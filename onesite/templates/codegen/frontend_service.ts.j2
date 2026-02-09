@@ -1,0 +1,39 @@
+import request from '../utils/request';
+
+const API_URL = '/api/v1/{{ model.lower_name }}s';
+
+export interface {{ model.name }} {
+{% for field in model.fields %}
+    {% if 'r' in field.permissions %}
+    {{ field.name }}: {{ 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+    {% endif %}
+{% endfor %}
+}
+
+export interface PaginatedResponse<T> {
+    items: T[];
+    total: number;
+    page: number;
+    size: number;
+    total_pages: number;
+}
+
+export const get{{ model.name }}s = async (page = 1, size = 20) => {
+    const response = await request.get<PaginatedResponse<{{ model.name }}>>(`${API_URL}/?page=${page}&size=${size}`);
+    return response.data;
+};
+
+export const create{{ model.name }} = async (data: any) => {
+    const response = await request.post<{{ model.name }}>(`${API_URL}/`, data);
+    return response.data;
+};
+
+export const update{{ model.name }} = async (id: number, data: any) => {
+    const response = await request.put<{{ model.name }}>(`${API_URL}/${id}`, data);
+    return response.data;
+};
+
+export const delete{{ model.name }} = async (id: number) => {
+    const response = await request.delete<{{ model.name }}>(`${API_URL}/${id}`);
+    return response.data;
+};

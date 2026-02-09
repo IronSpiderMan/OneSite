@@ -1,0 +1,22 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "onesite"
+version = "0.1.0"
+description = "A CLI tool to generate full-stack web projects from SQLModel"
+requires-python = ">=3.10"
+dependencies = [
+    "typer[all]",
+    "jinja2",
+    "sqlmodel",
+    "pydantic",
+    "rich",
+    "cookiecutter",  # Useful for scaffolding, but might use pure jinja2 for custom logic
+    "uvicorn",
+    "fastapi"
+]
+
+[project.scripts]
+site = "onesite.main:app"

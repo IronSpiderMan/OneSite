@@ -1,0 +1,31 @@
+from typing import Optional
+from datetime import datetime
+from sqlmodel import SQLModel
+from app.models.{{ model.lower_name }} import {{ model.name }}
+
+# Shared properties
+class {{ model.name }}Base(SQLModel):
+{% for field in model.fields %}
+    {% if 'r' in field.permissions and field.name != 'id' %}
+    {{ field.name }}: {{ field.type }}
+    {% endif %}
+{% endfor %}
+
+# Properties to receive via API on creation
+class {{ model.name }}Create(SQLModel):
+{% for field in model.fields %}
+    {% if 'c' in field.permissions and field.name != 'id' %}
+    {{ field.name }}: {{ field.type }}
+    {% endif %}
+{% endfor %}
+
+# Properties to receive via API on update
+class {{ model.name }}Update(SQLModel):
+{% for field in model.fields %}
+    {% if 'u' in field.permissions and field.name != 'id' %}
+    {{ field.name }}: {{ field.type }} = None
+    {% endif %}
+{% endfor %}
+
+class {{ model.name }}Read({{ model.name }}Base):
+    id: int

@@ -1,0 +1,34 @@
+from typing import List, Optional
+from sqlmodel import Session, select
+from app.models.{{ model.lower_name }} import {{ model.name }}
+from app.schemas.{{ model.lower_name }} import {{ model.name }}Create, {{ model.name }}Update
+
+def get(session: Session, id: int) -> Optional[{{ model.name }}]:
+    return session.get({{ model.name }}, id)
+
+def get_multi(session: Session, skip: int = 0, limit: int = 100) -> List[{{ model.name }}]:
+    statement = select({{ model.name }}).offset(skip).limit(limit)
+    return session.exec(statement).all()
+
+def create(session: Session, obj_in: {{ model.name }}Create) -> {{ model.name }}:
+    # Note: validation should happen before, here we assume obj_in is valid pydantic model
+    db_obj = {{ model.name }}.from_orm(obj_in)
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj
+
+def update(session: Session, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
+    hero_data = obj_in.dict(exclude_unset=True)
+    for key, value in hero_data.items():
+        setattr(db_obj, key, value)
+    session.add(db_obj)
+    session.commit()
+    session.refresh(db_obj)
+    return db_obj
+
+def delete(session: Session, id: int) -> {{ model.name }}:
+    db_obj = session.get({{ model.name }}, id)
+    session.delete(db_obj)
+    session.commit()
+    return db_obj

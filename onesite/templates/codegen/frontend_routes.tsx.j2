@@ -1,0 +1,13 @@
+import React from 'react';
+{% for model in models %}
+import {{ model.name }}Page from './pages/{{ model.lower_name }}';
+{% endfor %}
+
+export const GeneratedRoutes = [
+{% for model in models %}
+  {
+    path: '/{{ model.lower_name }}s',
+    element: <{{ model.name }}Page />,
+  },
+{% endfor %}
+];

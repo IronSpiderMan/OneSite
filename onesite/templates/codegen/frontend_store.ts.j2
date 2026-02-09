@@ -1,0 +1,74 @@
+import { create } from 'zustand';
+import { {{ model.name }}, get{{ model.name }}s, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.lower_name }}';
+
+interface {{ model.name }}State {
+    data: {{ model.name }}[];
+    total: number;
+    page: number;
+    size: number;
+    loading: boolean;
+    fetchData: (page?: number, size?: number) => Promise<void>;
+    createItem: (item: any) => Promise<void>;
+    updateItem: (id: number, item: any) => Promise<void>;
+    deleteItem: (id: number) => Promise<void>;
+}
+
+export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get) => ({
+    data: [],
+    total: 0,
+    page: 1,
+    size: 20,
+    loading: false,
+    fetchData: async (page = 1, size = 20) => {
+        set({ loading: true });
+        try {
+            const result = await get{{ model.name }}s(page, size);
+            if (result && Array.isArray(result.items)) {
+                set({ 
+                    data: result.items,
+                    total: result.total,
+                    page: result.page,
+                    size: result.size
+                });
+            } else {
+                console.error("Expected paginated response but got:", result);
+                set({ data: [], total: 0 });
+            }
+        } catch (error) {
+            console.error(error);
+            set({ data: [], total: 0 });
+        } finally {
+            set({ loading: false });
+        }
+    },
+    createItem: async (item: any) => {
+        try {
+            await create{{ model.name }}(item);
+            const { page, size } = get();
+            await get().fetchData(page, size);
+        } catch (error) {
+            console.error(error);
+            throw error;
+        }
+    },
+    updateItem: async (id: number, item: any) => {
+        try {
+            await update{{ model.name }}(id, item);
+            const { page, size } = get();
+            await get().fetchData(page, size);
+        } catch (error) {
+            console.error(error);
+            throw error;
+        }
+    },
+    deleteItem: async (id: number) => {
+        try {
+            await delete{{ model.name }}(id);
+            const { page, size } = get();
+            await get().fetchData(page, size);
+        } catch (error) {
+            console.error(error);
+            throw error;
+        }
+    },
+}));

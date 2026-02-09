@@ -1,0 +1,320 @@
+import os
+import sys
+import importlib
+import inspect
+import pkgutil
+from pathlib import Path
+from typing import List, Dict, Any, Set
+from sqlmodel import SQLModel
+from jinja2 import Environment, FileSystemLoader
+from rich.console import Console
+from pydantic_core import PydanticUndefined
+
+console = Console()
+
+TEMPLATE_DIR = Path(__file__).parent / "templates" / "codegen"
+
+def get_model_fields(model_cls):
+    fields = []
+    # Inspect SQLModel fields
+    for name, field in model_cls.model_fields.items():
+        # Get permissions from sa_column_kwargs -> info -> site_props -> permissions
+        # OR fallback to json_schema_extra if available (for future proofing)
+        
+        sa_column_kwargs = getattr(field, "sa_column_kwargs", {})
+        if sa_column_kwargs is PydanticUndefined or sa_column_kwargs is None:
+            sa_column_kwargs = {}
+            
+        info = sa_column_kwargs.get("info", {})
+        site_props = info.get("site_props", {})
+        
+        if not site_props:
+            # Fallback to json_schema_extra
+            if hasattr(field, "json_schema_extra"):
+                 json_schema_extra = field.json_schema_extra
+                 if json_schema_extra is PydanticUndefined or json_schema_extra is None:
+                     json_schema_extra = {}
+                 site_props = json_schema_extra.get("site_props", {})
+        
+        permissions = site_props.get("permissions", "rcu") # Default: Read, Create, Update
+        
+        # Force 'id' to be read-only if permissions not explicitly set to something else that includes write (unlikely)
+        # Or better, just force 'r' for 'id' unless user really knows what they are doing.
+        if name == 'id':
+            permissions = 'r'
+
+        console.print(f"Debug: Field {name} - Perms: {permissions}")
+        
+        # Determine python type string (simplified)
+        type_annotation = field.annotation
+        type_str = str(type_annotation)
+        
+        # Debugging type annotation
+        console.print(f"Debug: Field {name} - Type Annotation: {type_annotation} (Type: {type(type_annotation)}) - Type Str: {type_str}")
+
+        is_enum = False
+        enum_values = []
+        
+        # Check for Enum
+        if inspect.isclass(type_annotation) and issubclass(type_annotation, (str, int)) and hasattr(type_annotation, "__members__"):
+             is_enum = True
+             enum_values = [e.value for e in type_annotation]
+             type_str = "str" # Treat enum as string for now in frontend
+
+        # Improved Type Detection
+        if "int" in type_str: type_str = "int"
+        elif "str" in type_str: type_str = "str"
+        # Check for 'bool' in string OR if annotation is explicitly bool class
+        elif "bool" in type_str or type_annotation is bool: type_str = "bool"
+        elif "float" in type_str: type_str = "float"
+        elif "datetime" in type_str: type_str = "datetime"
+        else: type_str = "str" # Fallback
+        
+        # Save UI type before wrapping with Optional
+        ui_type = type_str
+        
+        # Check if optional
+        is_optional = not field.is_required()
+        if is_optional:
+            type_str = f"Optional[{type_str}]"
+            
+        fields.append({
+            "name": name,
+            "type": type_str,
+            "ui_type": ui_type,
+            "permissions": permissions,
+            "required": field.is_required(),
+            "default": field.default,
+            "is_enum": is_enum,
+            "enum_values": enum_values
+        })
+    print(f"Debug: Fields for {model_cls.__name__}: {fields}")
+    
+    
+    # Special handling for User model to add virtual 'password' field if not present
+    if model_cls.__name__ == 'User':
+        has_password = any(f['name'] == 'password' for f in fields)
+        if not has_password:
+             fields.append({
+                 "name": "password",
+                 "type": "str",
+                 "ui_type": "str",
+                 "permissions": "c", # Only for creation
+                 "required": True,
+                 "default": PydanticUndefined
+             })
+
+    return fields
+
+def generate_file(template_name: str, context: Dict, output_path: Path):
+    env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
+    template = env.get_template(template_name)
+    content = template.render(context)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(content)
+    console.print(f"Generated {output_path}")
+
+def generate_code():
+    # Assume we are in the project root
+    cwd = Path(os.getcwd())
+    backend_path = cwd / "backend"
+    
+    if not backend_path.exists():
+        console.print("[red]Backend directory not found. Are you in the project root?[/red]")
+        return
+
+    # 0. Sync models from root/models to backend/app/models
+    models_src_dir = cwd / "models"
+    models_dest_dir = backend_path / "app" / "models"
+    
+    if models_src_dir.exists():
+        import shutil
+        console.print(f"[green]Syncing models from {models_src_dir} to {models_dest_dir}...[/green]")
+        if not models_dest_dir.exists():
+            models_dest_dir.mkdir(parents=True, exist_ok=True)
+            # Ensure __init__.py exists
+            (models_dest_dir / "__init__.py").touch()
+            
+        for model_file in models_src_dir.glob("*.py"):
+            shutil.copy2(model_file, models_dest_dir / model_file.name)
+            console.print(f"Synced model: {model_file.name}")
+    else:
+        console.print(f"[yellow]Models directory not found at {models_src_dir}, skipping model sync.[/yellow]")
+
+    sys.path.append(str(backend_path))
+    
+    # Reload modules to pick up changes
+    # For simplicity, we just import
+    try:
+        import app.models
+    except ImportError as e:
+        console.print(f"[red]Could not import app.models: {e}[/red]")
+        return
+
+    # Find all model files
+    models_dir = backend_path / "app" / "models"
+    # Recursively find all .py files in models directory to support subdirectories if needed, 
+    # but for now simple glob is fine. 
+    # Important: glob returns Path objects, we need relative path to models_dir for module name if nested
+    # But current structure is flat.
+    model_files = [f.stem for f in models_dir.glob("*.py") if f.stem != "__init__"]
+    
+    found_models = []
+
+    # Ensure we check sys.modules for any existing loaded models and reload them
+    # This is crucial because if we just import, python might use cached version
+    
+    # Also we need to make sure we are importing from the correct path.
+    # We added backend_path to sys.path, so 'app.models' should be resolvable.
+    
+    for module_name in model_files:
+        full_module_name = f"app.models.{module_name}"
+        
+        try:
+            if full_module_name in sys.modules:
+                module = importlib.reload(sys.modules[full_module_name])
+            else:
+                module = importlib.import_module(full_module_name)
+        except ImportError as e:
+            console.print(f"[red]Error importing {full_module_name}: {e}[/red]")
+            continue
+        
+        # Inspect classes
+        for name, obj in inspect.getmembers(module):
+            if inspect.isclass(obj) and issubclass(obj, SQLModel) and obj is not SQLModel:
+                # Check if it is a table model (usually checking table=True in config, but SQLModel stores it differently)
+                # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
+                # A safer check:
+                if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
+                     fields = get_model_fields(obj)
+                     found_models.append({
+                         "name": name,
+                         "lower_name": name.lower(),
+                         "fields": fields
+                     })
+    
+    # Sync pagination schema
+    pagination_schema_src = Path(__file__).parent / "templates" / "backend" / "app" / "schemas" / "pagination.py"
+    pagination_schema_dst = backend_path / "app" / "schemas" / "pagination.py"
+    if pagination_schema_src.exists():
+        if not pagination_schema_dst.parent.exists():
+            pagination_schema_dst.parent.mkdir(parents=True, exist_ok=True)
+        import shutil
+        shutil.copy2(pagination_schema_src, pagination_schema_dst)
+        console.print(f"Synced pagination schema to {pagination_schema_dst}")
+
+    # Generate code for each model
+    for model in found_models:
+        context = {"model": model}
+        
+        # 1. Schemas
+        generate_file("schema.py.j2", context, backend_path / "app" / "schemas" / f"{model['lower_name']}.py")
+        
+        # 2. CRUD
+        generate_file("crud.py.j2", context, backend_path / "app" / "cruds" / f"{model['lower_name']}.py")
+        
+        # 3. Service
+        generate_file("service.py.j2", context, backend_path / "app" / "services" / f"{model['lower_name']}.py")
+        
+        # 4. API
+        generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['lower_name']}.py")
+        
+        # 5. Frontend Service
+        generate_file("frontend_service.ts.j2", context, cwd / "frontend" / "src" / "services" / f"{model['lower_name']}.ts")
+        
+        # 6. Frontend Store
+        generate_file("frontend_store.ts.j2", context, cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts")
+
+        # 7. Frontend View (Page List)
+        generate_file("frontend_page_list.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['lower_name']}" / "index.tsx")
+
+    # Sync UI Components (Ensure they exist in the target project)
+    # We copy from the template directory to the target project
+    import shutil
+    template_components_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "components" / "ui"
+    target_components_dir = cwd / "frontend" / "src" / "components" / "ui"
+    
+    if template_components_dir.exists():
+        if not target_components_dir.exists():
+            target_components_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy files if they don't exist or update them? 
+        # For now, let's copy if missing to avoid overwriting user changes, or overwrite? 
+        # Since this is a sync tool, overwriting might be expected for 'core' components, but risky.
+        # Let's just ensure they exist.
+        for item in template_components_dir.glob("*"):
+            if item.is_file():
+                shutil.copy2(item, target_components_dir / item.name)
+        console.print(f"Synced UI components to {target_components_dir}")
+
+    # Sync Utils
+    template_utils_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "lib"
+    target_utils_dir = cwd / "frontend" / "src" / "lib"
+    if template_utils_dir.exists():
+        if not target_utils_dir.exists():
+            target_utils_dir.mkdir(parents=True, exist_ok=True)
+        for item in template_utils_dir.glob("*"):
+            if item.is_file():
+                shutil.copy2(item, target_utils_dir / item.name)
+        console.print(f"Synced Utils to {target_utils_dir}")
+
+    # Sync Config Files (package.json, tailwind.config.js, etc.)
+    # This is important when templates are updated.
+    config_files = [
+        "package.json",
+        "tailwind.config.js",
+        "postcss.config.js",
+        "tsconfig.json",
+        "tsconfig.node.json",
+        "vite.config.ts",
+        "index.html",
+        "src/main.tsx",
+        "src/App.tsx",
+        "src/index.css",
+        "src/components/ui/button.tsx",
+        "src/components/ui/input.tsx",
+        "src/components/ui/label.tsx",
+        "src/components/ui/modal.tsx",
+        "src/components/ui/table.tsx",
+        "src/components/ui/badge.tsx",
+        "src/components/ui/switch.tsx",
+        "src/components/ui/select.tsx",
+        "src/components/Layout.tsx",
+        "src/utils/request.ts"
+    ]
+    template_frontend_root = Path(__file__).parent / "templates" / "frontend"
+    target_frontend_root = cwd / "frontend"
+    
+    for config_file in config_files:
+        src = template_frontend_root / config_file
+        dst = target_frontend_root / config_file
+        if src.exists():
+            # Check if destination exists. If it does, we might be overwriting user changes.
+            # But for core infrastructure files in this tool context, we probably want to keep them in sync 
+            # or at least update them if they are vastly different.
+            # For simplicity in this demo, we'll overwrite to ensure the new stack works.
+            # In a real tool, maybe ask for confirmation or only update if missing.
+            # But here, we just overwrite to fix the user's issue.
+            if dst.parent.exists(): # Ensure parent dir exists (e.g. src/)
+                shutil.copy2(src, dst)
+                console.print(f"Synced config file: {config_file}")
+
+    # Update api.py to include new routers
+    update_api_router(found_models, backend_path / "app" / "api" / "api.py")
+    
+    # Update Frontend Routes and Menu
+    generate_file("frontend_routes.tsx.j2", {"models": found_models}, cwd / "frontend" / "src" / "Routes.tsx")
+    generate_file("frontend_menu.tsx.j2", {"models": found_models}, cwd / "frontend" / "src" / "Menu.tsx")
+
+def update_api_router(models, api_file_path):
+    lines = []
+    imports = []
+    routers = []
+    
+    for model in models:
+        imports.append(f"from app.api.endpoints import {model['lower_name']}")
+        routers.append(f"api_router.include_router({model['lower_name']}.router, prefix=\"/{model['lower_name']}s\", tags=[\"{model['lower_name']}s\"])")
+        
+    content = "from fastapi import APIRouter\n" + "\n".join(imports) + "\n\napi_router = APIRouter()\n\n" + "\n".join(routers)
+    api_file_path.write_text(content)
+    console.print(f"Updated {api_file_path}")

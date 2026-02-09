@@ -1,0 +1,12 @@
+import React from 'react';
+import { LayoutDashboard } from 'lucide-react';
+
+export const GeneratedMenu = [
+{% for model in models %}
+  {
+    key: '/{{ model.lower_name }}s',
+    icon: <LayoutDashboard className="h-4 w-4" />,
+    label: '{{ model.name }}s',
+  },
+{% endfor %}
+];

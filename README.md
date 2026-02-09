@@ -1,0 +1,1 @@
+A model-driven system that automatically generates a front–end/back–end separated application from a single model definition, including CRUD APIs and corresponding web interfaces.
