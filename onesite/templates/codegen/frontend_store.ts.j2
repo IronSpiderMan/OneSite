@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { {{ model.name }}, get{{ model.name }}s, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.lower_name }}';
+import { {{ model.name }}, get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.lower_name }}';
 
 interface {{ model.name }}State {
     data: {{ model.name }}[];
@@ -7,7 +7,9 @@ interface {{ model.name }}State {
     page: number;
     size: number;
     loading: boolean;
+    currentItem: {{ model.name }} | null;
     fetchData: (page?: number, size?: number) => Promise<void>;
+    fetchItem: (id: number) => Promise<{{ model.name }} | null>;
     createItem: (item: any) => Promise<void>;
     updateItem: (id: number, item: any) => Promise<void>;
     deleteItem: (id: number) => Promise<void>;
@@ -19,6 +21,7 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     page: 1,
     size: 20,
     loading: false,
+    currentItem: null,
     fetchData: async (page = 1, size = 20) => {
         set({ loading: true });
         try {
@@ -37,6 +40,20 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
         } catch (error) {
             console.error(error);
             set({ data: [], total: 0 });
+        } finally {
+            set({ loading: false });
+        }
+    },
+    fetchItem: async (id: number) => {
+        set({ loading: true });
+        try {
+            const result = await get{{ model.name }}(id);
+            set({ currentItem: result });
+            return result;
+        } catch (error) {
+            console.error(error);
+            set({ currentItem: null });
+            return null;
         } finally {
             set({ loading: false });
         }

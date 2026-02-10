@@ -1,0 +1,150 @@
+import React, { useEffect, useState } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
+import { ArrowLeft, Loader2 } from 'lucide-react';
+import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
+import { Button } from '../../components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import { Label } from '../../components/ui/label';
+import { Separator } from '../../components/ui/separator';
+{% for fk in model.foreign_keys %}
+import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
+{% endfor %}
+
+const {{ model.name }}DetailPage: React.FC = () => {
+    const { id } = useParams<{ id: string }>();
+    const navigate = useNavigate();
+    const { fetchItem, currentItem, loading } = use{{ model.name }}Store();
+    
+    // State to store resolved foreign key data
+    {% for fk in model.foreign_keys %}
+    const [{{ fk.target_service }}Data, set{{ fk.target_model }}Data] = useState<any>(null);
+    {% endfor %}
+
+    useEffect(() => {
+        if (id) {
+            fetchItem(parseInt(id)).then((item) => {
+                if (item) {
+                    // Fetch FK data
+                    {% for fk in model.foreign_keys %}
+                    if (item.{{ fk.name.replace('_id', '') }}_id) {
+                        get{{ fk.target_model }}(item.{{ fk.name.replace('_id', '') }}_id).then(set{{ fk.target_model }}Data);
+                    }
+                    {% endfor %}
+                }
+            });
+        }
+    }, [id, fetchItem]);
+
+    if (loading && !currentItem) {
+        return (
+            <div className="flex h-full items-center justify-center">
+                <Loader2 className="h-8 w-8 animate-spin" />
+            </div>
+        );
+    }
+
+    if (!currentItem) {
+        return (
+            <div className="flex flex-col items-center justify-center space-y-4">
+                <div className="text-xl font-semibold">Item not found</div>
+                <Button onClick={() => navigate(-1)}>Go Back</Button>
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center space-x-4">
+                <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
+                    <ArrowLeft className="h-4 w-4" />
+                </Button>
+                <h1 className="text-3xl font-bold tracking-tight">{{ model.name }} Details</h1>
+            </div>
+
+            <div className="grid gap-6 md:grid-cols-2">
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Basic Information</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-4">
+                        {% for field in model.fields %}
+                        {% if not field.fk_info and 'r' in field.permissions %}
+                        <div className="space-y-1">
+                            <Label className="text-muted-foreground">{{ field.name }}</Label>
+                            <div className="font-medium">
+                                {% if field.ui_type == 'bool' %}
+                                <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
+                                    {currentItem.{{ field.name }} ? 'Yes' : 'No'}
+                                </Badge>
+                                {% elif field.is_enum %}
+                                <Badge variant="outline">{currentItem.{{ field.name }}}</Badge>
+                                {% else %}
+                                {String(currentItem.{{ field.name }} ?? '-')}
+                                {% endif %}
+                            </div>
+                        </div>
+                        {% endif %}
+                        {% endfor %}
+                    </CardContent>
+                </Card>
+
+                {% if model.foreign_keys %}
+                <Card>
+                    <CardHeader>
+                        <CardTitle>Related Information</CardTitle>
+                    </CardHeader>
+                    <CardContent className="space-y-6">
+                        {% for fk in model.foreign_keys %}
+                        <div>
+                            <div className="mb-2 flex items-center justify-between">
+                                <Label className="text-lg font-semibold">{{ fk.target_model }}</Label>
+                                <Badge variant="outline">ID: {currentItem.{{ fk.name.replace('_id', '') }}_id}</Badge>
+                            </div>
+                            <div className="rounded-md border p-4">
+                                { {{ fk.target_service }}Data ? (
+                                    <div className="space-y-2">
+                                        <div className="grid grid-cols-2 gap-2 text-sm">
+                                            <span className="text-muted-foreground">Display Name:</span>
+                                            <span className="font-medium">{ {{ fk.target_service }}Data.{{ fk.label_field }} }</span>
+                                            
+                                            {/* Show all readable fields for the target model */}
+                                            {% if fk.target_readable_fields %}
+                                            {% for target_field in fk.target_readable_fields %}
+                                            {% if target_field.name != fk.label_field %}
+                                            { {{ fk.target_service }}Data.{{ target_field.name }} !== undefined && (
+                                                <>
+                                                <span className="text-muted-foreground">{{ target_field.name.replace('_', ' ').title() }}:</span>
+                                                <span className="font-medium">
+                                                    {% if target_field.ui_type == 'bool' %}
+                                                    { {{ fk.target_service }}Data.{{ target_field.name }} ? 'Yes' : 'No' }
+                                                    {% else %}
+                                                    {String({{ fk.target_service }}Data.{{ target_field.name }} ?? '-')}
+                                                    {% endif %}
+                                                </span>
+                                                </>
+                                            )}
+                                            {% endif %}
+                                            {% endfor %}
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                ) : (
+                                    <div className="flex items-center space-x-2 text-muted-foreground">
+                                        <Loader2 className="h-4 w-4 animate-spin" />
+                                        <span>Loading related data...</span>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                        {% if not loop.last %}<Separator />{% endif %}
+                        {% endfor %}
+                    </CardContent>
+                </Card>
+                {% endif %}
+            </div>
+        </div>
+    );
+};
+
+export default {{ model.name }}DetailPage;

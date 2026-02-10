@@ -1,6 +1,7 @@
 import React from 'react';
 {% for model in models %}
 import {{ model.name }}Page from './pages/{{ model.lower_name }}';
+import {{ model.name }}DetailPage from './pages/{{ model.lower_name }}/detail';
 {% endfor %}
 
 export const GeneratedRoutes = [
@@ -8,6 +9,10 @@ export const GeneratedRoutes = [
   {
     path: '/{{ model.lower_name }}s',
     element: <{{ model.name }}Page />,
+  },
+  {
+    path: '/{{ model.lower_name }}s/:id',
+    element: <{{ model.name }}DetailPage />,
   },
 {% endfor %}
 ];

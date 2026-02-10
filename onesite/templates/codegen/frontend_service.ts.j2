@@ -18,8 +18,17 @@ export interface PaginatedResponse<T> {
     total_pages: number;
 }
 
-export const get{{ model.name }}s = async (page = 1, size = 20) => {
-    const response = await request.get<PaginatedResponse<{{ model.name }}>>(`${API_URL}/?page=${page}&size=${size}`);
+export const get{{ model.name }}s = async (page = 1, size = 20, query?: string) => {
+    let url = `${API_URL}/?page=${page}&size=${size}`;
+    if (query) {
+        url += `&q=${encodeURIComponent(query)}`;
+    }
+    const response = await request.get<PaginatedResponse<{{ model.name }}>>(url);
+    return response.data;
+};
+
+export const get{{ model.name }} = async (id: number) => {
+    const response = await request.get<{{ model.name }}>(`${API_URL}/${id}`);
     return response.data;
 };
 

@@ -73,6 +73,30 @@ def get_model_fields(model_cls):
         # Save UI type before wrapping with Optional
         ui_type = type_str
         
+        # Check metadata for search field
+        is_search_field = site_props.get("is_search_field", False)
+        
+        # Check foreign key info from site_props or infer from name
+        # We assume FK fields are named like `modelname_id` or explicit `foreign_key` in sa_column_args
+        # But SQLModel puts foreign_key in Field(foreign_key=...) which maps to sa_column_args?
+        # Actually SQLModel Field(foreign_key=...) puts it in sa_column_kwargs['foreign_key'] if using sa_column_kwargs explicitly
+        # But standard SQLModel Field(foreign_key="...") handles it differently in pydantic model fields.
+        # We need to inspect the field definition more closely or rely on naming convention + metadata for now.
+        
+        # Let's check naming convention for MVP: if ends with _id, it might be a FK
+        fk_info = None
+        if name.endswith("_id") and name != "id":
+             target_model_name = name[:-3] # e.g. category_id -> category
+             # Capitalize first letter to guess model class name
+             target_model_class = target_model_name.capitalize()
+             fk_info = {
+                 "name": name,  # Add field name here
+                 "target_model": target_model_class,
+                 "target_service": target_model_name,
+                 "target_endpoint": f"{target_model_name}s",
+                 "label_field": "name" # Default guess
+             }
+        
         # Check if optional
         is_optional = not field.is_required()
         if is_optional:
@@ -86,25 +110,53 @@ def get_model_fields(model_cls):
             "required": field.is_required(),
             "default": field.default,
             "is_enum": is_enum,
-            "enum_values": enum_values
+            "enum_values": enum_values,
+            "is_search_field": is_search_field,
+            "fk_info": fk_info
         })
-    print(f"Debug: Fields for {model_cls.__name__}: {fields}")
     
+    # Post-process fields to determine search field if not explicitly set
+    # Only one search field per model for now (for the fuzzy search)
+    has_explicit_search = any(f.get("is_search_field") for f in fields)
+    if not has_explicit_search:
+        # Guess: name, title, label, slug, email, username
+        guess_candidates = ["name", "title", "label", "slug", "email", "username", "full_name"]
+        for candidate in guess_candidates:
+            found = next((f for f in fields if f["name"] == candidate), None)
+            if found:
+                found["is_search_field"] = True
+                break
     
-    # Special handling for User model to add virtual 'password' field if not present
-    if model_cls.__name__ == 'User':
-        has_password = any(f['name'] == 'password' for f in fields)
-        if not has_password:
-             fields.append({
-                 "name": "password",
-                 "type": "str",
-                 "ui_type": "str",
-                 "permissions": "c", # Only for creation
-                 "required": True,
-                 "default": PydanticUndefined
-             })
+    # If still no search field, maybe use the first string field?
+    if not any(f.get("is_search_field") for f in fields):
+         first_str = next((f for f in fields if f["ui_type"] == "str" and not f["is_enum"]), None)
+         if first_str:
+             first_str["is_search_field"] = True
 
-    return fields
+    # Identify if this is a link table (Many-to-Many)
+    # Rule: 
+    # 1. Has explicit metadata `is_link_table`
+    # 2. OR: Has 2+ foreign keys AND no other required business fields (ignoring id, created_at, etc)
+    # For now, let's just stick to checking if it's a valid model to generate.
+    # We will filter found_models later.
+    
+    # Also collect foreign keys for the model context
+    foreign_keys = [f["fk_info"] for f in fields if f["fk_info"]]
+    # Remove duplicates if any (though usually 1 field = 1 fk)
+    
+    # Determine the search field name for this model to pass to context
+    search_field = next((f["name"] for f in fields if f.get("is_search_field")), "id")
+    
+    # Update fk_info with the correct label_field (which is the search_field of the target model)
+    # We can't do this here easily because we don't have access to other models yet.
+    # We will do a post-processing pass in generate_code() or let the frontend template assume 
+    # the target model's search field is what we want (which is usually true).
+    # But wait, we set 'label_field': 'name' as default guess in line 96.
+    # We should update this if possible.
+    # For now, let's just leave it as 'name' default, but maybe we can be smarter.
+    # Actually, the best place is in generate_code after all models are parsed.
+
+    return fields, foreign_keys, search_field
 
 def generate_file(template_name: str, context: Dict, output_path: Path):
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
@@ -186,12 +238,47 @@ def generate_code():
                 # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
-                     fields = get_model_fields(obj)
+                     fields, foreign_keys, search_field = get_model_fields(obj)
+                     
+                     # Special handling for User model to add virtual 'password' field if not present
+                     # Moving this logic out of get_model_fields to keep it clean or handle here
+                     if name == 'User':
+                        has_password = any(f['name'] == 'password' for f in fields)
+                        if not has_password:
+                             fields.append({
+                                 "name": "password",
+                                 "type": "str",
+                                 "ui_type": "str",
+                                 "permissions": "c", # Only for creation
+                                 "required": True,
+                                 "default": PydanticUndefined,
+                                 "is_search_field": False,
+                                 "fk_info": None
+                             })
+                             
                      found_models.append({
                          "name": name,
                          "lower_name": name.lower(),
-                         "fields": fields
+                         "fields": fields,
+                         "foreign_keys": foreign_keys,
+                         "search_field": search_field
                      })
+    
+    # Post-process models to update FK label fields and collect readable fields
+    # Now that we have all models and their search_fields, we can update fk_info
+    model_map = {m["name"]: m for m in found_models}
+    for model in found_models:
+        for fk in model["foreign_keys"]:
+            target_model = model_map.get(fk["target_model"])
+            if target_model:
+                fk["label_field"] = target_model["search_field"]
+                # Collect readable fields for the target model
+                # Filter out sensitive fields like password
+                fk["target_readable_fields"] = [
+                    f for f in target_model["fields"] 
+                    if 'r' in f["permissions"] and f["name"] != "password" and not f.get("fk_info")
+                ]
+                console.print(f"Debug: Updated FK {model['name']} -> {fk['target_model']} label to {fk['label_field']}")
     
     # Sync pagination schema
     pagination_schema_src = Path(__file__).parent / "templates" / "backend" / "app" / "schemas" / "pagination.py"
@@ -227,6 +314,9 @@ def generate_code():
 
         # 7. Frontend View (Page List)
         generate_file("frontend_page_list.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['lower_name']}" / "index.tsx")
+
+        # 8. Frontend View (Page Detail)
+        generate_file("frontend_page_detail.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['lower_name']}" / "detail.tsx")
 
     # Sync UI Components (Ensure they exist in the target project)
     # We copy from the template directory to the target project
@@ -279,6 +369,8 @@ def generate_code():
         "src/components/ui/badge.tsx",
         "src/components/ui/switch.tsx",
         "src/components/ui/select.tsx",
+        "src/components/ui/card.tsx",
+        "src/components/ui/separator.tsx",
         "src/components/Layout.tsx",
         "src/utils/request.ts"
     ]

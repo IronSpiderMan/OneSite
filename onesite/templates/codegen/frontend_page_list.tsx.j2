@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, Loader2 } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
+import { useNavigate } from 'react-router-dom';
 import { {{ model.name }} } from '../../services/{{ model.lower_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
@@ -11,8 +12,13 @@ import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { SearchableSelect } from '../../components/ui/searchable-select';
+{% for fk in model.foreign_keys %}
+import { get{{ fk.target_endpoint.capitalize() }} } from '../../services/{{ fk.target_service }}';
+{% endfor %}
 
 const {{ model.name }}Page: React.FC = () => {
+  const navigate = useNavigate();
   const { data, loading, fetchData, createItem, updateItem, deleteItem } = use{{ model.name }}Store();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -115,6 +121,9 @@ const {{ model.name }}Page: React.FC = () => {
                     {% endif %}
                     {% endfor %}
                     <TableCell className="flex items-center gap-2">
+                        <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.lower_name }}s/${item.id}`)}>
+                            <Eye className="h-4 w-4" />
+                        </Button>
                         <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                             <Pencil className="h-4 w-4" />
                         </Button>
@@ -193,6 +202,26 @@ const {{ model.name }}Page: React.FC = () => {
                             {% endfor %}
                         </SelectContent>
                     </Select>
+                )}
+            />
+            {% elif field.fk_info %}
+            <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                    <SearchableSelect
+                        value={value}
+                        onValueChange={onChange}
+                        placeholder="Select {{ field.name }}"
+                        searchPlaceholder="Search {{ field.fk_info.target_model }}..."
+                        loadOptions={async (query) => {
+                            const response = await get{{ field.fk_info.target_endpoint.capitalize() }}(1, 20, query);
+                            return response.items.map((item: any) => ({
+                                label: item.{{ field.fk_info.label_field }} || item.id,
+                                value: item.id
+                            }));
+                        }}
+                    />
                 )}
             />
             {% else %}

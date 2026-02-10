@@ -1,6 +1,6 @@
-from typing import List, Any
-from fastapi import APIRouter, Depends, HTTPException
-from sqlmodel import Session, select, func
+from typing import List, Any, Optional
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel import Session, select, func, col
 from app.core import db
 from app.schemas.{{ model.lower_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update
 from app.schemas.pagination import PaginatedResponse
@@ -13,17 +13,28 @@ router = APIRouter()
 def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
+    q: Optional[str] = Query(None, description="Search query"),
     session: Session = Depends(db.get_session),
 ) -> Any:
     # Calculate skip based on page and size
     skip = (page - 1) * size
     
-    # Get total count
-    total_statement = select(func.count()).select_from({{ model.name }})
+    # Base statement
+    statement = select({{ model.name }})
+    
+    # Apply search filter if query is present
+    {% if model.search_field != 'id' %}
+    if q:
+        statement = statement.where(col({{ model.name }}.{{ model.search_field }}).ilike(f"%{q}%"))
+    {% endif %}
+    
+    # Get total count (before limit/offset)
+    total_statement = select(func.count()).select_from(statement.subquery())
     total = session.exec(total_statement).one()
     
-    # Get items
-    items = service.get_multi(session, skip=skip, limit=size)
+    # Apply pagination
+    statement = statement.offset(skip).limit(size)
+    items = session.exec(statement).all()
     
     return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
