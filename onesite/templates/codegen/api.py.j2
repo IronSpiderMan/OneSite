@@ -1,7 +1,7 @@
 from typing import List, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import Session, select, func, col
-from app.core import db
+from app.core import db, deps
 from app.schemas.{{ model.lower_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.lower_name }} import service
@@ -14,7 +14,7 @@ from app.schemas.{{ m2m.target_model.lower() }} import {{ m2m.target_model }}Rea
 {% endfor %}
 {% endif %}
 
-router = APIRouter()
+router = APIRouter(dependencies=[Depends(deps.get_current_user)])
 
 @router.get("/", response_model=PaginatedResponse[{{ model.name }}Read])
 def read_{{ model.lower_name }}s(

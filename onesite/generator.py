@@ -379,6 +379,15 @@ def generate_code():
         shutil.copy2(pagination_schema_src, pagination_schema_dst)
         console.print(f"Synced pagination schema to {pagination_schema_dst}")
 
+    # Sync token schema
+    token_schema_src = Path(__file__).parent / "templates" / "backend" / "app" / "schemas" / "token.py"
+    token_schema_dst = backend_path / "app" / "schemas" / "token.py"
+    if token_schema_src.exists():
+        if not token_schema_dst.parent.exists():
+            token_schema_dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(token_schema_src, token_schema_dst)
+        console.print(f"Synced token schema to {token_schema_dst}")
+
     # Generate code for each model
     for model in found_models:
         # Skip generating views/APIs for link tables
@@ -470,7 +479,8 @@ def generate_code():
         "src/components/ui/card.tsx",
         "src/components/ui/separator.tsx",
         "src/components/Layout.tsx",
-        "src/utils/request.ts"
+        "src/utils/request.ts",
+        "src/pages/Login.tsx"
     ]
     template_frontend_root = Path(__file__).parent / "templates" / "frontend"
     target_frontend_root = cwd / "frontend"
@@ -502,6 +512,12 @@ def generate_code():
         if upload_py.exists():
              shutil.copy2(upload_py, target_endpoints_dir / "upload.py")
              console.print(f"Synced backend endpoint: upload.py")
+
+        # Copy login.py
+        login_py = template_endpoints_dir / "login.py"
+        if login_py.exists():
+             shutil.copy2(login_py, target_endpoints_dir / "login.py")
+             console.print(f"Synced backend endpoint: login.py")
 
     # Sync Backend Main (main.py)
     template_backend_main = Path(__file__).parent / "templates" / "backend" / "app" / "main.py"
@@ -538,6 +554,10 @@ def update_api_router(models, api_file_path):
     # Always include upload router
     imports.append("from app.api.endpoints import upload")
     routers.append("api_router.include_router(upload.router, tags=[\"upload\"])")
+
+    # Always include login router
+    imports.append("from app.api.endpoints import login")
+    routers.append("api_router.include_router(login.router, tags=[\"login\"])")
 
     for model in models:
         imports.append(f"from app.api.endpoints import {model['lower_name']}")

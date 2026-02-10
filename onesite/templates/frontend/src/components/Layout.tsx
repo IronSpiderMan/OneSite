@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { LayoutDashboard, Menu as MenuIcon, X } from 'lucide-react';
-import { Outlet, Link, useLocation } from 'react-router-dom';
+import { LayoutDashboard, Menu as MenuIcon, X, LogOut } from 'lucide-react';
+import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { GeneratedMenu } from '../Menu';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
@@ -8,6 +8,12 @@ import { Button } from './ui/button';
 const AppLayout: React.FC = () => {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const location = useLocation();
+  const navigate = useNavigate();
+
+  const handleLogout = () => {
+    localStorage.removeItem('token');
+    navigate('/login');
+  };
 
   return (
     <div className="min-h-screen bg-background flex">
@@ -52,6 +58,9 @@ const AppLayout: React.FC = () => {
             </Button>
             <div className="ml-auto flex items-center space-x-4">
                 <span className="text-sm text-muted-foreground">Admin User</span>
+                <Button variant="ghost" size="icon" onClick={handleLogout} title="Logout">
+                    <LogOut className="h-5 w-5" />
+                </Button>
             </div>
         </header>
         <main className="flex-1 p-6 overflow-auto">
