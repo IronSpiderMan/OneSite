@@ -12,20 +12,7 @@ class {{ model.name }}Service:
         return crud.get_multi(session, skip=skip, limit=limit)
 
     def create(self, session: Session, obj_in: {{ model.name }}Create) -> {{ model.name }}:
-        {% if model.name == 'User' %}
-        from app.core.security import get_password_hash
-        user_data = obj_in.dict()
-        if 'password' in user_data:
-            password = user_data.pop('password')
-            user_data['hashed_password'] = get_password_hash(password)
-        db_obj = {{ model.name }}(**user_data)
-        session.add(db_obj)
-        session.commit()
-        session.refresh(db_obj)
-        return db_obj
-        {% else %}
         return crud.create(session, obj_in)
-        {% endif %}
 
     def update(self, session: Session, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
         return crud.update(session, db_obj, obj_in)

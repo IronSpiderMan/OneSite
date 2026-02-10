@@ -12,7 +12,10 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 - **Smart UI Components**:
   - `bool` -> **Switch** / **Badge**
   - `Enum` -> **Select** / **Badge**
-  - `datetime` -> **Date Picker** (Coming soon) / Text
+  - `datetime` -> **Text**
+  - **Image Upload**: Detects image fields (e.g. `avatar`, `_image`) and generates file upload and preview components.
+  - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
+  - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
 - **Pagination**: Built-in standard pagination support for all list views.
 - **Authentication**: Built-in JWT authentication and User management.
 
@@ -46,8 +49,10 @@ myproject/
 
 ### 2. Define Your Models
 
-Add your models to the `models/` directory. For example, create `models/product.py`:
+Add your models to the `models/` directory.
 
+#### Basic Model
+`models/product.py`:
 ```python
 from typing import Optional
 from sqlmodel import Field, SQLModel
@@ -56,16 +61,57 @@ from enum import Enum
 class Category(str, Enum):
     ELECTRONICS = "electronics"
     CLOTHING = "clothing"
-    BOOKS = "books"
 
 class Product(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str
-    description: Optional[str] = None
     price: float
     is_active: bool = True
     category: Category = Category.ELECTRONICS
+    # Image field (auto-detected by name 'image', 'avatar', or '_image' suffix)
+    image: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"component": "image"}}})
 ```
+
+#### Foreign Key Relationship
+`models/post.py`:
+```python
+from typing import Optional
+from sqlmodel import Field, SQLModel
+
+class Post(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    content: str
+    # Foreign Key to User (naming convention: target_model_lower + _id)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+```
+
+#### Many-to-Many Relationship
+To define a Many-to-Many relationship (e.g., Posts have many Tags), create a link table model with specific metadata.
+
+`models/tag.py`:
+```python
+from typing import Optional
+from sqlmodel import Field, SQLModel
+
+class Tag(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True)
+```
+
+`models/post_tag_link.py`:
+```python
+from typing import Optional
+from sqlmodel import Field, SQLModel
+
+class PostTagLink(SQLModel, table=True):
+    # Required metadata to identify this as a M2M link table
+    __table_args__ = {"info": {"site_props": {"is_link_table": True}}}
+    
+    post_id: Optional[int] = Field(default=None, foreign_key="post.id", primary_key=True)
+    tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", primary_key=True)
+```
+OneSite will automatically inject a `tag_ids` field into the `Post` form, allowing you to select multiple Tags.
 
 ### 3. Sync and Generate Code
 
@@ -74,13 +120,6 @@ Run the sync command to generate backend and frontend code based on your models.
 ```bash
 site sync --install
 ```
-
-This command will:
-1. Copy models to the backend.
-2. Generate Database Schemas (Pydantic).
-3. Generate CRUD operations and API Endpoints.
-4. Generate Frontend Services (Axios), Stores (Zustand), and Pages (React components).
-5. Update Routing and Menus.
 
 ### 4. Run the Application
 
@@ -101,7 +140,6 @@ myproject/
 ├── backend/
 │   ├── app/
 │   │   ├── api/        # Generated API endpoints
-│   │   ├── core/       # Config, Security, DB
 │   │   ├── cruds/      # Generated CRUD logic
 │   │   ├── models/     # Synced models
 │   │   ├── schemas/    # Generated Pydantic schemas
@@ -109,12 +147,11 @@ myproject/
 │   └── ...
 └── frontend/
     ├── src/
-    │   ├── components/ # UI Components (Button, Input, Modal, etc.)
-    │   ├── pages/      # Generated List/Edit Pages
-    │   ├── services/   # Generated API Clients
-    │   ├── stores/     # Generated State Management
-    │   └── ...
-    └── ...
+        ├── components/ # UI Components (Button, Input, Modal, ImageUpload, etc.)
+        ├── pages/      # Generated List/Edit Pages
+        ├── services/   # Generated API Clients
+        ├── stores/     # Generated State Management
+        └── ...
 ```
 
 ## Commands Reference

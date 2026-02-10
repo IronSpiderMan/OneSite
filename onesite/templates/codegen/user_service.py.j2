@@ -1,0 +1,40 @@
+from typing import List, Optional
+from sqlmodel import Session
+from app.cruds import user as crud
+from app.schemas.user import UserCreate, UserUpdate
+from app.models.user import User
+
+class UserService:
+    def get(self, session: Session, id: int) -> Optional[User]:
+        return crud.get(session, id)
+
+    def get_multi(self, session: Session, skip: int = 0, limit: int = 100) -> List[User]:
+        return crud.get_multi(session, skip=skip, limit=limit)
+
+    def create(self, session: Session, obj_in: UserCreate) -> User:
+        from app.core.security import get_password_hash
+        user_data = obj_in.dict()
+        if 'password' in user_data:
+            password = user_data.pop('password')
+            user_data['hashed_password'] = get_password_hash(password)
+        db_obj = User(**user_data)
+        session.add(db_obj)
+        session.commit()
+        session.refresh(db_obj)
+        return db_obj
+
+    def update(self, session: Session, db_obj: User, obj_in: UserUpdate) -> User:
+        if hasattr(obj_in, 'password') and obj_in.password:
+            from app.core.security import get_password_hash
+            db_obj.hashed_password = get_password_hash(obj_in.password)
+            # Ensure we don't try to update 'password' attribute directly via CRUD if it's transient
+            # But crud.update will use obj_in.dict()
+            # We can modify obj_in.password to None or let crud handle it (it sets transient attr)
+            # Setting hashed_password on db_obj is enough.
+        
+        return crud.update(session, db_obj, obj_in)
+
+    def delete(self, session: Session, id: int) -> User:
+        return crud.delete(session, id)
+
+service = UserService()

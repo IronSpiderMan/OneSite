@@ -1,0 +1,47 @@
+from typing import Optional, List
+from datetime import datetime
+from sqlmodel import SQLModel
+from app.models.user import User
+
+# Shared properties
+class UserBase(SQLModel):
+{% for field in model.fields %}
+    {% if 'r' in field.permissions and field.name != 'id' and field.name != 'hashed_password' and field.name != 'password' %}
+    {{ field.name }}: {{ field.type }}
+    {% endif %}
+{% endfor %}
+
+# Properties to receive via API on creation
+class UserCreate(SQLModel):
+    email: str
+    password: str
+    full_name: Optional[str] = None
+    avatar: Optional[str] = None
+    is_active: bool = True
+    is_superuser: bool = False
+    
+    # Allow other fields if any
+{% for field in model.fields %}
+    {% if 'c' in field.permissions and field.name not in ['id', 'email', 'password', 'full_name', 'avatar', 'is_active', 'is_superuser', 'hashed_password', 'created_at', 'updated_at'] %}
+    {{ field.name }}: {{ field.type }}
+    {% endif %}
+{% endfor %}
+
+# Properties to receive via API on update
+class UserUpdate(SQLModel):
+    email: Optional[str] = None
+    password: Optional[str] = None
+    full_name: Optional[str] = None
+    avatar: Optional[str] = None
+    is_active: Optional[bool] = None
+    is_superuser: Optional[bool] = None
+    
+    # Allow other fields if any
+{% for field in model.fields %}
+    {% if 'u' in field.permissions and field.name not in ['id', 'email', 'password', 'full_name', 'avatar', 'is_active', 'is_superuser', 'hashed_password', 'created_at', 'updated_at'] %}
+    {{ field.name }}: {{ field.type }} = None
+    {% endif %}
+{% endfor %}
+
+class UserRead(UserBase):
+    id: int

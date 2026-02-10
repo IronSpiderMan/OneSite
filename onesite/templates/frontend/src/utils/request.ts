@@ -1,7 +1,10 @@
 import axios from 'axios';
 
-const request = axios.create({
-  baseURL: '', // Handled by Vite proxy
+// Get API URL from environment variable
+const baseURL = import.meta.env.VITE_API_URL || '/api/v1';
+
+export const request = axios.create({
+  baseURL,
   timeout: 10000,
 });
 

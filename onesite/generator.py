@@ -3,6 +3,7 @@ import sys
 import importlib
 import inspect
 import pkgutil
+import shutil
 from pathlib import Path
 from typing import List, Dict, Any, Set
 from sqlmodel import SQLModel
@@ -37,6 +38,8 @@ def get_model_fields(model_cls):
                  site_props = json_schema_extra.get("site_props", {})
         
         permissions = site_props.get("permissions", "rcu") # Default: Read, Create, Update
+        create_optional = site_props.get("create_optional", False)
+        update_optional = site_props.get("update_optional", False)
         
         # Force 'id' to be read-only if permissions not explicitly set to something else that includes write (unlikely)
         # Or better, just force 'r' for 'id' unless user really knows what they are doing.
@@ -73,6 +76,21 @@ def get_model_fields(model_cls):
         # Save UI type before wrapping with Optional
         ui_type = type_str
         
+        # Check for image component
+        if site_props.get("component") == "image":
+            ui_type = "image"
+        # Heuristic for image fields if type is string
+        elif ui_type == "str" and (
+            name.endswith("_image") or 
+            name.endswith("_img") or 
+            name.endswith("_photo") or 
+            name == "avatar" or
+            name == "image" or
+            name == "photo" or
+            name == "logo"
+        ):
+             ui_type = "image"
+        
         # Check metadata for search field
         is_search_field = site_props.get("is_search_field", False)
         
@@ -107,6 +125,8 @@ def get_model_fields(model_cls):
             "type": type_str,
             "ui_type": ui_type,
             "permissions": permissions,
+            "create_optional": create_optional,
+            "update_optional": update_optional,
             "required": field.is_required(),
             "default": field.default,
             "is_enum": is_enum,
@@ -182,22 +202,47 @@ def generate_code():
         return
 
     # 0. Sync models from root/models to backend/app/models
+    # AND ALSO sync core models from template/models to backend/app/models if they don't exist in root/models
     models_src_dir = cwd / "models"
     models_dest_dir = backend_path / "app" / "models"
     
+    # Template models dir
+    template_models_dir = Path(__file__).parent / "templates" / "models"
+    
+    if not models_dest_dir.exists():
+        models_dest_dir.mkdir(parents=True, exist_ok=True)
+        (models_dest_dir / "__init__.py").touch()
+
+    # Priority 1: Sync from project's models/ folder (User's custom models)
     if models_src_dir.exists():
-        import shutil
         console.print(f"[green]Syncing models from {models_src_dir} to {models_dest_dir}...[/green]")
-        if not models_dest_dir.exists():
-            models_dest_dir.mkdir(parents=True, exist_ok=True)
-            # Ensure __init__.py exists
-            (models_dest_dir / "__init__.py").touch()
-            
         for model_file in models_src_dir.glob("*.py"):
             shutil.copy2(model_file, models_dest_dir / model_file.name)
             console.print(f"Synced model: {model_file.name}")
-    else:
-        console.print(f"[yellow]Models directory not found at {models_src_dir}, skipping model sync.[/yellow]")
+    
+    # Priority 2: Sync base models (like User) from templates if they are not in project's models/
+    # This allows us to update the User model definition in the tool and have it propagate
+    # UNLESS the user has overridden it in their project models/
+    if template_models_dir.exists():
+         for model_file in template_models_dir.glob("*.py"):
+             # If user has a model with same name in models/, don't overwrite it from template
+             # But if user is relying on default User model, we want to update it.
+             # Wait, usually `site sync` assumes project root `models/` is the source of truth.
+             # If `models/user.py` exists in project, we use it.
+             # If not, we might fall back to backend/app/models/user.py which might be stale.
+             # The issue here is: The user edited `onesite/templates/models/user.py` (the tool's template),
+             # but `site sync` only looks at `project/models/`.
+             
+             # If the user wants to update the User model, they should probably copy it to `project/models/` first?
+             # OR, we should copy from template to `backend/app/models` if not present in `project/models/`.
+             
+             target_in_project = models_src_dir / model_file.name
+             if not target_in_project.exists():
+                 # Not in project custom models, so we can update the backend copy from template
+                 shutil.copy2(model_file, models_dest_dir / model_file.name)
+                 console.print(f"Synced base model from template: {model_file.name}")
+             else:
+                 console.print(f"Skipping template model {model_file.name} (overridden in project)")
 
     sys.path.append(str(backend_path))
     
@@ -255,7 +300,9 @@ def generate_code():
                                  "name": "password",
                                  "type": "str",
                                  "ui_type": "str",
-                                 "permissions": "c", # Only for creation
+                                 "permissions": "cu", # Create and Update
+                                 "create_optional": False,
+                                 "update_optional": True,
                                  "required": True,
                                  "default": PydanticUndefined,
                                  "is_search_field": False,
@@ -329,7 +376,6 @@ def generate_code():
     if pagination_schema_src.exists():
         if not pagination_schema_dst.parent.exists():
             pagination_schema_dst.parent.mkdir(parents=True, exist_ok=True)
-        import shutil
         shutil.copy2(pagination_schema_src, pagination_schema_dst)
         console.print(f"Synced pagination schema to {pagination_schema_dst}")
 
@@ -341,14 +387,19 @@ def generate_code():
             
         context = {"model": model}
         
+        is_user_model = model['name'] == 'User'
+        
         # 1. Schemas
-        generate_file("schema.py.j2", context, backend_path / "app" / "schemas" / f"{model['lower_name']}.py")
+        schema_tpl = "user_schema.py.j2" if is_user_model else "schema.py.j2"
+        generate_file(schema_tpl, context, backend_path / "app" / "schemas" / f"{model['lower_name']}.py")
         
         # 2. CRUD
-        generate_file("crud.py.j2", context, backend_path / "app" / "cruds" / f"{model['lower_name']}.py")
+        crud_tpl = "user_crud.py.j2" if is_user_model else "crud.py.j2"
+        generate_file(crud_tpl, context, backend_path / "app" / "cruds" / f"{model['lower_name']}.py")
         
         # 3. Service
-        generate_file("service.py.j2", context, backend_path / "app" / "services" / f"{model['lower_name']}.py")
+        service_tpl = "user_service.py.j2" if is_user_model else "service.py.j2"
+        generate_file(service_tpl, context, backend_path / "app" / "services" / f"{model['lower_name']}.py")
         
         # 4. API
         generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['lower_name']}.py")
@@ -367,7 +418,6 @@ def generate_code():
 
     # Sync UI Components (Ensure they exist in the target project)
     # We copy from the template directory to the target project
-    import shutil
     template_components_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "components" / "ui"
     target_components_dir = cwd / "frontend" / "src" / "components" / "ui"
     
@@ -385,8 +435,8 @@ def generate_code():
         console.print(f"Synced UI components to {target_components_dir}")
 
     # Sync Utils
-    template_utils_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "lib"
-    target_utils_dir = cwd / "frontend" / "src" / "lib"
+    template_utils_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "utils"
+    target_utils_dir = cwd / "frontend" / "src" / "utils"
     if template_utils_dir.exists():
         if not target_utils_dir.exists():
             target_utils_dir.mkdir(parents=True, exist_ok=True)
@@ -394,6 +444,7 @@ def generate_code():
             if item.is_file():
                 shutil.copy2(item, target_utils_dir / item.name)
         console.print(f"Synced Utils to {target_utils_dir}")
+
 
     # Sync Config Files (package.json, tailwind.config.js, etc.)
     # This is important when templates are updated.
@@ -438,7 +489,39 @@ def generate_code():
                 shutil.copy2(src, dst)
                 console.print(f"Synced config file: {config_file}")
 
+    # Sync Backend API Endpoints (for upload.py)
+    template_endpoints_dir = Path(__file__).parent / "templates" / "backend" / "app" / "api" / "endpoints"
+    target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
+    
+    if template_endpoints_dir.exists():
+        if not target_endpoints_dir.exists():
+            target_endpoints_dir.mkdir(parents=True, exist_ok=True)
+            
+        # Copy upload.py specifically if it exists, or just copy all non-generated files
+        upload_py = template_endpoints_dir / "upload.py"
+        if upload_py.exists():
+             shutil.copy2(upload_py, target_endpoints_dir / "upload.py")
+             console.print(f"Synced backend endpoint: upload.py")
+
+    # Sync Backend Main (main.py)
+    template_backend_main = Path(__file__).parent / "templates" / "backend" / "app" / "main.py"
+    target_backend_main = backend_path / "app" / "main.py"
+    if template_backend_main.exists():
+         shutil.copy2(template_backend_main, target_backend_main)
+         console.print(f"Synced backend main.py")
+
+    # Sync Backend API Router (api.py) - Base template
+    template_backend_api = Path(__file__).parent / "templates" / "backend" / "app" / "api" / "api.py"
+    target_backend_api = backend_path / "app" / "api" / "api.py"
+    if template_backend_api.exists():
+         # We copy it first to get the imports for upload, user etc.
+         # But wait, update_api_router below will overwrite it?
+         # No, update_api_router appends or rewrites.
+         # We need to make sure update_api_router preserves the upload router or we handle it there.
+         pass 
+
     # Update api.py to include new routers
+
     # Filter out link tables for API router inclusion
     api_models = [m for m in found_models if not m["is_link_table"]]
     update_api_router(api_models, backend_path / "app" / "api" / "api.py")
@@ -452,6 +535,10 @@ def update_api_router(models, api_file_path):
     imports = []
     routers = []
     
+    # Always include upload router
+    imports.append("from app.api.endpoints import upload")
+    routers.append("api_router.include_router(upload.router, tags=[\"upload\"])")
+
     for model in models:
         imports.append(f"from app.api.endpoints import {model['lower_name']}")
         routers.append(f"api_router.include_router({model['lower_name']}.router, prefix=\"/{model['lower_name']}s\", tags=[\"{model['lower_name']}s\"])")

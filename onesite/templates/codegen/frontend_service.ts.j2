@@ -1,6 +1,6 @@
 import request from '../utils/request';
 
-const API_URL = '/api/v1/{{ model.lower_name }}s';
+const API_URL = '/{{ model.lower_name }}s';
 
 export interface {{ model.name }} {
 {% for field in model.fields %}
