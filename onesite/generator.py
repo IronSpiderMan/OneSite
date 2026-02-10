@@ -156,7 +156,13 @@ def get_model_fields(model_cls):
     # For now, let's just leave it as 'name' default, but maybe we can be smarter.
     # Actually, the best place is in generate_code after all models are parsed.
 
-    return fields, foreign_keys, search_field
+    # Check if is_link_table metadata exists
+    is_link_table = False
+    if hasattr(model_cls, "__table_args__") and isinstance(model_cls.__table_args__, dict):
+        info = model_cls.__table_args__.get("info", {})
+        is_link_table = info.get("site_props", {}).get("is_link_table", False)
+
+    return fields, foreign_keys, search_field, is_link_table
 
 def generate_file(template_name: str, context: Dict, output_path: Path):
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
@@ -238,7 +244,7 @@ def generate_code():
                 # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
-                     fields, foreign_keys, search_field = get_model_fields(obj)
+                     fields, foreign_keys, search_field, is_link_table = get_model_fields(obj)
                      
                      # Special handling for User model to add virtual 'password' field if not present
                      # Moving this logic out of get_model_fields to keep it clean or handle here
@@ -258,10 +264,12 @@ def generate_code():
                              
                      found_models.append({
                          "name": name,
+                         "module_name": module_name, # Save the filename/module name
                          "lower_name": name.lower(),
                          "fields": fields,
                          "foreign_keys": foreign_keys,
-                         "search_field": search_field
+                         "search_field": search_field,
+                         "is_link_table": is_link_table
                      })
     
     # Post-process models to update FK label fields and collect readable fields
@@ -280,6 +288,41 @@ def generate_code():
                 ]
                 console.print(f"Debug: Updated FK {model['name']} -> {fk['target_model']} label to {fk['label_field']}")
     
+    # Process Link Tables (M2M)
+    # Strategy: Inject m2m fields into the source model (first FK)
+    for model in found_models:
+        if model["is_link_table"]:
+            fks = model["foreign_keys"]
+            if len(fks) >= 2:
+                # Assume 1st FK is Source, 2nd FK is Target
+                source_fk = fks[0]
+                target_fk = fks[1]
+                
+                source_model_name = source_fk["target_model"]
+                target_model_name = target_fk["target_model"]
+                
+                source_model = model_map.get(source_model_name)
+                target_model = model_map.get(target_model_name)
+                
+                if source_model and target_model:
+                    # Inject virtual field into Source Model
+                    m2m_field_name = f"{target_model['lower_name']}_ids"
+                    
+                    console.print(f"Debug: Injecting M2M field '{m2m_field_name}' into {source_model_name} (via {model['name']})")
+                    
+                    source_model["m2m_fields"] = source_model.get("m2m_fields", [])
+                    source_model["m2m_fields"].append({
+                        "name": m2m_field_name,
+                        "target_model": target_model_name,
+                        "target_service": target_fk["target_service"],
+                        "target_endpoint": target_fk["target_endpoint"],
+                        "label_field": target_fk["label_field"], # Already updated in previous loop
+                        "link_model": model["name"],
+                        "link_module": model["module_name"], # Pass the filename of the link table
+                        "source_fk_field": source_fk["name"], # Field in link table pointing to source
+                        "target_fk_field": target_fk["name"]  # Field in link table pointing to target
+                    })
+
     # Sync pagination schema
     pagination_schema_src = Path(__file__).parent / "templates" / "backend" / "app" / "schemas" / "pagination.py"
     pagination_schema_dst = backend_path / "app" / "schemas" / "pagination.py"
@@ -292,6 +335,10 @@ def generate_code():
 
     # Generate code for each model
     for model in found_models:
+        # Skip generating views/APIs for link tables
+        if model["is_link_table"]:
+            continue
+            
         context = {"model": model}
         
         # 1. Schemas
@@ -392,11 +439,13 @@ def generate_code():
                 console.print(f"Synced config file: {config_file}")
 
     # Update api.py to include new routers
-    update_api_router(found_models, backend_path / "app" / "api" / "api.py")
+    # Filter out link tables for API router inclusion
+    api_models = [m for m in found_models if not m["is_link_table"]]
+    update_api_router(api_models, backend_path / "app" / "api" / "api.py")
     
     # Update Frontend Routes and Menu
-    generate_file("frontend_routes.tsx.j2", {"models": found_models}, cwd / "frontend" / "src" / "Routes.tsx")
-    generate_file("frontend_menu.tsx.j2", {"models": found_models}, cwd / "frontend" / "src" / "Menu.tsx")
+    generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
+    generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
 
 def update_api_router(models, api_file_path):
     lines = []

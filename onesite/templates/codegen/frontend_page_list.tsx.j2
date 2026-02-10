@@ -16,6 +16,11 @@ import { SearchableSelect } from '../../components/ui/searchable-select';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_endpoint.capitalize() }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+import { get{{ m2m.target_endpoint.capitalize() }} } from '../../services/{{ m2m.target_service }}';
+{% endfor %}
+{% endif %}
 
 const {{ model.name }}Page: React.FC = () => {
   const navigate = useNavigate();
@@ -238,6 +243,34 @@ const {{ model.name }}Page: React.FC = () => {
           </div>
           {% endif %}
           {% endfor %}
+
+          {% if model.m2m_fields %}
+          {% for m2m in model.m2m_fields %}
+          <div className="space-y-2">
+            <Label>{{ m2m.target_model }}s</Label>
+            <Controller
+                control={control}
+                name="{{ m2m.name }}"
+                render={({ field: { onChange, value } }) => (
+                    <SearchableSelect
+                        value={value}
+                        onValueChange={onChange}
+                        multiple={true}
+                        placeholder="Select {{ m2m.target_model }}s"
+                        searchPlaceholder="Search {{ m2m.target_model }}..."
+                        loadOptions={async (query) => {
+                            const response = await get{{ m2m.target_endpoint.capitalize() }}(1, 20, query);
+                            return response.items.map((item: any) => ({
+                                label: item.{{ m2m.label_field }} || item.id,
+                                value: item.id
+                            }));
+                        }}
+                    />
+                )}
+            />
+          </div>
+          {% endfor %}
+          {% endif %}
           <div className="flex justify-end space-x-2 pt-4">
             <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>Cancel</Button>
             <Button type="submit">Save</Button>

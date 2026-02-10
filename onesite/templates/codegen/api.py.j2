@@ -6,6 +6,13 @@ from app.schemas.{{ model.lower_name }} import {{ model.name }}Read, {{ model.na
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.lower_name }} import service
 from app.models.{{ model.lower_name }} import {{ model.name }}
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
+from app.models.{{ m2m.target_model.lower() }} import {{ m2m.target_model }}
+from app.schemas.{{ m2m.target_model.lower() }} import {{ m2m.target_model }}Read
+{% endfor %}
+{% endif %}
 
 router = APIRouter()
 
@@ -81,3 +88,39 @@ def delete_{{ model.lower_name }}(
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {{ model.lower_name }} = service.delete(session, id)
     return {{ model.lower_name }}
+
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+@router.get("/{id}/{{ m2m.name }}", response_model=PaginatedResponse[{{ m2m.target_model }}Read])
+def read_{{ model.lower_name }}_{{ m2m.name }}(
+    *,
+    session: Session = Depends(db.get_session),
+    id: int,
+    page: int = 1,
+    size: int = 20,
+) -> Any:
+    """
+    Get {{ m2m.target_model }}s related to {{ model.name }}
+    """
+    # 1. Find all target_ids in link table
+    link_statement = select({{ m2m.link_model }}.{{ m2m.target_fk_field }}).where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == id)
+    target_ids = session.exec(link_statement).all()
+    
+    if not target_ids:
+        return PaginatedResponse.create(data=[], total=0, page=page, size=size)
+        
+    # 2. Find target objects
+    skip = (page - 1) * size
+    statement = select({{ m2m.target_model }}).where(col({{ m2m.target_model }}.id).in_(target_ids))
+    
+    # Count total
+    total_statement = select(func.count()).select_from(statement.subquery())
+    total = session.exec(total_statement).one()
+    
+    # Pagination
+    statement = statement.offset(skip).limit(size)
+    items = session.exec(statement).all()
+    
+    return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+{% endfor %}
+{% endif %}

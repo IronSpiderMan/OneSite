@@ -2,6 +2,11 @@ from typing import List, Optional
 from sqlmodel import Session, select
 from app.models.{{ model.lower_name }} import {{ model.name }}
 from app.schemas.{{ model.lower_name }} import {{ model.name }}Create, {{ model.name }}Update
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
+{% endfor %}
+{% endif %}
 
 def get(session: Session, id: int) -> Optional[{{ model.name }}]:
     return session.get({{ model.name }}, id)
@@ -12,14 +17,66 @@ def get_multi(session: Session, skip: int = 0, limit: int = 100) -> List[{{ mode
 
 def create(session: Session, obj_in: {{ model.name }}Create) -> {{ model.name }}:
     # Note: validation should happen before, here we assume obj_in is valid pydantic model
+    
+    # Handle M2M fields
+    {% if model.m2m_fields %}
+    m2m_data = {}
+    {% for m2m in model.m2m_fields %}
+    if hasattr(obj_in, "{{ m2m.name }}"):
+        m2m_data["{{ m2m.name }}"] = getattr(obj_in, "{{ m2m.name }}")
+        delattr(obj_in, "{{ m2m.name }}")
+    {% endfor %}
+    {% endif %}
+
     db_obj = {{ model.name }}.from_orm(obj_in)
     session.add(db_obj)
     session.commit()
     session.refresh(db_obj)
+    
+    {% if model.m2m_fields %}
+    # Insert M2M relations
+    {% for m2m in model.m2m_fields %}
+    if m2m_data.get("{{ m2m.name }}") is not None:
+        for target_id in m2m_data["{{ m2m.name }}"]:
+            link = {{ m2m.link_model }}(
+                {{ m2m.source_fk_field }}=db_obj.id,
+                {{ m2m.target_fk_field }}=target_id
+            )
+            session.add(link)
+    {% endfor %}
+    session.commit()
+    session.refresh(db_obj)
+    {% endif %}
+    
     return db_obj
 
 def update(session: Session, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
     hero_data = obj_in.dict(exclude_unset=True)
+    
+    {% if model.m2m_fields %}
+    # Handle M2M updates
+    {% for m2m in model.m2m_fields %}
+    if "{{ m2m.name }}" in hero_data:
+        new_ids = hero_data.pop("{{ m2m.name }}")
+        if new_ids is not None:
+            # 1. Clear existing relations
+            # This is a naive implementation (delete all and re-insert). 
+            # Better would be to calculate diff.
+            statement = select({{ m2m.link_model }}).where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == db_obj.id)
+            existing_links = session.exec(statement).all()
+            for link in existing_links:
+                session.delete(link)
+            
+            # 2. Insert new relations
+            for target_id in new_ids:
+                link = {{ m2m.link_model }}(
+                    {{ m2m.source_fk_field }}=db_obj.id,
+                    {{ m2m.target_fk_field }}=target_id
+                )
+                session.add(link)
+    {% endfor %}
+    {% endif %}
+    
     for key, value in hero_data.items():
         setattr(db_obj, key, value)
     session.add(db_obj)

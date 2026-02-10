@@ -46,3 +46,13 @@ export const delete{{ model.name }} = async (id: number) => {
     const response = await request.delete<{{ model.name }}>(`${API_URL}/${id}`);
     return response.data;
 };
+
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+import { {{ m2m.target_model }} } from './{{ m2m.target_model.lower() }}';
+export const get{{ model.name }}{{ m2m.target_model }}s = async (id: number, page = 1, size = 20) => {
+    const response = await request.get<PaginatedResponse<{{ m2m.target_model }}>>(`${API_URL}/${id}/{{ m2m.name }}?page=${page}&size=${size}`);
+    return response.data;
+};
+{% endfor %}
+{% endif %}

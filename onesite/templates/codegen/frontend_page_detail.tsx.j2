@@ -10,6 +10,12 @@ import { Separator } from '../../components/ui/separator';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+import { get{{ model.name }}{{ m2m.target_model }}s } from '../../services/{{ model.lower_name }}';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
+{% endfor %}
+{% endif %}
 
 const {{ model.name }}DetailPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
@@ -21,9 +27,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ fk.target_service }}Data, set{{ fk.target_model }}Data] = useState<any>(null);
     {% endfor %}
 
+    // State for M2M data
+    {% if model.m2m_fields %}
+    {% for m2m in model.m2m_fields %}
+    const [{{ m2m.name }}Data, set{{ m2m.target_model }}Data] = useState<any[]>([]);
+    const [{{ m2m.name }}Total, set{{ m2m.target_model }}Total] = useState(0);
+    const [{{ m2m.name }}Page, set{{ m2m.target_model }}Page] = useState(1);
+    const [{{ m2m.name }}Loading, set{{ m2m.target_model }}Loading] = useState(false);
+    {% endfor %}
+    {% endif %}
+
     useEffect(() => {
         if (id) {
-            fetchItem(parseInt(id)).then((item) => {
+            const itemId = parseInt(id);
+            fetchItem(itemId).then((item) => {
                 if (item) {
                     // Fetch FK data
                     {% for fk in model.foreign_keys %}
@@ -33,8 +50,33 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     {% endfor %}
                 }
             });
+            
+            // Fetch M2M data
+            {% if model.m2m_fields %}
+            {% for m2m in model.m2m_fields %}
+            fetch{{ m2m.target_model }}s(itemId, 1);
+            {% endfor %}
+            {% endif %}
         }
     }, [id, fetchItem]);
+
+    {% if model.m2m_fields %}
+    {% for m2m in model.m2m_fields %}
+    const fetch{{ m2m.target_model }}s = async (itemId: number, page: number) => {
+        set{{ m2m.target_model }}Loading(true);
+        try {
+            const result = await get{{ model.name }}{{ m2m.target_model }}s(itemId, page, 5); // Small page size for detail view
+            set{{ m2m.target_model }}Data(result.items);
+            set{{ m2m.target_model }}Total(result.total);
+            set{{ m2m.target_model }}Page(result.page);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            set{{ m2m.target_model }}Loading(false);
+        }
+    };
+    {% endfor %}
+    {% endif %}
 
     if (loading && !currentItem) {
         return (
@@ -141,6 +183,71 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% endfor %}
                     </CardContent>
                 </Card>
+                {% endif %}
+
+                {% if model.m2m_fields %}
+                {% for m2m in model.m2m_fields %}
+                <Card className="md:col-span-2">
+                    <CardHeader>
+                        <CardTitle>{{ m2m.target_model }}s</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="rounded-md border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>ID</TableHead>
+                                        <TableHead>{{ m2m.label_field.title() }}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    { {{ m2m.name }}Loading ? (
+                                        <TableRow>
+                                            <TableCell colSpan={2} className="h-24 text-center">
+                                                <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : {{ m2m.name }}Data.length > 0 ? (
+                                        {{ m2m.name }}Data.map((item) => (
+                                            <TableRow key={item.id}>
+                                                <TableCell>{item.id}</TableCell>
+                                                <TableCell>{item.{{ m2m.label_field }} }</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={2} className="h-24 text-center">
+                                                No {{ m2m.target_model.lower() }}s found.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                        <div className="mt-4 flex items-center justify-end space-x-2">
+                             <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetch{{ m2m.target_model }}s(parseInt(id!), {{ m2m.name }}Page - 1)}
+                                disabled={ {{ m2m.name }}Page <= 1 || {{ m2m.name }}Loading}
+                            >
+                                Previous
+                            </Button>
+                            <span className="text-sm">
+                                Page { {{ m2m.name }}Page } of { Math.ceil({{ m2m.name }}Total / 5) || 1 }
+                            </span>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetch{{ m2m.target_model }}s(parseInt(id!), {{ m2m.name }}Page + 1)}
+                                disabled={ {{ m2m.name }}Page >= Math.ceil({{ m2m.name }}Total / 5) || {{ m2m.name }}Loading}
+                            >
+                                Next
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+                {% endfor %}
                 {% endif %}
             </div>
         </div>
