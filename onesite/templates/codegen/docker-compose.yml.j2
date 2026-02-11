@@ -1,0 +1,24 @@
+version: '3.8'
+
+services:
+  backend:
+    image: {{ backend_image }}
+    container_name: {{ project_name }}-backend
+    restart: always
+    ports:
+      - "8000:80"
+    environment:
+      - PROJECT_NAME={{ project_name }}
+      # Add other environment variables here
+      # - DATABASE_URL=postgresql://user:password@db:5432/dbname
+    volumes:
+      - ./backend/sql_app.db:/app/sql_app.db # Persist SQLite DB
+
+  frontend:
+    image: {{ frontend_image }}
+    container_name: {{ project_name }}-frontend
+    restart: always
+    ports:
+      - "{{ frontend_port }}:80"
+    depends_on:
+      - backend

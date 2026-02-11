@@ -480,7 +480,8 @@ def generate_code():
         "src/components/ui/separator.tsx",
         "src/components/Layout.tsx",
         "src/utils/request.ts",
-        "src/pages/Login.tsx"
+        "src/pages/Login.tsx",
+        "src/vite-env.d.ts"
     ]
     template_frontend_root = Path(__file__).parent / "templates" / "frontend"
     target_frontend_root = cwd / "frontend"
@@ -519,12 +520,63 @@ def generate_code():
              shutil.copy2(login_py, target_endpoints_dir / "login.py")
              console.print(f"Synced backend endpoint: login.py")
 
+    template_security = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "security.py"
+    target_security = backend_path / "app" / "core" / "security.py"
+    if template_security.exists():
+         shutil.copy2(template_security, target_security)
+         console.print(f"Synced backend security.py")
+
+    template_config = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "config.py"
+    target_config = backend_path / "app" / "core" / "config.py"
+    if template_config.exists():
+         shutil.copy2(template_config, target_config)
+         console.print(f"Synced backend config.py")
+
+    template_db = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "db.py"
+    target_db = backend_path / "app" / "core" / "db.py"
+    if template_db.exists():
+         shutil.copy2(template_db, target_db)
+         console.print(f"Synced backend db.py")
+
+    template_initial_data = Path(__file__).parent / "templates" / "backend" / "app" / "initial_data.py"
+    target_initial_data = backend_path / "app" / "initial_data.py"
+    if template_initial_data.exists():
+         shutil.copy2(template_initial_data, target_initial_data)
+         console.print(f"Synced backend initial_data.py")
+     
     # Sync Backend Main (main.py)
     template_backend_main = Path(__file__).parent / "templates" / "backend" / "app" / "main.py"
     target_backend_main = backend_path / "app" / "main.py"
     if template_backend_main.exists():
          shutil.copy2(template_backend_main, target_backend_main)
          console.print(f"Synced backend main.py")
+
+    # Sync requirements.txt
+    template_requirements = Path(__file__).parent / "templates" / "backend" / "requirements.txt"
+    target_requirements = backend_path / "requirements.txt"
+    if template_requirements.exists():
+         shutil.copy2(template_requirements, target_requirements)
+         console.print(f"Synced requirements.txt")
+
+    # Sync Backend Dockerfile
+    template_backend_dockerfile = Path(__file__).parent / "templates" / "backend" / "Dockerfile"
+    target_backend_dockerfile = backend_path / "Dockerfile"
+    if template_backend_dockerfile.exists():
+         shutil.copy2(template_backend_dockerfile, target_backend_dockerfile)
+         console.print(f"Synced backend Dockerfile")
+
+    # Sync Frontend Dockerfile and Nginx Config
+    template_frontend_dockerfile = Path(__file__).parent / "templates" / "frontend" / "Dockerfile"
+    target_frontend_dockerfile = cwd / "frontend" / "Dockerfile"
+    if template_frontend_dockerfile.exists():
+         shutil.copy2(template_frontend_dockerfile, target_frontend_dockerfile)
+         console.print(f"Synced frontend Dockerfile")
+         
+    template_frontend_nginx = Path(__file__).parent / "templates" / "frontend" / "nginx.conf"
+    target_frontend_nginx = cwd / "frontend" / "nginx.conf"
+    if template_frontend_nginx.exists():
+         shutil.copy2(template_frontend_nginx, target_frontend_nginx)
+         console.print(f"Synced frontend nginx.conf")
 
     # Sync Backend API Router (api.py) - Base template
     template_backend_api = Path(__file__).parent / "templates" / "backend" / "app" / "api" / "api.py"

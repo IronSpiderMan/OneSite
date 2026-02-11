@@ -17,7 +17,12 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
   - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
   - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
 - **Pagination**: Built-in standard pagination support for all list views.
-- **Authentication**: Built-in JWT authentication and User management.
+- **Authentication & Security**:
+  - **Built-in Login**: Modern login page with JWT authentication.
+  - **Protected Routes**: Automatic auth guards for frontend pages.
+  - **Secure APIs**: CRUD endpoints default to authenticated access; static files are public.
+  - **User Management**: Secure password hashing and role-based field access.
+- **Containerization**: Built-in support for Docker/Podman build and Compose.
 
 ## Installation
 
@@ -113,7 +118,28 @@ class PostTagLink(SQLModel, table=True):
 ```
 OneSite will automatically inject a `tag_ids` field into the `Post` form, allowing you to select multiple Tags.
 
-### 3. Sync and Generate Code
+### 3. Advanced Configuration
+
+You can customize field behavior using `site_props` in `sa_column_kwargs`.
+
+#### Field Permissions & Validation
+Control field visibility and validation requirements for Create/Update operations.
+
+```python
+class User(SQLModel, table=True):
+    # ...
+    password: str = Field(sa_column_kwargs={"info": {"site_props": {
+        "permissions": "cu",          # 'c'=Create, 'u'=Update. 'r'=Read (omitted here, so password is never sent to frontend)
+        "create_optional": False,     # Required when creating a user
+        "update_optional": True       # Optional when updating (leave blank to keep current password)
+    }}})
+```
+
+- `permissions`: String with `r` (read), `c` (create), `u` (update). Default is `rcu`.
+- `create_optional`: If `True`, field is not required in Create form.
+- `update_optional`: If `True`, field is not required in Update form.
+
+### 4. Sync and Generate Code
 
 Run the sync command to generate backend and frontend code based on your models. Use `--install` flag for the first run to install dependencies.
 
@@ -121,7 +147,7 @@ Run the sync command to generate backend and frontend code based on your models.
 site sync --install
 ```
 
-### 4. Run the Application
+### 5. Run the Application (Local Development)
 
 Start both backend and frontend servers with one command:
 
@@ -131,6 +157,35 @@ site run
 
 - **Backend**: http://localhost:8000 (Docs: http://localhost:8000/docs)
 - **Frontend**: http://localhost:5173
+
+**Default Admin Credentials**:
+- Email: `admin@example.com`
+- Password: `admin`
+
+### 6. Containerization & Deployment
+
+OneSite makes it easy to build and run your application using Docker/Podman.
+
+#### Build Images & Generate Configuration
+This command builds the container images and generates a `docker-compose.yml` configured to use them.
+
+```bash
+# Build with default settings (Docker, tag: latest, port: 3000)
+site build
+
+# Or customize settings
+site build --engine podman --tag v1.0 --port 8080
+```
+
+#### Run with Compose
+Start the services using the generated configuration.
+
+```bash
+site compose up -d
+```
+
+- **Frontend**: http://localhost:3000 (or your custom port)
+- **Backend**: http://localhost:8000 (internal to compose network)
 
 ## Project Structure
 
@@ -143,7 +198,10 @@ myproject/
 │   │   ├── cruds/      # Generated CRUD logic
 │   │   ├── models/     # Synced models
 │   │   ├── schemas/    # Generated Pydantic schemas
-│   │   └── services/   # Business logic
+│   │   ├── services/   # Business logic
+│   │   ├── core/       # Config, Security, DB
+│   │   │   └── security.py # Password hashing & Auth
+│   │   └── initial_data.py # Data seeding (Admin user)
 │   └── ...
 └── frontend/
     ├── src/
@@ -158,9 +216,17 @@ myproject/
 
 - **`site create <name>`**: Create a new project scaffold.
 - **`site sync [--install/-i]`**: Sync models and generate code. Use `-i` to install Python and Node dependencies.
-- **`site run [component]`**: Run the project. `component` can be `backend`, `frontend`, or `all` (default).
+- **`site run [component]`**: Run the project locally. `component` can be `backend`, `frontend`, or `all` (default).
+- **`site build [--component/-c] [--engine/-e] [--tag/-t] [--port/-p]`**: Build container images and generate `docker-compose.yml`.
+  - `--component`: `backend`, `frontend`, or `all` (default).
+  - `--engine`: `docker` (default) or `podman`.
+  - `--tag`: Image tag (default: `latest`).
+  - `--port`: Frontend exposed port (default: `3000`).
+- **`site compose <command> [args]...`**: Run docker-compose commands using the generated file.
+  - Examples: `site compose up -d`, `site compose down`, `site compose logs -f`.
 
 ## Requirements
 
 - Python 3.10+
 - Node.js & npm (for frontend)
+- Docker or Podman (optional, for containerization)

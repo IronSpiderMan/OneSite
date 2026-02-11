@@ -22,7 +22,19 @@ def create_access_token(
     return encoded_jwt
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    return pwd_context.verify(plain_password, hashed_password)
+    # Truncate password to 72 bytes to avoid bcrypt limitation
+    # Handle byte truncation correctly
+    pwd_bytes = plain_password.encode('utf-8')
+    if len(pwd_bytes) > 72:
+        pwd_bytes = pwd_bytes[:72]
+    # Passlib can handle bytes for bcrypt
+    return pwd_context.verify(pwd_bytes, hashed_password)
 
 def get_password_hash(password: str) -> str:
-    return pwd_context.hash(password)
+    # Truncate password to 72 bytes to avoid bcrypt limitation
+    pwd_bytes = password.encode('utf-8')
+    if len(pwd_bytes) > 72:
+        pwd_bytes = pwd_bytes[:72]
+    
+    # print(f"DEBUG: Hashing password of length {len(pwd_bytes)}")
+    return pwd_context.hash(pwd_bytes)

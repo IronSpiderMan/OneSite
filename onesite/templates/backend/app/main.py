@@ -4,12 +4,24 @@ from starlette.middleware.cors import CORSMiddleware
 from pathlib import Path
 
 from app.api.api import api_router
+from contextlib import asynccontextmanager
+
 from app.core.config import settings
 from app.core.db import init_db
+from app.initial_data import init_data
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize DB
+    init_db()
+    # Initialize Data
+    init_data()
+    yield
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
-    openapi_url=f"{settings.API_V1_STR}/openapi.json"
+    openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    lifespan=lifespan
 )
 
 # Set all CORS enabled origins

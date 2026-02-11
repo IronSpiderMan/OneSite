@@ -16,7 +16,10 @@ except FileNotFoundError:
     # The command execution will likely fail later with a better error or we can check in commands
     pass
 
-app = typer.Typer(help="OneSiteTool - Generate Web Projects from SQLModel")
+app = typer.Typer(
+    help="OneSiteTool - Generate Web Projects from SQLModel",
+    context_settings={"allow_extra_args": True, "ignore_unknown_options": True}
+)
 console = Console()
 
 def get_cwd_safely() -> Path:
@@ -154,6 +157,107 @@ def run(
                 future.result()
             except Exception as e:
                 console.print(f"[red]Error: {e}[/red]")
+
+@app.command()
+def build(
+    component: str = typer.Option("all", "--component", "-c", help="Component to build: backend, frontend, or all"),
+    engine: str = typer.Option("docker", "--engine", "-e", help="Container engine: docker or podman"),
+    tag: str = typer.Option("latest", "--tag", "-t", help="Image tag"),
+    frontend_port: int = typer.Option(3000, "--port", "-p", help="Frontend exposed port")
+):
+    """
+    Build container images for the project and generate docker-compose.yml.
+    """
+    import subprocess
+    from onesite.generator import generate_file
+    
+    base_dir = get_cwd_safely()
+    project_name = base_dir.name.lower()
+    
+    backend_image = f"{project_name}-backend:{tag}"
+    frontend_image = f"{project_name}-frontend:{tag}"
+    
+    def run_build(context_dir, image_name):
+        console.print(f"[blue]Building {image_name} with {engine}...[/blue]")
+        try:
+            subprocess.run(
+                [engine, "build", "-t", image_name, "."], 
+                cwd=str(context_dir),
+                check=True
+            )
+            console.print(f"[green]Successfully built {image_name}[/green]")
+        except subprocess.CalledProcessError as e:
+            console.print(f"[red]Failed to build {image_name}: {e}[/red]")
+        except FileNotFoundError:
+            console.print(f"[red]Engine '{engine}' not found. Please install it or check your path.[/red]")
+
+    if component in ["backend", "all"]:
+        backend_dir = base_dir / "backend"
+        if (backend_dir / "Dockerfile").exists():
+            run_build(backend_dir, backend_image)
+        else:
+            console.print(f"[yellow]Backend Dockerfile not found in {backend_dir}. Run 'site sync' first.[/yellow]")
+
+    if component in ["frontend", "all"]:
+        frontend_dir = base_dir / "frontend"
+        if (frontend_dir / "Dockerfile").exists():
+            run_build(frontend_dir, frontend_image)
+        else:
+            console.print(f"[yellow]Frontend Dockerfile not found in {frontend_dir}. Run 'site sync' first.[/yellow]")
+            
+    # Generate docker-compose.yml with correct images and ports
+    console.print(f"[blue]Generating docker-compose.yml...[/blue]")
+    context = {
+        "project_name": project_name,
+        "backend_image": backend_image,
+        "frontend_image": frontend_image,
+        "frontend_port": frontend_port
+    }
+    generate_file("docker-compose.yml.j2", context, base_dir / "docker-compose.yml")
+    console.print(f"[green]Generated docker-compose.yml with images: {backend_image}, {frontend_image} and port {frontend_port}[/green]")
+
+@app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
+def compose(
+    ctx: typer.Context,
+    engine: str = typer.Option("docker", "--engine", "-e", help="Container engine: docker or podman"),
+):
+    """
+    Run docker-compose commands.
+    Examples:
+        site compose up -d
+        site compose down
+        site compose logs -f
+    """
+    import subprocess
+    
+    base_dir = get_cwd_safely()
+    compose_file = base_dir / "docker-compose.yml"
+    
+    if not compose_file.exists():
+        console.print(f"[red]docker-compose.yml not found in {base_dir}. Run 'site sync' first.[/red]")
+        raise typer.Exit(code=1)
+
+    # Use context args for the command
+    compose_args = ctx.args
+    
+    compose_cmd = "docker-compose"
+    if engine == "podman":
+        compose_cmd = "podman-compose"
+    
+    if not compose_args:
+        # If no args provided, show help for the compose tool
+        compose_args = ["--help"]
+        
+    full_cmd = [compose_cmd] + compose_args
+    
+    console.print(f"[blue]Running: {' '.join(full_cmd)}[/blue]")
+    
+    try:
+        subprocess.run(full_cmd, cwd=str(base_dir), check=True)
+    except subprocess.CalledProcessError as e:
+        console.print(f"[red]Command failed: {e}[/red]")
+    except FileNotFoundError:
+        console.print(f"[red]Command '{compose_cmd}' not found. Please install it.[/red]")
 
 if __name__ == "__main__":
     app()
