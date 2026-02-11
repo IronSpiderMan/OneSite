@@ -9,10 +9,21 @@ services:
       - "8000:80"
     environment:
       - PROJECT_NAME={{ project_name }}
-      # Add other environment variables here
-      # - DATABASE_URL=postgresql://user:password@db:5432/dbname
+      # If using PG, override DATABASE_URI
+      {% if use_pg %}
+      - DATABASE_URI=postgresql+asyncpg://postgres:postgres@db:5432/app
+      {% endif %}
     volumes:
-      - ./backend/sql_app.db:/app/sql_app.db # Persist SQLite DB
+      - ./uploads:/app/uploads # Persist uploads
+      {% if not use_pg %}
+      - ./app.db:/app/app.db # Persist SQLite DB
+      {% endif %}
+    networks:
+      - app-network
+    {% if use_pg %}
+    depends_on:
+      - db
+    {% endif %}
 
   frontend:
     image: {{ frontend_image }}
@@ -22,3 +33,29 @@ services:
       - "{{ frontend_port }}:80"
     depends_on:
       - backend
+    networks:
+      - app-network
+
+{% if use_pg %}
+  db:
+    image: postgres:15-alpine
+    container_name: {{ project_name }}-db
+    restart: always
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres
+      - POSTGRES_DB=app
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    networks:
+      - app-network
+
+volumes:
+  postgres_data:
+{% endif %}
+
+networks:
+  app-network:
+    driver: bridge

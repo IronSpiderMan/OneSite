@@ -3,7 +3,8 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.security import OAuth2PasswordRequestForm
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import security
 from app.core.config import settings
@@ -14,8 +15,8 @@ from app.schemas.token import Token
 router = APIRouter()
 
 @router.post("/login/access-token", response_model=Token)
-def login_access_token(
-    session: Session = Depends(get_session), 
+async def login_access_token(
+    session: AsyncSession = Depends(get_session), 
     form_data: OAuth2PasswordRequestForm = Depends()
 ) -> Any:
     """
@@ -23,7 +24,8 @@ def login_access_token(
     """
     # Find user by email
     statement = select(User).where(User.email == form_data.username)
-    user = session.exec(statement).first()
+    result = await session.exec(statement)
+    user = result.first()
     
     if not user or not security.verify_password(form_data.password, user.hashed_password):
         raise HTTPException(status_code=400, detail="Incorrect email or password")

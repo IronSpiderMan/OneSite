@@ -1,5 +1,6 @@
 from typing import List, Optional
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.{{ model.lower_name }} import {{ model.name }}
 from app.schemas.{{ model.lower_name }} import {{ model.name }}Create, {{ model.name }}Update
 {% if model.m2m_fields %}
@@ -8,14 +9,15 @@ from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
 {% endfor %}
 {% endif %}
 
-def get(session: Session, id: int) -> Optional[{{ model.name }}]:
-    return session.get({{ model.name }}, id)
+async def get(session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
+    return await session.get({{ model.name }}, id)
 
-def get_multi(session: Session, skip: int = 0, limit: int = 100) -> List[{{ model.name }}]:
+async def get_multi(session: AsyncSession, skip: int = 0, limit: int = 100) -> List[{{ model.name }}]:
     statement = select({{ model.name }}).offset(skip).limit(limit)
-    return session.exec(statement).all()
+    result = await session.exec(statement)
+    return result.all()
 
-def create(session: Session, obj_in: {{ model.name }}Create) -> {{ model.name }}:
+async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}:
     # Note: validation should happen before, here we assume obj_in is valid pydantic model
     
     # Handle M2M fields
@@ -30,8 +32,8 @@ def create(session: Session, obj_in: {{ model.name }}Create) -> {{ model.name }}
 
     db_obj = {{ model.name }}.from_orm(obj_in)
     session.add(db_obj)
-    session.commit()
-    session.refresh(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
     
     {% if model.m2m_fields %}
     # Insert M2M relations
@@ -44,13 +46,13 @@ def create(session: Session, obj_in: {{ model.name }}Create) -> {{ model.name }}
             )
             session.add(link)
     {% endfor %}
-    session.commit()
-    session.refresh(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
     {% endif %}
     
     return db_obj
 
-def update(session: Session, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
+async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
     hero_data = obj_in.dict(exclude_unset=True)
     
     {% if model.m2m_fields %}
@@ -63,9 +65,10 @@ def update(session: Session, db_obj: {{ model.name }}, obj_in: {{ model.name }}U
             # This is a naive implementation (delete all and re-insert). 
             # Better would be to calculate diff.
             statement = select({{ m2m.link_model }}).where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == db_obj.id)
-            existing_links = session.exec(statement).all()
+            result = await session.exec(statement)
+            existing_links = result.all()
             for link in existing_links:
-                session.delete(link)
+                await session.delete(link)
             
             # 2. Insert new relations
             for target_id in new_ids:
@@ -80,12 +83,12 @@ def update(session: Session, db_obj: {{ model.name }}, obj_in: {{ model.name }}U
     for key, value in hero_data.items():
         setattr(db_obj, key, value)
     session.add(db_obj)
-    session.commit()
-    session.refresh(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
     return db_obj
 
-def delete(session: Session, id: int) -> {{ model.name }}:
-    db_obj = session.get({{ model.name }}, id)
-    session.delete(db_obj)
-    session.commit()
+async def delete(session: AsyncSession, id: int) -> {{ model.name }}:
+    db_obj = await session.get({{ model.name }}, id)
+    await session.delete(db_obj)
+    await session.commit()
     return db_obj

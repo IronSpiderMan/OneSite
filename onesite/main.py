@@ -67,6 +67,17 @@ def create(
         content = content.replace("{{ project_name }}", project_name)
         config_file.write_text(content)
 
+    # Generate site_config.json
+    import json
+    site_config = {
+        "project_name": project_name,
+        "database_url": "sqlite:///./app.db",
+        "upload_dir": "uploads",
+        "secret_key": "changeme",
+        "allowed_origins": ["http://localhost:5173", "http://localhost:3000"]
+    }
+    (target_dir / "site_config.json").write_text(json.dumps(site_config, indent=4))
+
     console.print(f"[bold green]Project {project_name} created successfully![/bold green]")
     console.print(f"cd {project_name} && site sync")
 
@@ -194,27 +205,75 @@ def build(
     if component in ["backend", "all"]:
         backend_dir = base_dir / "backend"
         if (backend_dir / "Dockerfile").exists():
-            run_build(backend_dir, backend_image)
+            # Prompt for deleting existing images
+            should_build = True
+            try:
+                existing_images = subprocess.getoutput(f"{engine} images -q {backend_image}")
+                if existing_images and "command not found" not in existing_images:
+                    if typer.confirm(f"Image {backend_image} already exists. Delete it?", default=True):
+                        console.print(f"[blue]Deleting {backend_image}...[/blue]")
+                        subprocess.run([engine, "rmi", "-f", backend_image], check=False)
+                    else:
+                        console.print(f"[yellow]Skipping build for {backend_image} as per user request.[/yellow]")
+                        should_build = False
+            except Exception as e:
+                # Ignore errors here (e.g. docker not installed), run_build will handle/report it
+                pass
+
+            if should_build:
+                run_build(backend_dir, backend_image)
         else:
             console.print(f"[yellow]Backend Dockerfile not found in {backend_dir}. Run 'site sync' first.[/yellow]")
 
     if component in ["frontend", "all"]:
         frontend_dir = base_dir / "frontend"
         if (frontend_dir / "Dockerfile").exists():
-            run_build(frontend_dir, frontend_image)
+            # Prompt for deleting existing images
+            should_build = True
+            try:
+                existing_images = subprocess.getoutput(f"{engine} images -q {frontend_image}")
+                if existing_images and "command not found" not in existing_images:
+                    if typer.confirm(f"Image {frontend_image} already exists. Delete it?", default=True):
+                        console.print(f"[blue]Deleting {frontend_image}...[/blue]")
+                        subprocess.run([engine, "rmi", "-f", frontend_image], check=False)
+                    else:
+                        console.print(f"[yellow]Skipping build for {frontend_image} as per user request.[/yellow]")
+                        should_build = False
+            except Exception as e:
+                pass
+            
+            if should_build:
+                run_build(frontend_dir, frontend_image)
         else:
             console.print(f"[yellow]Frontend Dockerfile not found in {frontend_dir}. Run 'site sync' first.[/yellow]")
             
     # Generate docker-compose.yml with correct images and ports
     console.print(f"[blue]Generating docker-compose.yml...[/blue]")
+    
+    # Check for PG usage
+    use_pg = False
+    site_config_file = base_dir / "site_config.json"
+    if site_config_file.exists():
+        import json
+        try:
+            site_config = json.loads(site_config_file.read_text())
+            db_url = site_config.get("database_url", "")
+            if db_url.startswith("postgresql"):
+                use_pg = True
+        except:
+            pass
+
     context = {
         "project_name": project_name,
         "backend_image": backend_image,
         "frontend_image": frontend_image,
-        "frontend_port": frontend_port
+        "frontend_port": frontend_port,
+        "use_pg": use_pg
     }
     generate_file("docker-compose.yml.j2", context, base_dir / "docker-compose.yml")
     console.print(f"[green]Generated docker-compose.yml with images: {backend_image}, {frontend_image} and port {frontend_port}[/green]")
+    if use_pg:
+        console.print("[green]PostgreSQL service added to docker-compose.yml[/green]")
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def compose(

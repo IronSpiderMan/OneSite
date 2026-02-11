@@ -1,6 +1,7 @@
 from typing import List, Any, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlmodel import Session, select, func, col
+from sqlmodel import select, func, col
+from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import db, deps
 from app.schemas.{{ model.lower_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update
 from app.schemas.pagination import PaginatedResponse
@@ -17,11 +18,11 @@ from app.schemas.{{ m2m.target_model.lower() }} import {{ m2m.target_model }}Rea
 router = APIRouter(dependencies=[Depends(deps.get_current_user)])
 
 @router.get("/", response_model=PaginatedResponse[{{ model.name }}Read])
-def read_{{ model.lower_name }}s(
+async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
     q: Optional[str] = Query(None, description="Search query"),
-    session: Session = Depends(db.get_session),
+    session: AsyncSession = Depends(db.get_session),
 ) -> Any:
     # Calculate skip based on page and size
     skip = (page - 1) * size
@@ -37,64 +38,66 @@ def read_{{ model.lower_name }}s(
     
     # Get total count (before limit/offset)
     total_statement = select(func.count()).select_from(statement.subquery())
-    total = session.exec(total_statement).one()
+    total_result = await session.exec(total_statement)
+    total = total_result.one()
     
     # Apply pagination
     statement = statement.offset(skip).limit(size)
-    items = session.exec(statement).all()
+    result = await session.exec(statement)
+    items = result.all()
     
     return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
 @router.post("/", response_model={{ model.name }}Read)
-def create_{{ model.lower_name }}(
+async def create_{{ model.lower_name }}(
     *,
-    session: Session = Depends(db.get_session),
+    session: AsyncSession = Depends(db.get_session),
     {{ model.lower_name }}_in: {{ model.name }}Create,
 ) -> Any:
-    return service.create(session, {{ model.lower_name }}_in)
+    return await service.create(session, {{ model.lower_name }}_in)
 
 @router.get("/{id}", response_model={{ model.name }}Read)
-def read_{{ model.lower_name }}(
+async def read_{{ model.lower_name }}(
     *,
-    session: Session = Depends(db.get_session),
+    session: AsyncSession = Depends(db.get_session),
     id: int,
 ) -> Any:
-    {{ model.lower_name }} = service.get(session, id)
+    {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     return {{ model.lower_name }}
 
 @router.put("/{id}", response_model={{ model.name }}Read)
-def update_{{ model.lower_name }}(
+async def update_{{ model.lower_name }}(
     *,
-    session: Session = Depends(db.get_session),
+    session: AsyncSession = Depends(db.get_session),
     id: int,
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
-    {{ model.lower_name }} = service.get(session, id)
+    {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
-    {{ model.lower_name }} = service.update(session, {{ model.lower_name }}, {{ model.lower_name }}_in)
+    {{ model.lower_name }} = await service.update(session, {{ model.lower_name }}, {{ model.lower_name }}_in)
     return {{ model.lower_name }}
 
 @router.delete("/{id}", response_model={{ model.name }}Read)
-def delete_{{ model.lower_name }}(
+async def delete_{{ model.lower_name }}(
     *,
-    session: Session = Depends(db.get_session),
+    session: AsyncSession = Depends(db.get_session),
     id: int,
 ) -> Any:
-    {{ model.lower_name }} = service.get(session, id)
+    {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
-    {{ model.lower_name }} = service.delete(session, id)
+    {{ model.lower_name }} = await service.delete(session, id)
     return {{ model.lower_name }}
 
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 @router.get("/{id}/{{ m2m.name }}", response_model=PaginatedResponse[{{ m2m.target_model }}Read])
-def read_{{ model.lower_name }}_{{ m2m.name }}(
+async def read_{{ model.lower_name }}_{{ m2m.name }}(
     *,
-    session: Session = Depends(db.get_session),
+    session: AsyncSession = Depends(db.get_session),
     id: int,
     page: int = 1,
     size: int = 20,
@@ -104,7 +107,8 @@ def read_{{ model.lower_name }}_{{ m2m.name }}(
     """
     # 1. Find all target_ids in link table
     link_statement = select({{ m2m.link_model }}.{{ m2m.target_fk_field }}).where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == id)
-    target_ids = session.exec(link_statement).all()
+    link_result = await session.exec(link_statement)
+    target_ids = link_result.all()
     
     if not target_ids:
         return PaginatedResponse.create(data=[], total=0, page=page, size=size)
@@ -115,11 +119,13 @@ def read_{{ model.lower_name }}_{{ m2m.name }}(
     
     # Count total
     total_statement = select(func.count()).select_from(statement.subquery())
-    total = session.exec(total_statement).one()
+    total_result = await session.exec(total_statement)
+    total = total_result.one()
     
     # Pagination
     statement = statement.offset(skip).limit(size)
-    items = session.exec(statement).all()
+    result = await session.exec(statement)
+    items = result.all()
     
     return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 {% endfor %}

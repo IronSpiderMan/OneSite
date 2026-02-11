@@ -1,34 +1,27 @@
 from typing import List, Optional
-from sqlmodel import Session, select
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
 
-def get(session: Session, id: int) -> Optional[User]:
-    return session.get(User, id)
+async def get(session: AsyncSession, id: int) -> Optional[User]:
+    return await session.get(User, id)
 
-def get_multi(session: Session, skip: int = 0, limit: int = 100) -> List[User]:
+async def get_multi(session: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
     statement = select(User).offset(skip).limit(limit)
-    return session.exec(statement).all()
+    result = await session.exec(statement)
+    return result.all()
 
-def create(session: Session, obj_in: UserCreate) -> User:
+async def create(session: AsyncSession, obj_in: UserCreate) -> User:
     # User creation logic is mainly handled in Service (password hashing)
-    # But if called directly, we assume obj_in has hashed_password if needed?
-    # No, Service calls create. 
-    # Wait, service calls:
-    # db_obj = User(**user_data)
-    # session.add(db_obj)
-    # It does NOT call crud.create usually in my implementation above.
-    # Let's check user_service.py.j2 again.
-    # It instantiates User directly.
-    # So this crud.create might be unused by Service, but good to have for consistency.
     
     db_obj = User.from_orm(obj_in)
     session.add(db_obj)
-    session.commit()
-    session.refresh(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
     return db_obj
 
-def update(session: Session, db_obj: User, obj_in: UserUpdate) -> User:
+async def update(session: AsyncSession, db_obj: User, obj_in: UserUpdate) -> User:
     hero_data = obj_in.dict(exclude_unset=True)
     # Remove password from data if present (it's transient)
     if 'password' in hero_data:
@@ -37,12 +30,12 @@ def update(session: Session, db_obj: User, obj_in: UserUpdate) -> User:
     for key, value in hero_data.items():
         setattr(db_obj, key, value)
     session.add(db_obj)
-    session.commit()
-    session.refresh(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
     return db_obj
 
-def delete(session: Session, id: int) -> User:
-    db_obj = session.get(User, id)
-    session.delete(db_obj)
-    session.commit()
+async def delete(session: AsyncSession, id: int) -> User:
+    db_obj = await session.get(User, id)
+    await session.delete(db_obj)
+    await session.commit()
     return db_obj

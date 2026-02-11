@@ -1,5 +1,8 @@
 import logging
-from sqlmodel import Session, select
+import asyncio
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.orm import sessionmaker
 from app.core.db import engine, init_db
 from app.models.user import User
 from app.core.config import settings
@@ -8,11 +11,15 @@ from app.core.security import get_password_hash
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def init_data() -> None:
-    with Session(engine) as session:
-        user = session.exec(
+async def init_data() -> None:
+    async_session = sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with async_session() as session:
+        result = await session.exec(
             select(User).where(User.email == settings.FIRST_SUPERUSER)
-        ).first()
+        )
+        user = result.first()
         if not user:
             user = User(
                 email=settings.FIRST_SUPERUSER,
@@ -22,17 +29,17 @@ def init_data() -> None:
                 full_name="Admin User"
             )
             session.add(user)
-            session.commit()
-            session.refresh(user)
+            await session.commit()
+            await session.refresh(user)
             logger.info("Superuser created")
         else:
             logger.info("Superuser already exists")
 
-def main() -> None:
+async def main() -> None:
     logger.info("Creating initial data")
-    init_db()
-    init_data()
+    await init_db()
+    await init_data()
     logger.info("Initial data created")
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

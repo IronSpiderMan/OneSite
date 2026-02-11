@@ -8,14 +8,15 @@ interface ModalProps {
     onClose: () => void;
     title: string;
     children: React.ReactNode;
+    className?: string;
 }
 
-export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children }) => {
+export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, className }) => {
     if (!isOpen) return null;
 
     return (
         <div className="fixed inset-0 z-50 bg-background/80 backdrop-blur-sm flex items-center justify-center p-4">
-            <div className="bg-card text-card-foreground w-full max-w-lg border rounded-lg shadow-lg">
+            <div className={cn("bg-card text-card-foreground w-full max-w-lg border rounded-lg shadow-lg", className)}>
                 <div className="flex flex-col space-y-1.5 p-6">
                     <div className="flex items-center justify-between">
                         <h3 className="font-semibold leading-none tracking-tight">{title}</h3>

@@ -205,11 +205,128 @@ def generate_file(template_name: str, context: Dict, output_path: Path):
     output_path.write_text(content)
     console.print(f"Generated {output_path}")
 
+def load_site_config(cwd: Path) -> Dict[str, Any]:
+    config_path = cwd / "site_config.json"
+    if config_path.exists():
+        import json
+        try:
+            return json.loads(config_path.read_text())
+        except Exception as e:
+            console.print(f"[red]Error loading site_config.json: {e}[/red]")
+    return {}
+
+def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Path):
+    # Backend .env
+    backend_env = backend_path / ".env"
+    # Update .env (create or sync)
+    if True:
+        # Let's read existing env if any, and update keys from config.
+        env_content = ""
+        if backend_env.exists():
+            env_content = backend_env.read_text()
+        
+        # Simple key-value update (naive implementation)
+        # Better: parse env, update keys, write back.
+        new_keys = {
+            "PROJECT_NAME": config.get("project_name"),
+            "DATABASE_URI": config.get("database_url"),
+            "SECRET_KEY": config.get("secret_key"),
+            "FIRST_SUPERUSER": config.get("first_superuser", "admin@example.com"),
+            "FIRST_SUPERUSER_PASSWORD": config.get("first_superuser_password", "admin"),
+        }
+        
+        # Add CORS origins to .env
+        import json
+        allowed_origins = config.get("allowed_origins", [])
+        if allowed_origins:
+             new_keys["BACKEND_CORS_ORIGINS"] = json.dumps(allowed_origins)
+        
+        lines = env_content.splitlines()
+        existing_keys = {}
+        for line in lines:
+            if "=" in line and not line.startswith("#"):
+                key, val = line.split("=", 1)
+                existing_keys[key.strip()] = val.strip()
+        
+        updated_lines = []
+        # Update existing lines
+        for line in lines:
+            if "=" in line and not line.startswith("#"):
+                key, val = line.split("=", 1)
+                key = key.strip()
+                if key in new_keys:
+                    updated_lines.append(f"{key}={new_keys[key]}")
+                    del new_keys[key]
+                else:
+                    updated_lines.append(line)
+            else:
+                updated_lines.append(line)
+        
+        # Append new keys
+        for key, val in new_keys.items():
+             updated_lines.append(f"{key}={val}")
+             
+        backend_path.mkdir(parents=True, exist_ok=True)
+        backend_env.write_text("\n".join(updated_lines))
+        console.print(f"Synced backend .env")
+
+    # Frontend .env
+    frontend_env = frontend_path / ".env"
+    # Frontend needs VITE_API_URL and maybe VITE_UPLOAD_DIR (if needed)
+    # But usually VITE_API_URL is sufficient as /uploads is relative or proxied.
+    # We'll just ensure VITE_API_URL is set correctly if we know the backend port?
+    # Actually, config doesn't have port info usually. Defaults to localhost:8000.
+    # If user changes it, they change .env manually?
+    # Or we can add api_url to site_config.
+    # Default to relative path to use proxy
+    api_url = config.get("api_url", "/api/v1")
+    
+    # Check existing frontend .env
+    f_env_content = ""
+    if frontend_env.exists():
+        f_env_content = frontend_env.read_text()
+        
+    if "VITE_API_URL" not in f_env_content:
+        frontend_path.mkdir(parents=True, exist_ok=True)
+        with frontend_env.open("a") as f:
+            f.write(f"\nVITE_API_URL={api_url}\n")
+        console.print(f"Updated frontend .env with VITE_API_URL")
+    else:
+        # Update existing VITE_API_URL
+        lines = f_env_content.splitlines()
+        updated_lines = []
+        for line in lines:
+            if line.startswith("VITE_API_URL="):
+                updated_lines.append(f"VITE_API_URL={api_url}")
+            else:
+                updated_lines.append(line)
+        frontend_env.write_text("\n".join(updated_lines))
+        console.print(f"Updated frontend .env VITE_API_URL to {api_url}")
+
 def generate_code():
     # Assume we are in the project root
     cwd = Path(os.getcwd())
+    site_config = load_site_config(cwd)
+    
+    # Defaults
+    site_config.setdefault("project_name", "MyApp")
+    site_config.setdefault("database_url", "sqlite:///./app.db")
+    site_config.setdefault("upload_dir", "uploads")
+    site_config.setdefault("secret_key", "changeme")
+    site_config.setdefault("allowed_origins", [
+        "http://localhost:5173", 
+        "http://localhost:3000",
+        "http://127.0.0.1:5173",
+        "http://127.0.0.1:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1:8000"
+    ])
+    
     backend_path = cwd / "backend"
     
+    # Sync .env files
+    sync_env_files(site_config, backend_path, cwd / "frontend")
+
     if not backend_path.exists():
         console.print("[red]Backend directory not found. Are you in the project root?[/red]")
         return
@@ -503,6 +620,11 @@ def generate_code():
     target_frontend_root = cwd / "frontend"
     
     for config_file in config_files:
+        if config_file == "vite.config.ts":
+             # Use template for vite.config.ts
+             generate_file("frontend_vite.config.ts.j2", {"config": site_config}, target_frontend_root / config_file)
+             continue
+             
         src = template_frontend_root / config_file
         dst = target_frontend_root / config_file
         if src.exists():
@@ -524,11 +646,8 @@ def generate_code():
         if not target_endpoints_dir.exists():
             target_endpoints_dir.mkdir(parents=True, exist_ok=True)
             
-        # Copy upload.py specifically if it exists, or just copy all non-generated files
-        upload_py = template_endpoints_dir / "upload.py"
-        if upload_py.exists():
-             shutil.copy2(upload_py, target_endpoints_dir / "upload.py")
-             console.print(f"Synced backend endpoint: upload.py")
+        # Use template for upload.py to support dynamic upload dir
+        generate_file("backend_api_upload.py.j2", {"config": site_config}, target_endpoints_dir / "upload.py")
 
         # Copy login.py
         login_py = template_endpoints_dir / "login.py"
@@ -542,17 +661,25 @@ def generate_code():
          shutil.copy2(template_security, target_security)
          console.print(f"Synced backend security.py")
 
-    template_config = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "config.py"
-    target_config = backend_path / "app" / "core" / "config.py"
-    if template_config.exists():
-         shutil.copy2(template_config, target_config)
-         console.print(f"Synced backend config.py")
+    # Generate config.py from template (using site_config)
+    # We use a special template for config.py that accepts site_config
+    # If the template file in templates/backend/... is just a static py file, we need to make it a jinja2 template
+    # For now, let's assume we create config.py.j2 in templates/codegen/backend_core/
+    # But to minimize file movement, let's just use generate_file with a new template name
+    # We will create "backend_config.py.j2" in codegen templates
+    generate_file("backend_config.py.j2", {"config": site_config}, backend_path / "app" / "core" / "config.py")
 
     template_db = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "db.py"
     target_db = backend_path / "app" / "core" / "db.py"
     if template_db.exists():
          shutil.copy2(template_db, target_db)
          console.print(f"Synced backend db.py")
+
+    template_deps = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "deps.py"
+    target_deps = backend_path / "app" / "core" / "deps.py"
+    if template_deps.exists():
+         shutil.copy2(template_deps, target_deps)
+         console.print(f"Synced backend deps.py")
 
     template_initial_data = Path(__file__).parent / "templates" / "backend" / "app" / "initial_data.py"
     target_initial_data = backend_path / "app" / "initial_data.py"
@@ -561,11 +688,8 @@ def generate_code():
          console.print(f"Synced backend initial_data.py")
      
     # Sync Backend Main (main.py)
-    template_backend_main = Path(__file__).parent / "templates" / "backend" / "app" / "main.py"
-    target_backend_main = backend_path / "app" / "main.py"
-    if template_backend_main.exists():
-         shutil.copy2(template_backend_main, target_backend_main)
-         console.print(f"Synced backend main.py")
+    # Use template for main.py to support dynamic upload dir mount
+    generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
 
     # Sync requirements.txt
     template_requirements = Path(__file__).parent / "templates" / "backend" / "requirements.txt"
@@ -588,11 +712,8 @@ def generate_code():
          shutil.copy2(template_frontend_dockerfile, target_frontend_dockerfile)
          console.print(f"Synced frontend Dockerfile")
          
-    template_frontend_nginx = Path(__file__).parent / "templates" / "frontend" / "nginx.conf"
-    target_frontend_nginx = cwd / "frontend" / "nginx.conf"
-    if template_frontend_nginx.exists():
-         shutil.copy2(template_frontend_nginx, target_frontend_nginx)
-         console.print(f"Synced frontend nginx.conf")
+    # Use template for nginx.conf to support dynamic upload dir proxy
+    generate_file("frontend_nginx.conf.j2", {"config": site_config}, cwd / "frontend" / "nginx.conf")
 
     # Sync Backend API Router (api.py) - Base template
     template_backend_api = Path(__file__).parent / "templates" / "backend" / "app" / "api" / "api.py"
