@@ -94,6 +94,9 @@ class Document(SQLModel, table=True):
     
     # Method 2: Explicit component definition
     attachment: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"component": "file"}}})
+    
+    # Method 3: Disable download (preview only)
+    preview_only: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"component": "file", "allow_download": False}}})
 ```
 
 #### Foreign Key Relationship
