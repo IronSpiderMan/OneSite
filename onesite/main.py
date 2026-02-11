@@ -47,20 +47,27 @@ def create(
     Create a new full-stack project with backend and frontend.
     """
     console.print(f"[green]Creating project: {project_name}[/green]")
-    
+
     target_dir = get_cwd_safely() / project_name
     if target_dir.exists():
         console.print(f"[red]Directory {project_name} already exists![/red]")
         raise typer.Exit(code=1)
-    
+
     # Copy templates
-    shutil.copytree(TEMPLATE_DIR, target_dir)
-    
+    # shutil.copytree(TEMPLATE_DIR, target_dir)
+    shutil.copytree(
+        TEMPLATE_DIR,
+        target_dir,
+        ignore=shutil.ignore_patterns(
+            "templates/codegen"
+        )
+    )
+
     # Render templates (e.g. .env, config.py)
     # Walk through the directory and render files ending with .py or .env or others if needed
-    # For now, we just copied, let's assume simple copy is fine for most, 
+    # For now, we just copied, let's assume simple copy is fine for most,
     # but we might want to replace {{ project_name }} in config.py
-    
+
     config_file = target_dir / "backend/app/core/config.py"
     if config_file.exists():
         content = config_file.read_text()
@@ -91,23 +98,23 @@ def sync(
     """
     # Ensure we are in a valid directory
     get_cwd_safely()
-    
+
     console.print("[green]Syncing models...[/green]")
     from onesite.generator import generate_code
     generate_code()
-    
+
     if install:
         console.print("[green]Installing dependencies...[/green]")
         import subprocess
         base_dir = get_cwd_safely()
         backend_dir = base_dir / "backend"
         frontend_dir = base_dir / "frontend"
-        
+
         # Install Backend Dependencies
         if (backend_dir / "requirements.txt").exists():
             console.print("[blue]Installing backend dependencies...[/blue]")
             subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=str(backend_dir))
-        
+
         # Install Frontend Dependencies
         if (frontend_dir / "package.json").exists():
              console.print("[blue]Installing frontend dependencies...[/blue]")
@@ -122,7 +129,7 @@ def run(
     Run the project (Backend and Frontend).
     """
     console.print(f"[green]Running {component}...[/green]")
-    
+
     import subprocess
     import concurrent.futures
 
@@ -142,7 +149,7 @@ def run(
         if not frontend_dir.exists():
              console.print(f"[red]Frontend directory not found at {frontend_dir}![/red]")
              return
-        
+
         package_json = frontend_dir / "package.json"
         if package_json.exists():
             console.print("[blue]Starting Frontend (npm run dev)...[/blue]")
@@ -150,7 +157,7 @@ def run(
             if not (frontend_dir / "node_modules").exists():
                 console.print("[yellow]node_modules not found. Installing dependencies...[/yellow]")
                 subprocess.run(["npm", "install"], cwd=str(frontend_dir))
-            
+
             subprocess.run(["npm", "run", "dev"], cwd=str(frontend_dir))
         else:
             console.print("[blue]Starting Frontend...[/blue]")
@@ -162,7 +169,7 @@ def run(
             futures.append(executor.submit(run_backend))
         if component in ["frontend", "all"]:
             futures.append(executor.submit(run_frontend))
-        
+
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
@@ -181,18 +188,18 @@ def build(
     """
     import subprocess
     from onesite.generator import generate_file
-    
+
     base_dir = get_cwd_safely()
     project_name = base_dir.name.lower()
-    
+
     backend_image = f"{project_name}-backend:{tag}"
     frontend_image = f"{project_name}-frontend:{tag}"
-    
+
     def run_build(context_dir, image_name):
         console.print(f"[blue]Building {image_name} with {engine}...[/blue]")
         try:
             subprocess.run(
-                [engine, "build", "-t", image_name, "."], 
+                [engine, "build", "-t", image_name, "."],
                 cwd=str(context_dir),
                 check=True
             )
@@ -241,15 +248,15 @@ def build(
                         should_build = False
             except Exception as e:
                 pass
-            
+
             if should_build:
                 run_build(frontend_dir, frontend_image)
         else:
             console.print(f"[yellow]Frontend Dockerfile not found in {frontend_dir}. Run 'site sync' first.[/yellow]")
-            
+
     # Generate docker-compose.yml with correct images and ports
     console.print(f"[blue]Generating docker-compose.yml...[/blue]")
-    
+
     # Check for PG usage
     use_pg = False
     site_config_file = base_dir / "site_config.json"
@@ -288,29 +295,29 @@ def compose(
         site compose logs -f
     """
     import subprocess
-    
+
     base_dir = get_cwd_safely()
     compose_file = base_dir / "docker-compose.yml"
-    
+
     if not compose_file.exists():
         console.print(f"[red]docker-compose.yml not found in {base_dir}. Run 'site sync' first.[/red]")
         raise typer.Exit(code=1)
 
     # Use context args for the command
     compose_args = ctx.args
-    
+
     compose_cmd = "docker-compose"
     if engine == "podman":
         compose_cmd = "podman-compose"
-    
+
     if not compose_args:
         # If no args provided, show help for the compose tool
         compose_args = ["--help"]
-        
+
     full_cmd = [compose_cmd] + compose_args
-    
+
     console.print(f"[blue]Running: {' '.join(full_cmd)}[/blue]")
-    
+
     try:
         subprocess.run(full_cmd, cwd=str(base_dir), check=True)
     except subprocess.CalledProcessError as e:
