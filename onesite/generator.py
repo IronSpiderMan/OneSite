@@ -21,14 +21,14 @@ def get_model_fields(model_cls):
     for name, field in model_cls.model_fields.items():
         # Get permissions from sa_column_kwargs -> info -> site_props -> permissions
         # OR fallback to json_schema_extra if available (for future proofing)
-        
+
         sa_column_kwargs = getattr(field, "sa_column_kwargs", {})
         if sa_column_kwargs is PydanticUndefined or sa_column_kwargs is None:
             sa_column_kwargs = {}
-            
+
         info = sa_column_kwargs.get("info", {})
         site_props = info.get("site_props", {})
-        
+
         if not site_props:
             # Fallback to json_schema_extra
             if hasattr(field, "json_schema_extra"):
@@ -36,29 +36,29 @@ def get_model_fields(model_cls):
                  if json_schema_extra is PydanticUndefined or json_schema_extra is None:
                      json_schema_extra = {}
                  site_props = json_schema_extra.get("site_props", {})
-        
+
         permissions = site_props.get("permissions", "rcu") # Default: Read, Create, Update
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
         allow_download = site_props.get("allow_download", True)
-        
+
         # Force 'id' to be read-only if permissions not explicitly set to something else that includes write (unlikely)
         # Or better, just force 'r' for 'id' unless user really knows what they are doing.
         if name == 'id':
             permissions = 'r'
 
         console.print(f"Debug: Field {name} - Perms: {permissions}")
-        
+
         # Determine python type string (simplified)
         type_annotation = field.annotation
         type_str = str(type_annotation)
-        
+
         # Debugging type annotation
         console.print(f"Debug: Field {name} - Type Annotation: {type_annotation} (Type: {type(type_annotation)}) - Type Str: {type_str}")
 
         is_enum = False
         enum_values = []
-        
+
         # Check for Enum
         if inspect.isclass(type_annotation) and issubclass(type_annotation, (str, int)) and hasattr(type_annotation, "__members__"):
              is_enum = True
@@ -73,10 +73,10 @@ def get_model_fields(model_cls):
         elif "float" in type_str: type_str = "float"
         elif "datetime" in type_str: type_str = "datetime"
         else: type_str = "str" # Fallback
-        
+
         # Save UI type before wrapping with Optional
         ui_type = type_str
-        
+
         # Check for image component
         if site_props.get("component") == "image":
             ui_type = "image"
@@ -85,9 +85,9 @@ def get_model_fields(model_cls):
             ui_type = "file"
         # Heuristic for image fields if type is string
         elif ui_type == "str" and (
-            name.endswith("_image") or 
-            name.endswith("_img") or 
-            name.endswith("_photo") or 
+            name.endswith("_image") or
+            name.endswith("_img") or
+            name.endswith("_photo") or
             name == "avatar" or
             name == "image" or
             name == "photo" or
@@ -102,7 +102,7 @@ def get_model_fields(model_cls):
             name == "attachment"
         ):
              ui_type = "file"
-        
+
         # Check metadata for search field
         is_search_field = site_props.get("is_search_field", False)
 
@@ -113,17 +113,17 @@ def get_model_fields(model_cls):
         model_name_lower = model_cls.__name__.lower()
         default_label_key = f"models.{model_name_lower}.fields.{name}"
         label_key = site_props.get("label", default_label_key)
-        
+
         # Extract translations if available
         translations = site_props.get("translations", {})
-        
+
         # Check foreign key info from site_props or infer from name
         # We assume FK fields are named like `modelname_id` or explicit `foreign_key` in sa_column_args
         # But SQLModel puts foreign_key in Field(foreign_key=...) which maps to sa_column_args?
         # Actually SQLModel Field(foreign_key=...) puts it in sa_column_kwargs['foreign_key'] if using sa_column_kwargs explicitly
         # But standard SQLModel Field(foreign_key="...") handles it differently in pydantic model fields.
         # We need to inspect the field definition more closely or rely on naming convention + metadata for now.
-        
+
         # Let's check naming convention for MVP: if ends with _id, it might be a FK
         fk_info = None
         if name.endswith("_id") and name != "id":
@@ -137,12 +137,12 @@ def get_model_fields(model_cls):
                  "target_endpoint": f"{target_model_name}s",
                  "label_field": "name" # Default guess
              }
-        
+
         # Check if optional
         is_optional = not field.is_required()
         if is_optional:
             type_str = f"Optional[{type_str}]"
-            
+
         fields.append({
             "name": name,
             "type": type_str,
@@ -160,7 +160,7 @@ def get_model_fields(model_cls):
             "label_key": label_key,
             "translations": translations
         })
-    
+
     # Post-process fields to determine search field if not explicitly set
     # Only one search field per model for now (for the fuzzy search)
     has_explicit_search = any(f.get("is_search_field") for f in fields)
@@ -172,7 +172,7 @@ def get_model_fields(model_cls):
             if found:
                 found["is_search_field"] = True
                 break
-    
+
     # If still no search field, maybe use the first string field?
     if not any(f.get("is_search_field") for f in fields):
          first_str = next((f for f in fields if f["ui_type"] == "str" and not f["is_enum"]), None)
@@ -180,22 +180,22 @@ def get_model_fields(model_cls):
              first_str["is_search_field"] = True
 
     # Identify if this is a link table (Many-to-Many)
-    # Rule: 
+    # Rule:
     # 1. Has explicit metadata `is_link_table`
     # 2. OR: Has 2+ foreign keys AND no other required business fields (ignoring id, created_at, etc)
     # For now, let's just stick to checking if it's a valid model to generate.
     # We will filter found_models later.
-    
+
     # Also collect foreign keys for the model context
     foreign_keys = [f["fk_info"] for f in fields if f["fk_info"]]
     # Remove duplicates if any (though usually 1 field = 1 fk)
-    
+
     # Determine the search field name for this model to pass to context
     search_field = next((f["name"] for f in fields if f.get("is_search_field")), "id")
-    
+
     # Update fk_info with the correct label_field (which is the search_field of the target model)
     # We can't do this here easily because we don't have access to other models yet.
-    # We will do a post-processing pass in generate_code() or let the frontend template assume 
+    # We will do a post-processing pass in generate_code() or let the frontend template assume
     # the target model's search field is what we want (which is usually true).
     # But wait, we set 'label_field': 'name' as default guess in line 96.
     # We should update this if possible.
@@ -240,7 +240,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         env_content = ""
         if backend_env.exists():
             env_content = backend_env.read_text()
-        
+
         # Simple key-value update (naive implementation)
         # Better: parse env, update keys, write back.
         new_keys = {
@@ -250,20 +250,20 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
             "FIRST_SUPERUSER": config.get("first_superuser", "admin@example.com"),
             "FIRST_SUPERUSER_PASSWORD": config.get("first_superuser_password", "admin"),
         }
-        
+
         # Add CORS origins to .env
         import json
         allowed_origins = config.get("allowed_origins", [])
         if allowed_origins:
              new_keys["BACKEND_CORS_ORIGINS"] = json.dumps(allowed_origins)
-        
+
         lines = env_content.splitlines()
         existing_keys = {}
         for line in lines:
             if "=" in line and not line.startswith("#"):
                 key, val = line.split("=", 1)
                 existing_keys[key.strip()] = val.strip()
-        
+
         updated_lines = []
         # Update existing lines
         for line in lines:
@@ -277,11 +277,11 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
                     updated_lines.append(line)
             else:
                 updated_lines.append(line)
-        
+
         # Append new keys
         for key, val in new_keys.items():
              updated_lines.append(f"{key}={val}")
-             
+
         backend_path.mkdir(parents=True, exist_ok=True)
         backend_env.write_text("\n".join(updated_lines))
         console.print(f"Synced backend .env")
@@ -296,12 +296,12 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     # Or we can add api_url to site_config.
     # Default to relative path to use proxy
     api_url = config.get("api_url", "/api/v1")
-    
+
     # Check existing frontend .env
     f_env_content = ""
     if frontend_env.exists():
         f_env_content = frontend_env.read_text()
-        
+
     if "VITE_API_URL" not in f_env_content:
         frontend_path.mkdir(parents=True, exist_ok=True)
         with frontend_env.open("a") as f:
@@ -323,23 +323,23 @@ def generate_code():
     # Assume we are in the project root
     cwd = Path(os.getcwd())
     site_config = load_site_config(cwd)
-    
+
     # Defaults
     site_config.setdefault("project_name", "MyApp")
     site_config.setdefault("database_url", "sqlite:///./app.db")
     site_config.setdefault("upload_dir", "uploads")
     site_config.setdefault("secret_key", "changeme")
     site_config.setdefault("allowed_origins", [
-        "http://localhost:5173", 
+        "http://localhost:5173",
         "http://localhost:3000",
         "http://127.0.0.1:5173",
         "http://127.0.0.1:3000",
         "http://localhost:8000",
         "http://127.0.0.1:8000"
     ])
-    
+
     backend_path = cwd / "backend"
-    
+
     # Sync .env files
     sync_env_files(site_config, backend_path, cwd / "frontend")
 
@@ -351,10 +351,10 @@ def generate_code():
     # AND ALSO sync core models from template/models to backend/app/models if they don't exist in root/models
     models_src_dir = cwd / "models"
     models_dest_dir = backend_path / "app" / "models"
-    
+
     # Template models dir
     template_models_dir = Path(__file__).parent / "templates" / "models"
-    
+
     if not models_dest_dir.exists():
         models_dest_dir.mkdir(parents=True, exist_ok=True)
         (models_dest_dir / "__init__.py").touch()
@@ -365,7 +365,7 @@ def generate_code():
         for model_file in models_src_dir.glob("*.py"):
             shutil.copy2(model_file, models_dest_dir / model_file.name)
             console.print(f"Synced model: {model_file.name}")
-    
+
     # Priority 2: Sync base models (like User) from templates if they are not in project's models/
     # This allows us to update the User model definition in the tool and have it propagate
     # UNLESS the user has overridden it in their project models/
@@ -378,10 +378,10 @@ def generate_code():
              # If not, we might fall back to backend/app/models/user.py which might be stale.
              # The issue here is: The user edited `onesite/templates/models/user.py` (the tool's template),
              # but `site sync` only looks at `project/models/`.
-             
+
              # If the user wants to update the User model, they should probably copy it to `project/models/` first?
              # OR, we should copy from template to `backend/app/models` if not present in `project/models/`.
-             
+
              target_in_project = models_src_dir / model_file.name
              if not target_in_project.exists():
                  # Not in project custom models, so we can update the backend copy from template
@@ -391,7 +391,7 @@ def generate_code():
                  console.print(f"Skipping template model {model_file.name} (overridden in project)")
 
     sys.path.append(str(backend_path))
-    
+
     # Reload modules to pick up changes
     # For simplicity, we just import
     try:
@@ -402,23 +402,23 @@ def generate_code():
 
     # Find all model files
     models_dir = backend_path / "app" / "models"
-    # Recursively find all .py files in models directory to support subdirectories if needed, 
-    # but for now simple glob is fine. 
+    # Recursively find all .py files in models directory to support subdirectories if needed,
+    # but for now simple glob is fine.
     # Important: glob returns Path objects, we need relative path to models_dir for module name if nested
     # But current structure is flat.
     model_files = [f.stem for f in models_dir.glob("*.py") if f.stem != "__init__"]
-    
+
     found_models = []
 
     # Ensure we check sys.modules for any existing loaded models and reload them
     # This is crucial because if we just import, python might use cached version
-    
+
     # Also we need to make sure we are importing from the correct path.
     # We added backend_path to sys.path, so 'app.models' should be resolvable.
-    
+
     for module_name in model_files:
         full_module_name = f"app.models.{module_name}"
-        
+
         try:
             if full_module_name in sys.modules:
                 module = importlib.reload(sys.modules[full_module_name])
@@ -427,7 +427,7 @@ def generate_code():
         except ImportError as e:
             console.print(f"[red]Error importing {full_module_name}: {e}[/red]")
             continue
-        
+
         # Inspect classes
         for name, obj in inspect.getmembers(module):
             if inspect.isclass(obj) and issubclass(obj, SQLModel) and obj is not SQLModel:
@@ -436,7 +436,7 @@ def generate_code():
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
                      fields, foreign_keys, search_field, is_link_table, translations = get_model_fields(obj)
-                     
+
                      # Special handling for User model to add virtual 'password' field if not present
                      # Moving this logic out of get_model_fields to keep it clean or handle here
                      if name == 'User':
@@ -454,7 +454,7 @@ def generate_code():
                                  "is_search_field": False,
                                  "fk_info": None
                              })
-                             
+
                      found_models.append({
                          "name": name,
                          "module_name": module_name, # Save the filename/module name
@@ -465,7 +465,7 @@ def generate_code():
                          "is_link_table": is_link_table,
                          "translations": translations
                      })
-    
+
     # Post-process models to update FK label fields and collect readable fields
     # Now that we have all models and their search_fields, we can update fk_info
     model_map = {m["name"]: m for m in found_models}
@@ -477,11 +477,11 @@ def generate_code():
                 # Collect readable fields for the target model
                 # Filter out sensitive fields like password
                 fk["target_readable_fields"] = [
-                    f for f in target_model["fields"] 
+                    f for f in target_model["fields"]
                     if 'r' in f["permissions"] and f["name"] != "password" and not f.get("fk_info")
                 ]
                 console.print(f"Debug: Updated FK {model['name']} -> {fk['target_model']} label to {fk['label_field']}")
-    
+
     # Process Link Tables (M2M)
     # Strategy: Inject m2m fields into the source model (first FK)
     for model in found_models:
@@ -491,19 +491,19 @@ def generate_code():
                 # Assume 1st FK is Source, 2nd FK is Target
                 source_fk = fks[0]
                 target_fk = fks[1]
-                
+
                 source_model_name = source_fk["target_model"]
                 target_model_name = target_fk["target_model"]
-                
+
                 source_model = model_map.get(source_model_name)
                 target_model = model_map.get(target_model_name)
-                
+
                 if source_model and target_model:
                     # Inject virtual field into Source Model
                     m2m_field_name = f"{target_model['lower_name']}_ids"
-                    
+
                     console.print(f"Debug: Injecting M2M field '{m2m_field_name}' into {source_model_name} (via {model['name']})")
-                    
+
                     source_model["m2m_fields"] = source_model.get("m2m_fields", [])
                     source_model["m2m_fields"].append({
                         "name": m2m_field_name,
@@ -540,29 +540,29 @@ def generate_code():
         # Skip generating views/APIs for link tables
         if model["is_link_table"]:
             continue
-            
+
         context = {"model": model}
-        
+
         is_user_model = model['name'] == 'User'
-        
+
         # 1. Schemas
         schema_tpl = "user_schema.py.j2" if is_user_model else "schema.py.j2"
         generate_file(schema_tpl, context, backend_path / "app" / "schemas" / f"{model['lower_name']}.py")
-        
+
         # 2. CRUD
         crud_tpl = "user_crud.py.j2" if is_user_model else "crud.py.j2"
         generate_file(crud_tpl, context, backend_path / "app" / "cruds" / f"{model['lower_name']}.py")
-        
+
         # 3. Service
         service_tpl = "user_service.py.j2" if is_user_model else "service.py.j2"
         generate_file(service_tpl, context, backend_path / "app" / "services" / f"{model['lower_name']}.py")
-        
+
         # 4. API
         generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['lower_name']}.py")
-        
+
         # 5. Frontend Service
         generate_file("frontend_service.ts.j2", context, cwd / "frontend" / "src" / "services" / f"{model['lower_name']}.ts")
-        
+
         # 6. Frontend Store
         generate_file("frontend_store.ts.j2", context, cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts")
 
@@ -576,13 +576,13 @@ def generate_code():
     # We copy from the template directory to the target project
     template_components_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "components" / "ui"
     target_components_dir = cwd / "frontend" / "src" / "components" / "ui"
-    
+
     if template_components_dir.exists():
         if not target_components_dir.exists():
             target_components_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Copy files if they don't exist or update them? 
-        # For now, let's copy if missing to avoid overwriting user changes, or overwrite? 
+
+        # Copy files if they don't exist or update them?
+        # For now, let's copy if missing to avoid overwriting user changes, or overwrite?
         # Since this is a sync tool, overwriting might be expected for 'core' components, but risky.
         # Let's just ensure they exist.
         for item in template_components_dir.glob("*"):
@@ -637,7 +637,7 @@ def generate_code():
     ]
     template_frontend_root = Path(__file__).parent / "templates" / "frontend"
     target_frontend_root = cwd / "frontend"
-    
+
     # Sync src/lib (e.g. utils.ts)
     template_lib_dir = template_frontend_root / "src" / "lib"
     target_lib_dir = target_frontend_root / "src" / "lib"
@@ -648,18 +648,18 @@ def generate_code():
             if item.is_file():
                 shutil.copy2(item, target_lib_dir / item.name)
         console.print(f"Synced lib to {target_lib_dir}")
-    
+
     for config_file in config_files:
         if config_file == "vite.config.ts":
              # Use template for vite.config.ts
              generate_file("frontend_vite.config.ts.j2", {"config": site_config}, target_frontend_root / config_file)
              continue
-             
+
         src = template_frontend_root / config_file
         dst = target_frontend_root / config_file
         if src.exists():
             # Check if destination exists. If it does, we might be overwriting user changes.
-            # But for core infrastructure files in this tool context, we probably want to keep them in sync 
+            # But for core infrastructure files in this tool context, we probably want to keep them in sync
             # or at least update them if they are vastly different.
             # For simplicity in this demo, we'll overwrite to ensure the new stack works.
             # In a real tool, maybe ask for confirmation or only update if missing.
@@ -671,11 +671,11 @@ def generate_code():
     # Sync Backend API Endpoints (for upload.py)
     template_endpoints_dir = Path(__file__).parent / "templates" / "backend" / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
-    
+
     if template_endpoints_dir.exists():
         if not target_endpoints_dir.exists():
             target_endpoints_dir.mkdir(parents=True, exist_ok=True)
-            
+
         # Use template for upload.py to support dynamic upload dir
         generate_file("backend_api_upload.py.j2", {"config": site_config}, target_endpoints_dir / "upload.py")
 
@@ -716,7 +716,7 @@ def generate_code():
     if template_initial_data.exists():
          shutil.copy2(template_initial_data, target_initial_data)
          console.print(f"Synced backend initial_data.py")
-     
+
     # Sync Backend Main (main.py)
     # Use template for main.py to support dynamic upload dir mount
     generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
@@ -741,7 +741,7 @@ def generate_code():
     if template_frontend_dockerfile.exists():
          shutil.copy2(template_frontend_dockerfile, target_frontend_dockerfile)
          console.print(f"Synced frontend Dockerfile")
-         
+
     # Use template for nginx.conf to support dynamic upload dir proxy
     generate_file("frontend_nginx.conf.j2", {"config": site_config}, cwd / "frontend" / "nginx.conf")
 
@@ -753,24 +753,24 @@ def generate_code():
          # But wait, update_api_router below will overwrite it?
          # No, update_api_router appends or rewrites.
          # We need to make sure update_api_router preserves the upload router or we handle it there.
-         pass 
+         pass
 
     # Update api.py to include new routers
 
     # Filter out link tables for API router inclusion
     api_models = [m for m in found_models if not m["is_link_table"]]
     update_api_router(api_models, backend_path / "app" / "api" / "api.py")
-    
+
     # Update Frontend Routes and Menu
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
-    
+
     # Generate i18n locale files
     generate_locale_files(found_models, cwd / "frontend" / "src" / "locales")
 
 def generate_locale_files(models: List[Dict], locale_dir: Path):
     locale_dir.mkdir(parents=True, exist_ok=True)
-    
+
     # 1. English (Default)
     en_translations = {
         "common": {
@@ -794,7 +794,8 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
             "upload": "Upload",
             "no result": "No result",
             "previous": "Previous",
-            "next": "Next"
+            "next": "Next",
+            "select": "Select"
         },
         "login": {
             "title": "Sign in",
@@ -809,7 +810,7 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
         },
         "models": {}
     }
-    
+
     # 2. Chinese (Simplified)
     zh_translations = {
         "common": {
@@ -833,7 +834,8 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
             "upload": "上传",
             "no result": "结果为空",
             "previous": "前一页",
-            "next": "前一页"
+            "next": "前一页",
+            "select": "选择"
         },
         "login": {
             "title": "登录",
@@ -851,36 +853,36 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
 
     for model in models:
         model_name = model["lower_name"]
-        
+
         # Model Name Translation
         model_name_en = model["name"]
         model_name_zh = model["name"] # Fallback
-        
+
         model_translations = model.get("translations", {})
         if "en" in model_translations:
             model_name_en = model_translations["en"]
         if "zh" in model_translations:
             model_name_zh = model_translations["zh"]
-            
+
         en_model = {"name": model_name_en, "fields": {}}
         zh_model = {"name": model_name_zh, "fields": {}}
-        
+
         for field in model["fields"]:
             field_name = field["name"]
             # Default English label: Title Case of field name
             label_en = field_name.replace("_", " ").title()
             label_zh = label_en # Fallback for ZH
-            
+
             # Use explicit translations if available
             translations = field.get("translations", {})
             if "en" in translations:
                 label_en = translations["en"]
             if "zh" in translations:
                 label_zh = translations["zh"]
-            
+
             en_model["fields"][field_name] = label_en
             zh_model["fields"][field_name] = label_zh
-            
+
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model
 
@@ -893,7 +895,7 @@ def update_api_router(models, api_file_path):
     lines = []
     imports = []
     routers = []
-    
+
     # Always include upload router
     imports.append("from app.api.endpoints import upload")
     routers.append("api_router.include_router(upload.router, tags=[\"upload\"])")
@@ -905,7 +907,7 @@ def update_api_router(models, api_file_path):
     for model in models:
         imports.append(f"from app.api.endpoints import {model['lower_name']}")
         routers.append(f"api_router.include_router({model['lower_name']}.router, prefix=\"/{model['lower_name']}s\", tags=[\"{model['lower_name']}s\"])")
-        
+
     content = "from fastapi import APIRouter\n" + "\n".join(imports) + "\n\napi_router = APIRouter()\n\n" + "\n".join(routers)
     api_file_path.write_text(content)
     console.print(f"Updated {api_file_path}")

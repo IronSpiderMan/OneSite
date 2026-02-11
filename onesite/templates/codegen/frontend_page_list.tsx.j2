@@ -265,7 +265,7 @@ const {{ model.name }}Page: React.FC = () => {
                 render={({ field: { onChange, value } }) => (
                     <Select onValueChange={onChange} defaultValue={value}>
                         <SelectTrigger>
-                            <SelectValue placeholder={`Select ${t('{{ field.label_key }}')}`} />
+                            <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
                         </SelectTrigger>
                         <SelectContent>
                             {% for enum_val in field.enum_values %}
@@ -283,8 +283,8 @@ const {{ model.name }}Page: React.FC = () => {
                     <SearchableSelect
                         value={value}
                         onValueChange={onChange}
-                        placeholder={`Select ${t('{{ field.label_key }}')}`}
-                        searchPlaceholder={`Search ${t('models.{{ field.fk_info.target_model|lower }}.name')}...`}
+                        placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                        searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_model|lower }}.name')}...`}
                         loadOptions={async (query) => {
                             const response = await get{{ field.fk_info.target_endpoint.capitalize() }}(1, 20, query);
                             return response.items.map((item: any) => ({
@@ -322,8 +322,8 @@ const {{ model.name }}Page: React.FC = () => {
                         value={value}
                         onValueChange={onChange}
                         multiple={true}
-                        placeholder={`Select ${t('models.{{ m2m.target_model|lower }}.name')}s`}
-                        searchPlaceholder={`Search ${t('models.{{ m2m.target_model|lower }}.name')}...`}
+                        placeholder={`${t('common.select')} ${t('models.{{ m2m.target_model|lower }}.name')}s`}
+                        searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_model|lower }}.name')}...`}
                         loadOptions={async (query) => {
                             const response = await get{{ m2m.target_endpoint.capitalize() }}(1, 20, query);
                             return response.items.map((item: any) => ({
