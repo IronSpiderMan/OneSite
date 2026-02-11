@@ -791,7 +791,21 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
             "success": "Success",
             "error": "Error",
             "confirm_delete": "Are you sure you want to delete this item?",
-            "upload": "Upload"
+            "upload": "Upload",
+            "no result": "No result",
+            "previous": "Previous",
+            "next": "Next"
+        },
+        "login": {
+            "title": "Sign in",
+            "description": "Enter your email and password to access the admin panel",
+            "email": "Email",
+            "emailPlaceholder": "m@example.com",
+            "password": "Password",
+            "signIn": "Sign In",
+            "signingIn": "Signing in...",
+            "error": "Login failed. Please check your credentials.",
+            "demo": "Demo: admin@example.com / admin"
         },
         "models": {}
     }
@@ -816,7 +830,21 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
             "success": "成功",
             "error": "错误",
             "confirm_delete": "确定要删除此项吗？",
-            "upload": "上传"
+            "upload": "上传",
+            "no result": "结果为空",
+            "previous": "前一页",
+            "next": "前一页"
+        },
+        "login": {
+            "title": "登录",
+            "description": "输入您的邮箱和密码以访问管理面板",
+            "email": "电子邮箱",
+            "emailPlaceholder": "m@example.com",
+            "password": "密码",
+            "signIn": "登录",
+            "signingIn": "登录中...",
+            "error": "登录失败，请检查您的凭据。",
+            "demo": "演示账号：admin@example.com / admin"
         },
         "models": {}
     }

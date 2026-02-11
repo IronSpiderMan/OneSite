@@ -31,7 +31,7 @@ const {{ model.name }}Page: React.FC = () => {
   const { data, loading, fetchData, createItem, updateItem, deleteItem } = use{{ model.name }}Store();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
-  
+
   const { register, handleSubmit, reset, setValue, control } = useForm();
 
   useEffect(() => {
@@ -80,9 +80,9 @@ const {{ model.name }}Page: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">{{ model.name }}s</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.lower_name }}.name')}s</h1>
         <Button onClick={handleCreate}>
-          <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {{ model.name }}
+          <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.lower_name }}.name')}
         </Button>
       </div>
 
@@ -108,7 +108,7 @@ const {{ model.name }}Page: React.FC = () => {
             ) : data.length === 0 ? (
                 <TableRow>
                     <TableCell colSpan={ {{ model.fields|length + 1 }} } className="h-24 text-center">
-                        No results.
+                        {t('common.no result')}
                     </TableCell>
                 </TableRow>
             ) : (
@@ -123,10 +123,10 @@ const {{ model.name }}Page: React.FC = () => {
                         </Badge>
                         {% elif field.ui_type == 'image' %}
                         <div className="h-10 w-10 overflow-hidden rounded-md border bg-muted">
-                            <img 
-                                src={item.{{ field.name }} || 'https://placehold.co/100?text=No+Image'} 
-                                alt="{{ field.name }}" 
-                                className="h-full w-full object-cover" 
+                            <img
+                                src={item.{{ field.name }} || 'https://placehold.co/100?text=No+Image'}
+                                alt="{{ field.name }}"
+                                className="h-full w-full object-cover"
                                 onError={(e) => {
                                     (e.target as HTMLImageElement).src = 'https://placehold.co/100?text=Error';
                                 }}
@@ -135,7 +135,7 @@ const {{ model.name }}Page: React.FC = () => {
                         {% elif field.ui_type == 'file' %}
                         {item.{{ field.name }} ? (
                             <div className="flex items-center gap-2">
-                                <span 
+                                <span
                                     className="flex items-center text-primary cursor-pointer hover:underline"
                                     title={item.{{ field.name }}}
                                     onClick={() => {
@@ -146,10 +146,10 @@ const {{ model.name }}Page: React.FC = () => {
                                     File
                                 </span>
                                 {% if field.allow_download %}
-                                <a 
-                                    href={item.{{ field.name }}} 
-                                    target="_blank" 
-                                    rel="noopener noreferrer" 
+                                <a
+                                    href={item.{{ field.name }}}
+                                    target="_blank"
+                                    rel="noopener noreferrer"
                                     className="text-muted-foreground hover:text-primary"
                                     title="Download"
                                 >
@@ -185,7 +185,7 @@ const {{ model.name }}Page: React.FC = () => {
           </TableBody>
         </Table>
       </div>
-      
+
       {/* Pagination Controls */}
       <div className="flex items-center justify-end space-x-2">
         <div className="flex-1 text-sm text-muted-foreground">
@@ -198,7 +198,7 @@ const {{ model.name }}Page: React.FC = () => {
                 onClick={() => fetchData(use{{ model.name }}Store.getState().page - 1, use{{ model.name }}Store.getState().size)}
                 disabled={use{{ model.name }}Store(state => state.page) <= 1 || loading}
             >
-                Previous
+                {t('common.previous')}
             </Button>
             <Button
                 variant="outline"
@@ -206,14 +206,14 @@ const {{ model.name }}Page: React.FC = () => {
                 onClick={() => fetchData(use{{ model.name }}Store.getState().page + 1, use{{ model.name }}Store.getState().size)}
                 disabled={use{{ model.name }}Store(state => state.page) >= Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || loading}
             >
-                Next
+                {t('common.next')}
             </Button>
         </div>
       </div>
 
-      <Modal 
-        title={editingId ? `${t('common.edit')} {{ model.name }}` : `${t('common.create')} {{ model.name }}`} 
-        isOpen={isModalOpen} 
+      <Modal
+        title={editingId ? `${t('common.edit')} {{ model.name }}` : `${t('common.create')} {{ model.name }}`}
+        isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       >
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -296,7 +296,7 @@ const {{ model.name }}Page: React.FC = () => {
                 )}
             />
             {% else %}
-            <Input 
+            <Input
                 id="{{ field.name }}"
                 {% if field.ui_type == 'int' or field.ui_type == 'float' %}
                 type="number"
