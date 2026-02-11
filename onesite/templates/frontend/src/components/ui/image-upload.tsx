@@ -54,11 +54,11 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
             
             // A simple hack for development:
             let imageUrl = response.data.url;
-            if (imageUrl.startsWith('/static') && import.meta.env.VITE_API_URL) {
+            if (!imageUrl.startsWith('http') && import.meta.env.VITE_API_URL) {
                  // Remove /api/v1 if present in VITE_API_URL to get base host
                  // Actually VITE_API_URL usually is http://localhost:8000/api/v1
                  const baseUrl = import.meta.env.VITE_API_URL.replace(/\/api\/v1\/?$/, '');
-                 imageUrl = `${baseUrl}${imageUrl}`;
+                 imageUrl = `${baseUrl}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
             }
             
             onChange(imageUrl);

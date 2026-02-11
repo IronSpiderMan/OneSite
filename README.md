@@ -14,6 +14,8 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
   - `Enum` -> **Select** / **Badge**
   - `datetime` -> **Text**
   - **Image Upload**: Detects image fields (e.g. `avatar`, `_image`) and generates file upload and preview components.
+  - **File Attachment**: Detects file fields (e.g. `report_file`, `_file` suffix) and generates file upload components with built-in preview.
+    - **Preview Support**: PDF, Word (docx), Excel (xlsx, csv), Markdown, Code/Text, Video, Audio, Images.
   - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
   - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
 - **Pagination**: Built-in standard pagination support for all list views.
@@ -75,6 +77,23 @@ class Product(SQLModel, table=True):
     category: Category = Category.ELECTRONICS
     # Image field (auto-detected by name 'image', 'avatar', or '_image' suffix)
     image: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"component": "image"}}})
+```
+
+#### File Attachments
+`models/document.py`:
+```python
+from typing import Optional
+from sqlmodel import Field, SQLModel
+
+class Document(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    
+    # Method 1: Auto-detection via '_file' suffix
+    report_file: Optional[str] = Field(default=None)
+    
+    # Method 2: Explicit component definition
+    attachment: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"component": "file"}}})
 ```
 
 #### Foreign Key Relationship
@@ -202,6 +221,7 @@ myproject/
 │   │   ├── core/       # Config, Security, DB
 │   │   │   └── security.py # Password hashing & Auth
 │   │   └── initial_data.py # Data seeding (Admin user)
+│   ├── uploads/        # User uploaded files
 │   └── ...
 └── frontend/
     ├── src/

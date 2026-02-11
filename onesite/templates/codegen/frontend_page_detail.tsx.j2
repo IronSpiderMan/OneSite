@@ -7,6 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/ca
 import { Badge } from '../../components/ui/badge';
 import { Label } from '../../components/ui/label';
 import { Separator } from '../../components/ui/separator';
+import { FileUpload } from '../../components/ui/file-upload';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -121,6 +122,28 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 </Badge>
                                 {% elif field.is_enum %}
                                 <Badge variant="outline">{currentItem.{{ field.name }}}</Badge>
+                                {% elif field.ui_type == 'image' %}
+                                {currentItem.{{ field.name }} ? (
+                                    <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
+                                        <img
+                                            src={currentItem.{{ field.name }}}
+                                            alt="{{ field.name }}"
+                                            className="h-full w-full object-cover"
+                                        />
+                                    </div>
+                                ) : (
+                                    <span className="text-muted-foreground italic">No image</span>
+                                )}
+                                {% elif field.ui_type == 'file' %}
+                                {currentItem.{{ field.name }} ? (
+                                    <FileUpload 
+                                        value={currentItem.{{ field.name }}} 
+                                        onChange={() => {}} 
+                                        readOnly={true}
+                                    />
+                                ) : (
+                                    <span className="text-muted-foreground italic">No file</span>
+                                )}
                                 {% else %}
                                 {String(currentItem.{{ field.name }} ?? '-')}
                                 {% endif %}

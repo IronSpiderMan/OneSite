@@ -79,6 +79,9 @@ def get_model_fields(model_cls):
         # Check for image component
         if site_props.get("component") == "image":
             ui_type = "image"
+        # Check for file component
+        elif site_props.get("component") == "file":
+            ui_type = "file"
         # Heuristic for image fields if type is string
         elif ui_type == "str" and (
             name.endswith("_image") or 
@@ -90,6 +93,14 @@ def get_model_fields(model_cls):
             name == "logo"
         ):
              ui_type = "image"
+        # Heuristic for file fields if type is string
+        elif ui_type == "str" and (
+            name.endswith("_file") or
+            name.endswith("_attachment") or
+            name == "file" or
+            name == "attachment"
+        ):
+             ui_type = "file"
         
         # Check metadata for search field
         is_search_field = site_props.get("is_search_field", False)
@@ -478,6 +489,9 @@ def generate_code():
         "src/components/ui/select.tsx",
         "src/components/ui/card.tsx",
         "src/components/ui/separator.tsx",
+        "src/components/ui/image-upload.tsx",
+        "src/components/ui/file-upload.tsx",
+        "src/components/ui/file-preview.tsx",
         "src/components/Layout.tsx",
         "src/utils/request.ts",
         "src/pages/Login.tsx",

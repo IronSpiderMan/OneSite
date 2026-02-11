@@ -9,7 +9,7 @@ router = APIRouter()
 @router.post("/upload")
 async def upload_file(file: UploadFile = File(...)):
     # Define upload directory
-    upload_dir = Path("static/uploads")
+    upload_dir = Path("uploads")
     upload_dir.mkdir(parents=True, exist_ok=True)
     
     # Generate unique filename
@@ -22,9 +22,8 @@ async def upload_file(file: UploadFile = File(...)):
             shutil.copyfileobj(file.file, buffer)
             
         # Construct URL
-        # Assuming the static files are served at /static
-        # In production, this might be a CDN URL
-        url = f"/static/uploads/{unique_filename}"
+        # Served at /uploads
+        url = f"/uploads/{unique_filename}"
         
         return {"url": url, "filename": unique_filename}
     except Exception as e:
