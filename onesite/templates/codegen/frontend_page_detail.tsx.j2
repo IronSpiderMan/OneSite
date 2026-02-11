@@ -140,6 +140,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         value={currentItem.{{ field.name }}} 
                                         onChange={() => {}} 
                                         readOnly={true}
+                                        allowDownload={ {{ "true" if field.allow_download else "false" }} }
                                     />
                                 ) : (
                                     <span className="text-muted-foreground italic">No file</span>

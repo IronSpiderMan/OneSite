@@ -13,6 +13,7 @@ interface FileUploadProps {
     accept?: string;
     maxSize?: number; // in MB
     readOnly?: boolean;
+    allowDownload?: boolean;
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({
@@ -21,7 +22,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     className,
     accept = "*",
     maxSize = 20, // Default 20MB
-    readOnly = false
+    readOnly = false,
+    allowDownload = true
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
@@ -118,14 +120,18 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                             >
                                 Preview
                             </Button>
-                            <span className="text-xs text-muted-foreground">|</span>
-                            <Button 
-                                variant="link" 
-                                className="h-auto p-0 text-xs text-primary"
-                                onClick={handleDownload}
-                            >
-                                Download
-                            </Button>
+                            {allowDownload && (
+                                <>
+                                    <span className="text-xs text-muted-foreground">|</span>
+                                    <Button 
+                                        variant="link" 
+                                        className="h-auto p-0 text-xs text-primary"
+                                        onClick={handleDownload}
+                                    >
+                                        Download
+                                    </Button>
+                                </>
+                            )}
                         </div>
                     </div>
                     <div className="ml-2 pointer-events-auto">

@@ -40,6 +40,7 @@ def get_model_fields(model_cls):
         permissions = site_props.get("permissions", "rcu") # Default: Read, Create, Update
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
+        allow_download = site_props.get("allow_download", True)
         
         # Force 'id' to be read-only if permissions not explicitly set to something else that includes write (unlikely)
         # Or better, just force 'r' for 'id' unless user really knows what they are doing.
@@ -143,7 +144,8 @@ def get_model_fields(model_cls):
             "is_enum": is_enum,
             "enum_values": enum_values,
             "is_search_field": is_search_field,
-            "fk_info": fk_info
+            "fk_info": fk_info,
+            "allow_download": allow_download
         })
     
     # Post-process fields to determine search field if not explicitly set
