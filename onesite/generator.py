@@ -105,6 +105,17 @@ def get_model_fields(model_cls):
         
         # Check metadata for search field
         is_search_field = site_props.get("is_search_field", False)
+
+        # Determine label for i18n
+        # Default: models.{model_name}.fields.{field_name}
+        # If user provides explicit label in site_props, use it (though better to use i18n key)
+        # We will use 'label_key' to store the i18n key
+        model_name_lower = model_cls.__name__.lower()
+        default_label_key = f"models.{model_name_lower}.fields.{name}"
+        label_key = site_props.get("label", default_label_key)
+        
+        # Extract translations if available
+        translations = site_props.get("translations", {})
         
         # Check foreign key info from site_props or infer from name
         # We assume FK fields are named like `modelname_id` or explicit `foreign_key` in sa_column_args
@@ -145,7 +156,9 @@ def get_model_fields(model_cls):
             "enum_values": enum_values,
             "is_search_field": is_search_field,
             "fk_info": fk_info,
-            "allow_download": allow_download
+            "allow_download": allow_download,
+            "label_key": label_key,
+            "translations": translations
         })
     
     # Post-process fields to determine search field if not explicitly set
@@ -191,11 +204,14 @@ def get_model_fields(model_cls):
 
     # Check if is_link_table metadata exists
     is_link_table = False
+    translations = {}
     if hasattr(model_cls, "__table_args__") and isinstance(model_cls.__table_args__, dict):
         info = model_cls.__table_args__.get("info", {})
-        is_link_table = info.get("site_props", {}).get("is_link_table", False)
+        site_props = info.get("site_props", {})
+        is_link_table = site_props.get("is_link_table", False)
+        translations = site_props.get("translations", {})
 
-    return fields, foreign_keys, search_field, is_link_table
+    return fields, foreign_keys, search_field, is_link_table, translations
 
 def generate_file(template_name: str, context: Dict, output_path: Path):
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
@@ -419,7 +435,7 @@ def generate_code():
                 # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
-                     fields, foreign_keys, search_field, is_link_table = get_model_fields(obj)
+                     fields, foreign_keys, search_field, is_link_table, translations = get_model_fields(obj)
                      
                      # Special handling for User model to add virtual 'password' field if not present
                      # Moving this logic out of get_model_fields to keep it clean or handle here
@@ -446,7 +462,8 @@ def generate_code():
                          "fields": fields,
                          "foreign_keys": foreign_keys,
                          "search_field": search_field,
-                         "is_link_table": is_link_table
+                         "is_link_table": is_link_table,
+                         "translations": translations
                      })
     
     # Post-process models to update FK label fields and collect readable fields
@@ -614,10 +631,23 @@ def generate_code():
         "src/components/Layout.tsx",
         "src/utils/request.ts",
         "src/pages/Login.tsx",
-        "src/vite-env.d.ts"
+        "src/pages/Settings.tsx",
+        "src/vite-env.d.ts",
+        "src/i18n.ts"
     ]
     template_frontend_root = Path(__file__).parent / "templates" / "frontend"
     target_frontend_root = cwd / "frontend"
+    
+    # Sync src/lib (e.g. utils.ts)
+    template_lib_dir = template_frontend_root / "src" / "lib"
+    target_lib_dir = target_frontend_root / "src" / "lib"
+    if template_lib_dir.exists():
+        if not target_lib_dir.exists():
+            target_lib_dir.mkdir(parents=True, exist_ok=True)
+        for item in template_lib_dir.glob("*"):
+            if item.is_file():
+                shutil.copy2(item, target_lib_dir / item.name)
+        console.print(f"Synced lib to {target_lib_dir}")
     
     for config_file in config_files:
         if config_file == "vite.config.ts":
@@ -734,6 +764,102 @@ def generate_code():
     # Update Frontend Routes and Menu
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
+    
+    # Generate i18n locale files
+    generate_locale_files(found_models, cwd / "frontend" / "src" / "locales")
+
+def generate_locale_files(models: List[Dict], locale_dir: Path):
+    locale_dir.mkdir(parents=True, exist_ok=True)
+    
+    # 1. English (Default)
+    en_translations = {
+        "common": {
+            "welcome": "Welcome",
+            "login": "Login",
+            "logout": "Logout",
+            "settings": "Settings",
+            "language": "Language",
+            "timezone": "Timezone",
+            "save": "Save",
+            "cancel": "Cancel",
+            "create": "Create",
+            "edit": "Edit",
+            "delete": "Delete",
+            "actions": "Actions",
+            "search": "Search",
+            "loading": "Loading...",
+            "success": "Success",
+            "error": "Error",
+            "confirm_delete": "Are you sure you want to delete this item?",
+            "upload": "Upload"
+        },
+        "models": {}
+    }
+    
+    # 2. Chinese (Simplified)
+    zh_translations = {
+        "common": {
+            "welcome": "欢迎",
+            "login": "登录",
+            "logout": "退出登录",
+            "settings": "设置",
+            "language": "语言",
+            "timezone": "时区",
+            "save": "保存",
+            "cancel": "取消",
+            "create": "创建",
+            "edit": "编辑",
+            "delete": "删除",
+            "actions": "操作",
+            "search": "搜索",
+            "loading": "加载中...",
+            "success": "成功",
+            "error": "错误",
+            "confirm_delete": "确定要删除此项吗？",
+            "upload": "上传"
+        },
+        "models": {}
+    }
+
+    for model in models:
+        model_name = model["lower_name"]
+        
+        # Model Name Translation
+        model_name_en = model["name"]
+        model_name_zh = model["name"] # Fallback
+        
+        model_translations = model.get("translations", {})
+        if "en" in model_translations:
+            model_name_en = model_translations["en"]
+        if "zh" in model_translations:
+            model_name_zh = model_translations["zh"]
+            
+        en_model = {"name": model_name_en, "fields": {}}
+        zh_model = {"name": model_name_zh, "fields": {}}
+        
+        for field in model["fields"]:
+            field_name = field["name"]
+            # Default English label: Title Case of field name
+            label_en = field_name.replace("_", " ").title()
+            label_zh = label_en # Fallback for ZH
+            
+            # Use explicit translations if available
+            translations = field.get("translations", {})
+            if "en" in translations:
+                label_en = translations["en"]
+            if "zh" in translations:
+                label_zh = translations["zh"]
+            
+            en_model["fields"][field_name] = label_en
+            zh_model["fields"][field_name] = label_zh
+            
+        en_translations["models"][model_name] = en_model
+        zh_translations["models"][model_name] = zh_model
+
+    import json
+    (locale_dir / "en.json").write_text(json.dumps(en_translations, indent=2))
+    (locale_dir / "zh.json").write_text(json.dumps(zh_translations, indent=2, ensure_ascii=False))
+    console.print(f"Generated locale files in {locale_dir}")
 
 def update_api_router(models, api_file_path):
     lines = []

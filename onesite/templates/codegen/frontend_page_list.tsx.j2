@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { Plus, Pencil, Trash2, Loader2, Eye } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { {{ model.name }} } from '../../services/{{ model.lower_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
@@ -25,6 +26,7 @@ import { get{{ m2m.target_endpoint.capitalize() }} } from '../../services/{{ m2m
 {% endif %}
 
 const {{ model.name }}Page: React.FC = () => {
+  const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, loading, fetchData, createItem, updateItem, deleteItem } = use{{ model.name }}Store();
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -54,7 +56,7 @@ const {{ model.name }}Page: React.FC = () => {
   };
 
   const handleDelete = async (id: number) => {
-    if (!confirm('Are you sure?')) return;
+    if (!confirm(t('common.confirm_delete'))) return;
     try {
       await deleteItem(id);
     } catch (error) {
@@ -80,7 +82,7 @@ const {{ model.name }}Page: React.FC = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">{{ model.name }}s</h1>
         <Button onClick={handleCreate}>
-          <Plus className="mr-2 h-4 w-4" /> New {{ model.name }}
+          <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {{ model.name }}
         </Button>
       </div>
 
@@ -90,10 +92,10 @@ const {{ model.name }}Page: React.FC = () => {
             <TableRow>
               {% for field in model.fields %}
               {% if 'r' in field.permissions %}
-              <TableHead>{{ field.name }}</TableHead>
+              <TableHead>{t('{{ field.label_key }}')}</TableHead>
               {% endif %}
               {% endfor %}
-              <TableHead className="w-[100px]">Actions</TableHead>
+              <TableHead className="w-[100px]">{t('common.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -210,7 +212,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 
       <Modal 
-        title={editingId ? "Edit {{ model.name }}" : "Create {{ model.name }}"} 
+        title={editingId ? `${t('common.edit')} {{ model.name }}` : `${t('common.create')} {{ model.name }}`} 
         isOpen={isModalOpen} 
         onClose={() => setIsModalOpen(false)}
       >
@@ -218,7 +220,7 @@ const {{ model.name }}Page: React.FC = () => {
           {% for field in model.fields %}
           {% if 'c' in field.permissions or 'u' in field.permissions %}
           <div className="space-y-2">
-            <Label htmlFor="{{ field.name }}">{{ field.name }}</Label>
+            <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}</Label>
             {% if field.ui_type == 'bool' %}
             <div className="flex items-center space-x-2">
                 <Controller
@@ -230,7 +232,7 @@ const {{ model.name }}Page: React.FC = () => {
                     )}
                 />
                 <Label htmlFor="{{ field.name }}" className="font-normal text-muted-foreground">
-                    {{ field.name }}
+                    {t('{{ field.label_key }}')}
                 </Label>
             </div>
             {% elif field.ui_type == 'image' %}
@@ -263,7 +265,7 @@ const {{ model.name }}Page: React.FC = () => {
                 render={({ field: { onChange, value } }) => (
                     <Select onValueChange={onChange} defaultValue={value}>
                         <SelectTrigger>
-                            <SelectValue placeholder="Select {{ field.name }}" />
+                            <SelectValue placeholder={`Select ${t('{{ field.label_key }}')}`} />
                         </SelectTrigger>
                         <SelectContent>
                             {% for enum_val in field.enum_values %}
@@ -281,8 +283,8 @@ const {{ model.name }}Page: React.FC = () => {
                     <SearchableSelect
                         value={value}
                         onValueChange={onChange}
-                        placeholder="Select {{ field.name }}"
-                        searchPlaceholder="Search {{ field.fk_info.target_model }}..."
+                        placeholder={`Select ${t('{{ field.label_key }}')}`}
+                        searchPlaceholder={`Search ${t('models.{{ field.fk_info.target_model|lower }}.name')}...`}
                         loadOptions={async (query) => {
                             const response = await get{{ field.fk_info.target_endpoint.capitalize() }}(1, 20, query);
                             return response.items.map((item: any) => ({
@@ -311,7 +313,7 @@ const {{ model.name }}Page: React.FC = () => {
           {% if model.m2m_fields %}
           {% for m2m in model.m2m_fields %}
           <div className="space-y-2">
-            <Label>{{ m2m.target_model }}s</Label>
+            <Label>{t('models.{{ m2m.target_model|lower }}.name')}s</Label>
             <Controller
                 control={control}
                 name="{{ m2m.name }}"
@@ -320,8 +322,8 @@ const {{ model.name }}Page: React.FC = () => {
                         value={value}
                         onValueChange={onChange}
                         multiple={true}
-                        placeholder="Select {{ m2m.target_model }}s"
-                        searchPlaceholder="Search {{ m2m.target_model }}..."
+                        placeholder={`Select ${t('models.{{ m2m.target_model|lower }}.name')}s`}
+                        searchPlaceholder={`Search ${t('models.{{ m2m.target_model|lower }}.name')}...`}
                         loadOptions={async (query) => {
                             const response = await get{{ m2m.target_endpoint.capitalize() }}(1, 20, query);
                             return response.items.map((item: any) => ({
@@ -336,8 +338,8 @@ const {{ model.name }}Page: React.FC = () => {
           {% endfor %}
           {% endif %}
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>Cancel</Button>
-            <Button type="submit">Save</Button>
+            <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="submit">{t('common.save')}</Button>
           </div>
         </form>
       </Modal>

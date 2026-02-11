@@ -1,10 +1,15 @@
 import React from 'react';
+import SettingsPage from './pages/Settings';
 {% for model in models %}
 import {{ model.name }}Page from './pages/{{ model.lower_name }}';
 import {{ model.name }}DetailPage from './pages/{{ model.lower_name }}/detail';
 {% endfor %}
 
 export const GeneratedRoutes = [
+  {
+    path: '/settings',
+    element: <SettingsPage />,
+  },
 {% for model in models %}
   {
     path: '/{{ model.lower_name }}s',

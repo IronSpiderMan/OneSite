@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -19,6 +20,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 {% endif %}
 
 const {{ model.name }}DetailPage: React.FC = () => {
+    const { t } = useTranslation();
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { fetchItem, currentItem, loading } = use{{ model.name }}Store();
@@ -114,7 +116,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% for field in model.fields %}
                         {% if not field.fk_info and 'r' in field.permissions %}
                         <div className="space-y-1">
-                            <Label className="text-muted-foreground">{{ field.name }}</Label>
+                            <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
                             <div className="font-medium">
                                 {% if field.ui_type == 'bool' %}
                                 <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
@@ -164,7 +166,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% for fk in model.foreign_keys %}
                         <div>
                             <div className="mb-2 flex items-center justify-between">
-                                <Label className="text-lg font-semibold">{{ fk.target_model }}</Label>
+                                <Label className="text-lg font-semibold">{t('models.{{ fk.target_model|lower }}.name')}</Label>
                                 <Badge variant="outline">ID: {currentItem.{{ fk.name.replace('_id', '') }}_id}</Badge>
                             </div>
                             <div className="rounded-md border p-4">
@@ -180,7 +182,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             {% if target_field.name != fk.label_field %}
                                             { {{ fk.target_service }}Data.{{ target_field.name }} !== undefined && (
                                                 <>
-                                                <span className="text-muted-foreground">{{ target_field.name.replace('_', ' ').title() }}:</span>
+                                                <span className="text-muted-foreground">{t('{{ target_field.label_key }}')}:</span>
                                                 <span className="font-medium">
                                                     {% if target_field.ui_type == 'bool' %}
                                                     { {{ fk.target_service }}Data.{{ target_field.name }} ? 'Yes' : 'No' }
@@ -213,7 +215,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% for m2m in model.m2m_fields %}
                 <Card className="md:col-span-2">
                     <CardHeader>
-                        <CardTitle>{{ m2m.target_model }}s</CardTitle>
+                        <CardTitle>{t('models.{{ m2m.target_model|lower }}.name')}s</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="rounded-md border">

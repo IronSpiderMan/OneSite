@@ -52,8 +52,4 @@ uploads_path.mkdir(parents=True, exist_ok=True)
 # Assuming /uploads prefix maps to settings.UPLOAD_DIR
 app.mount("/uploads", StaticFiles(directory=settings.UPLOAD_DIR), name="uploads")
 
-@app.on_event("startup")
-def on_startup():
-    init_db()
-
 app.include_router(api_router, prefix=settings.API_V1_STR)

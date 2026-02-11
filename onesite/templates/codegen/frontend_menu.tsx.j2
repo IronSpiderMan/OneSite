@@ -6,7 +6,7 @@ export const GeneratedMenu = [
   {
     key: '/{{ model.lower_name }}s',
     icon: <LayoutDashboard className="h-4 w-4" />,
-    label: '{{ model.name }}s',
+    label: 'models.{{ model.lower_name }}.name', 
   },
 {% endfor %}
 ];
