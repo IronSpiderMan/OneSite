@@ -547,18 +547,18 @@ def generate_code():
 
         # 1. Schemas
         schema_tpl = "user_schema.py.j2" if is_user_model else "schema.py.j2"
-        generate_file(schema_tpl, context, backend_path / "app" / "schemas" / f"{model['lower_name']}.py")
+        generate_file(schema_tpl, context, backend_path / "app" / "schemas" / f"{model['module_name']}.py")
 
         # 2. CRUD
         crud_tpl = "user_crud.py.j2" if is_user_model else "crud.py.j2"
-        generate_file(crud_tpl, context, backend_path / "app" / "cruds" / f"{model['lower_name']}.py")
+        generate_file(crud_tpl, context, backend_path / "app" / "cruds" / f"{model['module_name']}.py")
 
         # 3. Service
         service_tpl = "user_service.py.j2" if is_user_model else "service.py.j2"
-        generate_file(service_tpl, context, backend_path / "app" / "services" / f"{model['lower_name']}.py")
+        generate_file(service_tpl, context, backend_path / "app" / "services" / f"{model['module_name']}.py")
 
         # 4. API
-        generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['lower_name']}.py")
+        generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py")
 
         # 5. Frontend Service
         generate_file("frontend_service.ts.j2", context, cwd / "frontend" / "src" / "services" / f"{model['lower_name']}.ts")
@@ -905,8 +905,8 @@ def update_api_router(models, api_file_path):
     routers.append("api_router.include_router(login.router, tags=[\"login\"])")
 
     for model in models:
-        imports.append(f"from app.api.endpoints import {model['lower_name']}")
-        routers.append(f"api_router.include_router({model['lower_name']}.router, prefix=\"/{model['lower_name']}s\", tags=[\"{model['lower_name']}s\"])")
+        imports.append(f"from app.api.endpoints import {model['module_name']}")
+        routers.append(f"api_router.include_router({model['module_name']}.router, prefix=\"/{model['module_name']}s\", tags=[\"{model['module_name']}s\"])")
 
     content = "from fastapi import APIRouter\n" + "\n".join(imports) + "\n\napi_router = APIRouter()\n\n" + "\n".join(routers)
     api_file_path.write_text(content)

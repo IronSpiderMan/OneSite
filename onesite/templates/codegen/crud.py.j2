@@ -1,8 +1,8 @@
 from typing import List, Optional
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.models.{{ model.lower_name }} import {{ model.name }}
-from app.schemas.{{ model.lower_name }} import {{ model.name }}Create, {{ model.name }}Update
+from app.models.{{ model.module_name }} import {{ model.name }}
+from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
