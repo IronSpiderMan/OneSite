@@ -114,7 +114,9 @@ def get_model_fields(model_cls, module_name=None):
         if module_name:
              model_key = module_name
         else:
-             model_key = model_name_lower
+             # Fallback to snake_case if module_name not provided
+             import re
+             model_key = re.sub(r'(?<!^)(?=[A-Z])', '_', model_cls.__name__).lower()
              
         default_label_key = f"models.{model_key}.fields.{name}"
         label_key = site_props.get("label", default_label_key)
@@ -129,19 +131,33 @@ def get_model_fields(model_cls, module_name=None):
         # But standard SQLModel Field(foreign_key="...") handles it differently in pydantic model fields.
         # We need to inspect the field definition more closely or rely on naming convention + metadata for now.
 
-        # Let's check naming convention for MVP: if ends with _id, it might be a FK
+        # Check naming convention for FK: if ends with _id, it might be a FK
         fk_info = None
         if name.endswith("_id") and name != "id":
-             target_model_name = name[:-3] # e.g. category_id -> category
-             # Capitalize first letter to guess model class name
-             target_model_class = target_model_name.capitalize()
-             fk_info = {
-                 "name": name,  # Add field name here
-                 "target_model": target_model_class,
-                 "target_service": target_model_name,
-                 "target_endpoint": f"{target_model_name}s",
-                 "label_field": "name" # Default guess
-             }
+             # Check if it is actually a foreign key (using SQLModel/Pydantic metadata)
+             # FieldInfo in SQLModel has foreign_key attribute
+             is_fk = False
+             if hasattr(field, "foreign_key") and field.foreign_key is not PydanticUndefined and field.foreign_key is not None:
+                 is_fk = True
+             
+             # Also allow explicit site_props override
+             if site_props.get("is_foreign_key"):
+                 is_fk = True
+             
+             if is_fk:
+                 target_service = name[:-3] # e.g. category_id -> category
+                 
+                 # Convert snake_case service name to PascalCase for target model class name
+                 # e.g. opc_node -> OpcNode
+                 target_model_class = "".join(word.capitalize() for word in target_service.split("_"))
+                 
+                 fk_info = {
+                     "name": name,  # Add field name here
+                     "target_model": target_model_class,
+                     "target_service": target_service,
+                     "target_endpoint": f"{target_service}s",
+                     "label_field": "name" # Default guess
+                 }
 
         # Check if optional
         is_optional = not field.is_required()
