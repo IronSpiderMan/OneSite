@@ -19,6 +19,7 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
   - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
   - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
 - **Pagination**: Built-in standard pagination support for all list views.
+- **Auto Refresh**: Configurable auto-refresh for real-time data monitoring.
 - **Authentication & Security**:
   - **Built-in Login**: Modern login page with JWT authentication.
   - **Protected Routes**: Automatic auth guards for frontend pages.
@@ -160,6 +161,25 @@ class User(SQLModel, table=True):
 - `permissions`: String with `r` (read), `c` (create), `u` (update). Default is `rcu`.
 - `create_optional`: If `True`, field is not required in Create form.
 - `update_optional`: If `True`, field is not required in Update form.
+
+#### Auto Refresh
+Enable automatic data refreshing for list and detail views. This is useful for monitoring dashboards or real-time data.
+
+```python
+class DashboardMetric(SQLModel, table=True):
+    # Enable auto-refresh every 5 seconds (5000ms)
+    __table_args__ = {"info": {"site_props": {
+        "auto_refresh": True, 
+        "refresh_interval": 5000
+    }}}
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    value: float
+```
+
+- `auto_refresh`: `bool`. If `True`, adds an "Auto Refresh" toggle to the UI.
+- `refresh_interval`: `int` (milliseconds). The default refresh interval (default: 5000ms). Users can change this in the UI.
 
 ### 4. Sync and Generate Code
 

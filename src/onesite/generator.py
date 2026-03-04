@@ -226,13 +226,18 @@ def get_model_fields(model_cls, module_name=None):
     # Check if is_link_table metadata exists
     is_link_table = False
     translations = {}
+    auto_refresh = False
+    refresh_interval = 5000
+
     if hasattr(model_cls, "__table_args__") and isinstance(model_cls.__table_args__, dict):
         info = model_cls.__table_args__.get("info", {})
         site_props = info.get("site_props", {})
         is_link_table = site_props.get("is_link_table", False)
         translations = site_props.get("translations", {})
+        auto_refresh = site_props.get("auto_refresh", False)
+        refresh_interval = site_props.get("refresh_interval", 5000)
 
-    return fields, foreign_keys, search_field, is_link_table, translations
+    return fields, foreign_keys, search_field, is_link_table, translations, auto_refresh, refresh_interval
 
 def generate_file(template_name: str, context: Dict, output_path: Path):
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
@@ -456,7 +461,7 @@ def generate_code():
                 # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
-                     fields, foreign_keys, search_field, is_link_table, translations = get_model_fields(obj, module_name)
+                     fields, foreign_keys, search_field, is_link_table, translations, auto_refresh, refresh_interval = get_model_fields(obj, module_name)
 
                      # Special handling for User model to add virtual 'password' field if not present
                      # Moving this logic out of get_model_fields to keep it clean or handle here
@@ -484,7 +489,9 @@ def generate_code():
                          "foreign_keys": foreign_keys,
                          "search_field": search_field,
                          "is_link_table": is_link_table,
-                         "translations": translations
+                         "translations": translations,
+                         "auto_refresh": auto_refresh,
+                         "refresh_interval": refresh_interval
                      })
 
     # Post-process models to update FK label fields and collect readable fields
@@ -816,7 +823,9 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
             "no result": "No result",
             "previous": "Previous",
             "next": "Next",
-            "select": "Select"
+            "select": "Select",
+            "auto_refresh": "Auto Refresh",
+            "refresh_interval": "Refresh Interval"
         },
         "login": {
             "title": "Sign in",
@@ -855,8 +864,10 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
             "upload": "上传",
             "no result": "结果为空",
             "previous": "前一页",
-            "next": "前一页",
-            "select": "选择"
+            "next": "后一页",
+            "select": "选择",
+            "auto_refresh": "自动刷新",
+            "refresh_interval": "刷新频率"
         },
         "login": {
             "title": "登录",

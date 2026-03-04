@@ -9,8 +9,10 @@ import { Badge } from '../../components/ui/badge';
 import { Label } from '../../components/ui/label';
 import { Separator } from '../../components/ui/separator';
 import { FileUpload } from '../../components/ui/file-upload';
+import { Switch } from '../../components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 {% for fk in model.foreign_keys %}
-import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
+import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
 {% endfor %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
@@ -40,6 +42,24 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% endfor %}
     {% endif %}
 
+    {% if model.auto_refresh %}
+    const [autoRefresh, setAutoRefresh] = useState(false);
+    const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval or 5000 }});
+
+    useEffect(() => {
+        let interval: NodeJS.Timeout;
+        if (autoRefresh && id) {
+            interval = setInterval(() => {
+                const itemId = parseInt(id);
+                fetchItem(itemId);
+                // Also refresh M2M if needed? Maybe too heavy.
+                // For now just refresh main item.
+            }, refreshInterval);
+        }
+        return () => clearInterval(interval);
+    }, [autoRefresh, refreshInterval, id, fetchItem]);
+    {% endif %}
+
     useEffect(() => {
         if (id) {
             const itemId = parseInt(id);
@@ -48,7 +68,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     // Fetch FK data
                     {% for fk in model.foreign_keys %}
                     if (item.{{ fk.name.replace('_id', '') }}_id) {
-                        get{{ fk.target_model }}(item.{{ fk.name.replace('_id', '') }}_id).then(set{{ fk.target_model }}Data);
+                        get{{ fk.target_model }}s(1, 1, '', item.{{ fk.name.replace('_id', '') }}_id).then(res => {
+                             if (res.items && res.items.length > 0) {
+                                 set{{ fk.target_model }}Data(res.items[0]);
+                             }
+                        });
                     }
                     {% endfor %}
                 }
@@ -100,11 +124,33 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     return (
         <div className="space-y-6">
-            <div className="flex items-center space-x-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-4">
                 <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
                 <h1 className="text-3xl font-bold tracking-tight">{{ model.name }} Details</h1>
+              </div>
+              
+              {% if model.auto_refresh %}
+              <div className="flex items-center gap-2">
+                 <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
+                 <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+                 {autoRefresh && (
+                    <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+                        <SelectTrigger className="w-[100px] h-8">
+                            <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                            <SelectItem value="1000">1s</SelectItem>
+                            <SelectItem value="5000">5s</SelectItem>
+                            <SelectItem value="10000">10s</SelectItem>
+                            <SelectItem value="30000">30s</SelectItem>
+                        </SelectContent>
+                    </Select>
+                 )}
+              </div>
+              {% endif %}
             </div>
 
             <div className="grid gap-6 md:grid-cols-2">

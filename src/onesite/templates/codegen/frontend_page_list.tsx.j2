@@ -34,6 +34,21 @@ const {{ model.name }}Page: React.FC = () => {
 
   const { register, handleSubmit, reset, setValue, control } = useForm();
 
+  {% if model.auto_refresh %}
+  const [autoRefresh, setAutoRefresh] = useState(false);
+  const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval or 5000 }});
+
+  useEffect(() => {
+    let interval: NodeJS.Timeout;
+    if (autoRefresh) {
+      interval = setInterval(() => {
+        fetchData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
+      }, refreshInterval);
+    }
+    return () => clearInterval(interval);
+  }, [autoRefresh, refreshInterval, fetchData]);
+  {% endif %}
+
   useEffect(() => {
     fetchData();
   }, [fetchData]);
@@ -81,9 +96,30 @@ const {{ model.name }}Page: React.FC = () => {
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')}s</h1>
-        <Button onClick={handleCreate}>
-          <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
-        </Button>
+        <div className="flex items-center gap-4">
+          {% if model.auto_refresh %}
+          <div className="flex items-center gap-2">
+             <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
+             <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+             {autoRefresh && (
+                <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+                    <SelectTrigger className="w-[100px] h-8">
+                        <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                        <SelectItem value="1000">1s</SelectItem>
+                        <SelectItem value="5000">5s</SelectItem>
+                        <SelectItem value="10000">10s</SelectItem>
+                        <SelectItem value="30000">30s</SelectItem>
+                    </SelectContent>
+                </Select>
+             )}
+          </div>
+          {% endif %}
+          <Button onClick={handleCreate}>
+            <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+          </Button>
+        </div>
       </div>
 
       <div className="border rounded-md">
