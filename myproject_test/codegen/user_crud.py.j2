@@ -1,0 +1,41 @@
+from typing import List, Optional
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.models.user import User
+from app.schemas.user import UserCreate, UserUpdate
+
+async def get(session: AsyncSession, id: int) -> Optional[User]:
+    return await session.get(User, id)
+
+async def get_multi(session: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
+    statement = select(User).offset(skip).limit(limit)
+    result = await session.exec(statement)
+    return result.all()
+
+async def create(session: AsyncSession, obj_in: UserCreate) -> User:
+    # User creation logic is mainly handled in Service (password hashing)
+    
+    db_obj = User.from_orm(obj_in)
+    session.add(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
+    return db_obj
+
+async def update(session: AsyncSession, db_obj: User, obj_in: UserUpdate) -> User:
+    hero_data = obj_in.dict(exclude_unset=True)
+    # Remove password from data if present (it's transient)
+    if 'password' in hero_data:
+        del hero_data['password']
+        
+    for key, value in hero_data.items():
+        setattr(db_obj, key, value)
+    session.add(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
+    return db_obj
+
+async def delete(session: AsyncSession, id: int) -> User:
+    db_obj = await session.get(User, id)
+    await session.delete(db_obj)
+    await session.commit()
+    return db_obj
