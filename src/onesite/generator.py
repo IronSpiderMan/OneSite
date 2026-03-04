@@ -15,7 +15,7 @@ console = Console()
 
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "codegen"
 
-def get_model_fields(model_cls):
+def get_model_fields(model_cls, module_name=None):
     fields = []
     # Inspect SQLModel fields
     for name, field in model_cls.model_fields.items():
@@ -111,7 +111,12 @@ def get_model_fields(model_cls):
         # If user provides explicit label in site_props, use it (though better to use i18n key)
         # We will use 'label_key' to store the i18n key
         model_name_lower = model_cls.__name__.lower()
-        default_label_key = f"models.{model_name_lower}.fields.{name}"
+        if module_name:
+             model_key = module_name
+        else:
+             model_key = model_name_lower
+             
+        default_label_key = f"models.{model_key}.fields.{name}"
         label_key = site_props.get("label", default_label_key)
 
         # Extract translations if available
@@ -435,7 +440,7 @@ def generate_code():
                 # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
-                     fields, foreign_keys, search_field, is_link_table, translations = get_model_fields(obj)
+                     fields, foreign_keys, search_field, is_link_table, translations = get_model_fields(obj, module_name)
 
                      # Special handling for User model to add virtual 'password' field if not present
                      # Moving this logic out of get_model_fields to keep it clean or handle here
@@ -561,16 +566,16 @@ def generate_code():
         generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py")
 
         # 5. Frontend Service
-        generate_file("frontend_service.ts.j2", context, cwd / "frontend" / "src" / "services" / f"{model['lower_name']}.ts")
+        generate_file("frontend_service.ts.j2", context, cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts")
 
         # 6. Frontend Store
         generate_file("frontend_store.ts.j2", context, cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts")
 
         # 7. Frontend View (Page List)
-        generate_file("frontend_page_list.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['lower_name']}" / "index.tsx")
+        generate_file("frontend_page_list.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "index.tsx")
 
         # 8. Frontend View (Page Detail)
-        generate_file("frontend_page_detail.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['lower_name']}" / "detail.tsx")
+        generate_file("frontend_page_detail.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx")
 
     # Sync UI Components (Ensure they exist in the target project)
     # We copy from the template directory to the target project
@@ -852,7 +857,7 @@ def generate_locale_files(models: List[Dict], locale_dir: Path):
     }
 
     for model in models:
-        model_name = model["lower_name"]
+        model_name = model["module_name"]
 
         # Model Name Translation
         model_name_en = model["name"]

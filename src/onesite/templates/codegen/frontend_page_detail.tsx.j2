@@ -14,7 +14,7 @@ import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}
 {% endfor %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
-import { get{{ model.name }}{{ m2m.target_model }}s } from '../../services/{{ model.lower_name }}';
+import { get{{ model.name }}{{ m2m.target_model }}s } from '../../services/{{ model.module_name }}';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 {% endfor %}
 {% endif %}
@@ -166,7 +166,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% for fk in model.foreign_keys %}
                         <div>
                             <div className="mb-2 flex items-center justify-between">
-                                <Label className="text-lg font-semibold">{t('models.{{ fk.target_model|lower }}.name')}</Label>
+                                <Label className="text-lg font-semibold">{t('models.{{ fk.target_service }}.name')}</Label>
                                 <Badge variant="outline">ID: {currentItem.{{ fk.name.replace('_id', '') }}_id}</Badge>
                             </div>
                             <div className="rounded-md border p-4">
@@ -215,7 +215,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% for m2m in model.m2m_fields %}
                 <Card className="md:col-span-2">
                     <CardHeader>
-                        <CardTitle>{t('models.{{ m2m.target_model|lower }}.name')}s</CardTitle>
+                        <CardTitle>{t('models.{{ m2m.target_service }}.name')}s</CardTitle>
                     </CardHeader>
                     <CardContent>
                         <div className="rounded-md border">

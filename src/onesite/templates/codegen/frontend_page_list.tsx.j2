@@ -3,7 +3,7 @@ import { Plus, Pencil, Trash2, Loader2, Eye } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { {{ model.name }} } from '../../services/{{ model.lower_name }}';
+import { {{ model.name }} } from '../../services/{{ model.module_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -80,9 +80,9 @@ const {{ model.name }}Page: React.FC = () => {
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.lower_name }}.name')}s</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')}s</h1>
         <Button onClick={handleCreate}>
-          <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.lower_name }}.name')}
+          <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
         </Button>
       </div>
 
@@ -169,7 +169,7 @@ const {{ model.name }}Page: React.FC = () => {
                     {% endif %}
                     {% endfor %}
                     <TableCell className="flex items-center gap-2">
-                        <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.lower_name }}s/${item.id}`)}>
+                        <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}>
                             <Eye className="h-4 w-4" />
                         </Button>
                         <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
@@ -216,7 +216,8 @@ const {{ model.name }}Page: React.FC = () => {
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
       >
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+            <div className="max-h-[80vh] overflow-y-auto pr-2">
+                <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {% for field in model.fields %}
           {% if 'c' in field.permissions or 'u' in field.permissions %}
           <div className="space-y-2">
@@ -284,7 +285,7 @@ const {{ model.name }}Page: React.FC = () => {
                         value={value}
                         onValueChange={onChange}
                         placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
-                        searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_model|lower }}.name')}...`}
+                        searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
                         loadOptions={async (query) => {
                             const response = await get{{ field.fk_info.target_endpoint.capitalize() }}(1, 20, query);
                             return response.items.map((item: any) => ({
@@ -313,7 +314,7 @@ const {{ model.name }}Page: React.FC = () => {
           {% if model.m2m_fields %}
           {% for m2m in model.m2m_fields %}
           <div className="space-y-2">
-            <Label>{t('models.{{ m2m.target_model|lower }}.name')}s</Label>
+            <Label>{t('models.{{ m2m.target_service }}.name')}s</Label>
             <Controller
                 control={control}
                 name="{{ m2m.name }}"
@@ -322,8 +323,8 @@ const {{ model.name }}Page: React.FC = () => {
                         value={value}
                         onValueChange={onChange}
                         multiple={true}
-                        placeholder={`${t('common.select')} ${t('models.{{ m2m.target_model|lower }}.name')}s`}
-                        searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_model|lower }}.name')}...`}
+                        placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.name')}s`}
+                        searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
                         loadOptions={async (query) => {
                             const response = await get{{ m2m.target_endpoint.capitalize() }}(1, 20, query);
                             return response.items.map((item: any) => ({
@@ -342,6 +343,7 @@ const {{ model.name }}Page: React.FC = () => {
             <Button type="submit">{t('common.save')}</Button>
           </div>
         </form>
+            </div>
       </Modal>
     </div>
   );

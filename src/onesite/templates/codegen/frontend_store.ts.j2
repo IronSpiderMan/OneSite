@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { {{ model.name }}, get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.lower_name }}';
+import { {{ model.name }}, get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.module_name }}';
 
 interface {{ model.name }}State {
     data: {{ model.name }}[];

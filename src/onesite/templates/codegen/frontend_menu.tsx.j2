@@ -4,9 +4,9 @@ import { LayoutDashboard } from 'lucide-react';
 export const GeneratedMenu = [
 {% for model in models %}
   {
-    key: '/{{ model.lower_name }}s',
+    key: '/{{ model.module_name }}s',
     icon: <LayoutDashboard className="h-4 w-4" />,
-    label: 'models.{{ model.lower_name }}.name', 
+    label: 'models.{{ model.module_name }}.name', 
   },
 {% endfor %}
 ];
