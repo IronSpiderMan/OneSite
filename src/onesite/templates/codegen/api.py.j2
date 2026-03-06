@@ -22,6 +22,9 @@ async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
     q: Optional[str] = Query(None, description="Search query"),
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}: Optional[int] = Query(None, description="Filter by {{ fk.name }}"),
+    {% endfor %}
     session: AsyncSession = Depends(db.get_session),
 ) -> Any:
     # Calculate skip based on page and size
@@ -35,6 +38,12 @@ async def read_{{ model.lower_name }}s(
     if q:
         statement = statement.where(col({{ model.name }}.{{ model.search_field }}).ilike(f"%{q}%"))
     {% endif %}
+
+    # Apply foreign key filters
+    {% for fk in model.foreign_keys %}
+    if {{ fk.name }}:
+        statement = statement.where({{ model.name }}.{{ fk.name }} == {{ fk.name }})
+    {% endfor %}
     
     # Get total count (before limit/offset)
     total_statement = select(func.count()).select_from(statement.subquery())

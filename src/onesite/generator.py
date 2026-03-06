@@ -151,12 +151,17 @@ def get_model_fields(model_cls, module_name=None):
                  # e.g. opc_node -> OpcNode
                  target_model_class = "".join(word.capitalize() for word in target_service.split("_"))
                  
+                 # Check if reverse display is configured for this specific FK
+                 # Default to True
+                 reverse_display = site_props.get("reverse_display", True)
+
                  fk_info = {
                      "name": name,  # Add field name here
                      "target_model": target_model_class,
                      "target_service": target_service,
                      "target_endpoint": f"{target_service}s",
-                     "label_field": "name" # Default guess
+                     "label_field": "name", # Default guess
+                     "reverse_display": reverse_display
                  }
 
         # Check if optional
@@ -228,6 +233,7 @@ def get_model_fields(model_cls, module_name=None):
     translations = {}
     auto_refresh = False
     refresh_interval = 5000
+    reverse_fk_display = True # Default to True
 
     if hasattr(model_cls, "__table_args__") and isinstance(model_cls.__table_args__, dict):
         info = model_cls.__table_args__.get("info", {})
@@ -236,8 +242,9 @@ def get_model_fields(model_cls, module_name=None):
         translations = site_props.get("translations", {})
         auto_refresh = site_props.get("auto_refresh", False)
         refresh_interval = site_props.get("refresh_interval", 5000)
+        reverse_fk_display = site_props.get("reverse_fk_display", True)
 
-    return fields, foreign_keys, search_field, is_link_table, translations, auto_refresh, refresh_interval
+    return fields, foreign_keys, search_field, is_link_table, translations, auto_refresh, refresh_interval, reverse_fk_display
 
 def generate_file(template_name: str, context: Dict, output_path: Path):
     env = Environment(loader=FileSystemLoader(str(TEMPLATE_DIR)))
@@ -461,7 +468,7 @@ def generate_code():
                 # We'll assume if it's in models/ and inherits SQLModel, we want to generate code for it.
                 # A safer check:
                 if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
-                     fields, foreign_keys, search_field, is_link_table, translations, auto_refresh, refresh_interval = get_model_fields(obj, module_name)
+                     fields, foreign_keys, search_field, is_link_table, translations, auto_refresh, refresh_interval, reverse_fk_display = get_model_fields(obj, module_name)
 
                      # Special handling for User model to add virtual 'password' field if not present
                      # Moving this logic out of get_model_fields to keep it clean or handle here
@@ -491,12 +498,18 @@ def generate_code():
                          "is_link_table": is_link_table,
                          "translations": translations,
                          "auto_refresh": auto_refresh,
-                         "refresh_interval": refresh_interval
+                         "refresh_interval": refresh_interval,
+                         "reverse_fk_display": reverse_fk_display
                      })
 
     # Post-process models to update FK label fields and collect readable fields
     # Now that we have all models and their search_fields, we can update fk_info
     model_map = {m["name"]: m for m in found_models}
+    
+    # Initialize reverse_foreign_keys list for all models
+    for model in found_models:
+        model["reverse_foreign_keys"] = []
+
     for model in found_models:
         for fk in model["foreign_keys"]:
             target_model = model_map.get(fk["target_model"])
@@ -509,6 +522,28 @@ def generate_code():
                     if 'r' in f["permissions"] and f["name"] != "password" and not f.get("fk_info")
                 ]
                 console.print(f"Debug: Updated FK {model['name']} -> {fk['target_model']} label to {fk['label_field']}")
+
+                # Add reverse FK to the target model (the "One" side)
+                # target_model (Parent) <--- model (Child)
+                
+                # Construct a useful name for the reverse relationship
+                # e.g. if Child is "Order" and Parent is "User", we want "orders"
+                # using module_name might be safer as it is usually snake_case singular
+                base_name = model['module_name']
+                if base_name.endswith("y") and base_name[-2] not in "aeiou":
+                     reverse_name = f"{base_name[:-1]}ies"
+                else:
+                     reverse_name = f"{base_name}s"
+                
+                target_model["reverse_foreign_keys"].append({
+                    "name": reverse_name, # e.g. "items"
+                    "source_model": model["name"], # e.g. "Item"
+                    "source_service": model["module_name"], # e.g. "item"
+                    "source_fk_field": fk["name"], # e.g. "user_id" - the field on Item that points to User
+                    "label_field": model["search_field"], # e.g. "name" - to display in lists
+                    "display": fk.get("reverse_display", True)
+                })
+                console.print(f"Debug: Added Reverse FK to {target_model['name']}: {reverse_name} (from {model['name']})")
 
     # Process Link Tables (M2M)
     # Strategy: Inject m2m fields into the source model (first FK)

@@ -18,6 +18,7 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
     - **Preview Support**: PDF, Word (docx), Excel (xlsx, csv), Markdown, Code/Text, Video, Audio, Images.
   - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
   - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
+  - **One-to-Many (Reverse FK)**: Displays related items in a paginated list on the detail page (e.g. Products under a Category). Configurable.
 - **Pagination**: Built-in standard pagination support for all list views.
 - **Auto Refresh**: Configurable auto-refresh for real-time data monitoring.
 - **Authentication & Security**:
@@ -110,8 +111,12 @@ class Post(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
     content: str
-    # Foreign Key to User (naming convention: target_model_lower + _id)
-    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+    
+    # Foreign Key to User
+    # Configure reverse display on the field itself
+    # reverse_display: Controls whether this relationship is shown on the target model's detail page (e.g. User page)
+    # Default is True.
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id", sa_column_kwargs={"info": {"site_props": {"reverse_display": True}}})
 ```
 
 #### Many-to-Many Relationship
