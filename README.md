@@ -8,7 +8,7 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 
 - **Full-Stack Generation**: Generates Backend (FastAPI, SQLModel, Pydantic) and Frontend (React, Tailwind, Zustand, Lucide Icons).
 - **Model-Driven**: Define your data models in standard Python code, and let OneSite handle the rest.
-- **Auto CRUD**: Automatically generates Create, Read, Update, Delete APIs and UI.
+- **Auto CRUD & Validation**: Automatically generates Create, Read, Update, Delete APIs and UI, including unique constraints validation.
 - **Smart UI Components**:
   - `bool` -> **Switch** / **Badge**
   - `Enum` -> **Select** / **Badge**
@@ -30,12 +30,16 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 
 ## Installation
 
+You can install OneSite directly from PyPI:
+
 ```bash
-# Clone the repository
+pip install onesite
+```
+
+*(Optional) If you want to install from source:*
+```bash
 git clone https://github.com/IronSpiderMan/OneSite.git
 cd OneSite
-
-# Install the tool in editable mode
 pip install -e .
 ```
 
@@ -148,7 +152,8 @@ OneSite will automatically inject a `tag_ids` field into the `Post` form, allowi
 
 ### 3. Advanced Configuration
 
-You can customize field behavior using `site_props` in `sa_column_kwargs`.
+You can customize field behavior using `site_props` in `sa_column_kwargs` or `schema_extra`.
+Note: when you use `sa_column=Column(...)` in SQLModel, you cannot also pass `sa_column_kwargs` (SQLModel limitation). In that case, put `site_props` in `schema_extra` instead.
 
 #### Field Permissions & Validation
 Control field visibility and validation requirements for Create/Update operations.
@@ -156,6 +161,7 @@ Control field visibility and validation requirements for Create/Update operation
 ```python
 class User(SQLModel, table=True):
     # ...
+    email: str = Field(unique=True) # Unique constraint validation
     password: str = Field(sa_column_kwargs={"info": {"site_props": {
         "permissions": "cu",          # 'c'=Create, 'u'=Update. 'r'=Read (omitted here, so password is never sent to frontend)
         "create_optional": False,     # Required when creating a user
@@ -163,9 +169,73 @@ class User(SQLModel, table=True):
     }}})
 ```
 
+- `unique=True`: Adds a unique constraint to the field. OneSite automatically generates validation logic in Create/Update APIs to prevent duplicate entries (returns `400 Bad Request`).
 - `permissions`: String with `r` (read), `c` (create), `u` (update). Default is `rcu`.
 - `create_optional`: If `True`, field is not required in Create form.
 - `update_optional`: If `True`, field is not required in Update form.
+
+#### JSON Fields (Object & Array)
+OneSite supports two JSON field kinds:
+- **Object JSON**: `Dict[str, Any]` (or `dict`)
+- **Array JSON**: `List[Any]` (or `list`)
+
+#### JSON Fields (BaseModel)
+If you define a Pydantic model in advance, you can use it directly as a JSON field type.
+OneSite will render a structured UI form for it, and you can switch between **UI mode** and **JSON mode**.
+
+```python
+from enum import Enum
+from typing import List, Optional
+
+from pydantic import BaseModel
+from sqlalchemy import Column
+from sqlalchemy.types import JSON
+from sqlmodel import Field, SQLModel
+
+class Gender(str, Enum):
+    male = "male"
+    female = "female"
+
+class Test(BaseModel):
+    name: str
+    gender: Gender
+    is_teacher: bool
+
+class NestedJsonDemo(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    t: Test = Field(sa_column=Column(JSON))
+    ts: List[Test] = Field(default_factory=list, sa_column=Column(JSON))
+```
+
+- `t: Test`: Renders fields like `name`, `gender`, `is_teacher` as normal inputs/selects/switch.
+- `ts: List[Test]`: Supports adding/removing multiple items, each item has the same UI form.
+- You can always switch to JSON mode to paste/edit raw JSON directly.
+
+**Recommended model definition (works across DBs that support JSON):**
+```python
+from typing import Any, Dict, List, Optional
+from sqlalchemy import Column
+from sqlalchemy.types import JSON
+from sqlmodel import Field, SQLModel
+
+class JsonDemo(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+
+    meta: Dict[str, Any] = Field(
+        default_factory=dict,
+        sa_column=Column(JSON),
+        schema_extra={"site_props": {"component": "json", "json_kind": "object"}},
+    )
+
+    tags: List[Any] = Field(
+        default_factory=list,
+        sa_column=Column(JSON),
+        schema_extra={"site_props": {"component": "json", "json_kind": "array"}},
+    )
+```
+
+- If you omit `component/json_kind`, OneSite will still infer JSON UI from `Dict[...]`/`List[...]` types.
+- The generated UI provides a JSON editor (formatting on blur + basic validation).
 
 #### Auto Refresh
 Enable automatic data refreshing for list and detail views. This is useful for monitoring dashboards or real-time data.
@@ -185,6 +255,26 @@ class DashboardMetric(SQLModel, table=True):
 
 - `auto_refresh`: `bool`. If `True`, adds an "Auto Refresh" toggle to the UI.
 - `refresh_interval`: `int` (milliseconds). The default refresh interval (default: 5000ms). Users can change this in the UI.
+
+#### Site Configuration (site_config.json)
+You can customize the look and feel of your application by editing `site_config.json` in the project root.
+
+```json
+{
+    "project_name": "My Awesome Project",
+    "style": "anime",
+    "radius": 1.0,
+    "database_url": "sqlite:///./app.db"
+}
+```
+
+- **style**: Presets for complete UI style. Each style includes full light/dark color system, border/input tone, font family, heading weight, card shadow, and page background texture.
+    - `normal`: Professional SaaS style, clean white/blue system, balanced spacing and neutral shadow.
+    - `industrial`: Mechanical dashboard style, colder grayscale palette, sharp corners, stronger borders and grid texture.
+    - `anime`: High-saturation fantasy style, vibrant violet/cyan/yellow accents, large round corners and colorful glow shadows.
+    - `cute`: Soft pastel style, warm pink/cream palette, extra round corners, gentle shadows and playful gradient texture.
+    - Legacy aliases are still accepted for backward compatibility: `slate`, `blue`, `red`, `green`, `orange`, `purple`, `yellow`.
+- **radius**: Optional global border radius override. If omitted, each style uses its own default radius.
 
 ### 4. Sync and Generate Code
 
