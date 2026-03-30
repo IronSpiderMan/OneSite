@@ -1,0 +1,274 @@
+import importlib
+import inspect
+import os
+import shutil
+import sys
+from pathlib import Path
+from typing import Any, Dict, List
+
+from pydantic_core import PydanticUndefined
+from rich.console import Console
+from sqlmodel import SQLModel
+
+from .assets import sync_backend_assets, sync_frontend_assets
+from .config import load_site_config
+from .envsync import sync_env_files
+from .i18n import generate_locale_files
+from .introspect import get_model_fields
+from .render import generate_file
+from .router import update_api_router
+from .theme import resolve_theme
+
+console = Console()
+
+def _to_snake(name: str) -> str:
+    import re
+
+    return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+
+def generate_code():
+    cwd = Path(os.getcwd())
+    site_config = load_site_config(cwd)
+
+    site_config.setdefault("project_name", "MyApp")
+    site_config.setdefault("database_url", "sqlite:///./app.db")
+    site_config.setdefault("upload_dir", "uploads")
+    site_config.setdefault("secret_key", "changeme")
+    site_config.setdefault(
+        "allowed_origins",
+        [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "http://127.0.0.1:5173",
+            "http://127.0.0.1:3000",
+            "http://localhost:8000",
+            "http://127.0.0.1:8000",
+        ],
+    )
+
+    backend_path = cwd / "backend"
+    sync_env_files(site_config, backend_path, cwd / "frontend")
+
+    if not backend_path.exists():
+        console.print("[red]Backend directory not found. Are you in the project root?[/red]")
+        return
+
+    models_src_dir = cwd / "models"
+    models_dest_dir = backend_path / "app" / "models"
+    template_models_dir = Path(__file__).resolve().parent.parent / "templates" / "models"
+
+    models_dest_dir.mkdir(parents=True, exist_ok=True)
+    (models_dest_dir / "__init__.py").touch(exist_ok=True)
+
+    if models_src_dir.exists():
+        console.print(f"[green]Syncing models from {models_src_dir} to {models_dest_dir}...[/green]")
+        for model_file in models_src_dir.glob("*.py"):
+            shutil.copy2(model_file, models_dest_dir / model_file.name)
+            console.print(f"Synced model: {model_file.name}")
+
+    if template_models_dir.exists():
+        for model_file in template_models_dir.glob("*.py"):
+            target_in_project = models_src_dir / model_file.name
+            if not target_in_project.exists():
+                shutil.copy2(model_file, models_dest_dir / model_file.name)
+                console.print(f"Synced base model from template: {model_file.name}")
+            else:
+                console.print(f"Skipping template model {model_file.name} (overridden in project)")
+
+    sys.path.insert(0, str(backend_path))
+    try:
+        import app.models  # noqa: F401
+    except ImportError as e:
+        console.print(f"[red]Could not import app.models: {e}[/red]")
+        return
+
+    models_dir = backend_path / "app" / "models"
+    model_files = [f.stem for f in models_dir.glob("*.py") if f.stem != "__init__"]
+
+    found_models: List[Dict[str, Any]] = []
+
+    for module_name in model_files:
+        full_module_name = f"app.models.{module_name}"
+        try:
+            if full_module_name in sys.modules:
+                module = importlib.reload(sys.modules[full_module_name])
+            else:
+                module = importlib.import_module(full_module_name)
+        except ImportError as e:
+            console.print(f"[red]Error importing {full_module_name}: {e}[/red]")
+            continue
+
+        for name, obj in inspect.getmembers(module):
+            if inspect.isclass(obj) and issubclass(obj, SQLModel) and obj is not SQLModel:
+                if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
+                    model_module_name = _to_snake(name)
+                    (
+                        fields,
+                        foreign_keys,
+                        search_field,
+                        is_link_table,
+                        translations,
+                        auto_refresh,
+                        refresh_interval,
+                        reverse_fk_display,
+                    ) = get_model_fields(obj, model_module_name)
+
+                    if name == "User":
+                        has_password = any(f["name"] == "password" for f in fields)
+                        if not has_password:
+                            fields.append(
+                                {
+                                    "name": "password",
+                                    "type": "str",
+                                    "ui_type": "str",
+                                    "json_kind": None,
+                                    "json_model_schema": None,
+                                    "json_item_schema": None,
+                                    "py_imports": [],
+                                    "permissions": "cu",
+                                    "create_optional": False,
+                                    "update_optional": True,
+                                    "required": True,
+                                    "default": PydanticUndefined,
+                                    "is_enum": False,
+                                    "enum_values": [],
+                                    "is_search_field": False,
+                                    "fk_info": None,
+                                    "allow_download": True,
+                                    "label_key": "models.user.fields.password",
+                                    "translations": {},
+                                    "is_unique": False,
+                                }
+                            )
+
+                    schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
+
+                    found_models.append(
+                        {
+                            "name": name,
+                            "module_name": model_module_name,
+                            "source_module": module_name,
+                            "lower_name": name.lower(),
+                            "fields": fields,
+                            "schema_imports": schema_imports,
+                            "foreign_keys": foreign_keys,
+                            "search_field": search_field,
+                            "is_link_table": is_link_table,
+                            "translations": translations,
+                            "auto_refresh": auto_refresh,
+                            "refresh_interval": refresh_interval,
+                            "reverse_fk_display": reverse_fk_display,
+                        }
+                    )
+
+    model_map = {m["name"]: m for m in found_models}
+    for model in found_models:
+        model["reverse_foreign_keys"] = []
+
+    for model in found_models:
+        for fk in model["foreign_keys"]:
+            target_model = model_map.get(fk["target_model"])
+            if target_model:
+                fk["label_field"] = target_model["search_field"]
+                fk["target_readable_fields"] = [
+                    f
+                    for f in target_model["fields"]
+                    if "r" in f["permissions"] and f["name"] != "password" and not f.get("fk_info")
+                ]
+
+                base_name = model["module_name"]
+                if base_name.endswith("y") and base_name[-2] not in "aeiou":
+                    reverse_name = f"{base_name[:-1]}ies"
+                else:
+                    reverse_name = f"{base_name}s"
+
+                target_model["reverse_foreign_keys"].append(
+                    {
+                        "name": reverse_name,
+                        "source_model": model["name"],
+                        "source_service": model["module_name"],
+                        "source_fk_field": fk["name"],
+                        "label_field": model["search_field"],
+                        "display": fk.get("reverse_display", True),
+                    }
+                )
+
+    for model in found_models:
+        if model["is_link_table"]:
+            fks = model["foreign_keys"]
+            if len(fks) >= 2:
+                source_fk = fks[0]
+                target_fk = fks[1]
+                source_model_name = source_fk["target_model"]
+                target_model_name = target_fk["target_model"]
+                source_model = model_map.get(source_model_name)
+                target_model = model_map.get(target_model_name)
+                if source_model and target_model:
+                    m2m_field_name = f"{target_model['lower_name']}_ids"
+                    source_model["m2m_fields"] = source_model.get("m2m_fields", [])
+                    source_model["m2m_fields"].append(
+                        {
+                            "name": m2m_field_name,
+                            "target_model": target_model_name,
+                            "target_service": target_fk["target_service"],
+                            "target_endpoint": target_fk["target_endpoint"],
+                            "label_field": target_fk["label_field"],
+                            "link_model": model["name"],
+                            "link_module": model["source_module"],
+                            "target_source_module": target_model["source_module"],
+                            "source_fk_field": source_fk["name"],
+                            "target_fk_field": target_fk["name"],
+                        }
+                    )
+
+    for model in found_models:
+        if model["is_link_table"]:
+            continue
+
+        context = {"model": model}
+        is_user_model = model["name"] == "User"
+
+        schema_tpl = "user_schema.py.j2" if is_user_model else "schema.py.j2"
+        generate_file(schema_tpl, context, backend_path / "app" / "schemas" / f"{model['module_name']}.py")
+
+        crud_tpl = "user_crud.py.j2" if is_user_model else "crud.py.j2"
+        generate_file(crud_tpl, context, backend_path / "app" / "cruds" / f"{model['module_name']}.py")
+
+        service_tpl = "user_service.py.j2" if is_user_model else "service.py.j2"
+        generate_file(service_tpl, context, backend_path / "app" / "services" / f"{model['module_name']}.py")
+
+        generate_file("api.py.j2", context, backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py")
+
+        generate_file("frontend_service.ts.j2", context, cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts")
+
+        generate_file(
+            "frontend_store.ts.j2",
+            context,
+            cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts",
+        )
+
+        generate_file(
+            "frontend_page_list.tsx.j2",
+            context,
+            cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
+        )
+
+        generate_file(
+            "frontend_page_detail.tsx.j2",
+            context,
+            cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
+        )
+
+    theme_config, radius = resolve_theme(site_config)
+    generate_file("index.css.j2", {"theme": theme_config, "radius": radius}, cwd / "frontend" / "src" / "index.css")
+
+    sync_frontend_assets(cwd, site_config)
+    sync_backend_assets(cwd, backend_path, site_config)
+
+    api_models = [m for m in found_models if not m["is_link_table"]]
+    update_api_router(api_models, backend_path / "app" / "api" / "api.py")
+
+    generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
+    generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
+    generate_locale_files(found_models, cwd / "frontend" / "src" / "locales")

@@ -2,7 +2,7 @@ from typing import List, Optional
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update
-from app.models.{{ model.module_name }} import {{ model.name }}
+from app.models.{{ model.source_module }} import {{ model.name }}
 
 class {{ model.name }}Service:
     async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}]:

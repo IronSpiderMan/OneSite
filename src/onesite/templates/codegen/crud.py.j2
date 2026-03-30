@@ -1,7 +1,7 @@
 from typing import List, Optional
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.models.{{ model.module_name }} import {{ model.name }}
+from app.models.{{ model.source_module }} import {{ model.name }}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
@@ -30,7 +30,10 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     {% endfor %}
     {% endif %}
 
-    db_obj = {{ model.name }}.from_orm(obj_in)
+    # Convert to dict to handle nested Pydantic models in JSON fields
+    obj_dict = obj_in.dict()
+    db_obj = {{ model.name }}(**obj_dict)
+    
     session.add(db_obj)
     await session.commit()
     await session.refresh(db_obj)
@@ -53,13 +56,13 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     return db_obj
 
 async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
-    hero_data = obj_in.dict(exclude_unset=True)
+    obj_data = obj_in.dict(exclude_unset=True)
     
     {% if model.m2m_fields %}
     # Handle M2M updates
     {% for m2m in model.m2m_fields %}
-    if "{{ m2m.name }}" in hero_data:
-        new_ids = hero_data.pop("{{ m2m.name }}")
+    if "{{ m2m.name }}" in obj_data:
+        new_ids = obj_data.pop("{{ m2m.name }}")
         if new_ids is not None:
             # 1. Clear existing relations
             # This is a naive implementation (delete all and re-insert). 
@@ -80,7 +83,7 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% endfor %}
     {% endif %}
     
-    for key, value in hero_data.items():
+    for key, value in obj_data.items():
         setattr(db_obj, key, value)
     session.add(db_obj)
     await session.commit()

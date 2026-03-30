@@ -1,7 +1,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlmodel import SQLModel
-from app.models.{{ model.module_name }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
+from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
 
 # Shared properties
 class {{ model.name }}Base(SQLModel):
