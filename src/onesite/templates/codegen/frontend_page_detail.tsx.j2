@@ -243,6 +243,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 ) : (
                                     <span className="text-muted-foreground italic">No file</span>
                                 )}
+                                {% elif field.ui_type == 'json' %}
+                                <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+                                    {currentItem.{{ field.name }} !== undefined && currentItem.{{ field.name }} !== null
+                                      ? JSON.stringify(currentItem.{{ field.name }}, null, 2)
+                                      : '-'}
+                                </pre>
                                 {% else %}
                                 {String(currentItem.{{ field.name }} ?? '-')}
                                 {% endif %}

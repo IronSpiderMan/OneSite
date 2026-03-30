@@ -4,8 +4,10 @@ import importlib
 import inspect
 import pkgutil
 import shutil
+from enum import Enum
 from pathlib import Path
-from typing import List, Dict, Any, Set
+from typing import List, Dict, Any, Set, get_origin, get_args
+from pydantic import BaseModel
 from sqlmodel import SQLModel
 from jinja2 import Environment, FileSystemLoader
 from rich.console import Console
@@ -202,6 +204,56 @@ THEMES = {
     }
 }
 
+def _json_field_kind_from_annotation(annotation: Any) -> str:
+    if annotation is bool:
+        return "bool"
+    if annotation is int:
+        return "int"
+    if annotation is float:
+        return "float"
+    if annotation is str:
+        return "str"
+    type_str = str(annotation)
+    if "datetime" in type_str:
+        return "datetime"
+    if inspect.isclass(annotation) and issubclass(annotation, Enum):
+        return "enum"
+    if inspect.isclass(annotation) and issubclass(annotation, BaseModel) and not issubclass(annotation, SQLModel):
+        return "model"
+    origin = get_origin(annotation)
+    if origin is list or annotation is list:
+        return "array"
+    return "any"
+
+def _build_json_model_schema(model: type[BaseModel], visited: Set[type] | None = None, depth: int = 0) -> Dict[str, Any]:
+    if visited is None:
+        visited = set()
+    if model in visited or depth >= 2:
+        return {"name": model.__name__, "fields": []}
+    visited.add(model)
+    fields: List[Dict[str, Any]] = []
+    for fname, f in model.model_fields.items():
+        ann = f.annotation
+        kind = _json_field_kind_from_annotation(ann)
+        field_schema: Dict[str, Any] = {"name": fname, "kind": kind}
+        if kind == "enum" and inspect.isclass(ann) and issubclass(ann, Enum):
+            field_schema["enumValues"] = [e.value for e in ann]
+        elif kind == "model" and inspect.isclass(ann) and issubclass(ann, BaseModel) and not issubclass(ann, SQLModel):
+            field_schema["model"] = _build_json_model_schema(ann, visited=visited, depth=depth + 1)
+        elif kind == "array":
+            origin = get_origin(ann)
+            args = get_args(ann) if origin is list else ()
+            item_ann = args[0] if args else Any
+            item_kind = _json_field_kind_from_annotation(item_ann)
+            item_schema: Dict[str, Any] = {"kind": item_kind}
+            if item_kind == "enum" and inspect.isclass(item_ann) and issubclass(item_ann, Enum):
+                item_schema["enumValues"] = [e.value for e in item_ann]
+            elif item_kind == "model" and inspect.isclass(item_ann) and issubclass(item_ann, BaseModel) and not issubclass(item_ann, SQLModel):
+                item_schema["model"] = _build_json_model_schema(item_ann, visited=visited, depth=depth + 1)
+            field_schema["item"] = item_schema
+        fields.append(field_schema)
+    return {"name": model.__name__, "fields": fields}
+
 def get_model_fields(model_cls, module_name=None):
     fields = []
     # Inspect SQLModel fields
@@ -236,7 +288,6 @@ def get_model_fields(model_cls, module_name=None):
 
         console.print(f"Debug: Field {name} - Perms: {permissions}")
 
-        # Determine python type string (simplified)
         type_annotation = field.annotation
         type_str = str(type_annotation)
 
@@ -245,24 +296,74 @@ def get_model_fields(model_cls, module_name=None):
 
         is_enum = False
         enum_values = []
+        json_kind = None
+        json_py_imports: List[str] = []
+        json_model_schema = None
+        json_item_schema = None
 
         # Check for Enum
         if inspect.isclass(type_annotation) and issubclass(type_annotation, (str, int)) and hasattr(type_annotation, "__members__"):
              is_enum = True
              enum_values = [e.value for e in type_annotation]
              type_str = "str" # Treat enum as string for now in frontend
+        
+        resolved_annotation = type_annotation
+        origin = get_origin(resolved_annotation)
+        args = get_args(resolved_annotation)
 
-        # Improved Type Detection
-        if "int" in type_str: type_str = "int"
-        elif "str" in type_str: type_str = "str"
-        # Check for 'bool' in string OR if annotation is explicitly bool class
-        elif "bool" in type_str or type_annotation is bool: type_str = "bool"
-        elif "float" in type_str: type_str = "float"
-        elif "datetime" in type_str: type_str = "datetime"
-        else: type_str = "str" # Fallback
+        if site_props.get("component") == "json":
+            json_kind = site_props.get("json_kind", "object")
+            if json_kind == "array":
+                type_str = "List[Any]"
+            else:
+                type_str = "Dict[str, Any]"
+        elif resolved_annotation in (dict, list) or origin in (dict, list):
+            if resolved_annotation is list or origin is list:
+                json_kind = "array"
+                item_type = args[0] if args else Any
+                item_origin = get_origin(item_type)
+                item_args = get_args(item_type)
+                if inspect.isclass(item_type) and issubclass(item_type, BaseModel) and not issubclass(item_type, SQLModel):
+                    type_str = f"List[{item_type.__name__}]"
+                    json_py_imports.append(item_type.__name__)
+                    json_item_schema = _build_json_model_schema(item_type)
+                elif item_type in (dict,) or item_origin is dict:
+                    value_type = item_args[1] if len(item_args) >= 2 else Any
+                    if inspect.isclass(value_type) and issubclass(value_type, BaseModel) and not issubclass(value_type, SQLModel):
+                        type_str = f"List[Dict[str, {value_type.__name__}]]"
+                        json_py_imports.append(value_type.__name__)
+                    else:
+                        type_str = "List[Dict[str, Any]]"
+                else:
+                    type_str = "List[Any]"
+            else:
+                json_kind = "object"
+                value_type = args[1] if len(args) >= 2 else Any
+                if inspect.isclass(value_type) and issubclass(value_type, BaseModel) and not issubclass(value_type, SQLModel):
+                    type_str = f"Dict[str, {value_type.__name__}]"
+                    json_py_imports.append(value_type.__name__)
+                else:
+                    type_str = "Dict[str, Any]"
+        elif inspect.isclass(resolved_annotation) and issubclass(resolved_annotation, BaseModel) and not issubclass(resolved_annotation, SQLModel):
+            json_kind = "object"
+            type_str = resolved_annotation.__name__
+            json_py_imports.append(resolved_annotation.__name__)
+            json_model_schema = _build_json_model_schema(resolved_annotation)
+        else:
+            if "int" in type_str:
+                type_str = "int"
+            elif "str" in type_str:
+                type_str = "str"
+            elif "bool" in type_str or type_annotation is bool:
+                type_str = "bool"
+            elif "float" in type_str:
+                type_str = "float"
+            elif "datetime" in type_str:
+                type_str = "datetime"
+            else:
+                type_str = "str"
 
-        # Save UI type before wrapping with Optional
-        ui_type = type_str
+        ui_type = "json" if json_kind else type_str
 
         # Check for image component
         if site_props.get("component") == "image":
@@ -372,6 +473,10 @@ def get_model_fields(model_cls, module_name=None):
             "name": name,
             "type": type_str,
             "ui_type": ui_type,
+            "json_kind": json_kind,
+            "json_model_schema": json_model_schema,
+            "json_item_schema": json_item_schema,
+            "py_imports": sorted(set(json_py_imports)),
             "permissions": permissions,
             "create_optional": create_optional,
             "update_optional": update_optional,
@@ -688,11 +793,14 @@ def generate_code():
                                  "fk_info": None
                              })
 
+                     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
+
                      found_models.append({
                          "name": name,
                          "module_name": module_name, # Save the filename/module name
                          "lower_name": name.lower(),
                          "fields": fields,
+                         "schema_imports": schema_imports,
                          "foreign_keys": foreign_keys,
                          "search_field": search_field,
                          "is_link_table": is_link_table,

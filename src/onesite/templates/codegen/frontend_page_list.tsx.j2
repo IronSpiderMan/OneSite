@@ -7,6 +7,8 @@ import { {{ model.name }} } from '../../services/{{ model.module_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
+import { JsonInput } from '../../components/ui/json-input';
+import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Modal } from '../../components/ui/modal';
 import { Label } from '../../components/ui/label';
@@ -198,6 +200,10 @@ const {{ model.name }}Page: React.FC = () => {
                         )}
                         {% elif field.is_enum %}
                         <Badge variant="outline">{item.{{ field.name }}}</Badge>
+                        {% elif field.ui_type == 'json' %}
+                        {item.{{ field.name }} !== undefined && item.{{ field.name }} !== null
+                          ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }}))
+                          : '-'}
                         {% else %}
                         {String(item.{{ field.name }})}
                         {% endif %}
@@ -330,6 +336,34 @@ const {{ model.name }}Page: React.FC = () => {
                             }));
                         }}
                     />
+                )}
+            />
+            {% elif field.ui_type == 'json' %}
+            <Controller
+                control={control}
+                name="{{ field.name }}"
+                defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} }
+                render={({ field: { onChange, value } }) => (
+                    {% if field.json_model_schema %}
+                    <JsonModelEditor
+                        schema={ {{ field.json_model_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                    />
+                    {% elif field.json_item_schema %}
+                    <JsonModelArrayEditor
+                        itemSchema={ {{ field.json_item_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                    />
+                    {% else %}
+                    <JsonInput
+                        value={value}
+                        onChange={onChange}
+                        jsonKind="{{ field.json_kind or 'object' }}"
+                        placeholder={ {% if field.json_kind == 'array' %}"[\\n  \\n]"{% else %}"{\\n  \\n}"{% endif %} }
+                    />
+                    {% endif %}
                 )}
             />
             {% else %}
