@@ -15,6 +15,193 @@ console = Console()
 
 TEMPLATE_DIR = Path(__file__).parent / "templates" / "codegen"
 
+THEMES = {
+    "normal": {
+        "background": "0 0% 100%",
+        "foreground": "222.2 84% 4.9%",
+        "card": "0 0% 100%",
+        "card_foreground": "222.2 84% 4.9%",
+        "popover": "0 0% 100%",
+        "popover_foreground": "222.2 84% 4.9%",
+        "primary": "221.2 83.2% 53.3%",
+        "primary_foreground": "210 40% 98%",
+        "secondary": "210 40% 96.1%",
+        "secondary_foreground": "222.2 47.4% 11.2%",
+        "muted": "210 40% 96.1%",
+        "muted_foreground": "215.4 16.3% 46.9%",
+        "accent": "210 40% 96.1%",
+        "accent_foreground": "222.2 47.4% 11.2%",
+        "destructive": "0 84.2% 60.2%",
+        "destructive_foreground": "210 40% 98%",
+        "border": "214.3 31.8% 91.4%",
+        "input": "214.3 31.8% 91.4%",
+        "ring": "221.2 83.2% 53.3%",
+        "radius": 0.5,
+        "font_family": "Inter, Segoe UI, system-ui, sans-serif",
+        "heading_weight": "700",
+        "shadow_sm": "0 1px 2px 0 rgb(2 6 23 / 0.06)",
+        "shadow_md": "0 8px 20px -12px rgb(15 23 42 / 0.14)",
+        "body_pattern": "none",
+        "dark_background": "222.2 84% 4.9%",
+        "dark_foreground": "210 40% 98%",
+        "dark_card": "222.2 84% 4.9%",
+        "dark_card_foreground": "210 40% 98%",
+        "dark_popover": "222.2 84% 4.9%",
+        "dark_popover_foreground": "210 40% 98%",
+        "dark_primary": "217.2 91.2% 59.8%",
+        "dark_primary_foreground": "222.2 47.4% 11.2%",
+        "dark_secondary": "217.2 32.6% 17.5%",
+        "dark_secondary_foreground": "210 40% 98%",
+        "dark_muted": "217.2 32.6% 17.5%",
+        "dark_muted_foreground": "215 20.2% 65.1%",
+        "dark_accent": "217.2 32.6% 17.5%",
+        "dark_accent_foreground": "210 40% 98%",
+        "dark_destructive": "0 62.8% 30.6%",
+        "dark_destructive_foreground": "210 40% 98%",
+        "dark_border": "217.2 32.6% 17.5%",
+        "dark_input": "217.2 32.6% 17.5%",
+        "dark_ring": "224.3 76.3% 48%"
+    },
+    "industrial": {
+        "background": "220 9% 96%",
+        "foreground": "222 25% 10%",
+        "card": "0 0% 100%",
+        "card_foreground": "222 25% 10%",
+        "popover": "0 0% 100%",
+        "popover_foreground": "222 25% 10%",
+        "primary": "215 15% 18%",
+        "primary_foreground": "210 20% 98%",
+        "secondary": "210 10% 88%",
+        "secondary_foreground": "222 25% 12%",
+        "muted": "210 12% 86%",
+        "muted_foreground": "215 11% 35%",
+        "accent": "206 28% 82%",
+        "accent_foreground": "218 38% 16%",
+        "destructive": "0 72% 46%",
+        "destructive_foreground": "210 20% 98%",
+        "border": "215 13% 76%",
+        "input": "215 13% 76%",
+        "ring": "205 90% 42%",
+        "radius": 0.1,
+        "font_family": "IBM Plex Sans, Inter, Segoe UI, system-ui, sans-serif",
+        "heading_weight": "800",
+        "shadow_sm": "0 1px 0 0 rgb(15 23 42 / 0.18)",
+        "shadow_md": "0 0 0 1px rgb(51 65 85 / 0.35), 0 12px 24px -14px rgb(2 6 23 / 0.42)",
+        "body_pattern": "linear-gradient(0deg, rgb(148 163 184 / 0.06) 1px, transparent 1px), linear-gradient(90deg, rgb(148 163 184 / 0.06) 1px, transparent 1px)",
+        "dark_background": "222 25% 8%",
+        "dark_foreground": "210 18% 96%",
+        "dark_card": "220 22% 11%",
+        "dark_card_foreground": "210 18% 96%",
+        "dark_popover": "220 22% 11%",
+        "dark_popover_foreground": "210 18% 96%",
+        "dark_primary": "210 24% 92%",
+        "dark_primary_foreground": "222 25% 10%",
+        "dark_secondary": "216 16% 20%",
+        "dark_secondary_foreground": "210 18% 96%",
+        "dark_muted": "217 14% 19%",
+        "dark_muted_foreground": "215 14% 74%",
+        "dark_accent": "204 60% 20%",
+        "dark_accent_foreground": "202 100% 88%",
+        "dark_destructive": "0 63% 32%",
+        "dark_destructive_foreground": "210 20% 98%",
+        "dark_border": "216 16% 26%",
+        "dark_input": "216 16% 26%",
+        "dark_ring": "205 90% 58%"
+    },
+    "anime": {
+        "background": "262 100% 99%",
+        "foreground": "252 38% 20%",
+        "card": "0 0% 100%",
+        "card_foreground": "252 38% 20%",
+        "popover": "0 0% 100%",
+        "popover_foreground": "252 38% 20%",
+        "primary": "286 86% 60%",
+        "primary_foreground": "0 0% 100%",
+        "secondary": "190 95% 90%",
+        "secondary_foreground": "201 59% 23%",
+        "muted": "278 100% 95%",
+        "muted_foreground": "262 21% 42%",
+        "accent": "45 100% 86%",
+        "accent_foreground": "24 56% 22%",
+        "destructive": "350 89% 60%",
+        "destructive_foreground": "0 0% 100%",
+        "border": "273 80% 86%",
+        "input": "273 80% 86%",
+        "ring": "286 86% 60%",
+        "radius": 1.1,
+        "font_family": "Nunito, Quicksand, Inter, system-ui, sans-serif",
+        "heading_weight": "800",
+        "shadow_sm": "0 2px 0 0 rgb(192 132 252 / 0.25)",
+        "shadow_md": "0 14px 30px -16px rgb(168 85 247 / 0.45)",
+        "body_pattern": "radial-gradient(circle at 12% 18%, rgb(253 224 71 / 0.22), transparent 24%), radial-gradient(circle at 88% 14%, rgb(125 211 252 / 0.18), transparent 20%), radial-gradient(circle at 80% 85%, rgb(244 114 182 / 0.2), transparent 24%)",
+        "dark_background": "258 46% 12%",
+        "dark_foreground": "288 34% 95%",
+        "dark_card": "259 40% 16%",
+        "dark_card_foreground": "288 34% 95%",
+        "dark_popover": "259 40% 16%",
+        "dark_popover_foreground": "288 34% 95%",
+        "dark_primary": "286 83% 66%",
+        "dark_primary_foreground": "0 0% 100%",
+        "dark_secondary": "214 55% 24%",
+        "dark_secondary_foreground": "190 95% 90%",
+        "dark_muted": "260 22% 23%",
+        "dark_muted_foreground": "270 24% 75%",
+        "dark_accent": "39 86% 40%",
+        "dark_accent_foreground": "51 100% 92%",
+        "dark_destructive": "350 70% 38%",
+        "dark_destructive_foreground": "0 0% 100%",
+        "dark_border": "262 24% 30%",
+        "dark_input": "262 24% 30%",
+        "dark_ring": "286 83% 66%"
+    },
+    "cute": {
+        "background": "330 100% 99%",
+        "foreground": "334 44% 22%",
+        "card": "0 0% 100%",
+        "card_foreground": "334 44% 22%",
+        "popover": "0 0% 100%",
+        "popover_foreground": "334 44% 22%",
+        "primary": "340 82% 63%",
+        "primary_foreground": "355 100% 98%",
+        "secondary": "41 100% 90%",
+        "secondary_foreground": "21 45% 28%",
+        "muted": "337 100% 94%",
+        "muted_foreground": "337 20% 45%",
+        "accent": "188 78% 88%",
+        "accent_foreground": "198 56% 26%",
+        "destructive": "355 79% 59%",
+        "destructive_foreground": "0 0% 100%",
+        "border": "338 70% 86%",
+        "input": "338 70% 86%",
+        "ring": "340 82% 63%",
+        "radius": 1.25,
+        "font_family": "M PLUS Rounded 1c, Nunito, Quicksand, Inter, system-ui, sans-serif",
+        "heading_weight": "800",
+        "shadow_sm": "0 2px 0 0 rgb(244 114 182 / 0.22)",
+        "shadow_md": "0 14px 30px -16px rgb(251 113 133 / 0.45)",
+        "body_pattern": "radial-gradient(circle at 18% 14%, rgb(253 186 116 / 0.18), transparent 22%), radial-gradient(circle at 86% 20%, rgb(165 243 252 / 0.18), transparent 20%), radial-gradient(circle at 78% 82%, rgb(251 207 232 / 0.26), transparent 26%)",
+        "dark_background": "334 38% 14%",
+        "dark_foreground": "343 100% 95%",
+        "dark_card": "335 34% 18%",
+        "dark_card_foreground": "343 100% 95%",
+        "dark_popover": "335 34% 18%",
+        "dark_popover_foreground": "343 100% 95%",
+        "dark_primary": "340 82% 66%",
+        "dark_primary_foreground": "355 100% 98%",
+        "dark_secondary": "32 58% 30%",
+        "dark_secondary_foreground": "42 100% 90%",
+        "dark_muted": "335 22% 25%",
+        "dark_muted_foreground": "338 24% 78%",
+        "dark_accent": "200 55% 30%",
+        "dark_accent_foreground": "188 80% 92%",
+        "dark_destructive": "355 67% 38%",
+        "dark_destructive_foreground": "0 0% 100%",
+        "dark_border": "334 20% 32%",
+        "dark_input": "334 20% 32%",
+        "dark_ring": "340 82% 66%"
+    }
+}
+
 def get_model_fields(model_cls, module_name=None):
     fields = []
     # Inspect SQLModel fields
@@ -169,6 +356,18 @@ def get_model_fields(model_cls, module_name=None):
         if is_optional:
             type_str = f"Optional[{type_str}]"
 
+        # Check if unique
+        is_unique = False
+        if hasattr(field, "json_schema_extra") and field.json_schema_extra and field.json_schema_extra.get("unique"):
+            is_unique = True
+        elif sa_column_kwargs and sa_column_kwargs.get("unique"):
+            is_unique = True
+        # FieldInfo might have json_schema_extra
+        elif getattr(field, "json_schema_extra", None) and getattr(field, "json_schema_extra", {}).get("unique"):
+             is_unique = True
+        elif hasattr(field, "unique") and field.unique is not PydanticUndefined and field.unique is not None:
+             is_unique = field.unique
+
         fields.append({
             "name": name,
             "type": type_str,
@@ -184,7 +383,8 @@ def get_model_fields(model_cls, module_name=None):
             "fk_info": fk_info,
             "allow_download": allow_download,
             "label_key": label_key,
-            "translations": translations
+            "translations": translations,
+            "is_unique": is_unique
         })
 
     # Post-process fields to determine search field if not explicitly set
@@ -635,6 +835,34 @@ def generate_code():
         # 8. Frontend View (Page Detail)
         generate_file("frontend_page_detail.tsx.j2", context, cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx")
 
+    # Generate Theme (index.css)
+    # Support 'style' or 'theme' in config for backward compatibility
+    theme_name = site_config.get("style") or site_config.get("theme") or "normal"
+    legacy_style_alias = {
+        "slate": "normal",
+        "blue": "normal",
+        "red": "industrial",
+        "green": "normal",
+        "orange": "anime",
+        "purple": "anime",
+        "yellow": "cute"
+    }
+    theme_name = legacy_style_alias.get(theme_name, theme_name)
+    
+    # If user provides a specific radius in config, it overrides the theme's default
+    config_radius = site_config.get("radius")
+    
+    if theme_name not in THEMES:
+        console.print(f"[yellow]Warning: Theme/Style '{theme_name}' not found. Falling back to 'normal'.[/yellow]")
+        theme_name = "normal"
+    
+    theme_config = THEMES[theme_name]
+    
+    # Use config radius if provided, otherwise use theme's radius, otherwise default to 0.5
+    radius = config_radius if config_radius is not None else theme_config.get("radius", 0.5)
+    
+    generate_file("index.css.j2", {"theme": theme_config, "radius": radius}, cwd / "frontend" / "src" / "index.css")
+
     # Sync UI Components (Ensure they exist in the target project)
     # We copy from the template directory to the target project
     template_components_dir = Path(__file__).parent / "templates" / "frontend" / "src" / "components" / "ui"
@@ -677,7 +905,6 @@ def generate_code():
         "index.html",
         "src/main.tsx",
         "src/App.tsx",
-        "src/index.css",
         "src/components/ui/button.tsx",
         "src/components/ui/input.tsx",
         "src/components/ui/label.tsx",
@@ -751,6 +978,7 @@ def generate_code():
     template_security = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "security.py"
     target_security = backend_path / "app" / "core" / "security.py"
     if template_security.exists():
+         target_security.parent.mkdir(parents=True, exist_ok=True)
          shutil.copy2(template_security, target_security)
          console.print(f"Synced backend security.py")
 
@@ -765,12 +993,14 @@ def generate_code():
     template_db = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "db.py"
     target_db = backend_path / "app" / "core" / "db.py"
     if template_db.exists():
+         target_db.parent.mkdir(parents=True, exist_ok=True)
          shutil.copy2(template_db, target_db)
          console.print(f"Synced backend db.py")
 
     template_deps = Path(__file__).parent / "templates" / "backend" / "app" / "core" / "deps.py"
     target_deps = backend_path / "app" / "core" / "deps.py"
     if template_deps.exists():
+         target_deps.parent.mkdir(parents=True, exist_ok=True)
          shutil.copy2(template_deps, target_deps)
          console.print(f"Synced backend deps.py")
 

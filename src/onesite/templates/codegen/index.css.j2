@@ -1,0 +1,84 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: {{ theme.background }};
+    --foreground: {{ theme.foreground }};
+    --card: {{ theme.card }};
+    --card-foreground: {{ theme.card_foreground }};
+    --popover: {{ theme.popover }};
+    --popover-foreground: {{ theme.popover_foreground }};
+    --primary: {{ theme.primary }};
+    --primary-foreground: {{ theme.primary_foreground }};
+    --secondary: {{ theme.secondary }};
+    --secondary-foreground: {{ theme.secondary_foreground }};
+    --muted: {{ theme.muted }};
+    --muted-foreground: {{ theme.muted_foreground }};
+    --accent: {{ theme.accent }};
+    --accent-foreground: {{ theme.accent_foreground }};
+    --destructive: {{ theme.destructive }};
+    --destructive-foreground: {{ theme.destructive_foreground }};
+    --border: {{ theme.border }};
+    --input: {{ theme.input }};
+    --ring: {{ theme.ring }};
+    --radius: {{ radius }}rem;
+    --shadow-sm-style: {{ theme.shadow_sm }};
+    --shadow-md-style: {{ theme.shadow_md }};
+  }
+ 
+  .dark {
+    --background: {{ theme.dark_background }};
+    --foreground: {{ theme.dark_foreground }};
+    --card: {{ theme.dark_card }};
+    --card-foreground: {{ theme.dark_card_foreground }};
+    --popover: {{ theme.dark_popover }};
+    --popover-foreground: {{ theme.dark_popover_foreground }};
+    --primary: {{ theme.dark_primary }};
+    --primary-foreground: {{ theme.dark_primary_foreground }};
+    --secondary: {{ theme.dark_secondary }};
+    --secondary-foreground: {{ theme.dark_secondary_foreground }};
+    --muted: {{ theme.dark_muted }};
+    --muted-foreground: {{ theme.dark_muted_foreground }};
+    --accent: {{ theme.dark_accent }};
+    --accent-foreground: {{ theme.dark_accent_foreground }};
+    --destructive: {{ theme.dark_destructive }};
+    --destructive-foreground: {{ theme.dark_destructive_foreground }};
+    --border: {{ theme.dark_border }};
+    --input: {{ theme.dark_input }};
+    --ring: {{ theme.dark_ring }};
+  }
+}
+ 
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: {{ theme.font_family }};
+    {% if theme.body_pattern != "none" %}
+    background-image: {{ theme.body_pattern }};
+    background-size: 28px 28px;
+    {% endif %}
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: {{ theme.heading_weight }};
+  }
+}
+
+@layer utilities {
+  .shadow-sm {
+    box-shadow: var(--shadow-sm-style);
+  }
+  .shadow, .shadow-md {
+    box-shadow: var(--shadow-md-style);
+  }
+  button {
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  }
+  button:hover {
+    filter: saturate(1.06);
+  }
+}
