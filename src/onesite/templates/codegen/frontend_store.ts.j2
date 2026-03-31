@@ -8,7 +8,9 @@ interface {{ model.name }}State {
     size: number;
     loading: boolean;
     currentItem: {{ model.name }} | null;
-    fetchData: (page?: number, size?: number) => Promise<void>;
+    query: string;
+    filters: Record<string, any>;
+    fetchData: (page?: number, size?: number, query?: string, filters?: Record<string, any>) => Promise<void>;
     fetchItem: (id: number) => Promise<{{ model.name }} | null>;
     createItem: (item: any) => Promise<void>;
     updateItem: (id: number, item: any) => Promise<void>;
@@ -22,16 +24,22 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     size: 20,
     loading: false,
     currentItem: null,
-    fetchData: async (page = 1, size = 20) => {
+    query: "",
+    filters: {},
+    fetchData: async (page = 1, size = 20, query?: string, filters?: Record<string, any>) => {
         set({ loading: true });
         try {
-            const result = await get{{ model.name }}s(page, size);
+            const q = query !== undefined ? query : get().query;
+            const f = filters !== undefined ? filters : get().filters;
+            const result = await get{{ model.name }}s(page, size, q || undefined, f);
             if (result && Array.isArray(result.items)) {
                 set({ 
                     data: result.items,
                     total: result.total,
                     page: result.page,
-                    size: result.size
+                    size: result.size,
+                    query: q,
+                    filters: f
                 });
             } else {
                 console.error("Expected paginated response but got:", result);
@@ -61,8 +69,8 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     createItem: async (item: any) => {
         try {
             await create{{ model.name }}(item);
-            const { page, size } = get();
-            await get().fetchData(page, size);
+            const { page, size, query, filters } = get();
+            await get().fetchData(page, size, query, filters);
         } catch (error) {
             console.error(error);
             throw error;
@@ -71,8 +79,8 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     updateItem: async (id: number, item: any) => {
         try {
             await update{{ model.name }}(id, item);
-            const { page, size } = get();
-            await get().fetchData(page, size);
+            const { page, size, query, filters } = get();
+            await get().fetchData(page, size, query, filters);
         } catch (error) {
             console.error(error);
             throw error;
@@ -81,8 +89,8 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     deleteItem: async (id: number) => {
         try {
             await delete{{ model.name }}(id);
-            const { page, size } = get();
-            await get().fetchData(page, size);
+            const { page, size, query, filters } = get();
+            await get().fetchData(page, size, query, filters);
         } catch (error) {
             console.error(error);
             throw error;

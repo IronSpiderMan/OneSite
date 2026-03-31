@@ -1,4 +1,5 @@
 from typing import List, Any, Optional
+from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -22,6 +23,20 @@ async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
     q: Optional[str] = Query(None, description="Search query"),
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    {{ field.name }}: Optional[bool] = Query(None, description="Filter by {{ field.name }}"),
+    {% elif field.ui_type == 'datetime' %}
+    {{ field.name }}_from: Optional[datetime] = Query(None, description="Filter by {{ field.name }} from"),
+    {{ field.name }}_to: Optional[datetime] = Query(None, description="Filter by {{ field.name }} to"),
+    {% elif field.is_enum %}
+    {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
+    {% elif field.ui_type == 'str' %}
+    {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
+    {% endif %}
+    {% endif %}
+    {% endfor %}
     {% for fk in model.foreign_keys %}
     {{ fk.name }}: Optional[int] = Query(None, description="Filter by {{ fk.name }}"),
     {% endfor %}
@@ -38,6 +53,27 @@ async def read_{{ model.lower_name }}s(
     if q:
         statement = statement.where(col({{ model.name }}.{{ model.search_field }}).ilike(f"%{q}%"))
     {% endif %}
+
+    # Apply per-field filters (configured via site_props.is_search_field)
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    if {{ field.name }} is not None:
+        statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
+    {% elif field.ui_type == 'datetime' %}
+    if {{ field.name }}_from is not None:
+        statement = statement.where({{ model.name }}.{{ field.name }} >= {{ field.name }}_from)
+    if {{ field.name }}_to is not None:
+        statement = statement.where({{ model.name }}.{{ field.name }} <= {{ field.name }}_to)
+    {% elif field.is_enum %}
+    if {{ field.name }}:
+        statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
+    {% elif field.ui_type == 'str' %}
+    if {{ field.name }}:
+        statement = statement.where(col({{ model.name }}.{{ field.name }}).ilike("%" + {{ field.name }} + "%"))
+    {% endif %}
+    {% endif %}
+    {% endfor %}
 
     # Apply foreign key filters
     {% for fk in model.foreign_keys %}

@@ -191,6 +191,8 @@ def generate_code():
         model["reverse_foreign_keys"] = []
 
     for model in found_models:
+        if model["is_link_table"]:
+            continue
         for fk in model["foreign_keys"]:
             target_model = model_map.get(fk["target_model"])
             if target_model:

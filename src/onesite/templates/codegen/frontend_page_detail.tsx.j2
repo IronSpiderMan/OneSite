@@ -66,7 +66,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval or 5000 }});
 
     useEffect(() => {
-        let interval: NodeJS.Timeout;
+        let interval: ReturnType<typeof setInterval>;
         if (autoRefresh && id) {
             interval = setInterval(() => {
                 const itemId = parseInt(id);
