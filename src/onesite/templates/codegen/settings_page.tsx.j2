@@ -237,7 +237,7 @@ const SettingsPage: React.FC = () => {
           <div className="space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-xl font-semibold">{t('settings.custom_title')}</h2>
-              <Button variant="secondary" onClick={handleSubmit(onSaveCustom)} disabled={isSavingCustom} className="flex items-center space-x-2">
+              <Button onClick={handleSubmit(onSaveCustom)} disabled={isSavingCustom} className="flex items-center space-x-2">
                 {isSavingCustom ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                 <span>{t('settings.save_custom')}</span>
               </Button>
