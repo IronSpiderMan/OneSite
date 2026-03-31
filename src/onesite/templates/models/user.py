@@ -10,6 +10,24 @@ class UserBase(SQLModel):
     is_superuser: bool = Field(default=False, sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
 
 class User(UserBase, table=True):
+    __onesite__ = {
+        "translations": {
+            "zh": {
+                "name": "用户",
+                "fields": {
+                    "email": "邮箱",
+                    "full_name": "姓名",
+                    "avatar": "头像",
+                    "is_active": "是否启用",
+                    "is_superuser": "是否超管",
+                    "created_at": "创建时间",
+                    "updated_at": "更新时间",
+                    "password": "密码"
+                }
+            }
+        }
+    }
+
     id: Optional[int] = Field(default=None, primary_key=True)
     hashed_password: str = Field(sa_column_kwargs={"info": {"site_props": {"permissions": ""}}}) # Hidden
     created_at: datetime = Field(default_factory=datetime.utcnow, sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})

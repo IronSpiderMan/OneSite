@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from rich.console import Console
 
@@ -159,16 +159,36 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             cur = nxt
         cur[parts[-1]] = value
 
+    def pick_model_name(pack: Any, fallback: str) -> str:
+        if isinstance(pack, str):
+            return pack
+        if isinstance(pack, dict):
+            name = pack.get("name")
+            if isinstance(name, str) and name:
+                return name
+        return fallback
+
+    def pick_model_field_label(pack: Any, field_name: str) -> Optional[str]:
+        if not isinstance(pack, dict):
+            return None
+        fields = pack.get("fields")
+        if not isinstance(fields, dict):
+            return None
+        v = fields.get(field_name)
+        if isinstance(v, str) and v:
+            return v
+        return None
+
     for model in models:
         model_name = model["module_name"]
         model_name_en = model["name"]
         model_name_zh = model["name"]
 
         model_translations = model.get("translations", {})
-        if "en" in model_translations:
-            model_name_en = model_translations["en"]
-        if "zh" in model_translations:
-            model_name_zh = model_translations["zh"]
+        en_pack = model_translations.get("en")
+        zh_pack = model_translations.get("zh")
+        model_name_en = pick_model_name(en_pack, model_name_en)
+        model_name_zh = pick_model_name(zh_pack, model_name_zh)
 
         en_model = {"name": model_name_en, "fields": {}}
         zh_model = {"name": model_name_zh, "fields": {}}
@@ -181,10 +201,19 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             translations = field.get("translations", {})
             if "en" in translations:
                 label_en = translations["en"]
+            else:
+                v = pick_model_field_label(en_pack, field_name)
+                if v is not None:
+                    label_en = v
             if "zh" in translations:
                 label_zh = translations["zh"]
-            elif field_name in zh_field_defaults:
-                label_zh = zh_field_defaults[field_name]
+            else:
+                v = pick_model_field_label(zh_pack, field_name)
+                if v is not None:
+                    label_zh = v
+                else:
+                    if field_name in zh_field_defaults:
+                        label_zh = zh_field_defaults[field_name]
 
             en_model["fields"][field_name] = label_en
             zh_model["fields"][field_name] = label_zh
