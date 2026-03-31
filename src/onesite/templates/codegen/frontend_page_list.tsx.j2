@@ -202,7 +202,8 @@ const {{ model.name }}Page: React.FC = () => {
             <Button size="sm" type="button" onClick={applySearch}>{t('common.search')}</Button>
           </div>
         </div>
-        <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-4 max-h-[40vh] overflow-auto pr-2">
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {% for field in model.fields %}
           {% if field.is_search_field and (field.ui_type in ['bool','str','datetime'] or field.is_enum) and field.name != 'id' %}
           <div className="space-y-2">
@@ -263,6 +264,7 @@ const {{ model.name }}Page: React.FC = () => {
           </div>
           {% endif %}
           {% endfor %}
+          </div>
         </div>
       </div>
       {% endif %}
