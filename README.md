@@ -9,6 +9,7 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 - **Full-Stack Generation**: Generates Backend (FastAPI, SQLModel, Pydantic) and Frontend (React, Tailwind, Zustand, Lucide Icons).
 - **Model-Driven**: Define your data models in standard Python code, and let OneSite handle the rest.
 - **Auto CRUD & Validation**: Automatically generates Create, Read, Update, Delete APIs and UI, including unique constraints validation.
+- **Search & Filters**: Mark fields as searchable to generate list-page filters (bool/enum/string contains/datetime range).
 - **Smart UI Components**:
   - `bool` -> **Switch** / **Badge**
   - `Enum` -> **Select** / **Badge**
@@ -19,6 +20,7 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
   - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
   - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
   - **One-to-Many (Reverse FK)**: Displays related items in a paginated list on the detail page (e.g. Products under a Category). Configurable.
+- **Better UX Defaults**: Delete confirmation dialogs; toast notifications for create/update.
 - **Pagination**: Built-in standard pagination support for all list views.
 - **Auto Refresh**: Configurable auto-refresh for real-time data monitoring.
 - **Authentication & Security**:
@@ -123,6 +125,22 @@ class Post(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id", sa_column_kwargs={"info": {"site_props": {"reverse_display": True}}})
 ```
 
+#### Table Names (`__tablename__`)
+SQLModel's default table name is not snake_case. By default it uses the lowercased class name.
+For example, `DataModel` becomes `datamodel` (not `data_model`).
+
+If you use `foreign_key="snake_case_table.id"` (recommended for consistency with OneSite's generated module/page names), you MUST set `__tablename__` explicitly:
+
+```python
+class DataModel(SQLModel, table=True):
+    __tablename__ = "data_model"
+    id: Optional[int] = Field(default=None, primary_key=True)
+```
+
+Rule of thumb:
+- If your model class name contains multiple words (e.g. `DataModel`, `DataSource`, `DeviceProfile`), add `__tablename__ = "data_model"` / `"data_source"` / `"device_profile"` and use those names in `foreign_key=...`.
+- If your model is a single word and matches its snake_case form (e.g. `User` -> `user`), `__tablename__` can be omitted.
+
 #### Many-to-Many Relationship
 To define a Many-to-Many relationship (e.g., Posts have many Tags), create a link table model with specific metadata.
 
@@ -143,7 +161,7 @@ from sqlmodel import Field, SQLModel
 
 class PostTagLink(SQLModel, table=True):
     # Required metadata to identify this as a M2M link table
-    __table_args__ = {"info": {"site_props": {"is_link_table": True}}}
+    __onesite__ = {"is_link_table": True}
     
     post_id: Optional[int] = Field(default=None, foreign_key="post.id", primary_key=True)
     tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", primary_key=True)
@@ -166,8 +184,6 @@ custom field 1
 custom field 2
 ...
 ```
-
-For browser-persisted fields, use `schema_extra={"site_props": {"storage": "local"}}`.
 
 `models/system_config.py` (Default generated):
 ```python
@@ -197,6 +213,12 @@ class TimezoneEnum(str, Enum):
     UTC = "UTC"
     ASIA_SHANGHAI = "Asia/Shanghai"
 
+class ThemeEnum(str, Enum):
+    SYSTEM = "system"
+    LIGHT = "light"
+    DARK = "dark"
+    IOTHUB = "iothub"
+
 class CustomConfig(SQLModel):
     __onesite__ = {"config_role": "custom", "frontend_only": True}
     
@@ -204,12 +226,14 @@ class CustomConfig(SQLModel):
     language: LanguageEnum = Field(default=LanguageEnum.EN)
     
     timezone: TimezoneEnum = Field(default=TimezoneEnum.UTC)
+
+    theme: ThemeEnum = Field(default=ThemeEnum.SYSTEM)
 ```
 
 ### 3. Advanced Configuration
 
-You can customize field behavior using `site_props` in `sa_column_kwargs` or `schema_extra`.
-Note: when you use `sa_column=Column(...)` in SQLModel, you cannot also pass `sa_column_kwargs` (SQLModel limitation). In that case, put `site_props` in `schema_extra` instead.
+You can customize field behavior using `site_props` (recommended via `sa_column_kwargs={"info": {"site_props": {...}}}`).
+Note: when you use `sa_column=Column(...)` in SQLModel, you cannot also pass `sa_column_kwargs` (SQLModel limitation). In that case, you can put `site_props` in `schema_extra`/`json_schema_extra`, but support depends on your SQLModel version. The most reliable approach is `sa_column_kwargs.info.site_props`.
 
 #### Field Permissions & Validation
 Control field visibility and validation requirements for Create/Update operations.
@@ -229,6 +253,27 @@ class User(SQLModel, table=True):
 - `permissions`: String with `r` (read), `c` (create), `u` (update). Default is `rcu`.
 - `create_optional`: If `True`, field is not required in Create form.
 - `update_optional`: If `True`, field is not required in Update form.
+
+#### Search & Filters
+You can mark certain fields as searchable to generate a filter panel at the top of list pages.
+
+```python
+from datetime import datetime
+from typing import Optional
+
+from sqlmodel import Field, SQLModel
+
+class Product(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}})
+    is_active: bool = Field(default=True, sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}})
+    created_at: datetime = Field(sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}})
+```
+
+- `bool`: exact match (All/Yes/No)
+- `Enum`: exact match (All + enum values)
+- `str`: fuzzy contains (`ilike "%value%"`)
+- `datetime`: range filter (from/to)
 
 #### JSON Fields (Object & Array)
 OneSite supports two JSON field kinds:
