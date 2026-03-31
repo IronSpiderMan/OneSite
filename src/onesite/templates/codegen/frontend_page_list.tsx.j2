@@ -3,6 +3,7 @@ import { Plus, Pencil, Trash2, Loader2, Eye } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { {{ model.name }} } from '../../services/{{ model.module_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
@@ -18,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ImageUpload } from '../../components/ui/image-upload';
 import { FileUpload } from '../../components/ui/file-upload';
 import { SearchableSelect } from '../../components/ui/searchable-select';
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -33,6 +35,9 @@ const {{ model.name }}Page: React.FC = () => {
   const { data, loading, fetchData, createItem, updateItem, deleteItem } = use{{ model.name }}Store();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   const { register, handleSubmit, reset, setValue, control } = useForm();
 
@@ -72,12 +77,24 @@ const {{ model.name }}Page: React.FC = () => {
     setIsModalOpen(true);
   };
 
-  const handleDelete = async (id: number) => {
-    if (!confirm(t('common.confirm_delete'))) return;
+  const requestDelete = (id: number) => {
+    setDeleteId(id);
+    setDeleteOpen(true);
+  };
+
+  const confirmDelete = async () => {
+    if (!deleteId) return;
+    setIsDeleting(true);
     try {
-      await deleteItem(id);
+      await deleteItem(deleteId);
+      toast.success(t('toast.delete_success', 'Deleted'));
     } catch (error) {
+      toast.error(t('toast.delete_failed', 'Delete failed'));
       console.error(error);
+    } finally {
+      setIsDeleting(false);
+      setDeleteOpen(false);
+      setDeleteId(null);
     }
   };
 
@@ -85,17 +102,37 @@ const {{ model.name }}Page: React.FC = () => {
     try {
       if (editingId) {
         await updateItem(editingId, values);
+        toast.success(t('toast.update_success', 'Updated'));
       } else {
         await createItem(values);
+        toast.success(t('toast.create_success', 'Created'));
       }
       setIsModalOpen(false);
     } catch (error) {
+      toast.error(t('toast.save_failed', 'Save failed'));
       console.error(error);
     }
   };
 
   return (
     <div className="space-y-6">
+      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('alert.delete_title', 'Confirm deletion')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('common.confirm_delete')}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isDeleting}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction disabled={isDeleting} onClick={confirmDelete}>
+              {isDeleting ? t('common.loading') : t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')}s</h1>
         <div className="flex items-center gap-4">
@@ -217,7 +254,7 @@ const {{ model.name }}Page: React.FC = () => {
                         <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                             <Pencil className="h-4 w-4" />
                         </Button>
-                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => handleDelete(item.id)}>
+                        <Button variant="ghost" size="icon" className="text-destructive" onClick={() => requestDelete(item.id)}>
                             <Trash2 className="h-4 w-4" />
                         </Button>
                     </TableCell>

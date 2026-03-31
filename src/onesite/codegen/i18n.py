@@ -64,6 +64,16 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "custom_title": "Personal Settings",
             "save_custom": "Save Personal Settings",
         },
+        "alert": {
+            "delete_title": "Confirm deletion",
+        },
+        "toast": {
+            "create_success": "Created",
+            "update_success": "Updated",
+            "delete_success": "Deleted",
+            "delete_failed": "Delete failed",
+            "save_failed": "Save failed",
+        },
         "models": {},
     }
 
@@ -112,6 +122,16 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "save_system": "保存系统配置",
             "custom_title": "个性化配置",
             "save_custom": "保存个性化配置",
+        },
+        "alert": {
+            "delete_title": "确认删除",
+        },
+        "toast": {
+            "create_success": "创建成功",
+            "update_success": "更新成功",
+            "delete_success": "删除成功",
+            "delete_failed": "删除失败",
+            "save_failed": "保存失败",
         },
         "models": {},
     }

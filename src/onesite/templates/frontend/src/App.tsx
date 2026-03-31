@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import AppLayout from './components/Layout';
 import { GeneratedRoutes } from './Routes';
 import LoginPage from './pages/Login';
+import { AppToaster } from './components/ui/sonner';
 
 // Simple Auth Guard
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -18,6 +19,7 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 function App() {
   return (
     <BrowserRouter>
+      <AppToaster />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         
