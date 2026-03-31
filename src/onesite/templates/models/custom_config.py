@@ -9,6 +9,12 @@ class TimezoneEnum(str, Enum):
     UTC = "UTC"
     ASIA_SHANGHAI = "Asia/Shanghai"
 
+class ThemeEnum(str, Enum):
+    SYSTEM = "system"
+    LIGHT = "light"
+    DARK = "dark"
+    IOTHUB = "iothub"
+
 class CustomConfig(SQLModel):
     __onesite__ = {"config_role": "custom", "frontend_only": True}
 
@@ -19,4 +25,8 @@ class CustomConfig(SQLModel):
     
     timezone: TimezoneEnum = Field(
         default=TimezoneEnum.UTC
+    )
+
+    theme: ThemeEnum = Field(
+        default=ThemeEnum.SYSTEM
     )

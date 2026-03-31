@@ -47,6 +47,28 @@
     --input: 217.2 32.6% 17.5%;
     --ring: 212.7 26.8% 83.9%;
   }
+
+  html.theme-iothub {
+    --background: 222 50% 6%;
+    --foreground: 210 40% 98%;
+    --card: 220 34% 12%;
+    --card-foreground: 210 40% 98%;
+    --popover: 220 34% 12%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 217 22% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 22% 16%;
+    --muted-foreground: 215 20.2% 72%;
+    --accent: 210 24% 18%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 44%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 18% 22%;
+    --input: 215 18% 22%;
+    --ring: 160 84% 39%;
+  }
 }
  
 @layer base {
@@ -55,5 +77,26 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer base {
+  html.theme-iothub body {
+    background-image:
+      radial-gradient(1200px 800px at 65% 12%, rgba(16, 185, 129, 0.35), rgba(16, 185, 129, 0) 60%),
+      radial-gradient(900px 700px at 25% 78%, rgba(37, 99, 235, 0.25), rgba(37, 99, 235, 0) 65%),
+      radial-gradient(700px 500px at 90% 85%, rgba(14, 165, 233, 0.18), rgba(14, 165, 233, 0) 60%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.15) 55%, rgba(0, 0, 0, 0.45) 100%);
+    background-attachment: fixed;
+  }
+
+  html.theme-iothub .bg-card {
+    background-color: hsl(var(--card) / 0.72);
+    backdrop-filter: blur(14px);
+  }
+
+  html.theme-iothub .bg-popover {
+    background-color: hsl(var(--popover) / 0.72);
+    backdrop-filter: blur(14px);
   }
 }

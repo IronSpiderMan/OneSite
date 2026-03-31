@@ -13,6 +13,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
     zh_field_defaults: Dict[str, str] = {
         "language": "语言",
         "timezone": "时区",
+        "theme": "主题",
         "site_name": "站点名称",
         "allow_registration": "允许注册",
     }
@@ -25,6 +26,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "settings": "Settings",
             "language": "Language",
             "timezone": "Timezone",
+            "theme": "Theme",
             "save": "Save",
             "cancel": "Cancel",
             "create": "Create",
@@ -73,6 +75,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "settings": "设置",
             "language": "语言",
             "timezone": "时区",
+            "theme": "主题",
             "save": "保存",
             "cancel": "取消",
             "create": "创建",
