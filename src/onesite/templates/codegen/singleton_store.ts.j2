@@ -1,0 +1,113 @@
+import { create } from 'zustand';
+{% if not model.frontend_only %}
+import { {{ model.name }}, get{{ model.name }}, update{{ model.name }} } from '../services/{{ model.module_name }}';
+{% endif %}
+{% if model.frontend_only %}
+export interface {{ model.name }} {
+{% for field in model.fields %}
+    {% if field.name != 'id' %}
+    {{ field.name }}: any;
+    {% endif %}
+{% endfor %}
+}
+{% endif %}
+
+interface {{ model.name }}State {
+    data: {{ model.name }} | null;
+    localData: Record<string, any>;
+    loading: boolean;
+    error: any | null;
+    fetchData: () => Promise<void>;
+    updateData: (item: any) => Promise<void>;
+}
+
+export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get) => ({
+    data: null,
+    localData: {},
+    loading: false,
+    error: null,
+    fetchData: async () => {
+        set({ loading: true, error: null });
+        try {
+            // Fetch server data
+            {% if not model.frontend_only %}
+            const result = await get{{ model.name }}();
+            {% else %}
+            const result = null;
+            {% endif %}
+            
+            // Fetch local data from localStorage
+            const localData: Record<string, any> = {};
+            {% for field in model.fields %}
+            {% if field.is_local_storage %}
+            const {{ field.name }}Val = localStorage.getItem('{{ model.module_name }}_{{ field.name }}');
+            if ({{ field.name }}Val !== null) {
+                try {
+                    localData['{{ field.name }}'] = JSON.parse({{ field.name }}Val);
+                } catch(e) {
+                    localData['{{ field.name }}'] = {{ field.name }}Val;
+                }
+            } else {
+                {% if field.default is not none and field.default != 'PydanticUndefined' %}
+                {% if field.is_enum %}
+                localData['{{ field.name }}'] = {{ field.enum_values[0] | tojson }};
+                {% else %}
+                localData['{{ field.name }}'] = {{ field.default | tojson }};
+                {% endif %}
+                {% else %}
+                localData['{{ field.name }}'] = null;
+                {% endif %}
+            }
+            {% endif %}
+            {% endfor %}
+            
+            set({ data: result, localData, loading: false });
+        } catch (error) {
+            console.error("Failed to fetch data:", error);
+            set({ loading: false, error });
+        }
+    },
+    updateData: async (item: any) => {
+        try {
+            // Separate server and local data
+            const serverData: Record<string, any> = {};
+            const localData: Record<string, any> = {};
+            
+            const allowedFields: string[] = [
+                {% for field in model.fields %}
+                {% if field.name != 'id' %}
+                '{{ field.name }}',
+                {% endif %}
+                {% endfor %}
+            ];
+            const localFields: string[] = [
+                {% for field in model.fields %}
+                {% if field.is_local_storage %}
+                '{{ field.name }}',
+                {% endif %}
+                {% endfor %}
+            ];
+            
+            Object.keys(item).forEach(key => {
+                if (!allowedFields.includes(key)) return;
+                if (localFields.includes(key)) {
+                    localData[key] = item[key];
+                    // Save to localStorage
+                    localStorage.setItem(`{{ model.module_name }}_${key}`, typeof item[key] === 'object' ? JSON.stringify(item[key]) : item[key]);
+                } else {
+                    serverData[key] = item[key];
+                }
+            });
+
+            {% if not model.frontend_only %}
+            const result = await update{{ model.name }}(serverData);
+            set({ data: result, localData });
+            {% else %}
+            set({ localData });
+            {% endif %}
+        } catch (error) {
+            console.error("Failed to update data:", error);
+            throw error;
+        }
+    },
+}));

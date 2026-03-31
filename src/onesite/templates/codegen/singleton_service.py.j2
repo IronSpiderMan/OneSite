@@ -1,0 +1,13 @@
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.cruds import {{ model.module_name }} as crud
+from app.schemas.{{ model.module_name }} import {{ model.name }}Update
+from app.models.{{ model.source_module }} import {{ model.name }}
+
+class {{ model.name }}Service:
+    async def get(self, session: AsyncSession) -> {{ model.name }}:
+        return await crud.get(session)
+
+    async def update(self, session: AsyncSession, obj_in: {{ model.name }}Update) -> {{ model.name }}:
+        return await crud.update(session, obj_in)
+
+service = {{ model.name }}Service()

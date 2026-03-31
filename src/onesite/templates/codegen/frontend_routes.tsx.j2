@@ -1,8 +1,12 @@
 import React from 'react';
 import SettingsPage from './pages/Settings';
 {% for model in models %}
+{% if not model.is_singleton %}
 import {{ model.name }}Page from './pages/{{ model.module_name }}';
 import {{ model.name }}DetailPage from './pages/{{ model.module_name }}/detail';
+{% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
+import {{ model.name }}Page from './pages/{{ model.module_name }}';
+{% endif %}
 {% endfor %}
 
 export const GeneratedRoutes = [
@@ -11,6 +15,7 @@ export const GeneratedRoutes = [
     element: <SettingsPage />,
   },
 {% for model in models %}
+{% if not model.is_singleton %}
   {
     path: '/{{ model.module_name }}s',
     element: <{{ model.name }}Page />,
@@ -19,5 +24,11 @@ export const GeneratedRoutes = [
     path: '/{{ model.module_name }}s/:id',
     element: <{{ model.name }}DetailPage />,
   },
+{% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
+  {
+    path: '/{{ model.module_name }}',
+    element: <{{ model.name }}Page />,
+  },
+{% endif %}
 {% endfor %}
 ];

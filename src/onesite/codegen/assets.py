@@ -66,10 +66,14 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         "src/components/Layout.tsx",
         "src/utils/request.ts",
         "src/pages/Login.tsx",
-        "src/pages/Settings.tsx",
         "src/vite-env.d.ts",
         "src/i18n.ts",
     ]
+
+    # Only sync Settings.tsx if there is no singleton model generated
+    settings_file = target_frontend_root / "src" / "pages" / "Settings.tsx"
+    if not settings_file.exists():
+        config_files.append("src/pages/Settings.tsx")
 
     for config_file in config_files:
         if config_file == "vite.config.ts":

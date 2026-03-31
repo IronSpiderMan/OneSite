@@ -1,0 +1,21 @@
+import request from '../utils/request';
+
+const API_URL = '/{{ model.module_name }}/';
+
+export interface {{ model.name }} {
+{% for field in model.fields %}
+    {% if not field.is_local_storage and 'r' in field.permissions %}
+    {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+    {% endif %}
+{% endfor %}
+}
+
+export const get{{ model.name }} = async () => {
+    const response = await request.get<{{ model.name }}>(API_URL);
+    return response.data;
+};
+
+export const update{{ model.name }} = async (data: Partial<{{ model.name }}>) => {
+    const response = await request.put<{{ model.name }}>(API_URL, data);
+    return response.data;
+};

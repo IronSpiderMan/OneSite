@@ -1,0 +1,34 @@
+from typing import Optional, List, Dict, Any
+from datetime import datetime
+from sqlmodel import SQLModel
+from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
+
+# Shared properties
+class {{ model.name }}Base(SQLModel):
+{% set ns = namespace(has_field=false) %}
+{% for field in model.fields %}
+    {% if not field.is_local_storage and 'r' in field.permissions and field.name != 'id' %}
+    {{ field.name }}: {{ field.type }}
+    {% set ns.has_field = true %}
+    {% endif %}
+{% endfor %}
+{% if not ns.has_field %}
+    pass
+{% endif %}
+
+
+# Properties to receive via API on update
+class {{ model.name }}Update(SQLModel):
+{% set ns = namespace(has_field=false) %}
+{% for field in model.fields %}
+    {% if not field.is_local_storage and 'u' in field.permissions and field.name != 'id' %}
+    {{ field.name }}: {{ field.type }} = None
+    {% set ns.has_field = true %}
+    {% endif %}
+{% endfor %}
+{% if not ns.has_field %}
+    pass
+{% endif %}
+
+class {{ model.name }}Read({{ model.name }}Base):
+    id: int

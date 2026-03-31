@@ -150,6 +150,62 @@ class PostTagLink(SQLModel, table=True):
 ```
 OneSite will automatically inject a `tag_ids` field into the `Post` form, allowing you to select multiple Tags.
 
+#### Configuration Models (Settings Page)
+OneSite reserves two special models for the unified `/settings` page:
+- `SystemConfig` in `models/system_config.py`: server-persisted system settings, admin-only
+- `CustomConfig` in `models/custom_config.py`: browser-persisted user preferences (localStorage), available to all users
+
+The Settings page uses a top-to-bottom layout:
+```
+[Save System Config]
+system field 1
+system field 2
+...
+[Save Custom Config]
+custom field 1
+custom field 2
+...
+```
+
+For browser-persisted fields, use `schema_extra={"site_props": {"storage": "local"}}`.
+
+`models/system_config.py` (Default generated):
+```python
+from typing import Optional
+from sqlmodel import Field, SQLModel
+
+class SystemConfig(SQLModel, table=True):
+    __onesite__ = {"config_role": "system", "permissions": "admin", "is_singleton": True}
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    
+    # Server-side settings
+    site_name: str = Field(default="OneSite Admin")
+    allow_registration: bool = Field(default=True)
+```
+
+`models/custom_config.py` (Default generated):
+```python
+from enum import Enum
+from sqlmodel import Field, SQLModel
+
+class LanguageEnum(str, Enum):
+    EN = "en"
+    ZH = "zh"
+
+class TimezoneEnum(str, Enum):
+    UTC = "UTC"
+    ASIA_SHANGHAI = "Asia/Shanghai"
+
+class CustomConfig(SQLModel):
+    __onesite__ = {"config_role": "custom", "frontend_only": True}
+    
+    # Since frontend_only is True, all fields are automatically treated as local storage
+    language: LanguageEnum = Field(default=LanguageEnum.EN)
+    
+    timezone: TimezoneEnum = Field(default=TimezoneEnum.UTC)
+```
+
 ### 3. Advanced Configuration
 
 You can customize field behavior using `site_props` in `sa_column_kwargs` or `schema_extra`.

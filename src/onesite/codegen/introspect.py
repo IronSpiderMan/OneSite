@@ -72,6 +72,27 @@ def _build_json_model_schema(
 def get_model_fields(
     model_cls: type[SQLModel], module_name: str | None = None
 ) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str, bool, Dict[str, Any], bool, int, bool]:
+    model_site_props: Dict[str, Any] = {}
+    if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
+        model_site_props.update(getattr(model_cls, "__onesite__"))
+    if hasattr(model_cls, "__site_props__") and isinstance(getattr(model_cls, "__site_props__"), dict):
+        model_site_props.update(getattr(model_cls, "__site_props__"))
+
+    if hasattr(model_cls, "__table_args__") and isinstance(model_cls.__table_args__, dict):
+        info = model_cls.__table_args__.get("info", {})
+        table_site_props = info.get("site_props", {})
+        if isinstance(table_site_props, dict):
+            model_site_props = {**table_site_props, **model_site_props}
+
+    is_link_table = model_site_props.get("is_link_table", False)
+    is_singleton = model_site_props.get("is_singleton", False)
+    model_permissions = model_site_props.get("permissions", "admin")
+    frontend_only = model_site_props.get("frontend_only", False)
+    model_translations = model_site_props.get("translations", {})
+    auto_refresh = model_site_props.get("auto_refresh", False)
+    refresh_interval = model_site_props.get("refresh_interval", 5000)
+    reverse_fk_display = model_site_props.get("reverse_fk_display", True)
+
     fields: List[Dict[str, Any]] = []
     for name, field in model_cls.model_fields.items():
         sa_column_kwargs = getattr(field, "sa_column_kwargs", {})
@@ -81,11 +102,18 @@ def get_model_fields(
         info = sa_column_kwargs.get("info", {})
         site_props = info.get("site_props", {})
         if not site_props:
-            if hasattr(field, "json_schema_extra"):
-                json_schema_extra = field.json_schema_extra
-                if json_schema_extra is PydanticUndefined or json_schema_extra is None:
-                    json_schema_extra = {}
-                site_props = json_schema_extra.get("site_props", {})
+            json_schema_extra = getattr(field, "json_schema_extra", None)
+            if json_schema_extra is PydanticUndefined or json_schema_extra is None:
+                json_schema_extra = {}
+            if isinstance(json_schema_extra, dict):
+                site_props = json_schema_extra.get("site_props", {}) or {}
+
+        if not site_props:
+            schema_extra = getattr(field, "schema_extra", None)
+            if schema_extra is PydanticUndefined or schema_extra is None:
+                schema_extra = {}
+            if isinstance(schema_extra, dict):
+                site_props = schema_extra.get("site_props", {}) or {}
 
         permissions = site_props.get("permissions", "rcu")
         create_optional = site_props.get("create_optional", False)
@@ -244,6 +272,9 @@ def get_model_fields(
         elif hasattr(field, "unique") and field.unique is not PydanticUndefined and field.unique is not None:
             is_unique = field.unique
 
+        # Check if local storage
+        is_local_storage = site_props.get("storage") == "local" or frontend_only
+
         fields.append(
             {
                 "name": name,
@@ -266,6 +297,7 @@ def get_model_fields(
                 "label_key": label_key,
                 "translations": translations,
                 "is_unique": is_unique,
+                "is_local_storage": is_local_storage,
             }
         )
 
@@ -286,26 +318,14 @@ def get_model_fields(
     foreign_keys = [f["fk_info"] for f in fields if f["fk_info"]]
     search_field = next((f["name"] for f in fields if f.get("is_search_field")), "id")
 
-    is_link_table = False
-    model_translations: Dict[str, Any] = {}
-    auto_refresh = False
-    refresh_interval = 5000
-    reverse_fk_display = True
-
-    if hasattr(model_cls, "__table_args__") and isinstance(model_cls.__table_args__, dict):
-        info = model_cls.__table_args__.get("info", {})
-        site_props = info.get("site_props", {})
-        is_link_table = site_props.get("is_link_table", False)
-        model_translations = site_props.get("translations", {})
-        auto_refresh = site_props.get("auto_refresh", False)
-        refresh_interval = site_props.get("refresh_interval", 5000)
-        reverse_fk_display = site_props.get("reverse_fk_display", True)
-
     return (
         fields,
         foreign_keys,
         search_field,
         is_link_table,
+        is_singleton,
+        model_permissions,
+        frontend_only,
         model_translations,
         auto_refresh,
         refresh_interval,

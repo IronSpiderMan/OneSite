@@ -1,0 +1,28 @@
+from typing import Any
+from fastapi import APIRouter, Depends
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.core import db, deps
+from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Update
+from app.services.{{ model.module_name }} import service
+
+router = APIRouter(
+{% if model.model_permissions == 'admin' %}
+    dependencies=[Depends(deps.get_current_active_superuser)]
+{% else %}
+    dependencies=[Depends(deps.get_current_user)]
+{% endif %}
+)
+
+@router.get("/", response_model={{ model.name }}Read)
+async def get_{{ model.lower_name }}(
+    session: AsyncSession = Depends(db.get_session),
+) -> Any:
+    return await service.get(session)
+
+@router.put("/", response_model={{ model.name }}Read)
+async def update_{{ model.lower_name }}(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    {{ model.lower_name }}_in: {{ model.name }}Update,
+) -> Any:
+    return await service.update(session, {{ model.lower_name }}_in)

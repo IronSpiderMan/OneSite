@@ -18,8 +18,10 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path):
 
     for model in models:
         imports.append(f"from app.api.endpoints import {model['module_name']}")
+        prefix = f"/{model['module_name']}s" if not model.get('is_singleton') else f"/{model['module_name']}"
+        tag_name = f"{model['module_name']}s" if not model.get('is_singleton') else f"{model['module_name']}"
         routers.append(
-            f'api_router.include_router({model["module_name"]}.router, prefix="/{model["module_name"]}s", tags=["{model["module_name"]}s"])'
+            f'api_router.include_router({model["module_name"]}.router, prefix="{prefix}", tags=["{tag_name}"])'
         )
 
     content = (

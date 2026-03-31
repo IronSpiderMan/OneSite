@@ -1,0 +1,342 @@
+import React, { useEffect, useState } from 'react';
+import { Loader2, Save } from 'lucide-react';
+import { useForm, Controller } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { JsonInput } from '../components/ui/json-input';
+import { JsonModelEditor, JsonModelArrayEditor } from '../components/ui/json-model-editor';
+import { Label } from '../components/ui/label';
+import { Switch } from '../components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { ImageUpload } from '../components/ui/image-upload';
+import { FileUpload } from '../components/ui/file-upload';
+{% if system_model %}
+import { use{{ system_model.name }}Store } from '../stores/use{{ system_model.name }}Store';
+{% endif %}
+{% if custom_model %}
+import { use{{ custom_model.name }}Store } from '../stores/use{{ custom_model.name }}Store';
+{% endif %}
+
+const SettingsPage: React.FC = () => {
+  const { t, i18n } = useTranslation();
+  const [isSavingSystem, setIsSavingSystem] = useState(false);
+  const [isSavingCustom, setIsSavingCustom] = useState(false);
+  const { register, handleSubmit, reset, control } = useForm();
+
+  {% if system_model %}
+  const {
+    data: systemData,
+    localData: systemLocalData,
+    loading: systemLoading,
+    error: systemError,
+    fetchData: fetchSystemData,
+    updateData: updateSystemData,
+  } = use{{ system_model.name }}Store();
+  {% else %}
+  const systemData = null;
+  const systemLocalData: Record<string, any> = React.useMemo(() => ({}), []);
+  const systemLoading = false;
+  const systemError = null;
+  const fetchSystemData = React.useCallback(async () => {}, []);
+  const updateSystemData = React.useCallback(async (_: any) => {}, []);
+  {% endif %}
+
+  {% if custom_model %}
+  const {
+    data: customData,
+    localData: customLocalData,
+    loading: customLoading,
+    error: customError,
+    fetchData: fetchCustomData,
+    updateData: updateCustomData,
+  } = use{{ custom_model.name }}Store();
+  {% else %}
+  const customData = null;
+  const customLocalData: Record<string, any> = React.useMemo(() => ({}), []);
+  const customLoading = false;
+  const customError = null;
+  const fetchCustomData = React.useCallback(async () => {}, []);
+  const updateCustomData = React.useCallback(async (_: any) => {}, []);
+  {% endif %}
+
+  useEffect(() => {
+    fetchSystemData();
+    fetchCustomData();
+  }, [fetchSystemData, fetchCustomData]);
+
+  useEffect(() => {
+    if (systemLoading || customLoading) return;
+
+    const combined: Record<string, any> = {
+      ...(systemData || {}),
+      ...(systemLocalData || {}),
+      ...(customData || {}),
+      ...(customLocalData || {}),
+    };
+
+    Object.keys(combined).forEach((k) => {
+      if (combined[k] === null || combined[k] === undefined) delete combined[k];
+    });
+
+    reset(combined);
+  }, [systemLoading, customLoading, systemData, systemLocalData, customData, customLocalData, reset]);
+
+  const onSaveSystem = async (formData: any) => {
+    try {
+      setIsSavingSystem(true);
+      await updateSystemData(formData);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSavingSystem(false);
+    }
+  };
+
+  const onSaveCustom = async (formData: any) => {
+    try {
+      setIsSavingCustom(true);
+
+      let shouldReload = false;
+      if (formData.language && formData.language !== i18n.language) {
+        i18n.changeLanguage(formData.language);
+        shouldReload = true;
+      }
+      if (formData.timezone && formData.timezone !== localStorage.getItem('timezone')) {
+        localStorage.setItem('timezone', formData.timezone);
+        shouldReload = true;
+      }
+
+      await updateCustomData(formData);
+
+      if (shouldReload) {
+        window.location.reload();
+      }
+    } catch (e) {
+      console.error(e);
+    } finally {
+      setIsSavingCustom(false);
+    }
+  };
+
+  const showSystemSection = systemData !== null;
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('common.settings')}</h1>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-8">
+        <form className="space-y-8" onSubmit={(e) => e.preventDefault()}>
+          {showSystemSection ? (
+            <div className="space-y-6">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold">{t('settings.system_title')}</h2>
+                <Button onClick={handleSubmit(onSaveSystem)} disabled={isSavingSystem} className="flex items-center space-x-2">
+                  {isSavingSystem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                  <span>{t('settings.save_system')}</span>
+                </Button>
+              </div>
+
+              {% if system_model %}
+              {% for field in system_model.fields %}
+              {% if 'u' in field.permissions and field.name != 'id' %}
+              <div className="space-y-2">
+                <Label htmlFor="{{ field.name }}">
+                  {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+                </Label>
+
+                {% if field.ui_type == 'bool' %}
+                <div className="flex items-center space-x-2">
+                  <Controller
+                    name="{{ field.name }}"
+                    control={control}
+                    render={({ field: { onChange, value } }) => (
+                      <Switch checked={!!value} onCheckedChange={onChange} />
+                    )}
+                  />
+                </div>
+                {% elif field.ui_type == 'image' %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <ImageUpload value={value} onChange={onChange} />
+                  )}
+                />
+                {% elif field.ui_type == 'file' %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <FileUpload value={value} onChange={onChange} />
+                  )}
+                />
+                {% elif field.ui_type == 'json' %}
+                  {% if field.json_model_schema %}
+                    {% if field.json_kind == 'array' %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <JsonModelArrayEditor value={value} onChange={onChange} schema={{ field.json_item_schema | tojson }} />
+                  )}
+                />
+                    {% else %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} />
+                  )}
+                />
+                    {% endif %}
+                  {% else %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <JsonInput value={value} onChange={onChange} />
+                  )}
+                />
+                  {% endif %}
+                {% elif field.is_enum %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <Select value={value || ''} onValueChange={onChange}>
+                      <SelectTrigger>
+                        <SelectValue placeholder={t('common.select', 'Select...')} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {% for enum_val in field.enum_values %}
+                        <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+                        {% endfor %}
+                      </SelectContent>
+                    </Select>
+                  )}
+                />
+                {% else %}
+                <Input
+                  id="{{ field.name }}"
+                  type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
+                  {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
+                />
+                {% endif %}
+              </div>
+              {% endif %}
+              {% endfor %}
+              {% endif %}
+            </div>
+          ) : null}
+
+          <div className="space-y-6">
+            <div className="flex items-center justify-between">
+              <h2 className="text-xl font-semibold">{t('settings.custom_title')}</h2>
+              <Button variant="secondary" onClick={handleSubmit(onSaveCustom)} disabled={isSavingCustom} className="flex items-center space-x-2">
+                {isSavingCustom ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+                <span>{t('settings.save_custom')}</span>
+              </Button>
+            </div>
+
+            {% if custom_model %}
+            {% for field in custom_model.fields %}
+            {% if 'u' in field.permissions and field.name != 'id' %}
+            <div className="space-y-2">
+              <Label htmlFor="{{ field.name }}">
+                {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+                {% if field.is_local_storage %}
+                <span className="ml-2 text-xs text-gray-500 font-normal">({t('common.local_storage', 'Local Storage')})</span>
+                {% endif %}
+              </Label>
+
+              {% if field.ui_type == 'bool' %}
+              <div className="flex items-center space-x-2">
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <Switch checked={!!value} onCheckedChange={onChange} />
+                  )}
+                />
+              </div>
+              {% elif field.ui_type == 'image' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <ImageUpload value={value} onChange={onChange} />
+                )}
+              />
+              {% elif field.ui_type == 'file' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <FileUpload value={value} onChange={onChange} />
+                )}
+              />
+              {% elif field.ui_type == 'json' %}
+                {% if field.json_model_schema %}
+                  {% if field.json_kind == 'array' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <JsonModelArrayEditor value={value} onChange={onChange} schema={{ field.json_item_schema | tojson }} />
+                )}
+              />
+                  {% else %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} />
+                )}
+              />
+                  {% endif %}
+                {% else %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <JsonInput value={value} onChange={onChange} />
+                )}
+              />
+                {% endif %}
+              {% elif field.is_enum %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <Select value={value || ''} onValueChange={onChange}>
+                    <SelectTrigger>
+                      <SelectValue placeholder={t('common.select', 'Select...')} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {% for enum_val in field.enum_values %}
+                      <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+                      {% endfor %}
+                    </SelectContent>
+                  </Select>
+                )}
+              />
+              {% else %}
+              <Input
+                id="{{ field.name }}"
+                type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
+                {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
+              />
+              {% endif %}
+            </div>
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default SettingsPage;

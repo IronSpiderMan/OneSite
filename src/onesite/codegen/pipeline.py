@@ -101,13 +101,34 @@ def generate_code():
 
         for name, obj in inspect.getmembers(module):
             if inspect.isclass(obj) and issubclass(obj, SQLModel) and obj is not SQLModel:
-                if hasattr(obj, "metadata") and getattr(obj, "__table__", None) is not None:
+                table_args = getattr(obj, "__table_args__", None)
+                singleton_marker = False
+                if isinstance(table_args, dict):
+                    info = table_args.get("info", {})
+                    site_props = info.get("site_props", {})
+                    singleton_marker = bool(site_props.get("is_singleton", False))
+
+                onesite_props = getattr(obj, "__onesite__", None)
+                onesite_marker = False
+                if isinstance(onesite_props, dict):
+                    onesite_marker = bool(
+                        onesite_props.get("config_role")
+                        or onesite_props.get("frontend_only")
+                        or onesite_props.get("is_singleton")
+                    )
+
+                if hasattr(obj, "metadata") and (
+                    getattr(obj, "__table__", None) is not None or singleton_marker or onesite_marker
+                ):
                     model_module_name = _to_snake(name)
                     (
                         fields,
                         foreign_keys,
                         search_field,
                         is_link_table,
+                        is_singleton,
+                        model_permissions,
+                        frontend_only,
                         translations,
                         auto_refresh,
                         refresh_interval,
@@ -155,6 +176,9 @@ def generate_code():
                             "foreign_keys": foreign_keys,
                             "search_field": search_field,
                             "is_link_table": is_link_table,
+                            "is_singleton": is_singleton,
+                            "model_permissions": model_permissions,
+                            "frontend_only": frontend_only,
                             "translations": translations,
                             "auto_refresh": auto_refresh,
                             "refresh_interval": refresh_interval,
@@ -222,11 +246,97 @@ def generate_code():
                         }
                     )
 
+    theme_config, radius = resolve_theme(site_config)
+    generate_file("index.css.j2", {"theme": theme_config, "radius": radius}, cwd / "frontend" / "src" / "index.css")
+
+    # Sync assets BEFORE generating models so that our generated Settings.tsx isn't overwritten
+    sync_frontend_assets(cwd, site_config)
+    sync_backend_assets(cwd, backend_path, site_config)
+
     for model in found_models:
         if model["is_link_table"]:
             continue
 
         context = {"model": model}
+
+        is_system_config = model["module_name"] == "system_config" and model["name"] == "SystemConfig"
+        is_custom_config = model["module_name"] == "custom_config" and model["name"] == "CustomConfig"
+
+        if is_system_config or is_custom_config:
+            if not model.get("frontend_only"):
+                generate_file(
+                    "singleton_schema.py.j2",
+                    context,
+                    backend_path / "app" / "schemas" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_crud.py.j2",
+                    context,
+                    backend_path / "app" / "cruds" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_service.py.j2",
+                    context,
+                    backend_path / "app" / "services" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_api.py.j2",
+                    context,
+                    backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_frontend_service.ts.j2",
+                    context,
+                    cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts",
+                )
+
+            generate_file(
+                "singleton_store.ts.j2",
+                context,
+                cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts",
+            )
+            continue
+
+        if model.get("is_singleton"):
+            if not model.get("frontend_only"):
+                generate_file(
+                    "singleton_schema.py.j2",
+                    context,
+                    backend_path / "app" / "schemas" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_crud.py.j2",
+                    context,
+                    backend_path / "app" / "cruds" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_service.py.j2",
+                    context,
+                    backend_path / "app" / "services" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_api.py.j2",
+                    context,
+                    backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py",
+                )
+                generate_file(
+                    "singleton_frontend_service.ts.j2",
+                    context,
+                    cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts",
+                )
+
+            generate_file(
+                "singleton_store.ts.j2",
+                context,
+                cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts",
+            )
+            generate_file(
+                "singleton_page.tsx.j2",
+                context,
+                cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
+            )
+            continue
+
         is_user_model = model["name"] == "User"
 
         schema_tpl = "user_schema.py.j2" if is_user_model else "schema.py.j2"
@@ -260,14 +370,12 @@ def generate_code():
             cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
         )
 
-    theme_config, radius = resolve_theme(site_config)
-    generate_file("index.css.j2", {"theme": theme_config, "radius": radius}, cwd / "frontend" / "src" / "index.css")
-
-    sync_frontend_assets(cwd, site_config)
-    sync_backend_assets(cwd, backend_path, site_config)
-
-    api_models = [m for m in found_models if not m["is_link_table"]]
+    api_models = [m for m in found_models if not m["is_link_table"] and not m.get("frontend_only")]
     update_api_router(api_models, backend_path / "app" / "api" / "api.py")
+
+    system_model = next((m for m in found_models if m["module_name"] == "system_config" and m["name"] == "SystemConfig"), None)
+    custom_model = next((m for m in found_models if m["module_name"] == "custom_config" and m["name"] == "CustomConfig"), None)
+    generate_file("settings_page.tsx.j2", {"system_model": system_model, "custom_model": custom_model}, cwd / "frontend" / "src" / "pages" / "Settings.tsx")
 
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")

@@ -1,0 +1,170 @@
+import React, { useEffect, useState } from 'react';
+import { Loader2, Save } from 'lucide-react';
+import { useForm, Controller } from 'react-hook-form';
+import { useTranslation } from 'react-i18next';
+import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { JsonInput } from '../../components/ui/json-input';
+import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
+import { Label } from '../../components/ui/label';
+import { Switch } from '../../components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
+import { ImageUpload } from '../../components/ui/image-upload';
+import { FileUpload } from '../../components/ui/file-upload';
+
+const {{ model.name }}Page: React.FC = () => {
+  const { t } = useTranslation();
+  const { data, localData, loading, fetchData, updateData } = use{{ model.name }}Store();
+  const [isSaving, setIsSaving] = useState(false);
+  const { register, handleSubmit, reset, control } = useForm();
+
+  useEffect(() => {
+    fetchData();
+  }, [fetchData]);
+
+  useEffect(() => {
+    if (loading) return;
+    const combined: Record<string, any> = { ...(data || {}), ...(localData || {}) };
+    Object.keys(combined).forEach((k) => {
+      if (combined[k] === null || combined[k] === undefined) delete combined[k];
+    });
+    reset(combined);
+  }, [data, localData, loading, reset]);
+
+  const onSubmit = async (formData: any) => {
+    try {
+      setIsSaving(true);
+      await updateData(formData);
+    } catch (error) {
+      console.error('Failed to save:', error);
+    } finally {
+      setIsSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex justify-center items-center h-64">
+        <Loader2 className="w-8 h-8 animate-spin text-primary" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="max-w-4xl mx-auto space-y-6">
+      <div className="flex justify-between items-center">
+        <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+          {t('menu.{{ model.module_name }}', '{{ model.name }}')}
+        </h1>
+        <Button onClick={handleSubmit(onSubmit)} disabled={isSaving} className="flex items-center space-x-2">
+          {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
+          <span>{t('common.save', 'Save')}</span>
+        </Button>
+      </div>
+
+      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-6">
+        <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
+          {% for field in model.fields %}
+          {% if 'u' in field.permissions and field.name != 'id' %}
+          <div className="space-y-2">
+            <Label htmlFor="{{ field.name }}">
+              {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+              {% if field.is_local_storage %}
+              <span className="ml-2 text-xs text-gray-500 font-normal">({t('common.local_storage', 'Local Storage')})</span>
+              {% endif %}
+            </Label>
+
+            {% if field.ui_type == 'bool' %}
+            <div className="flex items-center space-x-2">
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <Switch checked={!!value} onCheckedChange={onChange} />
+                )}
+              />
+            </div>
+
+            {% elif field.ui_type == 'image' %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <ImageUpload value={value} onChange={onChange} />
+              )}
+            />
+
+            {% elif field.ui_type == 'file' %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <FileUpload value={value} onChange={onChange} />
+              )}
+            />
+
+            {% elif field.ui_type == 'json' %}
+              {% if field.json_model_schema %}
+                {% if field.json_kind == 'array' %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <JsonModelArrayEditor value={value} onChange={onChange} schema={{ field.json_item_schema | tojson }} />
+              )}
+            />
+                {% else %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} />
+              )}
+            />
+                {% endif %}
+              {% else %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <JsonInput value={value} onChange={onChange} />
+              )}
+            />
+              {% endif %}
+
+            {% elif field.is_enum %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <Select value={value || ''} onValueChange={onChange}>
+                  <SelectTrigger>
+                    <SelectValue placeholder={t('common.select', 'Select...')} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {% for enum_val in field.enum_values %}
+                    <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+                    {% endfor %}
+                  </SelectContent>
+                </Select>
+              )}
+            />
+
+            {% else %}
+            <Input
+              id="{{ field.name }}"
+              type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
+              {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
+            />
+            {% endif %}
+          </div>
+          {% endif %}
+          {% endfor %}
+        </form>
+      </div>
+    </div>
+  );
+};
+
+export default {{ model.name }}Page;

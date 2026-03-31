@@ -10,6 +10,13 @@ console = Console()
 def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
     locale_dir.mkdir(parents=True, exist_ok=True)
 
+    zh_field_defaults: Dict[str, str] = {
+        "language": "语言",
+        "timezone": "时区",
+        "site_name": "站点名称",
+        "allow_registration": "允许注册",
+    }
+
     en_translations: Dict[str, Any] = {
         "common": {
             "welcome": "Welcome",
@@ -36,6 +43,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "select": "Select",
             "auto_refresh": "Auto Refresh",
             "refresh_interval": "Refresh Interval",
+            "local_storage": "Local Storage",
         },
         "login": {
             "title": "Sign in",
@@ -47,6 +55,12 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "signingIn": "Signing in...",
             "error": "Login failed. Please check your credentials.",
             "demo": "Demo: admin@example.com / admin",
+        },
+        "settings": {
+            "system_title": "System Settings",
+            "save_system": "Save System Settings",
+            "custom_title": "Personal Settings",
+            "save_custom": "Save Personal Settings",
         },
         "models": {},
     }
@@ -77,6 +91,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "select": "选择",
             "auto_refresh": "自动刷新",
             "refresh_interval": "刷新频率",
+            "local_storage": "本地存储",
         },
         "login": {
             "title": "登录",
@@ -89,8 +104,27 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "error": "登录失败，请检查您的凭据。",
             "demo": "演示账号：admin@example.com / admin",
         },
+        "settings": {
+            "system_title": "系统配置",
+            "save_system": "保存系统配置",
+            "custom_title": "个性化配置",
+            "save_custom": "保存个性化配置",
+        },
         "models": {},
     }
+
+    def set_by_path(obj: Dict[str, Any], path: str, value: Any):
+        parts = [p for p in path.split(".") if p]
+        if not parts:
+            return
+        cur: Dict[str, Any] = obj
+        for p in parts[:-1]:
+            nxt = cur.get(p)
+            if not isinstance(nxt, dict):
+                nxt = {}
+                cur[p] = nxt
+            cur = nxt
+        cur[parts[-1]] = value
 
     for model in models:
         model_name = model["module_name"]
@@ -116,9 +150,16 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
                 label_en = translations["en"]
             if "zh" in translations:
                 label_zh = translations["zh"]
+            elif field_name in zh_field_defaults:
+                label_zh = zh_field_defaults[field_name]
 
             en_model["fields"][field_name] = label_en
             zh_model["fields"][field_name] = label_zh
+
+            label_key = field.get("label_key")
+            if isinstance(label_key, str) and label_key:
+                set_by_path(en_translations, label_key, label_en)
+                set_by_path(zh_translations, label_key, label_zh)
 
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model
@@ -126,4 +167,3 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
     (locale_dir / "en.json").write_text(json.dumps(en_translations, indent=2))
     (locale_dir / "zh.json").write_text(json.dumps(zh_translations, indent=2, ensure_ascii=False))
     console.print(f"Generated locale files in {locale_dir}")
-

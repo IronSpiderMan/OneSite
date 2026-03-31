@@ -8,20 +8,24 @@ import { useForm, Controller } from 'react-hook-form';
 
 const SettingsPage: React.FC = () => {
     const { t, i18n } = useTranslation();
-    const { control, handleSubmit, setValue } = useForm();
-    
+    const { register, handleSubmit, control, reset } = useForm();
+
     useEffect(() => {
-        setValue('language', i18n.language);
-        setValue('timezone', localStorage.getItem('timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone);
-    }, [i18n.language, setValue]);
+        reset({
+            language: i18n.language || 'en',
+            timezone: localStorage.getItem('timezone') || Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC'
+        });
+    }, [i18n.language, reset]);
 
     const onSubmit = (data: any) => {
-        i18n.changeLanguage(data.language);
-        localStorage.setItem('timezone', data.timezone);
-        // We only save to local storage/i18n state, no API call needed.
-        // Reload page to ensure all components pick up changes if necessary, 
-        // though i18n is reactive. Timezone might need reload if used in initial state.
-        window.location.reload(); 
+        if (data.language && data.language !== i18n.language) {
+            i18n.changeLanguage(data.language);
+        }
+        if (data.timezone && data.timezone !== localStorage.getItem('timezone')) {
+            localStorage.setItem('timezone', data.timezone);
+        }
+        // Force reload to apply settings
+        window.location.reload();
     };
 
     return (

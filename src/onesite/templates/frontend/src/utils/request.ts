@@ -12,7 +12,13 @@ request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
     if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+      const headersAny: any = (config as any).headers || {};
+      if (typeof headersAny.set === 'function') {
+        headersAny.set('Authorization', `Bearer ${token}`);
+      } else {
+        headersAny.Authorization = `Bearer ${token}`;
+      }
+      (config as any).headers = headersAny;
     }
     return config;
   },
