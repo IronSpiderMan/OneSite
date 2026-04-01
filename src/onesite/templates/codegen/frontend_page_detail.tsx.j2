@@ -20,6 +20,13 @@ import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}
 import { get{{ model.name }}{{ m2m.target_model }}s } from '../../services/{{ model.module_name }}';
 {% endfor %}
 {% endif %}
+{% if model.reverse_m2m %}
+{% for rel in model.reverse_m2m %}
+{% if rel.display %}
+import { get{{ model.name }}{{ rel.source_model }}s } from '../../services/{{ model.module_name }}';
+{% endif %}
+{% endfor %}
+{% endif %}
 {% if model.reverse_foreign_keys %}
 {% for rfk in model.reverse_foreign_keys %}
 {% if rfk.display %}
@@ -46,6 +53,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ m2m.name }}Total, set{{ m2m.target_model }}Total] = useState(0);
     const [{{ m2m.name }}Page, set{{ m2m.target_model }}Page] = useState(1);
     const [{{ m2m.name }}Loading, set{{ m2m.target_model }}Loading] = useState(false);
+    {% endfor %}
+    {% endif %}
+
+    // State for Reverse M2M data
+    {% if model.reverse_m2m %}
+    {% for rel in model.reverse_m2m %}
+    {% if rel.display %}
+    const [{{ rel.name }}Data, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Data] = useState<any[]>([]);
+    const [{{ rel.name }}Total, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Total] = useState(0);
+    const [{{ rel.name }}Page, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Page] = useState(1);
+    const [{{ rel.name }}Loading, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Loading] = useState(false);
+    {% endif %}
     {% endfor %}
     {% endif %}
 
@@ -104,6 +123,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
             {% endfor %}
             {% endif %}
 
+            // Fetch Reverse M2M data
+            {% if model.reverse_m2m %}
+            {% for rel in model.reverse_m2m %}
+            {% if rel.display %}
+            fetch{{ model.name }}{{ rel.source_model }}s(itemId, 1);
+            {% endif %}
+            {% endfor %}
+            {% endif %}
+
             // Fetch Reverse FK data
             {% if model.reverse_foreign_keys %}
             {% for rfk in model.reverse_foreign_keys %}
@@ -130,6 +158,26 @@ const {{ model.name }}DetailPage: React.FC = () => {
             set{{ m2m.target_model }}Loading(false);
         }
     };
+    {% endfor %}
+    {% endif %}
+
+    {% if model.reverse_m2m %}
+    {% for rel in model.reverse_m2m %}
+    {% if rel.display %}
+    const fetch{{ model.name }}{{ rel.source_model }}s = async (itemId: number, page: number) => {
+        set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Loading(true);
+        try {
+            const result = await get{{ model.name }}{{ rel.source_model }}s(itemId, page, 5);
+            set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Data(result.items);
+            set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Total(result.total);
+            set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Page(result.page);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Loading(false);
+        }
+    };
+    {% endif %}
     {% endfor %}
     {% endif %}
 
@@ -375,6 +423,73 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         </div>
                     </CardContent>
                 </Card>
+                {% endfor %}
+                {% endif %}
+
+                {% if model.reverse_m2m %}
+                {% for rel in model.reverse_m2m %}
+                {% if rel.display %}
+                <Card className="md:col-span-2">
+                    <CardHeader>
+                        <CardTitle>{t('models.{{ rel.source_service }}.name')}s</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="rounded-md border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>ID</TableHead>
+                                        <TableHead>{{ rel.label_field.title() }}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    { {{ rel.name }}Loading ? (
+                                        <TableRow>
+                                            <TableCell colSpan={2} className="h-24 text-center">
+                                                <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : {{ rel.name }}Data.length > 0 ? (
+                                        {{ rel.name }}Data.map((item) => (
+                                            <TableRow key={item.id}>
+                                                <TableCell>{item.id}</TableCell>
+                                                <TableCell>{item.{{ rel.label_field }} }</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={2} className="h-24 text-center">
+                                                No {{ rel.source_model.lower() }}s found.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                        <div className="mt-4 flex items-center justify-end space-x-2">
+                             <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetch{{ model.name }}{{ rel.source_model }}s(parseInt(id!), {{ rel.name }}Page - 1)}
+                                disabled={ {{ rel.name }}Page <= 1 || {{ rel.name }}Loading}
+                            >
+                                Previous
+                            </Button>
+                            <span className="text-sm">
+                                Page { {{ rel.name }}Page } of { Math.ceil({{ rel.name }}Total / 5) || 1 }
+                            </span>
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetch{{ model.name }}{{ rel.source_model }}s(parseInt(id!), {{ rel.name }}Page + 1)}
+                                disabled={ {{ rel.name }}Page >= Math.ceil({{ rel.name }}Total / 5) || {{ rel.name }}Loading}
+                            >
+                                Next
+                            </Button>
+                        </div>
+                    </CardContent>
+                </Card>
+                {% endif %}
                 {% endfor %}
                 {% endif %}
 

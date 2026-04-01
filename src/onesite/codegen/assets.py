@@ -112,7 +112,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     generate_file("backend_config.py.j2", {"config": site_config}, backend_path / "app" / "core" / "config.py")
     generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
 
-    for name in ["security.py", "db.py", "deps.py"]:
+    for name in ["security.py", "db.py", "deps.py", "tablenames.py"]:
         src = template_backend_root / "app" / "core" / name
         dst = backend_path / "app" / "core" / name
         if src.exists():

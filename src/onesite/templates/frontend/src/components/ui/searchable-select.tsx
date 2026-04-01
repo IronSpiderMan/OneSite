@@ -24,6 +24,7 @@ export interface SearchableSelectProps {
   emptyText?: string
   loadOptions: (query: string) => Promise<{ label: string; value: string | number; description?: string }[]>
   defaultLabel?: string
+  valueLabels?: Record<string, string>
   multiple?: boolean
 }
 
@@ -35,6 +36,7 @@ export function SearchableSelect({
   emptyText = "No item found.",
   loadOptions,
   defaultLabel,
+  valueLabels,
   multiple = false
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
@@ -78,7 +80,7 @@ export function SearchableSelect({
                 const existing = selectedItems.find(i => String(i.value) === String(v))
                 return {
                     value: v,
-                    label: found?.label || existing?.label || String(v)
+                    label: found?.label || existing?.label || valueLabels?.[String(v)] || String(v)
                 }
             })
             // Only update if different length or values to avoid infinite loop
@@ -93,6 +95,8 @@ export function SearchableSelect({
             const found = options.find(o => String(o.value) === String(value))
             if (found) {
                 setSelectedLabel(found.label)
+            } else if (valueLabels?.[String(value)]) {
+                setSelectedLabel(valueLabels[String(value)])
             } else if (!selectedLabel && defaultLabel) {
                 setSelectedLabel(defaultLabel)
             }
@@ -100,7 +104,7 @@ export function SearchableSelect({
             setSelectedLabel("")
         }
     }
-  }, [value, options, defaultLabel, multiple])
+  }, [value, options, defaultLabel, valueLabels, multiple])
 
   const handleSelect = (optionValue: string | number, optionLabel: string) => {
     if (multiple) {

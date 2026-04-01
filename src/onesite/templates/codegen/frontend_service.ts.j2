@@ -58,7 +58,17 @@ export const delete{{ model.name }} = async (id: number) => {
 {% for m2m in model.m2m_fields %}
 import { {{ m2m.target_model }} } from './{{ m2m.target_model.lower() }}';
 export const get{{ model.name }}{{ m2m.target_model }}s = async (id: number, page = 1, size = 20) => {
-    const response = await request.get<PaginatedResponse<{{ m2m.target_model }}>>(`${API_URL}/${id}/{{ m2m.name }}?page=${page}&size=${size}`);
+    const response = await request.get<PaginatedResponse<{{ m2m.target_model }}>>(`${API_URL}/${id}/{{ m2m.target_endpoint }}?page=${page}&size=${size}`);
+    return response.data;
+};
+{% endfor %}
+{% endif %}
+
+{% if model.reverse_m2m %}
+{% for rel in model.reverse_m2m %}
+import { {{ rel.source_model }} } from './{{ rel.source_model.lower() }}';
+export const get{{ model.name }}{{ rel.source_model }}s = async (id: number, page = 1, size = 20) => {
+    const response = await request.get<PaginatedResponse<{{ rel.source_model }}>>(`${API_URL}/${id}/{{ rel.name }}?page=${page}&size=${size}`);
     return response.data;
 };
 {% endfor %}

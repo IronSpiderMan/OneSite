@@ -9,6 +9,7 @@ from typing import Any, Dict, List
 from pydantic_core import PydanticUndefined
 from rich.console import Console
 from sqlmodel import SQLModel
+import sqlmodel.main
 
 from .assets import sync_backend_assets, sync_frontend_assets
 from .config import load_site_config
@@ -25,6 +26,20 @@ def _to_snake(name: str) -> str:
     import re
 
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
+
+def _install_snake_case_tablenames() -> None:
+    if getattr(sqlmodel.main, "_onesite_snake_tablename_installed", False):
+        return
+
+    original_new = sqlmodel.main.SQLModelMetaclass.__new__
+
+    def patched_new(mcls, name, bases, dict_, **kwargs):
+        if kwargs.get("table", False) and "__tablename__" not in dict_:
+            dict_["__tablename__"] = _to_snake(name)
+        return original_new(mcls, name, bases, dict_, **kwargs)
+
+    sqlmodel.main.SQLModelMetaclass.__new__ = patched_new
+    sqlmodel.main._onesite_snake_tablename_installed = True
 
 
 def generate_code():
@@ -76,6 +91,7 @@ def generate_code():
             else:
                 console.print(f"Skipping template model {model_file.name} (overridden in project)")
 
+    _install_snake_case_tablenames()
     sys.path.insert(0, str(backend_path))
     try:
         import app.models  # noqa: F401
@@ -189,10 +205,17 @@ def generate_code():
     model_map = {m["name"]: m for m in found_models}
     for model in found_models:
         model["reverse_foreign_keys"] = []
+        model["m2m_fields"] = model.get("m2m_fields", [])
+        model["reverse_m2m"] = model.get("reverse_m2m", [])
+        if model.get("is_link_table"):
+            link_extra_fields = [f for f in model["fields"] if not f.get("fk_info") and f["name"] != "id"]
+            model["link_extra_fields"] = link_extra_fields
+            model["is_association_table"] = len(link_extra_fields) > 0
+        else:
+            model["link_extra_fields"] = []
+            model["is_association_table"] = False
 
     for model in found_models:
-        if model["is_link_table"]:
-            continue
         for fk in model["foreign_keys"]:
             target_model = model_map.get(fk["target_model"])
             if target_model:
@@ -203,22 +226,23 @@ def generate_code():
                     if "r" in f["permissions"] and f["name"] != "password" and not f.get("fk_info")
                 ]
 
-                base_name = model["module_name"]
-                if base_name.endswith("y") and base_name[-2] not in "aeiou":
-                    reverse_name = f"{base_name[:-1]}ies"
-                else:
-                    reverse_name = f"{base_name}s"
+                if not model.get("is_link_table"):
+                    base_name = model["module_name"]
+                    if base_name.endswith("y") and base_name[-2] not in "aeiou":
+                        reverse_name = f"{base_name[:-1]}ies"
+                    else:
+                        reverse_name = f"{base_name}s"
 
-                target_model["reverse_foreign_keys"].append(
-                    {
-                        "name": reverse_name,
-                        "source_model": model["name"],
-                        "source_service": model["module_name"],
-                        "source_fk_field": fk["name"],
-                        "label_field": model["search_field"],
-                        "display": fk.get("reverse_display", True),
-                    }
-                )
+                    target_model["reverse_foreign_keys"].append(
+                        {
+                            "name": reverse_name,
+                            "source_model": model["name"],
+                            "source_service": model["module_name"],
+                            "source_fk_field": fk["name"],
+                            "label_field": model["search_field"],
+                            "display": fk.get("reverse_display", True),
+                        }
+                    )
 
     for model in found_models:
         if model["is_link_table"]:
@@ -232,7 +256,6 @@ def generate_code():
                 target_model = model_map.get(target_model_name)
                 if source_model and target_model:
                     m2m_field_name = f"{target_model['lower_name']}_ids"
-                    source_model["m2m_fields"] = source_model.get("m2m_fields", [])
                     source_model["m2m_fields"].append(
                         {
                             "name": m2m_field_name,
@@ -248,6 +271,28 @@ def generate_code():
                         }
                     )
 
+                    base_name = source_model["module_name"]
+                    if base_name.endswith("y") and base_name[-2] not in "aeiou":
+                        reverse_name = f"{base_name[:-1]}ies"
+                    else:
+                        reverse_name = f"{base_name}s"
+
+                    target_model["reverse_m2m"].append(
+                        {
+                            "name": reverse_name,
+                            "source_model": source_model_name,
+                            "source_service": source_model["module_name"],
+                            "source_endpoint": f"{source_model['module_name']}s",
+                            "label_field": source_model["search_field"],
+                            "display": target_fk.get("reverse_display", True),
+                            "link_model": model["name"],
+                            "link_module": model["source_module"],
+                            "source_source_module": source_model["source_module"],
+                            "source_fk_field": source_fk["name"],
+                            "target_fk_field": target_fk["name"],
+                        }
+                    )
+
     theme_config, radius = resolve_theme(site_config)
     generate_file("index.css.j2", {"theme": theme_config, "radius": radius}, cwd / "frontend" / "src" / "index.css")
 
@@ -256,7 +301,7 @@ def generate_code():
     sync_backend_assets(cwd, backend_path, site_config)
 
     for model in found_models:
-        if model["is_link_table"]:
+        if model["is_link_table"] and not model.get("is_association_table"):
             continue
 
         context = {"model": model}

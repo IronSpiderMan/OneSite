@@ -3,6 +3,8 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
 from pathlib import Path
 
+import app.core.tablenames
+
 from app.api.api import api_router
 from contextlib import asynccontextmanager
 
