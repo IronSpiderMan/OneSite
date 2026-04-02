@@ -149,6 +149,7 @@ def generate_code():
                         auto_refresh,
                         refresh_interval,
                         reverse_fk_display,
+                        model_site_props,
                     ) = get_model_fields(obj, model_module_name)
 
                     if name == "User":
@@ -199,10 +200,12 @@ def generate_code():
                             "auto_refresh": auto_refresh,
                             "refresh_interval": refresh_interval,
                             "reverse_fk_display": reverse_fk_display,
+                            "site_props": model_site_props,
                         }
                     )
 
     model_map = {m["name"]: m for m in found_models}
+    module_map = {m["module_name"]: m for m in found_models}
     for model in found_models:
         model["reverse_foreign_keys"] = []
         model["m2m_fields"] = model.get("m2m_fields", [])
@@ -214,6 +217,10 @@ def generate_code():
         else:
             model["link_extra_fields"] = []
             model["is_association_table"] = False
+        if model.get("is_link_table") and model.get("is_association_table"):
+            model["show_in_menu"] = bool(model.get("site_props", {}).get("show_in_menu", True))
+        else:
+            model["show_in_menu"] = True
 
     for model in found_models:
         for fk in model["foreign_keys"]:
@@ -248,50 +255,113 @@ def generate_code():
         if model["is_link_table"]:
             fks = model["foreign_keys"]
             if len(fks) >= 2:
-                source_fk = fks[0]
-                target_fk = fks[1]
-                source_model_name = source_fk["target_model"]
-                target_model_name = target_fk["target_model"]
-                source_model = model_map.get(source_model_name)
-                target_model = model_map.get(target_model_name)
-                if source_model and target_model:
-                    m2m_field_name = f"{target_model['lower_name']}_ids"
-                    source_model["m2m_fields"].append(
+                m2m_cfg = {}
+                if isinstance(model.get("site_props"), dict):
+                    m2m_cfg = model["site_props"].get("m2m", {}) or {}
+                directions = m2m_cfg.get("directions")
+                if not isinstance(directions, list) or not directions:
+                    directions = [
                         {
-                            "name": m2m_field_name,
-                            "target_model": target_model_name,
-                            "target_service": target_fk["target_service"],
-                            "target_endpoint": target_fk["target_endpoint"],
-                            "label_field": target_fk["label_field"],
-                            "link_model": model["name"],
-                            "link_module": model["source_module"],
-                            "target_source_module": target_model["source_module"],
-                            "source_fk_field": source_fk["name"],
-                            "target_fk_field": target_fk["name"],
+                            "from": fks[0]["target_service"],
+                            "to": fks[1]["target_service"],
+                            "editable": True,
                         }
+                    ]
+
+                editable_edges = set()
+                for d in directions:
+                    if not isinstance(d, dict):
+                        continue
+                    if d.get("editable", True):
+                        editable_edges.add((str(d.get("from", "")), str(d.get("to", ""))))
+
+                def find_fk_for(target_service: str, target_model: str):
+                    return next(
+                        (
+                            fk
+                            for fk in fks
+                            if fk.get("target_service") == target_service or fk.get("target_model") == target_model
+                        ),
+                        None,
                     )
 
-                    base_name = source_model["module_name"]
+                for d in directions:
+                    if not isinstance(d, dict):
+                        continue
+                    from_ref = str(d.get("from", "")).strip()
+                    to_ref = str(d.get("to", "")).strip()
+                    if not from_ref or not to_ref:
+                        continue
+
+                    from_model = module_map.get(from_ref) or model_map.get(from_ref)
+                    to_model = module_map.get(to_ref) or model_map.get(to_ref)
+                    if not from_model or not to_model:
+                        continue
+
+                    from_fk = find_fk_for(from_model["module_name"], from_model["name"])
+                    to_fk = find_fk_for(to_model["module_name"], to_model["name"])
+                    if not from_fk or not to_fk:
+                        continue
+
+                    if d.get("editable", True):
+                        m2m_field_name = f"{to_model['lower_name']}_ids"
+                        existing = next(
+                            (
+                                x
+                                for x in from_model.get("m2m_fields", [])
+                                if x.get("name") == m2m_field_name and x.get("target_model") == to_model["name"]
+                            ),
+                            None,
+                        )
+                        if not existing:
+                            from_model["m2m_fields"].append(
+                                {
+                                    "name": m2m_field_name,
+                                    "target_model": to_model["name"],
+                                    "target_service": to_model["module_name"],
+                                    "target_endpoint": f"{to_model['module_name']}s",
+                                    "label_field": to_model["search_field"],
+                                    "link_model": model["name"],
+                                    "link_module": model["source_module"],
+                                    "target_source_module": to_model["source_module"],
+                                    "source_fk_field": from_fk["name"],
+                                    "target_fk_field": to_fk["name"],
+                                }
+                            )
+
+                    if (to_model["module_name"], from_model["module_name"]) in editable_edges:
+                        continue
+
+                    base_name = from_model["module_name"]
                     if base_name.endswith("y") and base_name[-2] not in "aeiou":
                         reverse_name = f"{base_name[:-1]}ies"
                     else:
                         reverse_name = f"{base_name}s"
 
-                    target_model["reverse_m2m"].append(
-                        {
-                            "name": reverse_name,
-                            "source_model": source_model_name,
-                            "source_service": source_model["module_name"],
-                            "source_endpoint": f"{source_model['module_name']}s",
-                            "label_field": source_model["search_field"],
-                            "display": target_fk.get("reverse_display", True),
-                            "link_model": model["name"],
-                            "link_module": model["source_module"],
-                            "source_source_module": source_model["source_module"],
-                            "source_fk_field": source_fk["name"],
-                            "target_fk_field": target_fk["name"],
-                        }
+                    existing_reverse = next(
+                        (
+                            x
+                            for x in to_model.get("reverse_m2m", [])
+                            if x.get("name") == reverse_name and x.get("source_model") == from_model["name"]
+                        ),
+                        None,
                     )
+                    if not existing_reverse:
+                        to_model["reverse_m2m"].append(
+                            {
+                                "name": reverse_name,
+                                "source_model": from_model["name"],
+                                "source_service": from_model["module_name"],
+                                "source_endpoint": f"{from_model['module_name']}s",
+                                "label_field": from_model["search_field"],
+                                "display": to_fk.get("reverse_display", True),
+                                "link_model": model["name"],
+                                "link_module": model["source_module"],
+                                "source_source_module": from_model["source_module"],
+                                "source_fk_field": from_fk["name"],
+                                "target_fk_field": to_fk["name"],
+                            }
+                        )
 
     theme_config, radius = resolve_theme(site_config)
     generate_file("index.css.j2", {"theme": theme_config, "radius": radius}, cwd / "frontend" / "src" / "index.css")
@@ -417,7 +487,12 @@ def generate_code():
             cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
         )
 
-    api_models = [m for m in found_models if not m["is_link_table"] and not m.get("frontend_only")]
+    api_models = [
+        m
+        for m in found_models
+        if not m.get("frontend_only")
+        and (not m["is_link_table"] or (m.get("is_association_table") and m.get("show_in_menu")))
+    ]
     update_api_router(api_models, backend_path / "app" / "api" / "api.py")
 
     system_model = next((m for m in found_models if m["module_name"] == "system_config" and m["name"] == "SystemConfig"), None)

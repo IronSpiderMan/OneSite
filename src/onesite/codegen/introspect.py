@@ -71,7 +71,20 @@ def _build_json_model_schema(
 
 def get_model_fields(
     model_cls: type[SQLModel], module_name: str | None = None
-) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]], str, bool, Dict[str, Any], bool, int, bool]:
+) -> Tuple[
+    List[Dict[str, Any]],
+    List[Dict[str, Any]],
+    str,
+    bool,
+    bool,
+    str,
+    bool,
+    Dict[str, Any],
+    bool,
+    int,
+    bool,
+    Dict[str, Any],
+]:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
         model_site_props.update(getattr(model_cls, "__onesite__"))
@@ -330,4 +343,5 @@ def get_model_fields(
         auto_refresh,
         refresh_interval,
         reverse_fk_display,
+        model_site_props,
     )

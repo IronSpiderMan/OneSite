@@ -206,7 +206,7 @@ OneSite will automatically inject a `tag_ids` field into the `Post` form, allowi
 
 Notes:
 - Link tables are treated as relationship carriers by default and are not exposed as standalone pages/menus.
-- If a link table contains extra non-FK fields (association table), OneSite will generate standalone CRUD pages/endpoints for it so you can edit those extra fields.
+- If a link table contains extra non-FK fields (association table), OneSite will generate standalone CRUD pages/endpoints for it so you can edit those extra fields. You can hide it from frontend menu/routes via `__onesite__ = {"show_in_menu": False}`.
 - Selection UI for both Foreign Keys and M2M uses `SearchableSelect`, which queries the target model list endpoint with `q=...` (fuzzy match on the target model's `search_field`).
 - OneSite generates relationship endpoints like:
   - `GET /posts/{id}/tags` (targets related to a source item)
@@ -214,7 +214,22 @@ Notes:
 
 ##### Direction (Owner Side)
 By default, OneSite injects the M2M `*_ids` field only on the "source" side of the link table.
-Currently, the source/target side is inferred by foreign key field order in the link table:
+If you need to control which side can edit the relationship, you can configure it explicitly:
+
+```python
+class PostTagLink(SQLModel, table=True):
+    __onesite__ = {
+        "is_link_table": True,
+        "m2m": {
+            "directions": [
+                {"from": "post", "to": "tag", "editable": True},
+                {"from": "tag", "to": "post", "editable": False},
+            ]
+        },
+    }
+```
+
+If `m2m.directions` is not provided, OneSite falls back to foreign key field order in the link table:
 - the first FK is treated as the source (gets `target_ids` in Create/Update)
 - the second FK is treated as the target (gets reverse M2M endpoints and detail-page related list)
 
