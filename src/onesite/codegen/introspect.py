@@ -1,6 +1,6 @@
 import inspect
 from enum import Enum
-from typing import Any, Dict, List, Set, Tuple, get_args, get_origin
+from typing import Any, Dict, List, Set, Tuple, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
@@ -271,7 +271,9 @@ def get_model_fields(
                     "reverse_display": reverse_display,
                 }
 
-        is_optional = not field.is_required()
+        origin = get_origin(resolved_annotation)
+        args = get_args(resolved_annotation)
+        is_optional = origin is Union and any(a is type(None) for a in args)
         if is_optional:
             type_str = f"Optional[{type_str}]"
 
@@ -288,6 +290,10 @@ def get_model_fields(
         # Check if local storage
         is_local_storage = site_props.get("storage") == "local" or frontend_only
 
+        default_value = None if field.default is PydanticUndefined else field.default
+        if is_enum and default_value is not None and hasattr(default_value, "value"):
+            default_value = default_value.value
+
         fields.append(
             {
                 "name": name,
@@ -301,7 +307,14 @@ def get_model_fields(
                 "create_optional": create_optional,
                 "update_optional": update_optional,
                 "required": field.is_required(),
-                "default": field.default,
+                "default": default_value,
+                "default_factory": (
+                    "list"
+                    if getattr(field, "default_factory", None) is list
+                    else "dict"
+                    if getattr(field, "default_factory", None) is dict
+                    else None
+                ),
                 "is_enum": is_enum,
                 "enum_values": enum_values,
                 "is_search_field": is_search_field,

@@ -1,7 +1,16 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, Field
 from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
+
+{% macro py_default(v) -%}
+{%- if v is sameas true -%}True
+{%- elif v is sameas false -%}False
+{%- elif v is none -%}None
+{%- elif v is number -%}{{ v }}
+{%- else -%}'{{ v|string|replace("'", "\\'") }}'
+{%- endif -%}
+{%- endmacro %}
 
 # Shared properties
 class {{ model.name }}Base(SQLModel):
@@ -22,7 +31,17 @@ class {{ model.name }}Create(SQLModel):
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if 'c' in field.permissions and field.name != 'id' %}
+    {% if field.required and not field.create_optional %}
     {{ field.name }}: {{ field.type }}
+    {% else %}
+    {% if field.default_factory == 'list' %}
+    {{ field.name }}: {{ field.type }} = Field(default_factory=list)
+    {% elif field.default_factory == 'dict' %}
+    {{ field.name }}: {{ field.type }} = Field(default_factory=dict)
+    {% else %}
+    {{ field.name }}: {{ field.type }} = {{ py_default(field.default) }}
+    {% endif %}
+    {% endif %}
     {% set ns.has_field = true %}
     {% endif %}
 {% endfor %}
@@ -41,7 +60,11 @@ class {{ model.name }}Update(SQLModel):
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if 'u' in field.permissions and field.name != 'id' %}
+    {% if field.type.startswith('Optional[') %}
     {{ field.name }}: {{ field.type }} = None
+    {% else %}
+    {{ field.name }}: Optional[{{ field.type }}] = None
+    {% endif %}
     {% set ns.has_field = true %}
     {% endif %}
 {% endfor %}
