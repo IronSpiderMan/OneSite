@@ -129,7 +129,10 @@ class Post(SQLModel, table=True):
 SQLModel's default table name is not snake_case. By default it uses the lowercased class name.
 For example, `DataModel` becomes `datamodel` (not `data_model`).
 
-If you use `foreign_key="snake_case_table.id"` (recommended for consistency with OneSite's generated module/page names), you MUST set `__tablename__` explicitly:
+OneSite enforces snake_case table names for `table=True` models during code generation and at backend startup.
+This keeps table names consistent with OneSite's generated module/page names and makes `foreign_key="data_model.id"` work as expected.
+
+If you want to override the table name, set `__tablename__` explicitly:
 
 ```python
 class DataModel(SQLModel, table=True):
@@ -137,9 +140,42 @@ class DataModel(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
 ```
 
-Rule of thumb:
-- If your model class name contains multiple words (e.g. `DataModel`, `DataSource`, `DeviceProfile`), add `__tablename__ = "data_model"` / `"data_source"` / `"device_profile"` and use those names in `foreign_key=...`.
-- If your model is a single word and matches its snake_case form (e.g. `User` -> `user`), `__tablename__` can be omitted.
+#### Internationalization (i18n)
+OneSite generates `frontend/src/locales/en.json` and `frontend/src/locales/zh.json` during `site sync`.
+Pages, menus, buttons, and model/field labels use these keys (via i18next).
+
+##### Model & Field Labels
+You can provide translations at model level using `__onesite__`.
+
+```python
+class DataSource(SQLModel, table=True):
+    __onesite__ = {
+        "translations": {
+            "zh": {
+                "name": "数据源",
+                "fields": {
+                    "name": "数据源名称",
+                    "type": "数据源类型",
+                },
+            },
+            "en": {
+                "name": "Data Source",
+                "fields": {
+                    "name": "Name",
+                    "type": "Type",
+                },
+            },
+        }
+    }
+```
+
+- `translations.<lang>.name`: model display name (used in menu/page titles)
+- `translations.<lang>.fields.<field>`: field label (used in list headers and forms)
+
+If you don't provide translations, OneSite falls back to auto-generated labels (e.g. `full_name` -> `Full Name`).
+
+##### Common UI Text
+General UI strings (e.g. Settings page, confirm dialogs, toast messages, filter panel labels) are generated into `common.*`, `settings.*`, `toast.*`, `alert.*`.
 
 #### Many-to-Many Relationship
 To define a Many-to-Many relationship (e.g., Posts have many Tags), create a link table model with specific metadata.
@@ -167,6 +203,22 @@ class PostTagLink(SQLModel, table=True):
     tag_id: Optional[int] = Field(default=None, foreign_key="tag.id", primary_key=True)
 ```
 OneSite will automatically inject a `tag_ids` field into the `Post` form, allowing you to select multiple Tags.
+
+Notes:
+- Link tables are treated as relationship carriers by default and are not exposed as standalone pages/menus.
+- If a link table contains extra non-FK fields (association table), OneSite will generate standalone CRUD pages/endpoints for it so you can edit those extra fields.
+- Selection UI for both Foreign Keys and M2M uses `SearchableSelect`, which queries the target model list endpoint with `q=...` (fuzzy match on the target model's `search_field`).
+- OneSite generates relationship endpoints like:
+  - `GET /posts/{id}/tags` (targets related to a source item)
+  - `GET /tags/{id}/posts` (reverse M2M: sources related to a target item)
+
+##### Direction (Owner Side)
+By default, OneSite injects the M2M `*_ids` field only on the "source" side of the link table.
+Currently, the source/target side is inferred by foreign key field order in the link table:
+- the first FK is treated as the source (gets `target_ids` in Create/Update)
+- the second FK is treated as the target (gets reverse M2M endpoints and detail-page related list)
+
+Example: `post_id` then `tag_id` means `Post` gets `tag_ids` and `GET /posts/{id}/tags`, while `Tag` gets `GET /tags/{id}/posts`.
 
 #### Configuration Models (Settings Page)
 OneSite reserves two special models for the unified `/settings` page:
