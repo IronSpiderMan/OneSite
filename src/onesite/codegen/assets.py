@@ -8,6 +8,12 @@ from .render import generate_file
 
 console = Console()
 
+def _ensure_init_py(dir_path: Path) -> None:
+    dir_path.mkdir(parents=True, exist_ok=True)
+    init_file = dir_path / "__init__.py"
+    if not init_file.exists():
+        init_file.write_text("")
+
 
 def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
     template_root = Path(__file__).resolve().parent.parent / "templates" / "frontend"
@@ -99,6 +105,14 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
 
 def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, Any]):
     template_backend_root = Path(__file__).resolve().parent.parent / "templates" / "backend"
+
+    _ensure_init_py(backend_path / "app")
+    _ensure_init_py(backend_path / "app" / "api")
+    _ensure_init_py(backend_path / "app" / "api" / "endpoints")
+    _ensure_init_py(backend_path / "app" / "core")
+    _ensure_init_py(backend_path / "app" / "cruds")
+    _ensure_init_py(backend_path / "app" / "schemas")
+    _ensure_init_py(backend_path / "app" / "services")
 
     template_endpoints_dir = template_backend_root / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
