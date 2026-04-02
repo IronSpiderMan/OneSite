@@ -2,6 +2,7 @@ import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-route
 import AppLayout from './components/Layout';
 import { GeneratedRoutes } from './Routes';
 import LoginPage from './pages/Login';
+import ErrorPage from './pages/ErrorPage';
 import { AppToaster } from './components/ui/sonner';
 
 // Simple Auth Guard
@@ -22,6 +23,14 @@ function App() {
       <AppToaster />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/error/:code"
+          element={
+            <RequireAuth>
+              <ErrorPage />
+            </RequireAuth>
+          }
+        />
         
         <Route path="/" element={
           <RequireAuth>
@@ -32,7 +41,9 @@ function App() {
           {GeneratedRoutes.map((route) => (
              <Route key={route.path} path={route.path} element={route.element} />
           ))}
+          <Route path="*" element={<Navigate to="/error/404" replace />} />
         </Route>
+        <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
     </BrowserRouter>
   );

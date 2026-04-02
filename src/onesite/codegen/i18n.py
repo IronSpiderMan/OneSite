@@ -51,6 +51,19 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "auto_refresh": "Auto Refresh",
             "refresh_interval": "Refresh Interval",
             "local_storage": "Local Storage",
+            "back": "Back",
+            "back_home": "Back Home",
+            "retry": "Retry",
+        },
+        "errors": {
+            "403": {"title": "Access denied", "desc": "You don't have permission to view this page."},
+            "404": {"title": "Page not found", "desc": "The page you’re looking for doesn’t exist."},
+            "500": {"title": "Something went wrong", "desc": "Please try again or return to the home page."},
+            "offline": {
+                "code": "OFFLINE",
+                "title": "You are offline",
+                "desc": "Network connection failed. Please check your connection and try again.",
+            },
         },
         "login": {
             "title": "Sign in",
@@ -115,6 +128,15 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "auto_refresh": "自动刷新",
             "refresh_interval": "刷新频率",
             "local_storage": "本地存储",
+            "back": "返回",
+            "back_home": "返回首页",
+            "retry": "重试",
+        },
+        "errors": {
+            "403": {"title": "无权限访问", "desc": "你没有权限访问此页面。"},
+            "404": {"title": "页面不存在", "desc": "你访问的页面不存在或已被移除。"},
+            "500": {"title": "服务异常", "desc": "发生了一些错误，请稍后重试或返回首页。"},
+            "offline": {"code": "离线", "title": "网络不可用", "desc": "网络连接失败，请检查网络后重试。"},
         },
         "login": {
             "title": "登录",

@@ -66,6 +66,7 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         "src/components/Layout.tsx",
         "src/utils/request.ts",
         "src/pages/Login.tsx",
+        "src/pages/ErrorPage.tsx",
         "src/vite-env.d.ts",
         "src/i18n.ts",
     ]
