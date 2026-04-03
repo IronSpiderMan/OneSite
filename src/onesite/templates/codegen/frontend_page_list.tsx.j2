@@ -4,7 +4,14 @@ import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { {{ model.name }}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% if m2m.order_field %}, get{{ model.name }}{{ m2m.target_model }}sWithMeta{% endif %}{% endfor %}{% endif %} } from '../../services/{{ model.module_name }}';
+import { 
+    {{ model.name }}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% if m2m.order_field %}, get{{ model.name }}{{ m2m.target_model }}sWithMeta{% endif %}{% endfor %}{% endif %}
+    {% if model.actions %}
+    {% for action_name, action_config in model.actions.items() %}
+    , perform{{ model.name }}{{ action_name.capitalize() }}
+    {% endfor %}
+    {% endif %}
+} from '../../services/{{ model.module_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -422,6 +429,26 @@ const {{ model.name }}Page: React.FC = () => {
                     {% endif %}
                     {% endfor %}
                     <TableCell className="flex items-center gap-2">
+                        {% if model.actions %}
+                        {% for action_name, action_config in model.actions.items() %}
+                        <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={async (e) => {
+                                e.stopPropagation();
+                                try {
+                                    await perform{{ model.name }}{{ action_name.capitalize() }}(item.id);
+                                    toast.success(t('common.success', 'Success'));
+                                    fetchData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
+                                } catch (e) {
+                                    toast.error(t('common.error', 'Error'));
+                                }
+                            }}
+                        >
+                            {{ action_name }}
+                        </Button>
+                        {% endfor %}
+                        {% endif %}
                         <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}>
                             <Eye className="h-4 w-4" />
                         </Button>

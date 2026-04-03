@@ -1,7 +1,7 @@
 from typing import List, Any, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table %}, Body{% endif %}
-{% if model.is_notification_table %}
+from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table or model.actions %}, Body{% endif %}
+{% if model.is_notification_table or model.actions %}
 from app.models.user import User
 {% endif %}
 from sqlmodel import select, func, col
@@ -296,6 +296,38 @@ async def delete_{{ model.lower_name }}(
     {% endif %}
     {{ model.lower_name }} = await service.delete(session, id)
     return {{ model.lower_name }}
+
+{% if model.actions %}
+{% for action_name, action_config in model.actions.items() %}
+@router.post("/{id}/actions/{{ action_name }}", response_model={{ model.name }}Read)
+async def perform_{{ model.lower_name }}_{{ action_name }}(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    id: int,
+) -> Any:
+    obj = await service.get(session, id)
+    if not obj:
+        raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    
+    import json
+    action_data = json.loads("""{{ action_config | tojson }}""")
+    
+    # Resolve special placeholders
+    resolved_data = {}
+    for k, v in action_data.items():
+        if isinstance(v, str) and v == "{% raw %}{{user_id}}{% endraw %}":
+            resolved_data[k] = current_user.id
+        else:
+            resolved_data[k] = v
+            
+    try:
+        update_obj = {{ model.name }}Update(**resolved_data)
+        return await service.update(session, obj, update_obj)
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=str(e))
+{% endfor %}
+{% endif %}
 
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}

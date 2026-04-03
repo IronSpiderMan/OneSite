@@ -244,6 +244,36 @@ If `m2m.directions` is not provided, OneSite falls back to foreign key field ord
 
 Example: `post_id` then `tag_id` means `Post` gets `tag_ids` and `GET /posts/{id}/tags`, while `Tag` gets `GET /tags/{id}/posts`.
 
+#### Model Actions
+
+OneSite allows you to define custom "actions" for your models. An action is a predefined set of field updates that can be triggered from the UI with a single click.
+
+```python
+class AlarmStatus(str, Enum):
+    ACTIVE = "ACTIVE"
+    ACKED = "ACKED"
+
+class AlarmRecord(SQLModel, table=True):
+    __onesite__ = {
+        "actions": {
+            "ack": {
+                "status": "ACKED",
+                "user_id": "{{user_id}}" # Automatically resolved to current user ID
+            }
+        }
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: AlarmStatus = AlarmStatus.ACTIVE
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+```
+
+Generated features:
+- **Action Buttons**: OneSite automatically adds buttons for each defined action in the list page table rows.
+- **Dynamic Field Updates**: Clicking the button sends a request to a dedicated endpoint (e.g., `POST /api/v1/alarm_records/{id}/actions/ack`) which performs the configured updates.
+- **User ID Resolution**: The `{{user_id}}` placeholder is automatically resolved to the ID of the authenticated user performing the action at runtime.
+- **Type Safety**: Actions use the model's generated Update schema, ensuring type consistency and validation.
+
 #### Configuration Models (Settings Page)
 OneSite reserves two special models for the unified `/settings` page:
 - `SystemConfig` in `models/system_config.py`: server-persisted system settings, admin-only

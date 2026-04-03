@@ -54,6 +54,15 @@ export const delete{{ model.name }} = async (id: number) => {
     return response.data;
 };
 
+{% if model.actions %}
+{% for action_name, action_config in model.actions.items() %}
+export const perform{{ model.name }}{{ action_name.capitalize() }} = async (id: number) => {
+    const response = await request.post<{{ model.name }}>(`${API_URL}/${id}/actions/{{ action_name }}`);
+    return response.data;
+};
+{% endfor %}
+{% endif %}
+
 {% if model.module_name == "user" and model.name == "User" %}
 export const getMe = async () => {
     const response = await request.get<{{ model.name }}>(`${API_URL}/me`);

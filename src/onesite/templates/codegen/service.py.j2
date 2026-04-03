@@ -1,4 +1,4 @@
-from typing import List, Optional
+from typing import List, Optional, Any
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update

@@ -150,6 +150,8 @@ def generate_code():
                         refresh_interval,
                         reverse_fk_display,
                         model_site_props,
+                        actions,
+                        is_notification_table,
                     ) = get_model_fields(obj, model_module_name)
 
                     if name == "User":
@@ -201,7 +203,8 @@ def generate_code():
                             "refresh_interval": refresh_interval,
                             "reverse_fk_display": reverse_fk_display,
                             "site_props": model_site_props,
-                            "is_notification_table": bool(model_site_props.get("is_notification_table", False))
+                            "actions": actions,
+                            "is_notification_table": is_notification_table
                         }
                     )
 

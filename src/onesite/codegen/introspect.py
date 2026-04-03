@@ -84,6 +84,8 @@ def get_model_fields(
     int,
     bool,
     Dict[str, Any],
+    Dict[str, Any],
+    bool,
 ]:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
@@ -105,6 +107,8 @@ def get_model_fields(
     auto_refresh = model_site_props.get("auto_refresh", False)
     refresh_interval = model_site_props.get("refresh_interval", 5000)
     reverse_fk_display = model_site_props.get("reverse_fk_display", True)
+    actions = model_site_props.get("actions", {})
+    is_notification_table = bool(model_site_props.get("is_notification_table", False))
 
     fields: List[Dict[str, Any]] = []
     for name, field in model_cls.model_fields.items():
@@ -357,4 +361,6 @@ def get_model_fields(
         refresh_interval,
         reverse_fk_display,
         model_site_props,
+        actions,
+        is_notification_table,
     )
