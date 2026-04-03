@@ -21,6 +21,7 @@ import { FileUpload } from '../../components/ui/file-upload';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
+import { formatDateTime, getUserTimeZone } from '../../lib/datetime';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -34,6 +35,7 @@ const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
   const { data, loading, fetchData, fetchItem, createItem, updateItem, deleteItem } = use{{ model.name }}Store();
+  const timeZone = getUserTimeZone();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
@@ -407,6 +409,8 @@ const {{ model.name }}Page: React.FC = () => {
                         )}
                         {% elif field.is_enum %}
                         <Badge variant="outline">{item.{{ field.name }}}</Badge>
+                        {% elif field.ui_type == 'datetime' %}
+                        <span className="text-muted-foreground">{formatDateTime(item.{{ field.name }}, timeZone)}</span>
                         {% elif field.ui_type == 'json' %}
                         {item.{{ field.name }} !== undefined && item.{{ field.name }} !== null
                           ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }}))
