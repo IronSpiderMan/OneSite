@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { GeneratedMenu } from '../Menu';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
+import { AvatarFallback } from './ui/avatar-fallback';
 
 const AppLayout: React.FC = () => {
   const { t } = useTranslation();
@@ -16,6 +17,9 @@ const AppLayout: React.FC = () => {
     localStorage.removeItem('token');
     navigate('/login');
   };
+
+  const userName = localStorage.getItem('user_name') || 'Admin User';
+  const userAvatar = localStorage.getItem('user_avatar');
 
   return (
     <div className="min-h-screen flex">
@@ -73,8 +77,9 @@ const AppLayout: React.FC = () => {
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
                 <MenuIcon className="h-5 w-5" />
             </Button>
-            <div className="ml-auto flex items-center space-x-4">
-                <span className="text-sm text-muted-foreground">Admin User</span>
+            <div className="ml-auto flex items-center space-x-3">
+                <AvatarFallback name={userName} src={userAvatar} size={32} />
+                <span className="text-sm text-muted-foreground">{userName}</span>
                 <Button variant="ghost" size="icon" onClick={handleLogout} title={t('common.logout')}>
                     <LogOut className="h-5 w-5" />
                 </Button>

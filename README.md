@@ -249,6 +249,17 @@ OneSite reserves two special models for the unified `/settings` page:
 - `SystemConfig` in `models/system_config.py`: server-persisted system settings, admin-only
 - `CustomConfig` in `models/custom_config.py`: browser-persisted user preferences (localStorage), available to all users
 
+#### Navigation Order
+You can control the sidebar menu order via `site_config.json`:
+
+```json
+{
+  "nav_order": ["user", "group", "product", "tag"]
+}
+```
+
+Items not listed in `nav_order` will be appended after the listed ones.
+
 The Settings page uses a top-to-bottom layout:
 ```
 [Save System Config]

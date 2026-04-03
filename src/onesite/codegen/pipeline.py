@@ -503,6 +503,13 @@ def generate_code():
         if not m.get("frontend_only")
         and (not m["is_link_table"] or (m.get("is_association_table") and m.get("show_in_menu")))
     ]
+
+    nav_order = site_config.get("nav_order", [])
+    if isinstance(nav_order, list) and nav_order:
+        order_map = {str(x): i for i, x in enumerate(nav_order)}
+        api_models.sort(key=lambda m: (order_map.get(m["module_name"], 10_000), m["module_name"]))
+    else:
+        api_models.sort(key=lambda m: m["module_name"])
     update_api_router(api_models, backend_path / "app" / "api" / "api.py")
 
     system_model = next((m for m in found_models if m["module_name"] == "system_config" and m["name"] == "SystemConfig"), None)

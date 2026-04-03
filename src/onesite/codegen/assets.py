@@ -74,6 +74,7 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         "src/pages/Login.tsx",
         "src/pages/ErrorPage.tsx",
         "src/components/ui/link-table-ordered-select.tsx",
+        "src/components/ui/avatar-fallback.tsx",
         "src/vite-env.d.ts",
         "src/i18n.ts",
     ]
