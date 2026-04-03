@@ -1,10 +1,13 @@
 from typing import List, Any, Optional
 from datetime import datetime
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table %}, Body{% endif %}
+{% if model.is_notification_table %}
+from app.models.user import User
+{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import db, deps
-from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
+from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.is_notification_table %}, {{ model.name }}Send{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.module_name }} import service
 from app.models.{{ model.source_module }} import {{ model.name }}
@@ -23,9 +26,99 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 {% endfor %}
 {% endif %}
 
+{% if model.is_notification_table %}
+router = APIRouter()
+{% else %}
 router = APIRouter(dependencies=[Depends(deps.get_current_user)])
+{% endif %}
 
-@router.get("/", response_model=PaginatedResponse[{{ model.name }}Read])
+{% if model.is_notification_table %}
+@router.get("/unread_count")
+async def unread_count(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    statement = select(func.count()).select_from({{ model.name }}).where(
+        col({{ model.name }}.user_id) == current_user.id,
+        col({{ model.name }}.is_read) == False,
+    )
+    result = await session.exec(statement)
+    return {"unread": result.one()}
+
+@router.get("/inbox", response_model=PaginatedResponse[{{ model.name }}Read])
+async def inbox(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    page: int = 1,
+    size: int = 20,
+) -> Any:
+    skip = (page - 1) * size
+    statement = (
+        select({{ model.name }})
+        .where(col({{ model.name }}.user_id) == current_user.id)
+        .order_by(col({{ model.name }}.created_at).desc())
+    )
+    total_statement = select(func.count()).select_from(statement.subquery())
+    total_result = await session.exec(total_statement)
+    total = total_result.one()
+    result = await session.exec(statement.offset(skip).limit(size))
+    items = result.all()
+    return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+
+@router.put("/{id}/read", response_model={{ model.name }}Read)
+async def mark_read(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    id: int,
+) -> Any:
+    n = await service.get(session, id)
+    if not n:
+        raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    if getattr(n, "user_id", None) != current_user.id and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    if not getattr(n, "is_read", False):
+        n = await service.update(session, n, {{ model.name }}Update(is_read=True))
+    return n
+
+@router.post("/send", dependencies=[Depends(deps.get_current_active_superuser)])
+async def send_notification(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    payload: {{ model.name }}Send,
+) -> Any:
+    title = str(payload.title or "").strip()
+    content = str(payload.content or "").strip()
+    summary = str(payload.summary or "").strip()
+    user_id = payload.user_id
+    broadcast = bool(payload.broadcast)
+    if not title or not content:
+        raise HTTPException(status_code=400, detail="title/content required")
+
+    created_count = 0
+    if broadcast:
+        q = await session.exec(select(User.id).where(User.is_active == True))
+        user_ids = q.all()
+        for uid in user_ids:
+            obj_in = {{ model.name }}Create(title=title, summary=summary or title, content=content, user_id=uid, is_read=False)
+            await service.create(session, obj_in)
+            created_count += 1
+    else:
+        if user_id is None:
+            raise HTTPException(status_code=400, detail="user_id required when broadcast=false")
+        try:
+            uid = int(user_id)
+        except Exception:
+            raise HTTPException(status_code=400, detail="invalid user_id")
+        obj_in = {{ model.name }}Create(title=title, summary=summary or title, content=content, user_id=uid, is_read=False)
+        await service.create(session, obj_in)
+        created_count = 1
+    return {"sent": created_count}
+{% endif %}
+
+@router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
@@ -100,7 +193,7 @@ async def read_{{ model.lower_name }}s(
     
     return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
-@router.post("/", response_model={{ model.name }}Read)
+@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -136,27 +229,41 @@ async def update_me(
     return user
 {% endif %}
 
-@router.get("/{id}", response_model={{ model.name }}Read)
+@router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def read_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.is_notification_table %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     id: int,
 ) -> Any:
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% if model.is_notification_table %}
+    if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    {% endif %}
     return {{ model.lower_name }}
 
-@router.put("/{id}", response_model={{ model.name }}Read)
+@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.is_notification_table %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     id: int,
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% if model.is_notification_table %}
+    if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    {% endif %}
         
     {%- for field in model.fields %}
     {%- if field.is_unique and field.name != 'id' %}
@@ -171,15 +278,22 @@ async def update_{{ model.lower_name }}(
     {{ model.lower_name }} = await service.update(session, {{ model.lower_name }}, {{ model.lower_name }}_in)
     return {{ model.lower_name }}
 
-@router.delete("/{id}", response_model={{ model.name }}Read)
+@router.delete("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.is_notification_table %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     id: int,
 ) -> Any:
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% if model.is_notification_table %}
+    if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    {% endif %}
     {{ model.lower_name }} = await service.delete(session, id)
     return {{ model.lower_name }}
 

@@ -201,6 +201,7 @@ def generate_code():
                             "refresh_interval": refresh_interval,
                             "reverse_fk_display": reverse_fk_display,
                             "site_props": model_site_props,
+                            "is_notification_table": bool(model_site_props.get("is_notification_table", False))
                         }
                     )
 
@@ -510,7 +511,22 @@ def generate_code():
         api_models.sort(key=lambda m: (order_map.get(m["module_name"], 10_000), m["module_name"]))
     else:
         api_models.sort(key=lambda m: m["module_name"])
+
+    notification_model = next((m for m in found_models if m.get("is_notification_table")), None)
+    notifications_enabled = bool(notification_model)
+    notifications_api_base = f"/{notification_model['module_name']}s" if notification_model else "/notifications"
+    if notification_model:
+        generate_file("ws.py.j2", {}, backend_path / "app" / "core" / "ws.py")
+        generate_file("ws_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "ws.py")
+        names = {f["name"] for f in notification_model.get("fields", [])}
+        required = {"title", "summary", "content", "created_at", "is_read", "user_id"}
+        missing = sorted([x for x in required if x not in names])
+        if missing:
+            raise ValueError(
+                f"Notification model '{notification_model['name']}' is missing required fields: {', '.join(missing)}"
+            )
     update_api_router(api_models, backend_path / "app" / "api" / "api.py")
+
 
     system_model = next((m for m in found_models if m["module_name"] == "system_config" and m["name"] == "SystemConfig"), None)
     custom_model = next((m for m in found_models if m["module_name"] == "custom_config" and m["name"] == "CustomConfig"), None)
@@ -518,4 +534,9 @@ def generate_code():
 
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
+    generate_file(
+        "frontend_features.ts.j2",
+        {"notifications_enabled": notifications_enabled, "notifications_api_base": notifications_api_base},
+        cwd / "frontend" / "src" / "features.ts",
+    )
     generate_locale_files(found_models, cwd / "frontend" / "src" / "locales")

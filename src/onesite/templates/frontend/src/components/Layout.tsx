@@ -6,6 +6,7 @@ import { GeneratedMenu } from '../Menu';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
+import { NotificationBell } from './notification-bell';
 
 const AppLayout: React.FC = () => {
   const { t } = useTranslation();
@@ -91,7 +92,8 @@ const AppLayout: React.FC = () => {
             <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
                 <MenuIcon className="h-5 w-5" />
             </Button>
-            <div className="ml-auto flex items-center space-x-3">
+            <div className="ml-auto flex items-center space-x-2">
+                <NotificationBell />
                 <Button variant="ghost" type="button" onClick={() => navigate('/profile')} className="h-10 px-2">
                     <AvatarFallback name={userName} src={userAvatar} size={32} />
                     <span className="ml-2 text-sm text-muted-foreground">{userName}</span>

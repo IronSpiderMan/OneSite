@@ -260,6 +260,33 @@ You can control the sidebar menu order via `site_config.json`:
 
 Items not listed in `nav_order` will be appended after the listed ones.
 
+#### Notifications (Optional)
+OneSite can generate a notification center if you provide a `Notification` model and mark it as the notification table:
+
+```python
+class Notification(SQLModel, table=True):
+    __onesite__ = {"is_notification_table": True}
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    summary: str
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_read: bool = Field(default=False)
+    user_id: int = Field(foreign_key="user.id")
+```
+
+Required fields (names are fixed): `title`, `summary`, `content`, `created_at`, `is_read`, `user_id`.
+
+Generated features:
+- **Unified WebSocket Infrastructure**: Generates a central `ConnectionManager` (`app/core/ws.py`) and a unified endpoint `/api/v1/ws` for all real-time communications.
+- **Header Notification Bell**: Real-time unread badge, infinite-scroll inbox list, and detailed message view.
+- **Service-Level Real-time Push**: The backend Service layer automatically triggers WebSocket pushes whenever a notification is created or its read status changes.
+- **Frontend Resiliency**: Built-in exponential backoff reconnection logic ensures the notification connection remains active.
+- **Admin Send API**:
+  - `POST /api/v1/notifications/send` with `{title, summary?, content, user_id? , broadcast?}`
+  - `broadcast=true` sends to all active users.
+
 The Settings page uses a top-to-bottom layout:
 ```
 [Save System Config]

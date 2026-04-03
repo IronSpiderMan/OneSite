@@ -56,6 +56,12 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "retry": "Retry",
             "profile": "Profile",
         },
+        "notifications": {
+            "title": "Notifications",
+            "empty": "No notifications",
+            "detail": "Notification",
+            "new": "New notification",
+        },
         "errors": {
             "403": {"title": "Access denied", "desc": "You don't have permission to view this page."},
             "404": {"title": "Page not found", "desc": "The page you’re looking for doesn’t exist."},
@@ -137,6 +143,12 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "back_home": "返回首页",
             "retry": "重试",
             "profile": "个人信息",
+        },
+        "notifications": {
+            "title": "消息通知",
+            "empty": "暂无消息",
+            "detail": "消息详情",
+            "new": "收到新消息",
         },
         "errors": {
             "403": {"title": "无权限访问", "desc": "你没有权限访问此页面。"},

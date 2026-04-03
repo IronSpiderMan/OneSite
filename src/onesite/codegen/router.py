@@ -16,6 +16,10 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path):
     imports.append("from app.api.endpoints import login")
     routers.append('api_router.include_router(login.router, tags=["login"])')
 
+    if any(m.get('is_notification_table') for m in models):
+        imports.append("from app.api.endpoints import ws")
+        routers.append('api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])')
+
     for model in models:
         imports.append(f"from app.api.endpoints import {model['module_name']}")
         prefix = f"/{model['module_name']}s" if not model.get('is_singleton') else f"/{model['module_name']}"

@@ -1,0 +1,7 @@
+export const features = {
+  notifications: {
+    enabled: {{ "true" if notifications_enabled else "false" }},
+    apiBase: "{{ notifications_api_base }}",
+  },
+} as const;
+

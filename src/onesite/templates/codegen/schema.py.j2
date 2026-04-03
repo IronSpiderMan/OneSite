@@ -87,6 +87,15 @@ class {{ model.name }}Read({{ model.name }}Base):
     pass
 {% endif %}
 
+{% if model.is_notification_table %}
+class {{ model.name }}Send(SQLModel):
+    title: str
+    content: str
+    summary: Optional[str] = None
+    user_id: Optional[int] = None
+    broadcast: bool = False
+{% endif %}
+
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 {% if m2m.order_field %}

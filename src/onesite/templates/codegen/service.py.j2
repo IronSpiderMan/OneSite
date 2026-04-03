@@ -3,6 +3,9 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update
 from app.models.{{ model.source_module }} import {{ model.name }}
+{% if model.is_notification_table %}
+from app.core.ws import manager
+{% endif %}
 
 class {{ model.name }}Service:
     async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
@@ -12,10 +15,38 @@ class {{ model.name }}Service:
         return await crud.get_multi(session, skip=skip, limit=limit)
 
     async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}:
-        return await crud.create(session, obj_in)
+        obj = await crud.create(session, obj_in)
+        {% if model.is_notification_table %}
+        # Auto-push for notification
+        try:
+            created_at = getattr(obj, "created_at", None)
+            payload = {
+                "type": "notification",
+                "data": {
+                    "id": getattr(obj, "id", None),
+                    "title": getattr(obj, "title", ""),
+                    "summary": getattr(obj, "summary", ""),
+                    "created_at": created_at.isoformat() if created_at else None,
+                    "is_read": bool(getattr(obj, "is_read", False)),
+                }
+            }
+            await manager.send_personal_message(payload, obj.user_id)
+        except Exception:
+            pass
+        {% endif %}
+        return obj
 
     async def update(self, session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
-        return await crud.update(session, db_obj, obj_in)
+        obj = await crud.update(session, db_obj, obj_in)
+        {% if model.is_notification_table %}
+        # Auto-push read status
+        try:
+            if getattr(obj, "is_read", False):
+                await manager.send_personal_message({"type": "read", "id": obj.id}, obj.user_id)
+        except Exception:
+            pass
+        {% endif %}
+        return obj
 
     async def delete(self, session: AsyncSession, id: int) -> {{ model.name }}:
         return await crud.delete(session, id)
