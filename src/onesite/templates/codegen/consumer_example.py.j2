@@ -1,0 +1,22 @@
+import aio_pika
+import logging
+import json
+from app.core.rabbitmq import rabbitmq_manager
+
+logger = logging.getLogger(__name__)
+
+async def process_test_message(message: aio_pika.abc.AbstractIncomingMessage):
+    """
+    Example RabbitMQ message callback
+    """
+    async with message.process():
+        try:
+            body = json.loads(message.body.decode())
+            logger.info(f"Processing message: {body}")
+            # Do business logic here
+        except Exception as e:
+            logger.error(f"Error processing message: {e}")
+
+# Register this consumer for 'test_queue'
+if rabbitmq_manager:
+    rabbitmq_manager.register_consumer("test_queue", process_test_message)

@@ -20,6 +20,18 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         "FIRST_SUPERUSER_PASSWORD": config.get("first_superuser_password", "admin"),
     }
 
+    if config.get("redis"):
+        redis_cfg = config["redis"]
+        if isinstance(redis_cfg, dict):
+            new_keys["REDIS_URL"] = redis_cfg.get("url", "redis://localhost:6379/0")
+            if redis_cfg.get("password"):
+                new_keys["REDIS_PASSWORD"] = redis_cfg["password"]
+
+    if config.get("rabbitmq"):
+        mq_cfg = config["rabbitmq"]
+        if isinstance(mq_cfg, dict):
+            new_keys["RABBITMQ_URL"] = mq_cfg.get("url", "amqp://guest:guest@localhost:5672/")
+
     import json
 
     allowed_origins = config.get("allowed_origins", [])

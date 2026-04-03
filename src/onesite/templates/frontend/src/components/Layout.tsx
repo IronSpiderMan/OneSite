@@ -16,6 +16,7 @@ const AppLayout: React.FC = () => {
 
   const [userName, setUserName] = useState(localStorage.getItem('user_name') || 'Admin User');
   const [userAvatar, setUserAvatar] = useState(localStorage.getItem('user_avatar'));
+  const [isOnline, setIsOnline] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
@@ -93,9 +94,9 @@ const AppLayout: React.FC = () => {
                 <MenuIcon className="h-5 w-5" />
             </Button>
             <div className="ml-auto flex items-center space-x-2">
-                <NotificationBell />
+                <NotificationBell onStatusChange={setIsOnline} />
                 <Button variant="ghost" type="button" onClick={() => navigate('/profile')} className="h-10 px-2">
-                    <AvatarFallback name={userName} src={userAvatar} size={32} />
+                    <AvatarFallback name={userName} src={userAvatar} size={32} isOnline={isOnline} />
                     <span className="ml-2 text-sm text-muted-foreground">{userName}</span>
                 </Button>
                 <Button variant="ghost" size="icon" onClick={handleLogout} title={t('common.logout')}>

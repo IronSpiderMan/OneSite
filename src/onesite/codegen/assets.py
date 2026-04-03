@@ -118,6 +118,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     _ensure_init_py(backend_path / "app" / "cruds")
     _ensure_init_py(backend_path / "app" / "schemas")
     _ensure_init_py(backend_path / "app" / "services")
+    _ensure_init_py(backend_path / "app" / "consumers")
 
     template_endpoints_dir = template_backend_root / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
@@ -131,6 +132,20 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
 
     generate_file("backend_config.py.j2", {"config": site_config}, backend_path / "app" / "core" / "config.py")
     generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
+
+    if site_config.get("redis"):
+        generate_file("redis.py.j2", {"redis": site_config["redis"]}, backend_path / "app" / "core" / "redis.py")
+    
+    if site_config.get("rabbitmq"):
+        generate_file("rabbitmq.py.j2", {"rabbitmq": site_config["rabbitmq"]}, backend_path / "app" / "core" / "rabbitmq.py")
+        # Generate an example consumer
+        consumer_init = backend_path / "app" / "consumers" / "__init__.py"
+        if not consumer_init.exists() or consumer_init.read_text().strip() == "":
+            consumer_init.write_text("from . import example\n")
+        
+        example_consumer = backend_path / "app" / "consumers" / "example.py"
+        if not example_consumer.exists():
+            generate_file("consumer_example.py.j2", {}, example_consumer)
 
     for name in ["security.py", "db.py", "deps.py", "tablenames.py"]:
         src = template_backend_root / "app" / "core" / name

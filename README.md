@@ -290,6 +290,64 @@ You can control the sidebar menu order via `site_config.json`:
 
 Items not listed in `nav_order` will be appended after the listed ones.
 
+#### Global Resources (Redis & RabbitMQ)
+
+OneSite can automatically generate initialization code for global resources like Redis and RabbitMQ if configured in `site_config.json`.
+
+```json
+{
+  "redis": {
+    "url": "redis://localhost:6379/0",
+    "password": "optional_password"
+  },
+  "rabbitmq": {
+    "url": "amqp://guest:guest@localhost:5672/"
+  }
+}
+```
+
+Generated features:
+- **Automatic Client Initialization**: Generates `app/core/redis.py` and `app/core/rabbitmq.py` with pre-configured async clients.
+- **Lifecycle Management**: RabbitMQ connections are automatically established on startup and closed on shutdown in the FastAPI lifespan.
+- **Environment Integration**: Configuration is automatically synced to the backend `.env` file.
+- **Dependency Management**: Automatically adds `redis` and `aio-pika` to the generated `requirements.txt`.
+
+Usage in your code:
+```python
+from app.core.redis import redis_client
+from app.core.rabbitmq import rabbitmq_manager
+
+# Redis (Async)
+await redis_client.set("key", "value")
+
+# RabbitMQ (aio-pika)
+async with rabbitmq_manager.channel.transaction():
+    await rabbitmq_manager.channel.default_exchange.publish(...)
+```
+
+##### RabbitMQ Consumers (Callbacks)
+
+If you have RabbitMQ enabled, OneSite provides a standard way to handle message callbacks (consumers):
+
+1.  **Define your consumer**: Add a file in `backend/app/consumers/` (e.g., `my_consumer.py`).
+2.  **Register the callback**: Use `rabbitmq_manager.register_consumer` to link a queue to your async function.
+
+Example `app/consumers/my_consumer.py`:
+```python
+import aio_pika
+from app.core.rabbitmq import rabbitmq_manager
+
+async def on_message(message: aio_pika.abc.AbstractIncomingMessage):
+    async with message.process():
+        print(f"Received message: {message.body}")
+
+# Register it for the 'my_queue'
+if rabbitmq_manager:
+    rabbitmq_manager.register_consumer("my_queue", on_message)
+```
+
+3.  **Import your consumer**: Make sure your consumer file is imported in `backend/app/consumers/__init__.py`. OneSite automatically imports this directory on startup to start all registered consumers.
+
 #### Notifications (Optional)
 OneSite can generate a notification center if you provide a `Notification` model and mark it as the notification table:
 

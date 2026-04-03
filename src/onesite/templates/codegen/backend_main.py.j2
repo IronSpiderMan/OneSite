@@ -12,6 +12,18 @@ from app.core.config import settings
 from app.core.db import init_db
 from app.initial_data import init_data
 
+{% if config.redis %}
+from app.core.redis import redis_client
+{% endif %}
+{% if config.rabbitmq %}
+from app.core.rabbitmq import rabbitmq_manager
+# Import consumers to register them
+try:
+    import app.consumers
+except ImportError:
+    pass
+{% endif %}
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Initialize DB
@@ -20,7 +32,20 @@ async def lifespan(app: FastAPI):
     await init_data()
     # Debug CORS
     print(f"Loaded CORS Origins: {settings.BACKEND_CORS_ORIGINS}")
+
+    {% if config.rabbitmq %}
+    # Initialize RabbitMQ
+    if rabbitmq_manager:
+        await rabbitmq_manager.connect()
+    {% endif %}
+
     yield
+
+    {% if config.rabbitmq %}
+    # Disconnect RabbitMQ
+    if rabbitmq_manager:
+        await rabbitmq_manager.disconnect()
+    {% endif %}
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

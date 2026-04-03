@@ -15,6 +15,15 @@ class Settings(BaseSettings):
     # Upload config
     UPLOAD_DIR: str = "{{ config.upload_dir }}"
 
+    # Global Resources
+    {% if config.redis %}
+    REDIS_URL: str = "{{ config.redis.url or 'redis://localhost:6379/0' }}"
+    REDIS_PASSWORD: Optional[str] = "{{ config.redis.password or '' }}"
+    {% endif %}
+    {% if config.rabbitmq %}
+    RABBITMQ_URL: str = "{{ config.rabbitmq.url or 'amqp://guest:guest@localhost:5672/' }}"
+    {% endif %}
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Any) -> Any:

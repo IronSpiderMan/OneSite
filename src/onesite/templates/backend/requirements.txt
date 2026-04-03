@@ -11,3 +11,5 @@ pydantic-settings
 aiosqlite
 asyncpg
 greenlet
+redis
+aio-pika

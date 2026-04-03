@@ -18,7 +18,7 @@ import {
   markAsRead,
 } from '../services/notification-center';
 
-export function NotificationBell() {
+export function NotificationBell({ onStatusChange }: { onStatusChange?: (online: boolean) => void }) {
   const { t } = useTranslation();
   const timeZone = getUserTimeZone();
 
@@ -104,6 +104,7 @@ export function NotificationBell() {
 
         ws.onopen = () => {
           retryCount = 0;
+          onStatusChange?.(true);
         };
 
         ws.onmessage = (ev) => {
@@ -128,6 +129,7 @@ export function NotificationBell() {
         };
 
         ws.onclose = (event) => {
+          onStatusChange?.(false);
           const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
           timeoutId = setTimeout(() => {
             retryCount++;
