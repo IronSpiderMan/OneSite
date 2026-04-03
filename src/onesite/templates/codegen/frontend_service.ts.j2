@@ -61,6 +61,13 @@ export const get{{ model.name }}{{ m2m.target_model }}s = async (id: number, pag
     const response = await request.get<PaginatedResponse<{{ m2m.target_model }}>>(`${API_URL}/${id}/{{ m2m.target_endpoint }}?page=${page}&size=${size}`);
     return response.data;
 };
+{% if m2m.order_field %}
+export type {{ model.name }}{{ m2m.target_model }}WithMeta = { id: number; label: string; order: number };
+export const get{{ model.name }}{{ m2m.target_model }}sWithMeta = async (id: number, page = 1, size = 50) => {
+    const response = await request.get<PaginatedResponse<{{ model.name }}{{ m2m.target_model }}WithMeta>>(`${API_URL}/${id}/{{ m2m.target_endpoint }}_with_meta?page=${page}&size=${size}`);
+    return response.data;
+};
+{% endif %}
 {% endfor %}
 {% endif %}
 

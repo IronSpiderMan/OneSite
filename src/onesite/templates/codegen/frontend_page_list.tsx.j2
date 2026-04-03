@@ -4,7 +4,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
-import { {{ model.name }}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% endfor %}{% endif %} } from '../../services/{{ model.module_name }}';
+import { {{ model.name }}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% if m2m.order_field %}, get{{ model.name }}{{ m2m.target_model }}sWithMeta{% endif %}{% endfor %}{% endif %} } from '../../services/{{ model.module_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -19,6 +19,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ImageUpload } from '../../components/ui/image-upload';
 import { FileUpload } from '../../components/ui/file-upload';
 import { SearchableSelect } from '../../components/ui/searchable-select';
+import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
@@ -120,9 +121,16 @@ const {{ model.name }}Page: React.FC = () => {
     {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
     try {
+      {% if m2m.order_field %}
+      const rel = await get{{ model.name }}{{ m2m.target_model }}sWithMeta(record.id, 1, 200);
+      const ordered = [...rel.items].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
+      setValue('{{ m2m.name }}', ordered.map((x: any) => x.id));
+      set{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels(Object.fromEntries(ordered.map((x: any) => [String(x.id), x.label || String(x.id)])));
+      {% else %}
       const rel = await get{{ model.name }}{{ m2m.target_model }}s(record.id, 1, 200);
       setValue('{{ m2m.name }}', rel.items.map((x: any) => x.id));
       set{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels(Object.fromEntries(rel.items.map((x: any) => [String(x.id), x.{{ m2m.label_field }} || String(x.id)])));
+      {% endif %}
     } catch (error) {
       console.error(error);
       set{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({});
@@ -591,6 +599,22 @@ const {{ model.name }}Page: React.FC = () => {
                 control={control}
                 name="{{ m2m.name }}"
                 render={({ field: { onChange, value } }) => (
+                    {% if m2m.order_field %}
+                    <LinkTableOrderedSelect
+                        value={value}
+                        onValueChange={onChange}
+                        placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.name')}s`}
+                        searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
+                        valueLabels={ {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                        loadOptions={async (query) => {
+                            const response = await get{{ m2m.target_model }}s(1, 20, query);
+                            return response.items.map((item: any) => ({
+                                label: item.{{ m2m.label_field }} || item.id,
+                                value: item.id
+                            }));
+                        }}
+                    />
+                    {% else %}
                     <SearchableSelect
                         value={value}
                         onValueChange={onChange}
@@ -606,6 +630,7 @@ const {{ model.name }}Page: React.FC = () => {
                             }));
                         }}
                     />
+                    {% endif %}
                 )}
             />
           </div>

@@ -212,6 +212,15 @@ Notes:
   - `GET /posts/{id}/tags` (targets related to a source item)
   - `GET /tags/{id}/posts` (reverse M2M: sources related to a target item)
 
+##### Ordering (Link Field: `order`)
+If your link table defines an integer field named `order`, OneSite treats the relationship as ordered:
+- The edit form uses a dedicated ordered selector with drag-and-drop to reorder selected items.
+- Create/Update writes `order=1..n` based on the submitted `*_ids` array order.
+- A meta endpoint is generated to fetch the current order:
+  - `GET /posts/{id}/tags_with_meta` -> `[{id, label, order}]`
+
+If the link table does not have an `order` field, OneSite treats the relationship as unordered.
+
 ##### Direction (Owner Side)
 By default, OneSite injects the M2M `*_ids` field only on the "source" side of the link table.
 If you need to control which side can edit the relationship, you can configure it explicitly:

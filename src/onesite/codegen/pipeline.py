@@ -211,10 +211,18 @@ def generate_code():
         model["m2m_fields"] = model.get("m2m_fields", [])
         model["reverse_m2m"] = model.get("reverse_m2m", [])
         if model.get("is_link_table"):
-            link_extra_fields = [f for f in model["fields"] if not f.get("fk_info") and f["name"] != "id"]
+            order_field = next((f for f in model["fields"] if f["name"] == "order" and not f.get("fk_info")), None)
+            model["link_order_field"] = "order" if order_field else None
+
+            link_extra_fields = [
+                f
+                for f in model["fields"]
+                if not f.get("fk_info") and f["name"] not in ["id", "order"]
+            ]
             model["link_extra_fields"] = link_extra_fields
             model["is_association_table"] = len(link_extra_fields) > 0
         else:
+            model["link_order_field"] = None
             model["link_extra_fields"] = []
             model["is_association_table"] = False
         if model.get("is_link_table") and model.get("is_association_table"):
@@ -326,6 +334,7 @@ def generate_code():
                                     "target_source_module": to_model["source_module"],
                                     "source_fk_field": from_fk["name"],
                                     "target_fk_field": to_fk["name"],
+                                    "order_field": model.get("link_order_field"),
                                 }
                             )
 
@@ -360,6 +369,7 @@ def generate_code():
                                 "source_source_module": from_model["source_module"],
                                 "source_fk_field": from_fk["name"],
                                 "target_fk_field": to_fk["name"],
+                                "order_field": model.get("link_order_field"),
                             }
                         )
 

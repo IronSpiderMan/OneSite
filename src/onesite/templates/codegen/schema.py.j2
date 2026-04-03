@@ -86,3 +86,14 @@ class {{ model.name }}Read({{ model.name }}Base):
     # Frontend will fetch them separately if needed, or we can add them later
     pass
 {% endif %}
+
+{% if model.m2m_fields %}
+{% for m2m in model.m2m_fields %}
+{% if m2m.order_field %}
+class {{ model.name }}{{ m2m.target_model }}Meta(SQLModel):
+    id: int
+    label: str
+    order: int
+{% endif %}
+{% endfor %}
+{% endif %}

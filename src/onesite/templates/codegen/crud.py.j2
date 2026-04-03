@@ -42,10 +42,13 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     # Insert M2M relations
     {% for m2m in model.m2m_fields %}
     if m2m_data.get("{{ m2m.name }}") is not None:
-        for target_id in m2m_data["{{ m2m.name }}"]:
+        for idx, target_id in enumerate(m2m_data["{{ m2m.name }}"], start=1):
             link = {{ m2m.link_model }}(
                 {{ m2m.source_fk_field }}=db_obj.id,
                 {{ m2m.target_fk_field }}=target_id
+                {% if m2m.order_field %}
+                , {{ m2m.order_field }}=idx
+                {% endif %}
             )
             session.add(link)
     {% endfor %}
@@ -74,10 +77,13 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
                 await session.delete(link)
             
             # 2. Insert new relations
-            for target_id in new_ids:
+            for idx, target_id in enumerate(new_ids, start=1):
                 link = {{ m2m.link_model }}(
                     {{ m2m.source_fk_field }}=db_obj.id,
                     {{ m2m.target_fk_field }}=target_id
+                    {% if m2m.order_field %}
+                    , {{ m2m.order_field }}=idx
+                    {% endif %}
                 )
                 session.add(link)
     {% endfor %}
