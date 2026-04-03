@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { LayoutDashboard, Menu as MenuIcon, X, LogOut, Settings } from 'lucide-react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -13,13 +13,27 @@ const AppLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
+  const [userName, setUserName] = useState(localStorage.getItem('user_name') || 'Admin User');
+  const [userAvatar, setUserAvatar] = useState(localStorage.getItem('user_avatar'));
+
   const handleLogout = () => {
     localStorage.removeItem('token');
     navigate('/login');
   };
 
-  const userName = localStorage.getItem('user_name') || 'Admin User';
-  const userAvatar = localStorage.getItem('user_avatar');
+  useEffect(() => {
+    const sync = () => {
+      setUserName(localStorage.getItem('user_name') || 'Admin User');
+      setUserAvatar(localStorage.getItem('user_avatar'));
+    };
+    sync();
+    window.addEventListener('onesite:user_updated', sync as any);
+    window.addEventListener('storage', sync);
+    return () => {
+      window.removeEventListener('onesite:user_updated', sync as any);
+      window.removeEventListener('storage', sync);
+    };
+  }, []);
 
   return (
     <div className="min-h-screen flex">
@@ -78,8 +92,10 @@ const AppLayout: React.FC = () => {
                 <MenuIcon className="h-5 w-5" />
             </Button>
             <div className="ml-auto flex items-center space-x-3">
-                <AvatarFallback name={userName} src={userAvatar} size={32} />
-                <span className="text-sm text-muted-foreground">{userName}</span>
+                <Button variant="ghost" type="button" onClick={() => navigate('/profile')} className="h-10 px-2">
+                    <AvatarFallback name={userName} src={userAvatar} size={32} />
+                    <span className="ml-2 text-sm text-muted-foreground">{userName}</span>
+                </Button>
                 <Button variant="ghost" size="icon" onClick={handleLogout} title={t('common.logout')}>
                     <LogOut className="h-5 w-5" />
                 </Button>

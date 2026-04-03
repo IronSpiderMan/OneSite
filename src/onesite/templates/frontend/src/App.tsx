@@ -3,6 +3,7 @@ import AppLayout from './components/Layout';
 import { GeneratedRoutes } from './Routes';
 import LoginPage from './pages/Login';
 import ErrorPage from './pages/ErrorPage';
+import ProfilePage from './pages/Profile';
 import { AppToaster } from './components/ui/sonner';
 
 // Simple Auth Guard
@@ -37,6 +38,7 @@ function App() {
             <AppLayout />
           </RequireAuth>
         }>
+          <Route path="profile" element={<ProfilePage />} />
           <Route index element={<Navigate to={GeneratedRoutes[0]?.path || "/"} replace />} />
           {GeneratedRoutes.map((route) => (
              <Route key={route.path} path={route.path} element={route.element} />

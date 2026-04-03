@@ -117,6 +117,25 @@ async def create_{{ model.lower_name }}(
     {%- endfor %}
     return await service.create(session, {{ model.lower_name }}_in)
 
+{% if model.module_name == "user" and model.name == "User" %}
+@router.get("/me", response_model=UserRead)
+async def read_me(
+    *,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    return current_user
+
+@router.put("/me", response_model=UserRead)
+async def update_me(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    user_in: UserUpdate,
+) -> Any:
+    user = await service.update(session, current_user, user_in)
+    return user
+{% endif %}
+
 @router.get("/{id}", response_model={{ model.name }}Read)
 async def read_{{ model.lower_name }}(
     *,

@@ -54,6 +54,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "back": "Back",
             "back_home": "Back Home",
             "retry": "Retry",
+            "profile": "Profile",
         },
         "errors": {
             "403": {"title": "Access denied", "desc": "You don't have permission to view this page."},
@@ -81,6 +82,10 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "save_system": "Save System Settings",
             "custom_title": "Personal Settings",
             "save_custom": "Save Personal Settings",
+        },
+        "profile": {
+            "basic": "Basic Info",
+            "full_name_placeholder": "Enter your name",
         },
         "alert": {
             "delete_title": "Confirm deletion",
@@ -131,6 +136,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "back": "返回",
             "back_home": "返回首页",
             "retry": "重试",
+            "profile": "个人信息",
         },
         "errors": {
             "403": {"title": "无权限访问", "desc": "你没有权限访问此页面。"},
@@ -154,6 +160,10 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "save_system": "保存系统配置",
             "custom_title": "个性化配置",
             "save_custom": "保存个性化配置",
+        },
+        "profile": {
+            "basic": "基础信息",
+            "full_name_placeholder": "请输入姓名",
         },
         "alert": {
             "delete_title": "确认删除",
