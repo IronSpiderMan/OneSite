@@ -1,5 +1,5 @@
-import React, { useState, useEffect } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye } from 'lucide-react';
+import React, { useState, useEffect, useRef } from 'react';
+import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -10,6 +10,15 @@ import {
     {% for action_name, action_config in model.actions.items() %}
     , perform{{ model.name }}{{ action_name.capitalize() }}
     {% endfor %}
+    {% endif %}
+    {% if model.importable %}
+    , import{{ model.name }}s
+    {% endif %}
+    {% if model.exportable %}
+    , export{{ model.name }}s
+    {% endif %}
+    {% if model.importable and not model.exportable %}
+    , download{{ model.name }}Template
     {% endif %}
 } from '../../services/{{ model.module_name }}';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
@@ -50,6 +59,9 @@ const {{ model.name }}Page: React.FC = () => {
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
+  {% if model.importable %}
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  {% endif %}
   {% for field in model.fields %}
   {% if field.fk_info %}
   const [{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels, set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels] = useState<Record<string, string>>({});
@@ -98,6 +110,58 @@ const {{ model.name }}Page: React.FC = () => {
     {% endif %}
     setIsModalOpen(true);
   };
+
+  {% if model.exportable %}
+  const handleExport = async () => {
+    try {
+      await export{{ model.name }}s();
+      toast.success(t('export.success', 'Export completed'));
+    } catch (error) {
+      toast.error(t('export.failed', 'Export failed'));
+    }
+  };
+  {% endif %}
+
+  {% if model.importable %}
+  const handleImportClick = () => {
+    // Trigger file input click
+    fileInputRef.current?.click();
+  };
+
+  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const result = await import{{ model.name }}s(file);
+      if (result.failed > 0) {
+        toast.warning(t('import.partial', `Imported ${result.success} records, ${result.failed} failed`));
+      } else {
+        toast.success(t('import.success', `Successfully imported ${result.success} records`));
+      }
+      // Refresh data after import
+      fetchData();
+    } catch (error) {
+      toast.error(t('import.failed', 'Import failed'));
+    }
+    
+    // Reset file input
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+  {% endif %}
+
+  {% if model.importable and not model.exportable %}
+  const handleDownloadTemplate = async () => {
+    try {
+      await download{{ model.name }}Template();
+      toast.success(t('template.downloaded', 'Template downloaded'));
+    } catch (error) {
+      toast.error(t('template.download_failed', 'Download failed'));
+    }
+  };
+  {% endif %}
 
   const handleEdit = async (record: {{ model.name }}) => {
     setEditingId(record.id);
@@ -253,6 +317,35 @@ const {{ model.name }}Page: React.FC = () => {
                     </SelectContent>
                 </Select>
              )}
+          </div>
+          {% endif %}
+          {% if model.importable or model.exportable %}
+          <div className="flex items-center gap-2">
+            {% if model.importable %}
+            <>
+              <input
+                type="file"
+                accept=".csv"
+                ref={fileInputRef}
+                onChange={handleFileSelect}
+                className="hidden"
+              />
+              <Button variant="outline" onClick={handleImportClick}>
+                <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
+              </Button>
+            </>
+            {% endif %}
+            {% if model.exportable %}
+            <Button variant="outline" onClick={handleExport}>
+              <Download className="mr-2 h-4 w-4" />
+              {t('common.export', 'Export')}
+            </Button>
+            {% endif %}
+            {% if model.importable and not model.exportable %}
+            <Button variant="outline" onClick={handleDownloadTemplate}>
+              <Download className="mr-2 h-4 w-4" /> {t('common.template', 'Template')}
+            </Button>
+            {% endif %}
           </div>
           {% endif %}
           <Button onClick={handleCreate}>

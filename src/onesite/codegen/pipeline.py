@@ -153,6 +153,8 @@ def generate_code():
                         actions,
                         is_notification_table,
                         union_key,
+                        importable,
+                        exportable,
                     ) = get_model_fields(obj, model_module_name)
 
                     if name == "User":
@@ -207,6 +209,8 @@ def generate_code():
                             "actions": actions,
                             "is_notification_table": is_notification_table,
                             "union_key": union_key,
+                            "importable": importable,
+                            "exportable": exportable,
                         }
                     )
 

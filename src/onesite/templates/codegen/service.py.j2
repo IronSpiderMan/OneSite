@@ -353,4 +353,126 @@ class {{ model.name }}Service:
         )
     {% endif %}
 
+    {% if model.importable or model.exportable %}
+    # Import/Export methods
+    {% if model.exportable %}
+    async def export_to_csv(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        user_id: int,
+        filters: Optional[dict] = None,
+        ws_manager = None,
+    ) -> str:
+        """
+        Export {{ model.name }} records to CSV.
+        Returns the file path of the exported CSV.
+        """
+        import csv
+        import os
+        from datetime import datetime
+        
+        upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+        export_dir = os.path.join(upload_dir, "exports")
+        os.makedirs(export_dir, exist_ok=True)
+        
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{{ model.module_name }}_export_{timestamp}.csv"
+        filepath = os.path.join(export_dir, filename)
+        
+        # Write CSV
+        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+            writer = csv.writer(f)
+            
+            # Header
+            headers = [{% for field in model.fields %}{% if 'r' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+            writer.writerow(headers)
+            
+            # Process in batches
+            batch_size = 1000
+            page = 1
+            
+            while True:
+                items = await crud.get_multi(session, page=page, size=batch_size)
+                if not items:
+                    break
+                
+                for item in items:
+                    row = []
+                    {% for field in model.fields %}
+                    {% if 'r' in field.permissions %}
+                    row.append(getattr(item, "{{ field.name }}", None))
+                    {% endif %}
+                    {% endfor %}
+                    writer.writerow(row)
+                
+                page += 1
+                
+                if len(items) < batch_size:
+                    break
+        
+        return filepath
+    {% endif %}
+
+    {% if model.importable %}
+    async def import_from_csv(
+        self,
+        session: AsyncSession,
+        *,
+        task_id: str,
+        user_id: int,
+        file: Any,
+        dry_run: bool = False,
+        ws_manager = None,
+    ) -> dict:
+        """
+        Import {{ model.name }} records from CSV.
+        Returns import statistics.
+        """
+        import csv
+        import io
+        
+        contents = await file.read()
+        csv_file = io.StringIO(contents.decode('utf-8'))
+        reader = csv.DictReader(csv_file)
+        
+        rows = list(reader)
+        
+        stats = {"success": 0, "failed": 0, "errors": []}
+        
+        for idx, row in enumerate(rows, 1):
+            try:
+                # Build create object from row
+                obj_data = {}
+                {% for field in model.fields %}
+                {% if field.name != 'id' and 'c' in field.permissions %}
+                if "{{ field.name }}" in row:
+                    value = row["{{ field.name }}"]
+                    {% if field.ui_type == 'int' %}
+                    obj_data["{{ field.name }}"] = int(value) if value else None
+                    {% elif field.ui_type == 'float' %}
+                    obj_data["{{ field.name }}"] = float(value) if value else None
+                    {% elif field.ui_type == 'bool' %}
+                    obj_data["{{ field.name }}"] = value.lower() in ('true', '1', 'yes', 'on') if value else False
+                    {% else %}
+                    obj_data["{{ field.name }}"] = value
+                    {% endif %}
+                {% endif %}
+                {% endfor %}
+                
+                if not dry_run:
+                    obj_in = {{ model.name }}Create(**obj_data)
+                    await self.create(session, obj_in)
+                
+                stats["success"] += 1
+                
+            except Exception as e:
+                stats["failed"] += 1
+                stats["errors"].append(f"Row {idx}: {str(e)}")
+        
+        return stats
+    {% endif %}
+    {% endif %}
+
 service = {{ model.name }}Service()

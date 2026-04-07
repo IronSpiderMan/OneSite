@@ -101,3 +101,56 @@ export const get{{ model.name }}{{ rel.source_model }}s = async (id: number, pag
 };
 {% endfor %}
 {% endif %}
+
+{% if model.importable or model.exportable %}
+// Import/Export functions
+{% if model.exportable %}
+export const export{{ model.name }}s = async () => {
+    const response = await request.post<Blob>(`${API_URL}/export`, {}, {
+        responseType: 'blob'
+    });
+    // Create download link for the returned file
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', '{{ model.module_name }}s_export.csv');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+};
+{% endif %}
+
+{% if model.importable %}
+export interface ImportResult {
+    success: number;
+    failed: number;
+    errors: string[];
+}
+
+export const import{{ model.name }}s = async (file: File): Promise<ImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await request.post<ImportResult>(`${API_URL}/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' }
+    });
+    return response.data;
+};
+{% endif %}
+
+{% if model.importable and not model.exportable %}
+export const download{{ model.name }}Template = async () => {
+    const response = await request.get(`${API_URL}/export/template`, {
+        responseType: 'blob'
+    });
+    const url = window.URL.createObjectURL(new Blob([response.data]));
+    const link = document.createElement('a');
+    link.href = url;
+    link.setAttribute('download', '{{ model.module_name }}_template.csv');
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+    window.URL.revokeObjectURL(url);
+};
+{% endif %}
+{% endif %}

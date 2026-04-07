@@ -1,7 +1,7 @@
 from typing import List, Any, Optional
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
-from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table or model.actions %}, Body{% endif %}
-{% if model.is_notification_table or model.actions %}
+from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table or model.actions or model.importable %}, Body{% endif %}{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -375,4 +375,102 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
     """
     return await service.get_{{ rel.name }}(session, id, page=page, size=size)
 {% endfor %}
+{% endif %}
+
+{% if model.exportable %}
+@router.post("/export")
+async def export_{{ model.lower_name }}s(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    filters: Optional[dict] = Body(None),
+) -> Any:
+    """
+    Export {{ model.name }} records to CSV.
+    Returns the CSV file directly.
+    """
+    import os
+    import uuid
+    from fastapi.responses import FileResponse
+    
+    task_id = str(uuid.uuid4())
+    
+    # Export synchronously and return file
+    filepath = await service.export_to_csv(
+        session,
+        task_id=task_id,
+        user_id=current_user.id,
+        filters=filters,
+        ws_manager=None,  # No WebSocket progress for synchronous export
+    )
+    
+    # Return file directly
+    filename = os.path.basename(filepath)
+    return FileResponse(
+        filepath,
+        media_type="text/csv",
+        filename=filename,
+    )
+{% endif %}
+
+{% if model.importable %}
+@router.post("/import")
+async def import_{{ model.lower_name }}s(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    file: UploadFile = File(...),
+    dry_run: bool = Query(False, description="Validate without importing"),
+) -> Any:
+    """
+    Import {{ model.name }} records from CSV.
+    Returns the import result directly.
+    """
+    import uuid
+    task_id = str(uuid.uuid4())
+    
+    # Import synchronously and return result
+    result = await service.import_from_csv(
+        session,
+        task_id=task_id,
+        user_id=current_user.id,
+        file=file,
+        dry_run=dry_run,
+        ws_manager=None,  # No WebSocket progress for synchronous import
+    )
+    
+    return result
+
+{% if not model.exportable %}
+@router.get("/export/template")
+async def export_{{ model.lower_name }}_template(
+    *,
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Download CSV template for importing {{ model.name }} records.
+    """
+    from fastapi.responses import StreamingResponse
+    import io
+    import csv
+    
+    output = io.StringIO()
+    writer = csv.writer(output)
+    
+    # Write header with field names
+    fields = [{% for field in model.fields %}{% if field.name != 'id' and 'c' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+    writer.writerow(fields)
+    
+    # Write sample row
+    sample = [{% for field in model.fields %}{% if field.name != 'id' and 'c' in field.permissions %}{% if field.ui_type == 'int' %}0{% elif field.ui_type == 'float' %}0.0{% elif field.ui_type == 'bool' %}True{% else %}"sample"{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+    writer.writerow(sample)
+    
+    output.seek(0)
+    
+    return StreamingResponse(
+        io.BytesIO(output.getvalue().encode()),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={{ model.module_name }}_template.csv"}
+    )
+{% endif %}
 {% endif %}

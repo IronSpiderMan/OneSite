@@ -274,6 +274,40 @@ Generated features:
 - **User ID Resolution**: The `{{user_id}}` placeholder is automatically resolved to the ID of the authenticated user performing the action at runtime.
 - **Type Safety**: Actions use the model's generated Update schema, ensuring type consistency and validation.
 
+#### CSV Import & Export
+
+OneSite can generate CSV import and export functionality for your models. Simply add `importable` and/or `exportable` to your model's `__onesite__` configuration:
+
+```python
+class Product(SQLModel, table=True):
+    __onesite__ = {
+        "importable": True,  # Enable CSV import
+        "exportable": True,  # Enable CSV export
+    }
+    
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str
+    price: float
+    quantity: int = 0
+    is_active: bool = True
+```
+
+Generated features:
+- **Export Button**: Downloads all records as a CSV file directly.
+- **Import Button**: Opens a file picker to upload a CSV file. The import runs synchronously and shows results (success/failed count) when complete.
+- **Template Download**: If only `importable` is enabled (without `exportable`), a template download button is provided showing the expected CSV format.
+
+**CSV Format**:
+- The first row contains field names (excluding `id`)
+- Each subsequent row represents one record to create
+- Boolean values should be `true`/`false`
+- Empty cells are treated as `None`/`null`
+
+**Import Behavior**:
+- Import creates new records (does not update existing)
+- Failed rows are skipped and reported in the result
+- After successful import, the list page automatically refreshes
+
 #### Configuration Models (Settings Page)
 OneSite reserves two special models for the unified `/settings` page:
 - `SystemConfig` in `models/system_config.py`: server-persisted system settings, admin-only
