@@ -1,4 +1,3 @@
-import logging
 import asyncio
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -7,9 +6,9 @@ from app.core.db import engine, init_db
 from app.models.user import User
 from app.core.config import settings
 from app.core.security import get_password_hash
+from app.core.logger import get_logger
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 async def init_data() -> None:
     async_session = sessionmaker(

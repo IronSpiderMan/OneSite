@@ -1,10 +1,10 @@
 import aio_pika
 from app.core.config import settings
-import logging
-import asyncio
 from typing import Callable, Awaitable, Dict
 
-logger = logging.getLogger(__name__)
+from app.core.logger import get_logger
+
+logger = get_logger(__name__)
 
 {% if rabbitmq.url %}
 class RabbitMQManager:
