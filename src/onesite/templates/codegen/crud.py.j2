@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -12,6 +12,25 @@ from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
 
 async def get(session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
     return await session.get({{ model.name }}, id)
+
+
+{% if model.fields | selectattr('is_unique') | list %}
+async def check_unique_field(
+    session: AsyncSession,
+    field_name: str,
+    value: Any,
+    exclude_id: Optional[int] = None,
+) -> bool:
+    """
+    Check if a field value is unique.
+    Returns True if unique (no conflict), False if duplicate exists.
+    """
+    statement = select({{ model.name }}).where(getattr({{ model.name }}, field_name) == value)
+    if exclude_id is not None:
+        statement = statement.where({{ model.name }}.id != exclude_id)
+    result = await session.exec(statement)
+    return result.first() is None
+{% endif %}
 
 
 def _apply_filters(
@@ -269,3 +288,79 @@ async def delete(session: AsyncSession, id: int) -> {{ model.name }}:
     await session.delete(db_obj)
     await session.commit()
     return db_obj
+
+{% if model.m2m_fields %}
+# M2M Relationship CRUD functions
+{% for m2m in model.m2m_fields %}
+async def get_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> List[int]:
+    """Get list of {{ m2m.target_model }} IDs related to {{ model.name }}."""
+    statement = select({{ m2m.link_model }}.{{ m2m.target_fk_field }}).where(
+        {{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id
+    )
+    result = await session.exec(statement)
+    return list(result.all())
+
+
+async def count_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> int:
+    """Count {{ m2m.target_model }}s related to {{ model.name }}."""
+    statement = select(func.count()).select_from({{ m2m.link_model }}).where(
+        {{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id
+    )
+    result = await session.exec(statement)
+    return result.one()
+
+{% if m2m.order_field %}
+async def get_{{ m2m.target_endpoint }}_with_order(
+    session: AsyncSession,
+    {{ model.lower_name }}_id: int,
+    page: int = 1,
+    size: int = 50,
+) -> tuple[List[tuple], int]:
+    """Get {{ m2m.target_model }}s with order field. Returns (items, total)."""
+    skip = (page - 1) * size
+    
+    # Count total
+    total = await count_{{ m2m.target_endpoint }}(session, {{ model.lower_name }}_id)
+    
+    if total == 0:
+        return [], 0
+    
+    # Query with join
+    from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }}
+    statement = (
+        select({{ m2m.target_model }}.id, {{ m2m.target_model }}.{{ m2m.label_field }}, {{ m2m.link_model }}.{{ m2m.order_field }})
+        .join({{ m2m.link_model }}, {{ m2m.link_model }}.{{ m2m.target_fk_field }} == {{ m2m.target_model }}.id)
+        .where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id)
+        .order_by({{ m2m.link_model }}.{{ m2m.order_field }})
+        .offset(skip)
+        .limit(size)
+    )
+    result = await session.exec(statement)
+    rows = result.all()
+    
+    return rows, total
+{% endif %}
+{% endfor %}
+{% endif %}
+
+{% if model.reverse_m2m %}
+# Reverse M2M Relationship CRUD functions
+{% for rel in model.reverse_m2m %}
+async def get_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> List[int]:
+    """Get list of {{ rel.source_model }} IDs related to {{ model.name }} (reverse M2M)."""
+    statement = select({{ rel.link_model }}.{{ rel.source_fk_field }}).where(
+        {{ rel.link_model }}.{{ rel.target_fk_field }} == {{ model.lower_name }}_id
+    )
+    result = await session.exec(statement)
+    return list(result.all())
+
+
+async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> int:
+    """Count {{ rel.source_model }}s related to {{ model.name }} (reverse M2M)."""
+    statement = select(func.count()).select_from({{ rel.link_model }}).where(
+        {{ rel.link_model }}.{{ rel.target_fk_field }} == {{ model.lower_name }}_id
+    )
+    result = await session.exec(statement)
+    return result.one()
+{% endfor %}
+{% endif %}

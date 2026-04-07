@@ -4,7 +4,9 @@ from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notif
 {% if model.is_notification_table or model.actions %}
 from app.models.user import User
 {% endif %}
+{% if model.is_notification_table %}
 from sqlmodel import select, func, col
+{% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import db, deps
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.is_notification_table %}, {{ model.name }}Send{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
@@ -13,15 +15,11 @@ from app.services.{{ model.module_name }} import service
 from app.models.{{ model.source_module }} import {{ model.name }}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
-from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
-from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
 {% endfor %}
 {% endif %}
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
-from app.models.{{ rel.link_module }} import {{ rel.link_model }}
-from app.models.{{ rel.source_source_module }} import {{ rel.source_model }}
 from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 {% endfor %}
 {% endif %}
@@ -176,16 +174,10 @@ async def create_{{ model.lower_name }}(
     session: AsyncSession = Depends(db.get_session),
     {{ model.lower_name }}_in: {{ model.name }}Create,
 ) -> Any:
-    {%- for field in model.fields %}
-    {%- if field.is_unique and field.name != 'id' %}
-    if getattr({{ model.lower_name }}_in, "{{ field.name }}", None) is not None:
-        statement = select({{ model.name }}).where({{ model.name }}.{{ field.name }} == getattr({{ model.lower_name }}_in, "{{ field.name }}"))
-        result = await session.exec(statement)
-        if result.first():
-            raise HTTPException(status_code=400, detail="{{ field.name }} already exists")
-    {%- endif %}
-    {%- endfor %}
-    return await service.create(session, {{ model.lower_name }}_in)
+    try:
+        return await service.create(session, {{ model.lower_name }}_in)
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 {% if model.module_name == "user" and model.name == "User" %}
 @router.get("/me", response_model=UserRead)
@@ -202,8 +194,11 @@ async def update_me(
     current_user: User = Depends(deps.get_current_user),
     user_in: UserUpdate,
 ) -> Any:
-    user = await service.update(session, current_user, user_in)
-    return user
+    try:
+        user = await service.update(session, current_user.id, user_in)
+        return user
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 {% endif %}
 
 @router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
@@ -234,26 +229,21 @@ async def update_{{ model.lower_name }}(
     id: int,
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
+    {% if model.is_notification_table %}
+    # Check permission for notification
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
-    {% if model.is_notification_table %}
     if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Forbidden")
     {% endif %}
-        
-    {%- for field in model.fields %}
-    {%- if field.is_unique and field.name != 'id' %}
-    if getattr({{ model.lower_name }}_in, "{{ field.name }}", None) is not None and getattr({{ model.lower_name }}_in, "{{ field.name }}") != getattr({{ model.lower_name }}, "{{ field.name }}"):
-        statement = select({{ model.name }}).where({{ model.name }}.{{ field.name }} == getattr({{ model.lower_name }}_in, "{{ field.name }}"))
-        result = await session.exec(statement)
-        if result.first():
-            raise HTTPException(status_code=400, detail="{{ field.name }} already exists")
-    {%- endif %}
-    {%- endfor %}
-
-    {{ model.lower_name }} = await service.update(session, {{ model.lower_name }}, {{ model.lower_name }}_in)
-    return {{ model.lower_name }}
+    try:
+        {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in)
+        return {{ model.lower_name }}
+    except ValueError as e:
+        if "not found" in str(e):
+            raise HTTPException(status_code=404, detail=str(e))
+        raise HTTPException(status_code=400, detail=str(e))
 
 @router.delete("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def delete_{{ model.lower_name }}(
@@ -319,29 +309,7 @@ async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}(
     """
     Get {{ m2m.target_model }}s related to {{ model.name }}
     """
-    # 1. Find all target_ids in link table
-    link_statement = select({{ m2m.link_model }}.{{ m2m.target_fk_field }}).where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == id)
-    link_result = await session.exec(link_statement)
-    target_ids = link_result.all()
-    
-    if not target_ids:
-        return PaginatedResponse.create(data=[], total=0, page=page, size=size)
-        
-    # 2. Find target objects
-    skip = (page - 1) * size
-    statement = select({{ m2m.target_model }}).where(col({{ m2m.target_model }}.id).in_(target_ids))
-    
-    # Count total
-    total_statement = select(func.count()).select_from(statement.subquery())
-    total_result = await session.exec(total_statement)
-    total = total_result.one()
-    
-    # Pagination
-    statement = statement.offset(skip).limit(size)
-    result = await session.exec(statement)
-    items = result.all()
-    
-    return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+    return await service.get_{{ m2m.target_endpoint }}(session, id, page=page, size=size)
 {% endfor %}
 {% endif %}
 
@@ -359,24 +327,7 @@ async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}_with_meta(
     """
     Get {{ m2m.target_model }}s related to {{ model.name }} with link-table order
     """
-    skip = (page - 1) * size
-
-    total_statement = select(func.count()).select_from({{ m2m.link_model }}).where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == id)
-    total_result = await session.exec(total_statement)
-    total = total_result.one()
-
-    statement = (
-        select({{ m2m.target_model }}.id, {{ m2m.target_model }}.{{ m2m.label_field }}, {{ m2m.link_model }}.{{ m2m.order_field }})
-        .join({{ m2m.link_model }}, {{ m2m.link_model }}.{{ m2m.target_fk_field }} == {{ m2m.target_model }}.id)
-        .where({{ m2m.link_model }}.{{ m2m.source_fk_field }} == id)
-        .order_by({{ m2m.link_model }}.{{ m2m.order_field }})
-        .offset(skip)
-        .limit(size)
-    )
-    result = await session.exec(statement)
-    rows = result.all()
-    items = [{{ model.name }}{{ m2m.target_model }}Meta(id=r[0], label=str(r[1]), order=int(r[2] or 0)) for r in rows]
-    return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+    return await service.get_{{ m2m.target_endpoint }}_with_meta(session, id, page=page, size=size)
 {% endif %}
 {% endfor %}
 {% endif %}
@@ -394,24 +345,6 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
     """
     Get {{ rel.source_model }}s related to {{ model.name }} (via M2M)
     """
-    link_statement = select({{ rel.link_model }}.{{ rel.source_fk_field }}).where({{ rel.link_model }}.{{ rel.target_fk_field }} == id)
-    link_result = await session.exec(link_statement)
-    source_ids = link_result.all()
-
-    if not source_ids:
-        return PaginatedResponse.create(data=[], total=0, page=page, size=size)
-
-    skip = (page - 1) * size
-    statement = select({{ rel.source_model }}).where(col({{ rel.source_model }}.id).in_(source_ids))
-
-    total_statement = select(func.count()).select_from(statement.subquery())
-    total_result = await session.exec(total_statement)
-    total = total_result.one()
-
-    statement = statement.offset(skip).limit(size)
-    result = await session.exec(statement)
-    items = result.all()
-
-    return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+    return await service.get_{{ rel.name }}(session, id, page=page, size=size)
 {% endfor %}
 {% endif %}

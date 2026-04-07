@@ -1,4 +1,4 @@
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -7,6 +7,25 @@ from app.schemas.user import UserCreate, UserUpdate
 
 async def get(session: AsyncSession, id: int) -> Optional[User]:
     return await session.get(User, id)
+
+
+{% if model.fields | selectattr('is_unique') | list %}
+async def check_unique_field(
+    session: AsyncSession,
+    field_name: str,
+    value: Any,
+    exclude_id: Optional[int] = None,
+) -> bool:
+    """
+    Check if a field value is unique.
+    Returns True if unique (no conflict), False if duplicate exists.
+    """
+    statement = select(User).where(getattr(User, field_name) == value)
+    if exclude_id is not None:
+        statement = statement.where(User.id != exclude_id)
+    result = await session.exec(statement)
+    return result.first() is None
+{% endif %}
 
 
 def _apply_filters(

@@ -93,6 +93,16 @@ class UserService:
         return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
     async def create(self, session: AsyncSession, obj_in: UserCreate) -> User:
+        {% if model.fields | selectattr('is_unique') | list %}
+        # Check unique field constraints
+        {% for field in model.fields %}
+        {% if field.is_unique and field.name != 'id' %}
+        if getattr(obj_in, "{{ field.name }}", None) is not None:
+            if not await crud.check_unique_field(session, "{{ field.name }}", obj_in.{{ field.name }}):
+                raise ValueError("{{ field.name }} already exists")
+        {% endif %}
+        {% endfor %}
+        {% endif %}
         from app.core.security import get_password_hash
         user_data = obj_in.dict()
         if 'password' in user_data:
@@ -104,7 +114,27 @@ class UserService:
         await session.refresh(db_obj)
         return db_obj
 
-    async def update(self, session: AsyncSession, db_obj: User, obj_in: UserUpdate) -> User:
+    async def update(self, session: AsyncSession, id: int, obj_in: UserUpdate) -> User:
+        """
+        Update User by ID with validation.
+        Raises ValueError if unique constraint is violated.
+        Raises NotFoundError if object doesn't exist.
+        """
+        db_obj = await crud.get(session, id)
+        if not db_obj:
+            raise ValueError("User not found")
+        
+        {% if model.fields | selectattr('is_unique') | list %}
+        # Check unique field constraints (only for fields being updated)
+        {% for field in model.fields %}
+        {% if field.is_unique and field.name != 'id' %}
+        if getattr(obj_in, "{{ field.name }}", None) is not None and getattr(obj_in, "{{ field.name }}") != getattr(db_obj, "{{ field.name }}"):
+            if not await crud.check_unique_field(session, "{{ field.name }}", obj_in.{{ field.name }}, exclude_id=id):
+                raise ValueError("{{ field.name }} already exists")
+        {% endif %}
+        {% endfor %}
+        {% endif %}
+        
         if hasattr(obj_in, 'password') and obj_in.password:
             from app.core.security import get_password_hash
             db_obj.hashed_password = get_password_hash(obj_in.password)
