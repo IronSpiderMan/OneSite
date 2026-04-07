@@ -28,7 +28,8 @@ import { FileUpload } from '../../components/ui/file-upload';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
-import { formatDateTime, getUserTimeZone } from '../../lib/datetime';
+import { TimePicker } from '../../components/ui/time-picker';
+import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -196,6 +197,8 @@ const {{ model.name }}Page: React.FC = () => {
     {% elif field.ui_type == 'datetime' %}
     if (searchValues['{{ field.name }}_from']) next['{{ field.name }}_from'] = `${searchValues['{{ field.name }}_from']}T00:00:00`;
     if (searchValues['{{ field.name }}_to']) next['{{ field.name }}_to'] = `${searchValues['{{ field.name }}_to']}T23:59:59`;
+    {% elif field.ui_type == 'time' %}
+    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
     {% elif field.is_enum %}
     if (searchValues['{{ field.name }}'] && searchValues['{{ field.name }}'] !== '__all__') next['{{ field.name }}'] = searchValues['{{ field.name }}'];
     {% elif field.ui_type == 'str' %}
@@ -260,7 +263,7 @@ const {{ model.name }}Page: React.FC = () => {
 
       {% set ns = namespace(has_search_fields=false) %}
       {% for field in model.fields %}
-      {% if field.is_search_field and (field.ui_type in ['bool','str','datetime'] or field.is_enum) and field.name != 'id' %}
+          {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) and field.name != 'id' %}
       {% set ns.has_search_fields = true %}
       {% endif %}
       {% endfor %}
@@ -276,7 +279,7 @@ const {{ model.name }}Page: React.FC = () => {
         <div className="mt-4 max-h-[40vh] overflow-auto pr-2">
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
           {% for field in model.fields %}
-          {% if field.is_search_field and (field.ui_type in ['bool','str','datetime'] or field.is_enum) and field.name != 'id' %}
+              {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) and field.name != 'id' %}
           <div className="space-y-2">
             <Label>{t('{{ field.label_key }}')}</Label>
             {% if field.ui_type == 'bool' %}
@@ -309,6 +312,12 @@ const {{ model.name }}Page: React.FC = () => {
                 onChange={(e) => setSearchValues((s) => ({ ...s, ['{{ field.name }}_to']: e.target.value }))}
               />
             </div>
+            {% elif field.ui_type == 'time' %}
+            <TimePicker
+              value={searchValues['{{ field.name }}'] || ''}
+              onChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
+              placeholder={t('common.select_time', 'Select time')}
+            />
             {% elif field.is_enum %}
             <Select
               value={searchValues['{{ field.name }}'] || '__all__'}
@@ -418,6 +427,8 @@ const {{ model.name }}Page: React.FC = () => {
                         <Badge variant="outline">{item.{{ field.name }}}</Badge>
                         {% elif field.ui_type == 'datetime' %}
                         <span className="text-muted-foreground">{formatDateTime(item.{{ field.name }}, timeZone)}</span>
+                        {% elif field.ui_type == 'time' %}
+                        <span className="text-muted-foreground">{formatTime(item.{{ field.name }})}</span>
                         {% elif field.ui_type == 'json' %}
                         {item.{{ field.name }} !== undefined && item.{{ field.name }} !== null
                           ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }}))
@@ -579,6 +590,18 @@ const {{ model.name }}Page: React.FC = () => {
                     />
                 )}
             />
+            {% elif field.ui_type == 'time' %}
+            <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                    <TimePicker
+                        value={value}
+                        onChange={onChange}
+                        placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                    />
+                )}
+            />
             {% elif field.ui_type == 'json' %}
             <Controller
                 control={control}
@@ -612,6 +635,8 @@ const {{ model.name }}Page: React.FC = () => {
                 id="{{ field.name }}"
                 {% if field.ui_type == 'int' or field.ui_type == 'float' %}
                 type="number"
+                {% elif field.ui_type == 'datetime' %}
+                type="datetime-local"
                 {% else %}
                 type="text"
                 {% endif %}

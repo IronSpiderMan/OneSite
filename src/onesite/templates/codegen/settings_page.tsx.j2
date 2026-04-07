@@ -11,6 +11,7 @@ import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { ImageUpload } from '../components/ui/image-upload';
 import { FileUpload } from '../components/ui/file-upload';
+import { TimePicker } from '../components/ui/time-picker';
 import { applyTheme } from '../lib/theme';
 {% if system_model %}
 import { use{{ system_model.name }}Store } from '../stores/use{{ system_model.name }}Store';
@@ -203,6 +204,18 @@ const SettingsPage: React.FC = () => {
                   )}
                 />
                   {% endif %}
+                {% elif field.ui_type == 'time' %}
+                <Controller
+                  name="{{ field.name }}"
+                  control={control}
+                  render={({ field: { onChange, value } }) => (
+                    <TimePicker
+                      value={value}
+                      onChange={onChange}
+                      placeholder={t('common.select_time', 'Select time')}
+                    />
+                  )}
+                />
                 {% elif field.is_enum %}
                 <Controller
                   name="{{ field.name }}"
@@ -308,6 +321,18 @@ const SettingsPage: React.FC = () => {
                 )}
               />
                 {% endif %}
+              {% elif field.ui_type == 'time' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <TimePicker
+                    value={value}
+                    onChange={onChange}
+                    placeholder={t('common.select_time', 'Select time')}
+                  />
+                )}
+              />
               {% elif field.is_enum %}
               <Controller
                 name="{{ field.name }}"

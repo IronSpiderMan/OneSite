@@ -1,5 +1,5 @@
 from typing import List, Any, Optional
-from datetime import datetime
+from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table or model.actions %}, Body{% endif %}
 {% if model.is_notification_table or model.actions %}
 from app.models.user import User
@@ -129,6 +129,8 @@ async def read_{{ model.lower_name }}s(
     {% elif field.ui_type == 'datetime' %}
     {{ field.name }}_from: Optional[datetime] = Query(None, description="Filter by {{ field.name }} from"),
     {{ field.name }}_to: Optional[datetime] = Query(None, description="Filter by {{ field.name }} to"),
+    {% elif field.ui_type == 'time' %}
+    {{ field.name }}: Optional[time] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.ui_type == 'str' %}
@@ -156,6 +158,8 @@ async def read_{{ model.lower_name }}s(
         {% elif field.ui_type == 'datetime' %}
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
+        {% elif field.ui_type == 'time' %}
+        {{ field.name }}={{ field.name }},
         {% elif field.is_enum %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'str' %}

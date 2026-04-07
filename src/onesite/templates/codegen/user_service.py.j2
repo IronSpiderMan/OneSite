@@ -1,5 +1,5 @@
 from typing import Optional
-from datetime import datetime
+from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import user as crud
 from app.schemas.user import UserCreate, UserUpdate
@@ -24,6 +24,8 @@ class UserService:
         {% elif field.ui_type == 'datetime' %}
         {{ field.name }}_from: Optional[datetime] = None,
         {{ field.name }}_to: Optional[datetime] = None,
+        {% elif field.ui_type == 'time' %}
+        {{ field.name }}: Optional[time] = None,
         {% elif field.is_enum %}
         {{ field.name }}: Optional[str] = None,
         {% elif field.ui_type == 'str' %}
@@ -50,6 +52,8 @@ class UserService:
             {% elif field.ui_type == 'datetime' %}
             {{ field.name }}_from={{ field.name }}_from,
             {{ field.name }}_to={{ field.name }}_to,
+            {% elif field.ui_type == 'time' %}
+            {{ field.name }}={{ field.name }},
             {% elif field.is_enum %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'str' %}
@@ -75,6 +79,8 @@ class UserService:
             {% elif field.ui_type == 'datetime' %}
             {{ field.name }}_from={{ field.name }}_from,
             {{ field.name }}_to={{ field.name }}_to,
+            {% elif field.ui_type == 'time' %}
+            {{ field.name }}={{ field.name }},
             {% elif field.is_enum %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'str' %}

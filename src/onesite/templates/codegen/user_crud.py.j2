@@ -1,5 +1,5 @@
 from typing import Optional, List, Any
-from datetime import datetime
+from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.user import User
@@ -39,6 +39,8 @@ def _apply_filters(
     {% elif field.ui_type == 'datetime' %}
     {{ field.name }}_from: Optional[datetime] = None,
     {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type == 'time' %}
+    {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}
@@ -68,6 +70,9 @@ def _apply_filters(
         statement = statement.where(User.{{ field.name }} >= {{ field.name }}_from)
     if {{ field.name }}_to is not None:
         statement = statement.where(User.{{ field.name }} <= {{ field.name }}_to)
+    {% elif field.ui_type == 'time' %}
+    if {{ field.name }} is not None:
+        statement = statement.where(User.{{ field.name }} == {{ field.name }})
     {% elif field.is_enum %}
     if {{ field.name }}:
         statement = statement.where(User.{{ field.name }} == {{ field.name }})
@@ -100,6 +105,8 @@ async def get_multi(
     {% elif field.ui_type == 'datetime' %}
     {{ field.name }}_from: Optional[datetime] = None,
     {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type == 'time' %}
+    {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}
@@ -159,6 +166,8 @@ async def count(
     {% elif field.ui_type == 'datetime' %}
     {{ field.name }}_from: Optional[datetime] = None,
     {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type == 'time' %}
+    {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}

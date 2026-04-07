@@ -204,7 +204,12 @@ def get_model_fields(
             json_py_imports.append(resolved_annotation.__name__)
             json_model_schema = _build_json_model_schema(resolved_annotation)
         else:
-            if "int" in type_str:
+            # Check for time type first - must check before datetime since datetime.time contains "datetime"
+            # The type_str is like "<class 'datetime.time'>" for time type
+            # We need to check for 'datetime.time' specifically to not match datetime.datetime
+            if "'datetime.time'" in type_str:
+                type_str = "time"
+            elif "int" in type_str:
                 type_str = "int"
             elif "str" in type_str:
                 type_str = "str"

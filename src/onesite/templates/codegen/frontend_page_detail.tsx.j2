@@ -8,7 +8,7 @@ import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
 import { Label } from '../../components/ui/label';
-import { formatDateTime, getUserTimeZone } from '../../lib/datetime';
+import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime';
 import { Separator } from '../../components/ui/separator';
 import { FileUpload } from '../../components/ui/file-upload';
 import { Switch } from '../../components/ui/switch';
@@ -332,6 +332,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 </pre>
                                 {% elif field.ui_type == 'datetime' %}
                                 <span className="text-muted-foreground">{formatDateTime(currentItem.{{ field.name }}, timeZone)}</span>
+                                {% elif field.ui_type == 'time' %}
+                                <span className="text-muted-foreground">{formatTime(currentItem.{{ field.name }})}</span>
                                 {% else %}
                                 {String(currentItem.{{ field.name }} ?? '-')}
                                 {% endif %}

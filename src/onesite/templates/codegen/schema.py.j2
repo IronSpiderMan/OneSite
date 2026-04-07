@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime
+from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import SQLModel, Field
 from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
 
