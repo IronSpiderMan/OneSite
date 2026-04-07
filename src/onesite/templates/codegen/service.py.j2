@@ -1,7 +1,9 @@
-from typing import List, Optional, Any
+from typing import Optional, Any
+from datetime import datetime
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update
+from app.schemas.pagination import PaginatedResponse
 from app.models.{{ model.source_module }} import {{ model.name }}
 {% if model.is_notification_table %}
 from app.core.ws import manager
@@ -11,10 +13,146 @@ class {{ model.name }}Service:
     async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
         return await crud.get(session, id)
 
-    async def get_multi(self, session: AsyncSession, skip: int = 0, limit: int = 100) -> List[{{ model.name }}]:
-        return await crud.get_multi(session, skip=skip, limit=limit)
+    async def get_multi(
+        self,
+        session: AsyncSession,
+        *,
+        q: Optional[str] = None,
+        page: int = 1,
+        size: int = 20,
+        {% for field in model.fields %}
+        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.ui_type == 'bool' %}
+        {{ field.name }}: Optional[bool] = None,
+        {% elif field.ui_type == 'datetime' %}
+        {{ field.name }}_from: Optional[datetime] = None,
+        {{ field.name }}_to: Optional[datetime] = None,
+        {% elif field.is_enum %}
+        {{ field.name }}: Optional[str] = None,
+        {% elif field.ui_type == 'str' %}
+        {{ field.name }}: Optional[str] = None,
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+        {% for fk in model.foreign_keys %}
+        {{ fk.name }}: Optional[int] = None,
+        {% endfor %}
+    ) -> PaginatedResponse[{{ model.name }}]:
+        """
+        Get paginated list with optional search and filter support.
+        Combines CRUD get_multi and count into PaginatedResponse.
+        """
+        # Get total count first
+        total = await crud.count(
+            session,
+            q=q,
+            {% for field in model.fields %}
+            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.ui_type == 'bool' %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'datetime' %}
+            {{ field.name }}_from={{ field.name }}_from,
+            {{ field.name }}_to={{ field.name }}_to,
+            {% elif field.is_enum %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'str' %}
+            {{ field.name }}={{ field.name }},
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% for fk in model.foreign_keys %}
+            {{ fk.name }}={{ fk.name }},
+            {% endfor %}
+        )
+        
+        # Get items
+        items = await crud.get_multi(
+            session,
+            q=q,
+            page=page,
+            size=size,
+            {% for field in model.fields %}
+            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.ui_type == 'bool' %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'datetime' %}
+            {{ field.name }}_from={{ field.name }}_from,
+            {{ field.name }}_to={{ field.name }}_to,
+            {% elif field.is_enum %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'str' %}
+            {{ field.name }}={{ field.name }},
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% for fk in model.foreign_keys %}
+            {{ fk.name }}={{ fk.name }},
+            {% endfor %}
+        )
+        
+        # Build response
+        if size == -1:
+            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
+        return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
     async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}:
+        {% if model.is_notification_table %}
+        # If user_id is None, broadcast to all active users
+        if getattr(obj_in, "user_id", None) is None:
+            from sqlmodel import select
+            from app.models.user import User
+            
+            result = await session.exec(select(User.id).where(User.is_active == True))
+            user_ids = result.all()
+            
+            if not user_ids:
+                # No active users, return placeholder
+                return {{ model.name }}(
+                    title=obj_in.title,
+                    summary=obj_in.summary,
+                    content=obj_in.content,
+                    is_read=False,
+                    user_id=0
+                )
+            
+            from datetime import datetime as dt
+            created_at = dt.utcnow()
+            created_objects = []
+            
+            for uid in user_ids:
+                obj_data = obj_in.dict()
+                obj_data["user_id"] = uid
+                obj_data["created_at"] = created_at
+                db_obj = {{ model.name }}(**obj_data)
+                session.add(db_obj)
+                created_objects.append(db_obj)
+            
+            await session.commit()
+            
+            # Refresh all objects to get their IDs
+            for obj in created_objects:
+                await session.refresh(obj)
+            
+            # Push notifications to all users
+            for obj in created_objects:
+                try:
+                    payload = {
+                        "type": "notification",
+                        "data": {
+                            "id": obj.id,
+                            "title": obj.title,
+                            "summary": obj.summary,
+                            "created_at": obj.created_at.isoformat() if obj.created_at else None,
+                            "is_read": obj.is_read,
+                        }
+                    }
+                    await manager.send_personal_message(payload, obj.user_id)
+                except Exception:
+                    pass
+            
+            # Return the first created object as representative
+            return created_objects[0] if created_objects else {{ model.name }}()
+        {% endif %}
         obj = await crud.create(session, obj_in)
         {% if model.is_notification_table %}
         # Auto-push for notification

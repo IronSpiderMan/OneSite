@@ -1,15 +1,96 @@
-from typing import List, Optional
+from typing import Optional
+from datetime import datetime
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import user as crud
 from app.schemas.user import UserCreate, UserUpdate
+from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
 
 class UserService:
     async def get(self, session: AsyncSession, id: int) -> Optional[User]:
         return await crud.get(session, id)
 
-    async def get_multi(self, session: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
-        return await crud.get_multi(session, skip=skip, limit=limit)
+    async def get_multi(
+        self,
+        session: AsyncSession,
+        *,
+        q: Optional[str] = None,
+        page: int = 1,
+        size: int = 20,
+        {% for field in model.fields %}
+        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.ui_type == 'bool' %}
+        {{ field.name }}: Optional[bool] = None,
+        {% elif field.ui_type == 'datetime' %}
+        {{ field.name }}_from: Optional[datetime] = None,
+        {{ field.name }}_to: Optional[datetime] = None,
+        {% elif field.is_enum %}
+        {{ field.name }}: Optional[str] = None,
+        {% elif field.ui_type == 'str' %}
+        {{ field.name }}: Optional[str] = None,
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+        {% for fk in model.foreign_keys %}
+        {{ fk.name }}: Optional[int] = None,
+        {% endfor %}
+    ) -> PaginatedResponse[User]:
+        """
+        Get paginated list with optional search and filter support.
+        Combines CRUD get_multi and count into PaginatedResponse.
+        """
+        # Get total count first
+        total = await crud.count(
+            session,
+            q=q,
+            {% for field in model.fields %}
+            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.ui_type == 'bool' %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'datetime' %}
+            {{ field.name }}_from={{ field.name }}_from,
+            {{ field.name }}_to={{ field.name }}_to,
+            {% elif field.is_enum %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'str' %}
+            {{ field.name }}={{ field.name }},
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% for fk in model.foreign_keys %}
+            {{ fk.name }}={{ fk.name }},
+            {% endfor %}
+        )
+        
+        # Get items
+        items = await crud.get_multi(
+            session,
+            q=q,
+            page=page,
+            size=size,
+            {% for field in model.fields %}
+            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.ui_type == 'bool' %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'datetime' %}
+            {{ field.name }}_from={{ field.name }}_from,
+            {{ field.name }}_to={{ field.name }}_to,
+            {% elif field.is_enum %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.ui_type == 'str' %}
+            {{ field.name }}={{ field.name }},
+            {% endif %}
+            {% endif %}
+            {% endfor %}
+            {% for fk in model.foreign_keys %}
+            {{ fk.name }}={{ fk.name }},
+            {% endfor %}
+        )
+        
+        # Build response
+        if size == -1:
+            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
+        return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
     async def create(self, session: AsyncSession, obj_in: UserCreate) -> User:
         from app.core.security import get_password_hash

@@ -32,7 +32,12 @@ class {{ model.name }}Create(SQLModel):
 {% for field in model.fields %}
     {% if 'c' in field.permissions and field.name != 'id' %}
     {% if field.required and not field.create_optional %}
+    {% if model.is_notification_table and field.name == 'user_id' %}
+    # user_id is optional in create - None means broadcast to all users
+    user_id: Optional[int] = None
+    {% else %}
     {{ field.name }}: {{ field.type }}
+    {% endif %}
     {% else %}
     {% if field.default_factory == 'list' %}
     {{ field.name }}: {{ field.type }} = Field(default_factory=list)

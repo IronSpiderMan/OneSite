@@ -1,5 +1,6 @@
-from typing import List, Optional
-from sqlmodel import select
+from typing import Optional, List
+from datetime import datetime
+from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate
@@ -7,10 +8,177 @@ from app.schemas.user import UserCreate, UserUpdate
 async def get(session: AsyncSession, id: int) -> Optional[User]:
     return await session.get(User, id)
 
-async def get_multi(session: AsyncSession, skip: int = 0, limit: int = 100) -> List[User]:
-    statement = select(User).offset(skip).limit(limit)
+
+def _apply_filters(
+    statement,
+    *,
+    q: Optional[str] = None,
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    {{ field.name }}: Optional[bool] = None,
+    {% elif field.ui_type == 'datetime' %}
+    {{ field.name }}_from: Optional[datetime] = None,
+    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.is_enum %}
+    {{ field.name }}: Optional[str] = None,
+    {% elif field.ui_type == 'str' %}
+    {{ field.name }}: Optional[str] = None,
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}: Optional[int] = None,
+    {% endfor %}
+):
+    """Apply search and filter conditions to statement. Shared by get_multi and count."""
+    # Apply search filter if query is present
+    {% if model.search_field != 'id' %}
+    if q:
+        statement = statement.where(col(User.{{ model.search_field }}).ilike(f"%{q}%"))
+    {% endif %}
+
+    # Apply per-field filters (configured via site_props.is_search_field)
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    if {{ field.name }} is not None:
+        statement = statement.where(User.{{ field.name }} == {{ field.name }})
+    {% elif field.ui_type == 'datetime' %}
+    if {{ field.name }}_from is not None:
+        statement = statement.where(User.{{ field.name }} >= {{ field.name }}_from)
+    if {{ field.name }}_to is not None:
+        statement = statement.where(User.{{ field.name }} <= {{ field.name }}_to)
+    {% elif field.is_enum %}
+    if {{ field.name }}:
+        statement = statement.where(User.{{ field.name }} == {{ field.name }})
+    {% elif field.ui_type == 'str' %}
+    if {{ field.name }}:
+        statement = statement.where(col(User.{{ field.name }}).ilike("%" + {{ field.name }} + "%"))
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+
+    # Apply foreign key filters
+    {% for fk in model.foreign_keys %}
+    if {{ fk.name }}:
+        statement = statement.where(User.{{ fk.name }} == {{ fk.name }})
+    {% endfor %}
+    
+    return statement
+
+
+async def get_multi(
+    session: AsyncSession,
+    *,
+    q: Optional[str] = None,
+    page: int = 1,
+    size: int = 20,
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    {{ field.name }}: Optional[bool] = None,
+    {% elif field.ui_type == 'datetime' %}
+    {{ field.name }}_from: Optional[datetime] = None,
+    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.is_enum %}
+    {{ field.name }}: Optional[str] = None,
+    {% elif field.ui_type == 'str' %}
+    {{ field.name }}: Optional[str] = None,
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}: Optional[int] = None,
+    {% endfor %}
+) -> List[User]:
+    """
+    Get list of users with optional search and filter support.
+    When size=-1, returns all matching records without pagination.
+    Returns only the list of users; use count() for total.
+    """
+    statement = select(User)
+    statement = _apply_filters(
+        statement,
+        q=q,
+        {% for field in model.fields %}
+        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.ui_type == 'bool' %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.ui_type == 'datetime' %}
+        {{ field.name }}_from={{ field.name }}_from,
+        {{ field.name }}_to={{ field.name }}_to,
+        {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.ui_type == 'str' %}
+        {{ field.name }}={{ field.name }},
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+        {% for fk in model.foreign_keys %}
+        {{ fk.name }}={{ fk.name }},
+        {% endfor %}
+    )
+    
+    # Apply pagination (skip if size == -1, meaning get all)
+    if size != -1:
+        skip = (page - 1) * size
+        statement = statement.offset(skip).limit(size)
+    
     result = await session.exec(statement)
-    return result.all()
+    return list(result.all())
+
+
+async def count(
+    session: AsyncSession,
+    *,
+    q: Optional[str] = None,
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    {{ field.name }}: Optional[bool] = None,
+    {% elif field.ui_type == 'datetime' %}
+    {{ field.name }}_from: Optional[datetime] = None,
+    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.is_enum %}
+    {{ field.name }}: Optional[str] = None,
+    {% elif field.ui_type == 'str' %}
+    {{ field.name }}: Optional[str] = None,
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}: Optional[int] = None,
+    {% endfor %}
+) -> int:
+    """
+    Count total matching records with same filter conditions as get_multi.
+    """
+    statement = select(func.count()).select_from(User)
+    statement = _apply_filters(
+        statement,
+        q=q,
+        {% for field in model.fields %}
+        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.ui_type == 'bool' %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.ui_type == 'datetime' %}
+        {{ field.name }}_from={{ field.name }}_from,
+        {{ field.name }}_to={{ field.name }}_to,
+        {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.ui_type == 'str' %}
+        {{ field.name }}={{ field.name }},
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+        {% for fk in model.foreign_keys %}
+        {{ fk.name }}={{ fk.name }},
+        {% endfor %}
+    )
+    
+    result = await session.exec(statement)
+    return result.one()
 
 async def create(session: AsyncSession, obj_in: UserCreate) -> User:
     # User creation logic is mainly handled in Service (password hashing)
