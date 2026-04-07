@@ -355,6 +355,8 @@ async def get_{{ m2m.target_endpoint }}_with_order(
 {% if model.reverse_m2m %}
 # Reverse M2M Relationship CRUD functions
 {% for rel in model.reverse_m2m %}
+from app.models.{{ rel.link_module }} import {{ rel.link_model }}
+
 async def get_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> List[int]:
     """Get list of {{ rel.source_model }} IDs related to {{ model.name }} (reverse M2M)."""
     statement = select({{ rel.link_model }}.{{ rel.source_fk_field }}).where(
@@ -372,4 +374,24 @@ async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id:
     result = await session.exec(statement)
     return result.one()
 {% endfor %}
+{% endif %}
+
+{% if model.union_key %}
+# Union Key (Composite Key) lookup
+async def get_by_{{ model.union_key | join('_') }}(
+    session: AsyncSession,
+    {% for key_field in model.union_key %}
+    {{ key_field }}: {% if key_field.endswith('_id') %}int{% else %}str{% endif %}{% if not loop.last %},
+    {% endif %}
+    {% endfor %}
+) -> Optional[{{ model.name }}]:
+    """Get {{ model.name }} by composite key: {{ model.union_key | join(', ') }}."""
+    statement = select({{ model.name }}).where(
+        {% for key_field in model.union_key %}
+        {{ model.name }}.{{ key_field }} == {{ key_field }}{% if not loop.last %},
+        {% endif %}
+        {% endfor %}
+    )
+    result = await session.exec(statement)
+    return result.first()
 {% endif %}

@@ -78,7 +78,7 @@ async def mark_read(
     if getattr(n, "user_id", None) != current_user.id and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Forbidden")
     if not getattr(n, "is_read", False):
-        n = await service.update(session, n, {{ model.name }}Update(is_read=True))
+        n = await service.update(session, id, {{ model.name }}Update(is_read=True))
     return n
 
 @router.post("/send", dependencies=[Depends(deps.get_current_active_superuser)])
@@ -203,6 +203,30 @@ async def update_me(
         return user
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+{% endif %}
+
+{% if model.union_key %}
+@router.get("/by_{{ model.union_key | join('_') }}", response_model={{ model.name }}Read)
+async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    {% for key_field in model.union_key %}
+    {{ key_field }}: {% if key_field.endswith('_id') %}int{% else %}str{% endif %} = Query(..., description="Filter by {{ key_field }}"),
+    {% endfor %}
+) -> Any:
+    """
+    Get {{ model.name }} by composite key: {{ model.union_key | join(', ') }}
+    """
+    {{ model.lower_name }} = await service.get_by_{{ model.union_key | join('_') }}(
+        session,
+        {% for key_field in model.union_key %}
+        {{ key_field }}{% if not loop.last %},
+        {% endif %}
+        {% endfor %}
+    )
+    if not {{ model.lower_name }}:
+        raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    return {{ model.lower_name }}
 {% endif %}
 
 @router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})

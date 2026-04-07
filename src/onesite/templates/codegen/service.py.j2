@@ -331,4 +331,26 @@ class {{ model.name }}Service:
     {% endfor %}
     {% endif %}
 
+    {% if model.union_key %}
+    # Union Key (Composite Key) lookup
+    async def get_by_{{ model.union_key | join('_') }}(
+        self,
+        session: AsyncSession,
+        {% for key_field in model.union_key %}
+        {{ key_field }}: {% if key_field.endswith('_id') %}int{% else %}str{% endif %}{% if not loop.last %},
+        {% endif %}
+        {% endfor %}
+    ) -> Optional[{{ model.name }}]:
+        """
+        Get {{ model.name }} by composite key: {{ model.union_key | join(', ') }}.
+        """
+        return await crud.get_by_{{ model.union_key | join('_') }}(
+            session,
+            {% for key_field in model.union_key %}
+            {{ key_field }}{% if not loop.last %},
+            {% endif %}
+            {% endfor %}
+        )
+    {% endif %}
+
 service = {{ model.name }}Service()

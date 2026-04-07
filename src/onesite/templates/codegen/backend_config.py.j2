@@ -24,6 +24,13 @@ class Settings(BaseSettings):
     RABBITMQ_URL: str = "{{ config.rabbitmq.url or 'amqp://guest:guest@localhost:5672/' }}"
     {% endif %}
 
+    {% if config.extra %}
+    # Custom extra config from site_config.json
+    {% for key, value in config.extra.items() %}
+    {{ key }}: {% if value is string %}str{% elif value is integer %}int{% elif value is float %}float{% elif value is boolean %}bool{% else %}Any{% endif %} = {% if value is boolean %}{{ value | string | capitalize }}{% else %}{{ value | tojson }}{% endif %}
+    {% endfor %}
+    {% endif %}
+
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod
     def assemble_cors_origins(cls, v: Any) -> Any:

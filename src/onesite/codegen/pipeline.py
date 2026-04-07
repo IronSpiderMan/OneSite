@@ -152,6 +152,7 @@ def generate_code():
                         model_site_props,
                         actions,
                         is_notification_table,
+                        union_key,
                     ) = get_model_fields(obj, model_module_name)
 
                     if name == "User":
@@ -204,7 +205,8 @@ def generate_code():
                             "reverse_fk_display": reverse_fk_display,
                             "site_props": model_site_props,
                             "actions": actions,
-                            "is_notification_table": is_notification_table
+                            "is_notification_table": is_notification_table,
+                            "union_key": union_key,
                         }
                     )
 
