@@ -41,6 +41,12 @@ export const markAsRead = async (id: number) => {
   return response.data;
 };
 
+export const markAllRead = async () => {
+  const base = features.notifications.apiBase;
+  const response = await request.put<{ updated: number }>(`${base}/mark_all_read`, {});
+  return response.data;
+};
+
 export const getNotificationDetail = async (id: number) => {
   const base = features.notifications.apiBase;
   const response = await request.get<NotificationDetail>(`${base}/${id}`);

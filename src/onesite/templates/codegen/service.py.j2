@@ -236,6 +236,24 @@ class {{ model.name }}Service:
     async def delete(self, session: AsyncSession, id: int) -> {{ model.name }}:
         return await crud.delete(session, id)
 
+    {% if model.is_notification_table %}
+    async def mark_all_read(self, session: AsyncSession, user_id: int) -> int:
+        """
+        Mark all unread notifications as read for a specific user.
+        Returns the number of notifications updated.
+        """
+        updated_count = await crud.mark_all_read_by_user(session, user_id)
+        {% if model.is_notification_table %}
+        # Push read status for all to WebSocket
+        try:
+            # Push a single "all_read" event to notify the frontend to refresh
+            await manager.send_personal_message({"type": "all_read", "user_id": user_id}, user_id)
+        except Exception:
+            pass
+        {% endif %}
+        return updated_count
+    {% endif %}
+
     {% if model.m2m_fields %}
     # M2M Relationship methods
     {% for m2m in model.m2m_fields %}

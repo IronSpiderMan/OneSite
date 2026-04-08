@@ -16,6 +16,7 @@ import {
   getNotificationDetail,
   getUnreadCount,
   markAsRead,
+  markAllRead,
 } from '../services/notification-center';
 
 export function NotificationBell({ onStatusChange }: { onStatusChange?: (online: boolean) => void }) {
@@ -32,6 +33,8 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
   const [detailOpen, setDetailOpen] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detail, setDetail] = useState<NotificationDetail | null>(null);
+  const [markingAllRead, setMarkingAllRead] = useState(false);
+  const recentlyReadIds = useRef<Set<number>>(new Set());
 
   const boxRef = useRef<HTMLDivElement | null>(null);
   const panelRef = useRef<HTMLDivElement | null>(null);
@@ -72,6 +75,11 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
       const d = await getNotificationDetail(id);
       setDetail(d);
       if (!d.is_read) {
+        // Add to recentlyReadIds BEFORE awaiting to prevent race condition with WebSocket
+        recentlyReadIds.current.add(id);
+        setTimeout(() => {
+          recentlyReadIds.current.delete(id);
+        }, 1000);
         await markAsRead(id);
         setItems((prev) => prev.map((x) => (x.id === id ? { ...x, is_read: true } : x)));
         setUnread((u) => Math.max(0, u - 1));
@@ -80,6 +88,21 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
       console.error(e);
     } finally {
       setDetailLoading(false);
+    }
+  };
+
+  const handleMarkAllRead = async () => {
+    if (unread === 0) return;
+    try {
+      setMarkingAllRead(true);
+      await markAllRead();
+      setItems((prev) => prev.map((x) => ({ ...x, is_read: true })));
+      setUnread(0);
+    } catch (e) {
+      console.error(e);
+      toast.error(t('common.error', 'Error'));
+    } finally {
+      setMarkingAllRead(false);
     }
   };
 
@@ -118,10 +141,16 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
                 description: n.summary || '',
               });
             } else if (payload?.type === 'read' && payload?.id) {
-              setItems((prev) =>
-                prev.map((x) => (x.id === payload.id ? { ...x, is_read: true } : x))
-              );
-              setUnread((u) => Math.max(0, u - 1));
+              // Skip if we just handled this read locally to avoid double-decrement
+              if (!recentlyReadIds.current.has(payload.id)) {
+                setItems((prev) =>
+                  prev.map((x) => (x.id === payload.id ? { ...x, is_read: true } : x))
+                );
+                setUnread((u) => Math.max(0, u - 1));
+              }
+            } else if (payload?.type === 'all_read') {
+              setItems((prev) => prev.map((x) => ({ ...x, is_read: true })));
+              setUnread(0);
             }
           } catch (e) {
             console.error(e);
@@ -207,9 +236,17 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
             <CardHeader className="py-3">
               <div className="flex items-center justify-between">
                 <CardTitle className="text-base">{title}</CardTitle>
-                <Button variant="ghost" size="sm" type="button" onClick={loadUnread}>
-                  {t('common.retry', 'Retry')}
-                </Button>
+                <div className="flex items-center gap-1">
+                  {unread > 0 ? (
+                    <Button variant="ghost" size="sm" type="button" onClick={handleMarkAllRead} disabled={markingAllRead}>
+                      {markingAllRead ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                      {t('notifications.mark_all_read', 'Mark all read')}
+                    </Button>
+                  ) : null}
+                  <Button variant="ghost" size="sm" type="button" onClick={loadUnread}>
+                    {t('common.retry', 'Retry')}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent className="p-0">

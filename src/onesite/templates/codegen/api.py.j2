@@ -81,6 +81,19 @@ async def mark_read(
         n = await service.update(session, id, {{ model.name }}Update(is_read=True))
     return n
 
+@router.put("/mark_all_read")
+async def mark_all_read(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """
+    Mark all unread notifications as read for the current user.
+    Returns the count of notifications marked as read.
+    """
+    updated_count = await service.mark_all_read(session, current_user.id)
+    return {"updated": updated_count}
+
 @router.post("/send", dependencies=[Depends(deps.get_current_active_superuser)])
 async def send_notification(
     *,

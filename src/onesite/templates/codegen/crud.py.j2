@@ -298,6 +298,25 @@ async def delete(session: AsyncSession, id: int) -> {{ model.name }}:
     await session.commit()
     return db_obj
 
+{% if model.is_notification_table %}
+async def mark_all_read_by_user(session: AsyncSession, user_id: int) -> int:
+    """
+    Mark all unread notifications as read for a specific user.
+    Returns the number of notifications updated.
+    """
+    from sqlmodel import update
+
+    statement = (
+        update({{ model.name }})
+        .where({{ model.name }}.user_id == user_id)
+        .where({{ model.name }}.is_read == False)
+        .values(is_read=True)
+    )
+    result = await session.exec(statement)
+    await session.commit()
+    return result.row_count
+{% endif %}
+
 {% if model.m2m_fields %}
 # M2M Relationship CRUD functions
 {% for m2m in model.m2m_fields %}
