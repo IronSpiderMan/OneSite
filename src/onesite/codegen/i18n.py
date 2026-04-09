@@ -55,6 +55,14 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "back_home": "Back Home",
             "retry": "Retry",
             "profile": "Profile",
+            "bulk_delete": "Bulk Delete",
+        },
+        "menu": {
+            "dashboard": "Dashboard",
+        },
+        "dashboard": {
+            "total": "total",
+            "no_models": "No models available for dashboard",
         },
         "notifications": {
             "title": "Notifications",
@@ -95,6 +103,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         },
         "alert": {
             "delete_title": "Confirm deletion",
+            "bulk_delete_confirm": "Are you sure you want to delete these items?",
         },
         "toast": {
             "create_success": "Created",
@@ -143,6 +152,14 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "back_home": "返回首页",
             "retry": "重试",
             "profile": "个人信息",
+            "bulk_delete": "批量删除",
+        },
+        "menu": {
+            "dashboard": "仪表盘",
+        },
+        "dashboard": {
+            "total": "总计",
+            "no_models": "没有可用于仪表盘的模型",
         },
         "notifications": {
             "title": "消息通知",
@@ -179,6 +196,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         },
         "alert": {
             "delete_title": "确认删除",
+            "bulk_delete_confirm": "确定要删除这些项目吗？",
         },
         "toast": {
             "create_success": "创建成功",

@@ -1,0 +1,186 @@
+# backend/tests/test_{{ model.module_name }}_api.py
+import pytest
+from httpx import AsyncClient, ASGITransport
+from sqlalchemy.ext.asyncio import create_async_engine, async_sessionmaker, AsyncSession
+from sqlmodel import SQLModel
+from app.main import app
+from app.core import db, deps
+from app.models.{{ model.source_module }} import {{ model.name }}
+{% if model.foreign_keys %}
+{% for fk in model.foreign_keys %}
+from app.models.{{ fk.target_service }} import {{ fk.target_model }}
+{% endfor %}
+{% endif %}
+
+TEST_DATABASE_URL = "sqlite+aiosqlite:///./test.db"
+engine = create_async_engine(TEST_DATABASE_URL, echo=False)
+TestingSessionLocal = async_sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+
+
+async def override_get_session():
+    async with TestingSessionLocal() as session:
+        yield session
+
+
+async def override_get_current_user():
+    from app.models.user import User
+    async with TestingSessionLocal() as session:
+        # Create test user if not exists
+        user = await session.get(User, 1)
+        if not user:
+            user = User(id=1, username="testuser", email="test@test.com", hashed_password="", is_superuser=True)
+            session.add(user)
+            await session.commit()
+        return user
+
+
+app.dependency_overrides[deps.get_session] = override_get_session
+app.dependency_overrides[deps.get_current_user] = override_get_current_user
+
+
+@pytest.fixture(scope="function")
+async def db_session():
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    async with TestingSessionLocal() as session:
+        yield session
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.drop_all)
+
+
+@pytest.fixture
+async def client():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        yield ac
+
+
+{% if model.is_singleton %}
+class Test{{ model.name }}Singleton:
+    @pytest.mark.asyncio
+    async def test_get_{{ model.module_name }}(self, client):
+        """Test getting singleton {{ model.name }}"""
+        response = await client.get("/{{ model.module_name }}")
+        # Singleton may not exist yet, expect 404 or 200
+        assert response.status_code in [200, 404]
+
+    @pytest.mark.asyncio
+    async def test_update_{{ model.module_name }}(self, client):
+        """Test updating singleton {{ model.name }}"""
+        payload = {
+{% for field in model.fields %}
+{% if 'u' in field.permissions and field.name != 'id' %}
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% else %}""{% endif %},
+{% endif %}
+{% endfor %}
+        }
+        response = await client.put("/{{ model.module_name }}", json=payload)
+        assert response.status_code in [200, 404]
+
+{% else %}
+class Test{{ model.name }}API:
+    @pytest.mark.asyncio
+    async def test_list_{{ model.module_name }}s(self, client):
+        """Test listing {{ model.name }} records"""
+        response = await client.get("/{{ model.module_name }}s/")
+        assert response.status_code == 200
+        data = response.json()
+        assert "items" in data
+        assert "total" in data
+        assert "page" in data
+        assert "size" in data
+
+    @pytest.mark.asyncio
+    async def test_create_{{ model.module_name }}(self, client):
+        """Test creating a {{ model.name }} record"""
+        payload = {
+{% for field in model.fields %}
+{% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+{% endif %}
+{% endfor %}
+        }
+        response = await client.post("/{{ model.module_name }}s/", json=payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert "id" in data
+
+    @pytest.mark.asyncio
+    async def test_get_{{ model.module_name }}(self, client):
+        """Test getting a single {{ model.name }} record"""
+        # First create
+        payload = {
+{% for field in model.fields %}
+{% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+{% endif %}
+{% endfor %}
+        }
+        create_response = await client.post("/{{ model.module_name }}s/", json=payload)
+        assert create_response.status_code == 200
+        created_id = create_response.json()["id"]
+
+        # Then get
+        response = await client.get("/{{ model.module_name }}s/{created_id}")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == created_id
+
+    @pytest.mark.asyncio
+    async def test_update_{{ model.module_name }}(self, client):
+        """Test updating a {{ model.name }} record"""
+        # First create
+        payload = {
+{% for field in model.fields %}
+{% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+{% endif %}
+{% endfor %}
+        }
+        create_response = await client.post("/{{ model.module_name }}s/", json=payload)
+        assert create_response.status_code == 200
+        created_id = create_response.json()["id"]
+
+        # Then update
+        update_payload = {
+{% for field in model.fields %}
+{% if 'u' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
+            "{{ field.name }}": {% if field.ui_type == 'int' %}2{% elif field.ui_type == 'float' %}2.0{% elif field.ui_type == 'bool' %}False{% elif field.ui_type == 'datetime' %}null{% else %}"updated"{% endif %},
+{% endif %}
+{% endfor %}
+        }
+        response = await client.put("/{{ model.module_name }}s/{created_id}", json=update_payload)
+        assert response.status_code == 200
+        data = response.json()
+        assert data["id"] == created_id
+
+    @pytest.mark.asyncio
+    async def test_delete_{{ model.module_name }}(self, client):
+        """Test deleting a {{ model.name }} record"""
+        # First create
+        payload = {
+{% for field in model.fields %}
+{% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+{% endif %}
+{% endfor %}
+        }
+        create_response = await client.post("/{{ model.module_name }}s/", json=payload)
+        assert create_response.status_code == 200
+        created_id = create_response.json()["id"]
+
+        # Then delete
+        response = await client.delete("/{{ model.module_name }}s/{created_id}")
+        assert response.status_code == 200
+
+        # Verify deleted
+        get_response = await client.get("/{{ model.module_name }}s/{created_id}")
+        assert get_response.status_code == 404
+
+    @pytest.mark.asyncio
+    async def test_get_{{ model.module_name }}_not_found(self, client):
+        """Test getting a non-existent {{ model.name }} record"""
+        response = await client.get("/{{ model.module_name }}s/999999")
+        assert response.status_code == 404
+
+{% endif %}

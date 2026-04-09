@@ -507,6 +507,21 @@ def generate_code():
             cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
         )
 
+        # Generate backend tests
+        if not model.get("frontend_only"):
+            generate_file(
+                "backend_test.py.j2",
+                context,
+                backend_path / "tests" / f"test_{model['module_name']}_api.py",
+            )
+
+        # Generate frontend tests
+        generate_file(
+            "frontend_test.ts.j2",
+            context,
+            cwd / "frontend" / "src" / f"{model['module_name']}.test.ts",
+        )
+
     api_models = [
         m
         for m in found_models
@@ -543,6 +558,7 @@ def generate_code():
 
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
+    generate_file("dashboard_page.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "pages" / "Dashboard.tsx")
     generate_file(
         "frontend_features.ts.j2",
         {"notifications_enabled": notifications_enabled, "notifications_api_base": notifications_api_base},

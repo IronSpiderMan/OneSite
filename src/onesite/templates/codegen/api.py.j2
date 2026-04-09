@@ -305,6 +305,23 @@ async def delete_{{ model.lower_name }}(
     {{ model.lower_name }} = await service.delete(session, id)
     return {{ model.lower_name }}
 
+@router.post("/bulk_delete")
+async def bulk_delete_{{ model.lower_name }}(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    ids: List[int],
+) -> Any:
+    """
+    Delete multiple {{ model.name }} records by their IDs.
+    """
+    deleted_count = 0
+    for id in ids:
+        obj = await service.get(session, id)
+        if obj:
+            await service.delete(session, id)
+            deleted_count += 1
+    return {"deleted": deleted_count}
+
 {% if model.actions %}
 {% for action_name, action_config in model.actions.items() %}
 @router.post("/{id}/actions/{{ action_name }}", response_model={{ model.name }}Read)

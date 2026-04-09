@@ -1,5 +1,5 @@
 import { create } from 'zustand';
-import { {{ model.name }}, get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.module_name }}';
+import { {{ model.name }}, get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }}, bulkDelete{{ model.name }} } from '../services/{{ model.module_name }}';
 
 interface {{ model.name }}State {
     data: {{ model.name }}[];
@@ -15,6 +15,7 @@ interface {{ model.name }}State {
     createItem: (item: any) => Promise<void>;
     updateItem: (id: number, item: any) => Promise<void>;
     deleteItem: (id: number) => Promise<void>;
+    bulkDeleteItem: (ids: number[]) => Promise<void>;
 }
 
 export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get) => ({
@@ -89,6 +90,16 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     deleteItem: async (id: number) => {
         try {
             await delete{{ model.name }}(id);
+            const { page, size, query, filters } = get();
+            await get().fetchData(page, size, query, filters);
+        } catch (error) {
+            console.error(error);
+            throw error;
+        }
+    },
+    bulkDeleteItem: async (ids: number[]) => {
+        try {
+            await bulkDelete{{ model.name }}(ids);
             const { page, size, query, filters } = get();
             await get().fetchData(page, size, query, filters);
         } catch (error) {

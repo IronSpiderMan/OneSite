@@ -1,7 +1,12 @@
 import React from 'react';
-import { LayoutDashboard } from 'lucide-react';
+import { LayoutDashboard, Home } from 'lucide-react';
 
 export const GeneratedMenu = [
+  {
+    key: '/dashboard',
+    icon: <Home className="h-4 w-4" />,
+    label: 'menu.dashboard',
+  },
 {% for model in models %}
 {% if not model.is_singleton %}
   {

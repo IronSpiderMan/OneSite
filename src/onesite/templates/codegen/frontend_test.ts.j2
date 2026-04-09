@@ -1,0 +1,85 @@
+// frontend/src/{{ model.module_name }}.test.ts
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }} } from '../services/{{ model.module_name }}';
+
+{% if not model.is_singleton %}
+// Mock request module
+vi.mock('../utils/request', () => ({
+    default: {
+        get: vi.fn(),
+        post: vi.fn(),
+        put: vi.fn(),
+        delete: vi.fn(),
+    },
+}));
+
+describe('{{ model.name }} Service', () => {
+    beforeEach(() => {
+        vi.clearAllMocks();
+    });
+
+    it('get{{ model.name }}s returns paginated response', async () => {
+        const mockResponse = {
+            data: {
+                items: [
+                    { id: 1{% for field in model.fields %}{% if 'r' in field.permissions %}, {{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} },
+                ],
+                total: 1,
+                page: 1,
+                size: 20,
+                total_pages: 1,
+            },
+        };
+
+        const request = await import('../utils/request');
+        (request.default.get as any).mockResolvedValueOnce(mockResponse);
+
+        const result = await get{{ model.name }}s(1, 20);
+        expect(result.items).toHaveLength(1);
+        expect(result.total).toBe(1);
+    });
+
+    it('get{{ model.name }} returns single item', async () => {
+        const mockItem = { id: 1{% for field in model.fields %}{% if 'r' in field.permissions %}, {{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} };
+        const mockResponse = { data: mockItem };
+
+        const request = await import('../utils/request');
+        (request.default.get as any).mockResolvedValueOnce(mockResponse);
+
+        const result = await get{{ model.name }}(1);
+        expect(result.id).toBe(1);
+    });
+
+    it('create{{ model.name }} creates new item', async () => {
+        const newItem = { {% for field in model.fields %}{% if 'c' in field.permissions and field.name != 'id' %}{{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} };
+        const mockResponse = { data: { id: 1, ...newItem } };
+
+        const request = await import('../utils/request');
+        (request.default.post as any).mockResolvedValueOnce(mockResponse);
+
+        const result = await create{{ model.name }}(newItem);
+        expect(result.id).toBe(1);
+    });
+
+    it('update{{ model.name }} updates existing item', async () => {
+        const updatedItem = { {% for field in model.fields %}{% if 'u' in field.permissions and field.name != 'id' %}{{ field.name }}: {% if field.ui_type == 'int' %}2{% elif field.ui_type == 'float' %}2.0{% elif field.ui_type == 'bool' %}false{% else %}"updated"{% endif %}{% endif %}{% endfor %} };
+        const mockResponse = { data: { id: 1, ...updatedItem } };
+
+        const request = await import('../utils/request');
+        (request.default.put as any).mockResolvedValueOnce(mockResponse);
+
+        const result = await update{{ model.name }}(1, updatedItem);
+        expect(result.id).toBe(1);
+    });
+
+    it('delete{{ model.name }} removes item', async () => {
+        const mockResponse = { data: { id: 1 } };
+
+        const request = await import('../utils/request');
+        (request.default.delete as any).mockResolvedValueOnce(mockResponse);
+
+        const result = await delete{{ model.name }}(1);
+        expect(result.id).toBe(1);
+    });
+});
+{% endif %}

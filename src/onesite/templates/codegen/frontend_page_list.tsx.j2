@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %} } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -51,13 +51,16 @@ import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service
 const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data, loading, fetchData, fetchItem, createItem, updateItem, deleteItem } = use{{ model.name }}Store();
+  const { data, loading, fetchData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
   const timeZone = getUserTimeZone();
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
   {% if model.importable %}
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -235,6 +238,36 @@ const {{ model.name }}Page: React.FC = () => {
     }
   };
 
+  const toggleSelectAll = () => {
+    if (selectedIds.length === data.length) {
+      setSelectedIds([]);
+    } else {
+      setSelectedIds(data.map((item) => item.id));
+    }
+  };
+
+  const toggleSelect = (id: number) => {
+    setSelectedIds((prev) =>
+      prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
+    );
+  };
+
+  const confirmBulkDelete = async () => {
+    if (selectedIds.length === 0) return;
+    setIsBulkDeleting(true);
+    try {
+      await bulkDeleteItem(selectedIds);
+      toast.success(t('toast.delete_success', 'Deleted'));
+      setSelectedIds([]);
+    } catch (error) {
+      toast.error(t('toast.delete_failed', 'Delete failed'));
+      console.error(error);
+    } finally {
+      setIsBulkDeleting(false);
+      setBulkDeleteOpen(false);
+    }
+  };
+
   const onSubmit = async (values: any) => {
     try {
       if (editingId) {
@@ -297,6 +330,23 @@ const {{ model.name }}Page: React.FC = () => {
         </AlertDialogContent>
       </AlertDialog>
 
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t('alert.delete_title', 'Confirm deletion')}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t('alert.bulk_delete_confirm', `Are you sure you want to delete ${selectedIds.length} items?`)}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={isBulkDeleting}>{t('common.cancel')}</AlertDialogCancel>
+            <AlertDialogAction disabled={isBulkDeleting} onClick={confirmBulkDelete}>
+              {isBulkDeleting ? t('common.loading') : t('common.delete')}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')}s</h1>
         <div className="flex items-center gap-4">
@@ -348,6 +398,11 @@ const {{ model.name }}Page: React.FC = () => {
             {% endif %}
           </div>
           {% endif %}
+          {selectedIds.length > 0 && (
+            <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
+              <Trash className="mr-2 h-4 w-4" /> {t('common.bulk_delete', 'Delete')} ({selectedIds.length})
+            </Button>
+          )}
           <Button onClick={handleCreate}>
             <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
           </Button>
@@ -446,6 +501,14 @@ const {{ model.name }}Page: React.FC = () => {
         <Table>
           <TableHeader>
             <TableRow>
+              <TableHead className="w-[40px]">
+                <input
+                  type="checkbox"
+                  checked={selectedIds.length === data.length && data.length > 0}
+                  onChange={toggleSelectAll}
+                  className="h-4 w-4 rounded border-gray-300"
+                />
+              </TableHead>
               {% for field in model.fields %}
               {% if 'r' in field.permissions %}
               <TableHead>{t('{{ field.label_key }}')}</TableHead>
@@ -457,19 +520,27 @@ const {{ model.name }}Page: React.FC = () => {
           <TableBody>
             {loading ? (
                 <TableRow>
-                    <TableCell colSpan={ {{ model.fields|length + 1 }} } className="h-24 text-center">
+                    <TableCell colSpan={ {{ model.fields|length + 2 }} } className="h-24 text-center">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                     </TableCell>
                 </TableRow>
             ) : data.length === 0 ? (
                 <TableRow>
-                    <TableCell colSpan={ {{ model.fields|length + 1 }} } className="h-24 text-center">
+                    <TableCell colSpan={ {{ model.fields|length + 2 }} } className="h-24 text-center">
                         {t('common.no result')}
                     </TableCell>
                 </TableRow>
             ) : (
                 data.map((item) => (
                 <TableRow key={item.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        checked={selectedIds.includes(item.id)}
+                        onChange={() => toggleSelect(item.id)}
+                        className="h-4 w-4 rounded border-gray-300"
+                      />
+                    </TableCell>
                     {% for field in model.fields %}
                     {% if 'r' in field.permissions %}
                     <TableCell>

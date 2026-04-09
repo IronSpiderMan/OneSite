@@ -1,0 +1,121 @@
+// frontend/src/pages/Dashboard.tsx
+import React, { useEffect, useState } from 'react';
+import { Loader2 } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+{% for model in models %}
+{% if not model.is_singleton and not model.is_link_table and not model.get('frontend_only') %}
+import { get{{ model.name }}s } from '../services/{{ model.module_name }}';
+{% endif %}
+{% endfor %}
+
+interface ModelCount {
+    moduleName: string;
+    count: number;
+    loading: boolean;
+}
+
+const DashboardPage: React.FC = () => {
+    const { t } = useTranslation();
+    const [modelCounts, setModelCounts] = useState<ModelCount[]>([]);
+    const [initialLoading, setInitialLoading] = useState(true);
+
+    useEffect(() => {
+        const fetchCounts = async () => {
+            setInitialLoading(true);
+            const counts: ModelCount[] = [];
+{% for model in models %}
+{% if not model.is_singleton and not model.is_link_table and not model.get('frontend_only') %}
+            counts.push({ moduleName: '{{ model.module_name }}', count: 0, loading: true });
+{% endif %}
+{% endfor %}
+            setModelCounts(counts);
+
+            // Fetch counts in parallel
+            await Promise.all([
+{% for model in models %}
+{% if not model.is_singleton and not model.is_link_table and not model.get('frontend_only') %}
+                (async () => {
+                    try {
+                        const response = await get{{ model.name }}s(1, 1);
+                        setModelCounts((prev) =>
+                            prev.map((m) =>
+                                m.moduleName === '{{ model.module_name }}'
+                                    ? { ...m, count: response.total, loading: false }
+                                    : m
+                            )
+                        );
+                    } catch (error) {
+                        console.error('Failed to fetch count for {{ model.module_name }}:', error);
+                        setModelCounts((prev) =>
+                            prev.map((m) =>
+                                m.moduleName === '{{ model.module_name }}'
+                                    ? { ...m, loading: false }
+                                    : m
+                            )
+                        );
+                    }
+                })(),
+{% endif %}
+{% endfor %}
+            ]);
+
+            setInitialLoading(false);
+        };
+
+        fetchCounts();
+    }, []);
+
+    if (initialLoading) {
+        return (
+            <div className="flex justify-center items-center h-64">
+                <Loader2 className="w-8 h-8 animate-spin text-primary" />
+            </div>
+        );
+    }
+
+    return (
+        <div className="space-y-6">
+            <div className="flex items-center justify-between">
+                <h1 className="text-3xl font-bold tracking-tight">
+                    {t('menu.dashboard', 'Dashboard')}
+                </h1>
+            </div>
+
+            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+                {modelCounts.map((item) => (
+                    <div
+                        key={item.moduleName}
+                        className="rounded-xl border bg-card text-card-foreground shadow-sm"
+                    >
+                        <div className="p-6 flex flex-col space-y-2">
+                            <div className="flex items-center justify-between">
+                                <p className="text-sm font-medium text-muted-foreground">
+                                    {t(`models.${item.moduleName}.name`, item.moduleName)}
+                                </p>
+                                {item.loading && (
+                                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
+                                )}
+                            </div>
+                            <div className="flex items-baseline">
+                                <p className="text-3xl font-bold">
+                                    {item.loading ? '-' : item.count.toLocaleString()}
+                                </p>
+                                <p className="ml-2 text-sm text-muted-foreground">
+                                    {t('dashboard.total', 'total')}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                ))}
+            </div>
+
+            {modelCounts.length === 0 && (
+                <div className="text-center py-12 text-muted-foreground">
+                    {t('dashboard.no_models', 'No models available for dashboard')}
+                </div>
+            )}
+        </div>
+    );
+};
+
+export default DashboardPage;

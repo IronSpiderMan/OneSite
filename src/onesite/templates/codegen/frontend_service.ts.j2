@@ -54,6 +54,11 @@ export const delete{{ model.name }} = async (id: number) => {
     return response.data;
 };
 
+export const bulkDelete{{ model.name }} = async (ids: number[]) => {
+    const response = await request.post<{ deleted: number }>(`${API_URL}/bulk_delete`, { ids });
+    return response.data;
+};
+
 {% if model.actions %}
 {% for action_name, action_config in model.actions.items() %}
 export const perform{{ model.name }}{{ action_name.capitalize() }} = async (id: number) => {

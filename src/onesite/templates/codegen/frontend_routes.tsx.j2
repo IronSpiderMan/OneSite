@@ -1,5 +1,6 @@
 import React from 'react';
 import SettingsPage from './pages/Settings';
+import DashboardPage from './pages/Dashboard';
 {% for model in models %}
 {% if not model.is_singleton %}
 import {{ model.name }}Page from './pages/{{ model.module_name }}';
@@ -10,6 +11,10 @@ import {{ model.name }}Page from './pages/{{ model.module_name }}';
 {% endfor %}
 
 export const GeneratedRoutes = [
+  {
+    path: '/dashboard',
+    element: <DashboardPage />,
+  },
   {
     path: '/settings',
     element: <SettingsPage />,
