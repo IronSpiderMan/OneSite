@@ -211,6 +211,7 @@ def generate_code():
                             "union_key": union_key,
                             "importable": importable,
                             "exportable": exportable,
+                            "visualize": model_site_props.get("visualize"),
                         }
                     )
 

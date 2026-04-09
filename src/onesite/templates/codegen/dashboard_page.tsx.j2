@@ -2,70 +2,53 @@
 import React, { useEffect, useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
+import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 {% for model in models %}
-{% if not model.is_singleton and not model.is_link_table and not model.get('frontend_only') %}
-import { get{{ model.name }}s } from '../services/{{ model.module_name }}';
+{% if model.visualize and model.visualize.get('show') %}
+import { get{{ model.name }}Stats } from '../services/{{ model.module_name }}';
 {% endif %}
 {% endfor %}
 
-interface ModelCount {
-    moduleName: string;
-    count: number;
-    loading: boolean;
+interface ChartData {
+    labels: string[];
+    values: number[];
+    title: string;
 }
+
+const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
 const DashboardPage: React.FC = () => {
     const { t } = useTranslation();
-    const [modelCounts, setModelCounts] = useState<ModelCount[]>([]);
-    const [initialLoading, setInitialLoading] = useState(true);
+    const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
+    const [loading, setLoading] = useState(true);
+    {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
+    const [period, setPeriod] = useState('day');
+    {% endif %}
 
     useEffect(() => {
-        const fetchCounts = async () => {
-            setInitialLoading(true);
-            const counts: ModelCount[] = [];
-{% for model in models %}
-{% if not model.is_singleton and not model.is_link_table and not model.get('frontend_only') %}
-            counts.push({ moduleName: '{{ model.module_name }}', count: 0, loading: true });
-{% endif %}
-{% endfor %}
-            setModelCounts(counts);
+        const fetchAllStats = async () => {
+            setLoading(true);
+            const results: Record<string, ChartData> = {};
 
-            // Fetch counts in parallel
-            await Promise.all([
-{% for model in models %}
-{% if not model.is_singleton and not model.is_link_table and not model.get('frontend_only') %}
-                (async () => {
-                    try {
-                        const response = await get{{ model.name }}s(1, 1);
-                        setModelCounts((prev) =>
-                            prev.map((m) =>
-                                m.moduleName === '{{ model.module_name }}'
-                                    ? { ...m, count: response.total, loading: false }
-                                    : m
-                            )
-                        );
-                    } catch (error) {
-                        console.error('Failed to fetch count for {{ model.module_name }}:', error);
-                        setModelCounts((prev) =>
-                            prev.map((m) =>
-                                m.moduleName === '{{ model.module_name }}'
-                                    ? { ...m, loading: false }
-                                    : m
-                            )
-                        );
-                    }
-                })(),
-{% endif %}
-{% endfor %}
-            ]);
+            {% for model in models %}
+            {% if model.visualize and model.visualize.get('show') %}
+            try {
+                const data = await get{{ model.name }}Stats({% if model.visualize.get('time_field') %}period{% endif %});
+                results['{{ model.module_name }}'] = data;
+            } catch (error) {
+                console.error('Failed to fetch stats for {{ model.module_name }}:', error);
+            }
+            {% endif %}
+            {% endfor %}
 
-            setInitialLoading(false);
+            setChartsData(results);
+            setLoading(false);
         };
 
-        fetchCounts();
-    }, []);
+        fetchAllStats();
+    }, [{% if models | selectattr('visualize') | selectattr('visualize.show') | list %}period{% endif %}]);
 
-    if (initialLoading) {
+    if (loading) {
         return (
             <div className="flex justify-center items-center h-64">
                 <Loader2 className="w-8 h-8 animate-spin text-primary" />
@@ -73,47 +56,141 @@ const DashboardPage: React.FC = () => {
         );
     }
 
+    const chartModels = [
+        {% for model in models %}
+        {% if model.visualize and model.visualize.get('show') %}
+        {
+            moduleName: '{{ model.module_name }}',
+            chartType: '{{ model.visualize.get('chart_type', 'bar') }}',
+            title: '{{ model.visualize.get('title', model.name) }}',
+        },
+        {% endif %}
+        {% endfor %}
+    ];
+
+    if (chartModels.length === 0) {
+        return (
+            <div className="space-y-6">
+                <div className="flex items-center justify-between">
+                    <h1 className="text-3xl font-bold tracking-tight">
+                        {t('menu.dashboard', 'Dashboard')}
+                    </h1>
+                </div>
+                <div className="text-center py-12 text-muted-foreground">
+                    {t('dashboard.no_visualizations', 'No visualizations configured')}
+                </div>
+            </div>
+        );
+    }
+
+    const renderChart = (moduleName: string, chartType: string, title: string) => {
+        const data = chartsData[moduleName];
+        if (!data || !data.labels.length) {
+            return (
+                <div className="flex justify-center items-center h-64 text-muted-foreground">
+                    {t('dashboard.no_data', 'No data available')}
+                </div>
+            );
+        }
+
+        const chartData = data.labels.map((label, index) => ({
+            name: label,
+            value: data.values[index],
+        }));
+
+        if (chartType === 'pie') {
+            return (
+                <ResponsiveContainer width="100%" height={300}>
+                    <PieChart>
+                        <Pie
+                            data={chartData}
+                            cx="50%"
+                            cy="50%"
+                            labelLine={false}
+                            label={({ name, percent }) => `${name}: ${(percent * 100).toFixed(0)}%`}
+                            outerRadius={100}
+                            fill="#8884d8"
+                            dataKey="value"
+                            name={title}
+                        >
+                            {chartData.map((_, index) => (
+                                <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
+                            ))}
+                        </Pie>
+                        <Tooltip />
+                        <Legend />
+                    </PieChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        if (chartType === 'line') {
+            return (
+                <ResponsiveContainer width="100%" height={300}>
+                    <LineChart data={chartData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        <Line type="monotone" dataKey="value" stroke="#3b82f6" strokeWidth={2} name={title} />
+                    </LineChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        // Default to bar chart
+        return (
+            <ResponsiveContainer width="100%" height={300}>
+                <BarChart data={chartData}>
+                    <CartesianGrid strokeDasharray="3 3" />
+                    <XAxis dataKey="name" />
+                    <YAxis />
+                    <Tooltip />
+                    <Legend />
+                    <Bar dataKey="value" fill="#3b82f6" name={title} />
+                </BarChart>
+            </ResponsiveContainer>
+        );
+    };
+
     return (
         <div className="space-y-6">
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">
                     {t('menu.dashboard', 'Dashboard')}
                 </h1>
+                {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
+                {% set has_time_field = false %}
+                {% for model in models %}
+                {% if model.visualize and model.visualize.get('show') and model.visualize.get('time_field') %}
+                {% set has_time_field = true %}
+                {% endif %}
+                {% endfor %}
+                {% if has_time_field %}
+                <select
+                    className="border rounded-md px-3 py-2 text-sm"
+                    value={period}
+                    onChange={(e) => setPeriod(e.target.value)}
+                >
+                    <option value="day">{t('dashboard.period_day', 'Daily')}</option>
+                    <option value="week">{t('dashboard.period_week', 'Weekly')}</option>
+                    <option value="month">{t('dashboard.period_month', 'Monthly')}</option>
+                </select>
+                {% endif %}
+                {% endif %}
             </div>
 
-            <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
-                {modelCounts.map((item) => (
-                    <div
-                        key={item.moduleName}
-                        className="rounded-xl border bg-card text-card-foreground shadow-sm"
-                    >
-                        <div className="p-6 flex flex-col space-y-2">
-                            <div className="flex items-center justify-between">
-                                <p className="text-sm font-medium text-muted-foreground">
-                                    {t(`models.${item.moduleName}.name`, item.moduleName)}
-                                </p>
-                                {item.loading && (
-                                    <Loader2 className="w-4 h-4 animate-spin text-muted-foreground" />
-                                )}
-                            </div>
-                            <div className="flex items-baseline">
-                                <p className="text-3xl font-bold">
-                                    {item.loading ? '-' : item.count.toLocaleString()}
-                                </p>
-                                <p className="ml-2 text-sm text-muted-foreground">
-                                    {t('dashboard.total', 'total')}
-                                </p>
-                            </div>
-                        </div>
+            <div className="grid gap-6 md:grid-cols-2">
+                {chartModels.map((chart) => (
+                    <div key={chart.moduleName} className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
+                        <h3 className="text-lg font-semibold mb-4">
+                            {t(`models.${chart.moduleName}.name`, chart.title)}
+                        </h3>
+                        {renderChart(chart.moduleName, chart.chartType, chart.title)}
                     </div>
                 ))}
             </div>
-
-            {modelCounts.length === 0 && (
-                <div className="text-center py-12 text-muted-foreground">
-                    {t('dashboard.no_models', 'No models available for dashboard')}
-                </div>
-            )}
         </div>
     );
 };

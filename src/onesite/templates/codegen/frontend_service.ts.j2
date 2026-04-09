@@ -59,6 +59,25 @@ export const bulkDelete{{ model.name }} = async (ids: number[]) => {
     return response.data;
 };
 
+{% if model.visualize %}
+export interface {{ model.name }}Stats {
+    labels: string[];
+    values: number[];
+    title: string;
+}
+
+export const get{{ model.name }}Stats = async ({% if model.visualize.get('time_field') %}period?: string{% endif %}) => {
+    let url = `${API_URL}/stats`;
+    {% if model.visualize.get('time_field') %}
+    if (period) {
+        url += `?period=${period}`;
+    }
+    {% endif %}
+    const response = await request.get<{{ model.name }}Stats>(url);
+    return response.data;
+};
+{% endif %}
+
 {% if model.actions %}
 {% for action_name, action_config in model.actions.items() %}
 export const perform{{ model.name }}{{ action_name.capitalize() }} = async (id: number) => {

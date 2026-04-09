@@ -63,12 +63,18 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         "dashboard": {
             "total": "total",
             "no_models": "No models available for dashboard",
+            "no_visualizations": "No visualizations configured",
+            "no_data": "No data available",
+            "period_day": "Daily",
+            "period_week": "Weekly",
+            "period_month": "Monthly",
         },
         "notifications": {
             "title": "Notifications",
             "empty": "No notifications",
             "detail": "Notification",
             "new": "New notification",
+            "mark_all_read": "Mark all read",
         },
         "errors": {
             "403": {"title": "Access denied", "desc": "You don't have permission to view this page."},
@@ -160,12 +166,18 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         "dashboard": {
             "total": "总计",
             "no_models": "没有可用于仪表盘的模型",
+            "no_visualizations": "未配置可视化",
+            "no_data": "暂无数据",
+            "period_day": "按日",
+            "period_week": "按周",
+            "period_month": "按月",
         },
         "notifications": {
             "title": "消息通知",
             "empty": "暂无消息",
             "detail": "消息详情",
             "new": "收到新消息",
+            "mark_all_read": "全部已读",
         },
         "errors": {
             "403": {"title": "无权限访问", "desc": "你没有权限访问此页面。"},

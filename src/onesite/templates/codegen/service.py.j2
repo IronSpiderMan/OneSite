@@ -398,11 +398,11 @@ class {{ model.name }}Service:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{{ model.module_name }}_export_{timestamp}.csv"
         filepath = os.path.join(export_dir, filename)
-        
-        # Write CSV
-        with open(filepath, 'w', newline='', encoding='utf-8') as f:
+
+        # Write CSV with UTF-8 BOM for Excel compatibility
+        with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
-            
+
             # Header
             headers = [{% for field in model.fields %}{% if 'r' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
             writer.writerow(headers)
@@ -420,7 +420,18 @@ class {{ model.name }}Service:
                     row = []
                     {% for field in model.fields %}
                     {% if 'r' in field.permissions %}
-                    row.append(getattr(item, "{{ field.name }}", None))
+                    val = getattr(item, "{{ field.name }}", None)
+                    # Convert to string, handle Enum/datetime specially
+                    if val is None:
+                        row.append("")
+                    elif hasattr(val, 'value'):
+                        # Enum type - get the value
+                        row.append(str(val.value))
+                    elif hasattr(val, 'isoformat'):
+                        # datetime type - use ISO format
+                        row.append(val.isoformat())
+                    else:
+                        row.append(str(val))
                     {% endif %}
                     {% endfor %}
                     writer.writerow(row)
@@ -491,6 +502,118 @@ class {{ model.name }}Service:
         
         return stats
     {% endif %}
+    {% endif %}
+
+    {% if model.visualize %}
+    async def get_stats(
+        self,
+        session: AsyncSession,
+        *,
+        label_field: str,
+        value_field: str,
+        aggregation: str = "count",
+        {% if model.visualize.get('time_field') %}
+        time_field: Optional[str] = None,
+        period: Optional[str] = "day",
+        {% endif %}
+    ) -> dict:
+        """
+        Get statistics for {{ model.name }} visualization.
+        """
+        from sqlalchemy import func, extract, case, cast, String
+        from datetime import datetime, timedelta
+
+        model = {{ model.name }}
+
+        {% if model.visualize.get('time_field') %}
+        if time_field:
+            # Time-based aggregation (line chart)
+            time_col = getattr(model, time_field)
+            value_col = getattr(model, value_field)
+
+            if period == "day":
+                date_trunc = func.date(time_col)
+            elif period == "week":
+                date_trunc = func.date(func.date_trunc('week', time_col))
+            elif period == "month":
+                date_trunc = func.date(func.date_trunc('month', time_col))
+            else:
+                date_trunc = func.date(time_col)
+
+            if aggregation == "count":
+                stmt = select(date_trunc, func.count(model.id)).group_by(date_trunc)
+            elif aggregation == "sum":
+                stmt = select(date_trunc, func.coalesce(func.sum(value_col), 0)).group_by(date_trunc)
+            elif aggregation == "avg":
+                stmt = select(date_trunc, func.coalesce(func.avg(value_col), 0)).group_by(date_trunc)
+            elif aggregation == "min":
+                stmt = select(date_trunc, func.min(value_col)).group_by(date_trunc)
+            elif aggregation == "max":
+                stmt = select(date_trunc, func.max(value_col)).group_by(date_trunc)
+            else:
+                stmt = select(date_trunc, func.count(model.id)).group_by(date_trunc)
+
+            result = await session.exec(stmt)
+            rows = result.all()
+
+            labels = []
+            values = []
+            for row in rows:
+                date_val = row[0]
+                if isinstance(date_val, datetime):
+                    labels.append(date_val.strftime("%Y-%m-%d"))
+                elif hasattr(date_val, 'value'):
+                    # Handle Enum types
+                    labels.append(str(date_val.value))
+                else:
+                    labels.append(str(date_val))
+                values.append(float(row[1]))
+
+            return {
+                "labels": labels,
+                "values": values,
+                "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}",
+            }
+        {% else %}
+        # Group by label field (bar/pie chart)
+        label_col = getattr(model, label_field, None)
+        value_col = getattr(model, value_field, None)
+        if label_col is None:
+            return {"labels": [], "values": [], "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}"}
+
+        if aggregation == "count":
+            stmt = select(label_col, func.count(model.id)).group_by(label_col)
+        elif aggregation == "sum":
+            stmt = select(label_col, func.coalesce(func.sum(value_col), 0)).group_by(label_col)
+        elif aggregation == "avg":
+            stmt = select(label_col, func.coalesce(func.avg(value_col), 0)).group_by(label_col)
+        elif aggregation == "min":
+            stmt = select(label_col, func.min(value_col)).group_by(label_col)
+        elif aggregation == "max":
+            stmt = select(label_col, func.max(value_col)).group_by(label_col)
+        else:
+            stmt = select(label_col, func.count(model.id)).group_by(label_col)
+
+        result = await session.exec(stmt)
+        rows = result.all()
+
+        def to_label(val):
+            if val is None:
+                return "None"
+            # Handle Enum types - get .value instead of full representation
+            if hasattr(val, 'value'):
+                return str(val.value)
+            return str(val)
+
+        labels = [to_label(row[0]) for row in rows]
+        values = [float(row[1]) for row in rows]
+
+        return {
+            "labels": labels,
+            "values": values,
+            "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}",
+        }
+        {% endif %}
     {% endif %}
 
 service = {{ model.name }}Service()

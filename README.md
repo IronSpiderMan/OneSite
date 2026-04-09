@@ -23,6 +23,9 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 - **Better UX Defaults**: Delete confirmation dialogs; toast notifications for create/update.
 - **Pagination**: Built-in standard pagination support for all list views.
 - **Auto Refresh**: Configurable auto-refresh for real-time data monitoring.
+- **Dashboard**: Auto-generated dashboard page with statistics cards and charts (bar, line, pie).
+- **Bulk Delete**: Select multiple items in list pages for batch deletion.
+- **Test Generation**: Auto-generated pytest tests for backend APIs and Vitest tests for frontend services/stores.
 - **Authentication & Security**:
   - **Built-in Login**: Modern login page with JWT authentication.
   - **Protected Routes**: Automatic auth guards for frontend pages.
@@ -307,6 +310,102 @@ Generated features:
 - Import creates new records (does not update existing)
 - Failed rows are skipped and reported in the result
 - After successful import, the list page automatically refreshes
+
+#### Dashboard & Visualization
+OneSite can generate a dashboard page with statistics and charts. Configure `visualize` in your model's `__onesite__`:
+
+```python
+from enum import Enum
+
+class NotificationStatus(str, Enum):
+    SUCCEED = "SUCCEED"
+    REJECTED = "REJECTED"
+    SKIPPED = "SKIPPED"
+
+class NotificationRecord(SQLModel, table=True):
+    __onesite__ = {
+        "visualize": {
+            "show": True,                    # Show on dashboard
+            "chart_type": "bar",             # bar, line, pie
+            "label_field": "status",         # Field to group by
+            "value_field": "id",             # Field to aggregate
+            "aggregation": "count",           # sum, count, avg, min, max
+            # "time_field": "created_at",     # Optional: for time-based line charts
+            "title": "通知统计",             # Optional custom title
+        }
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    status: NotificationStatus
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+```
+
+**Chart Types**:
+- `bar`: Bar chart for categorical data (grouped by `label_field`)
+- `pie`: Pie chart for percentage distribution
+- `line`: Line chart for time-series trends (requires `time_field`)
+
+**Time-Based Charts** (line chart):
+- Set `chart_type: "line"` and provide `time_field` (e.g., `created_at`)
+- Supports `period` parameter: `day`, `week`, `month`
+
+**Generated Features**:
+- Backend: `GET /{module_name}/stats` endpoint returns `{labels: [], values: [], title: "..."}`
+- Frontend: Dashboard page with Recharts visualizations
+- Auto-detects all models with `visualize.show: True`
+
+#### Bulk Delete
+List pages include multi-select checkboxes for batch operations. Selecting items reveals a bulk delete button:
+
+```
+[ ] Name        | Status
+[x] Item 1      | Active
+[x] Item 2      | Inactive
+[x] Item 3      | Active
+
+[Delete (3)] [Create Product]
+```
+
+- Click the checkbox in the table header to select/deselect all visible items
+- Bulk delete requires confirmation before executing
+- Both single and bulk delete are available for all non-singleton models
+
+#### Test Generation
+OneSite auto-generates test files during `site sync`:
+
+**Backend Tests** (`backend/tests/test_{module_name}_api.py`):
+```python
+# pytest + httpx AsyncClient
+class TestNotificationRecordAPI:
+    async def test_list_notification_records(self, client):
+        response = await client.get("/notification_records/")
+        assert response.status_code == 200
+
+    async def test_create_notification_record(self, client):
+        payload = {"status": "SUCCEED"}
+        response = await client.post("/notification_records/", json=payload)
+        assert response.status_code == 200
+```
+
+**Frontend Tests** (`frontend/src/{module_name}.test.ts`):
+```typescript
+// Vitest + mocking
+describe('NotificationRecord Service', () => {
+    it('getNotificationRecords returns paginated response', async () => {
+        const result = await getNotificationRecords(1, 20);
+        expect(result.items).toHaveLength(1);
+    });
+});
+```
+
+Run tests:
+```bash
+# Backend
+cd backend && pytest
+
+# Frontend
+cd frontend && npm test
+```
 
 #### Configuration Models (Settings Page)
 OneSite reserves two special models for the unified `/settings` page:
@@ -669,19 +768,20 @@ myproject/
 ├── backend/
 │   ├── app/
 │   │   ├── api/        # Generated API endpoints
-│   │   ├── cruds/      # Generated CRUD logic
+│   │   ├── cruds/     # Generated CRUD logic
 │   │   ├── models/     # Synced models
 │   │   ├── schemas/    # Generated Pydantic schemas
 │   │   ├── services/   # Business logic
 │   │   ├── core/       # Config, Security, DB
 │   │   │   └── security.py # Password hashing & Auth
 │   │   └── initial_data.py # Data seeding (Admin user)
+│   ├── tests/          # Generated pytest tests
 │   ├── uploads/        # User uploaded files
 │   └── ...
 └── frontend/
     ├── src/
         ├── components/ # UI Components (Button, Input, Modal, ImageUpload, etc.)
-        ├── pages/      # Generated List/Edit Pages
+        ├── pages/      # Generated List/Edit Pages + Dashboard
         ├── services/   # Generated API Clients
         ├── stores/     # Generated State Management
         └── ...

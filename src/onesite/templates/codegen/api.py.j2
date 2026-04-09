@@ -130,6 +130,30 @@ async def send_notification(
     return {"sent": created_count}
 {% endif %}
 
+{% if model.visualize %}
+@router.get("/stats")
+async def get_{{ model.lower_name }}_stats(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    {% if model.visualize.get('time_field') %}
+    period: Optional[str] = Query("day", description="Time period: day, week, month"),
+    {% endif %}
+) -> Any:
+    """
+    Get statistics for {{ model.name }} visualization.
+    """
+    return await service.get_stats(
+        session,
+        label_field="{{ model.visualize.get('label_field', 'id') }}",
+        value_field="{{ model.visualize.get('value_field', 'id') }}",
+        aggregation="{{ model.visualize.get('aggregation', 'count') }}",
+        {% if model.visualize.get('time_field') %}
+        time_field="{{ model.visualize.get('time_field') }}",
+        period=period,
+        {% endif %}
+    )
+{% endif %}
+
 @router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def read_{{ model.lower_name }}s(
     page: int = 1,
@@ -422,9 +446,9 @@ async def export_{{ model.lower_name }}s(
     import os
     import uuid
     from fastapi.responses import FileResponse
-    
+
     task_id = str(uuid.uuid4())
-    
+
     # Export synchronously and return file
     filepath = await service.export_to_csv(
         session,
@@ -433,7 +457,7 @@ async def export_{{ model.lower_name }}s(
         filters=filters,
         ws_manager=None,  # No WebSocket progress for synchronous export
     )
-    
+
     # Return file directly
     filename = os.path.basename(filepath)
     return FileResponse(
@@ -483,22 +507,22 @@ async def export_{{ model.lower_name }}_template(
     from fastapi.responses import StreamingResponse
     import io
     import csv
-    
+
     output = io.StringIO()
     writer = csv.writer(output)
-    
+
     # Write header with field names
     fields = [{% for field in model.fields %}{% if field.name != 'id' and 'c' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
     writer.writerow(fields)
-    
+
     # Write sample row
     sample = [{% for field in model.fields %}{% if field.name != 'id' and 'c' in field.permissions %}{% if field.ui_type == 'int' %}0{% elif field.ui_type == 'float' %}0.0{% elif field.ui_type == 'bool' %}True{% else %}"sample"{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
     writer.writerow(sample)
-    
+
     output.seek(0)
-    
+
     return StreamingResponse(
-        io.BytesIO(output.getvalue().encode()),
+        io.BytesIO(output.getvalue().encode("utf-8-sig")),
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={{ model.module_name }}_template.csv"}
     )
