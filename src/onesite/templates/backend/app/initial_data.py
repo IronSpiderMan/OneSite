@@ -3,7 +3,7 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.core.db import engine, init_db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.core.config import settings
 from app.core.security import get_password_hash
 from app.core.logger import get_logger
@@ -25,6 +25,7 @@ async def init_data() -> None:
                 hashed_password=get_password_hash(settings.FIRST_SUPERUSER_PASSWORD),
                 is_superuser=True,
                 is_active=True,
+                role=UserRole.DEVELOPER,
                 full_name="Admin User"
             )
             session.add(user)

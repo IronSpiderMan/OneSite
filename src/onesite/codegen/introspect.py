@@ -105,7 +105,7 @@ def get_model_fields(
 
     is_link_table = model_site_props.get("is_link_table", False)
     is_singleton = model_site_props.get("is_singleton", False)
-    model_permissions = model_site_props.get("permissions", "admin")
+    raw_permissions = model_site_props.get("permissions", "rcud")
     frontend_only = model_site_props.get("frontend_only", False)
     model_translations = model_site_props.get("translations", {})
     auto_refresh = model_site_props.get("auto_refresh", False)
@@ -117,6 +117,78 @@ def get_model_fields(
     importable = model_site_props.get("importable", False)
     import_key = model_site_props.get("import_key", None)
     exportable = model_site_props.get("exportable", False)
+    raw_visible = model_site_props.get("visible", None)
+    special_me_permissions = model_site_props.get("special_me_permissions", None)  # For /me endpoint special handling
+
+    # Role hierarchy for permission validation
+    role_hierarchy = {"rcu": 0, "admin-rcu": 1, "developer-rcu": 2}
+    role_order = ["user", "admin", "developer"]
+
+    # Parse permissions - support both string and dict formats
+    # String format (backward compatible): "rcu", "admin-rcu", "developer-rcu"
+    # Dict format (new): {"user": "ru", "admin": "rcu", "developer": "rcu"}
+    role_permissions = {}
+    model_permissions = "rcu"  # Default for API router
+
+    if isinstance(raw_permissions, dict):
+        role_permissions = raw_permissions.copy()
+        # Model-level permission is the maximum across all roles (for API router)
+        max_level = 0
+        for role, perms in raw_permissions.items():
+            level = role_hierarchy.get(perms, 0)
+            if level > max_level:
+                max_level = level
+        # Find the permission string with the max level
+        for perms, level in role_hierarchy.items():
+            if level == max_level:
+                model_permissions = perms
+                break
+    elif isinstance(raw_permissions, str):
+        # Legacy string format
+        if raw_permissions == "admin":
+            console.print(f"[yellow]Warning: Model '{model_cls.__name__}' uses legacy 'admin' permission, please update to 'admin-rcu'[/yellow]")
+            raw_permissions = "admin-rcu"
+        elif raw_permissions == "user":
+            console.print(f"[yellow]Warning: Model '{model_cls.__name__}' uses legacy 'user' permission, please update to 'rcu'[/yellow]")
+            raw_permissions = "rcu"
+
+        model_permissions = raw_permissions
+        model_level = role_hierarchy.get(raw_permissions, 0)
+
+        # Expand to all roles based on hierarchy
+        if model_level == 0:  # rcu - all roles
+            role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
+        elif model_level == 1:  # admin-rcu - admin+ only
+            role_permissions = {"admin": "rcu", "developer": "rcu"}
+            # Note: user is excluded (no access)
+        elif model_level == 2:  # developer-rcu - developer only
+            role_permissions = {"developer": "rcu"}
+            # Note: admin and user are excluded
+    else:
+        role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
+        model_permissions = "rcu"
+
+    # Parse visible config - support both string and dict formats
+    # String format: "admin" (admin+ visible), "developer" (developer only)
+    # Dict format: {"user": True, "admin": True, "developer": False}
+    role_visible = {}
+    if isinstance(raw_visible, dict):
+        role_visible = raw_visible.copy()
+    elif isinstance(raw_visible, str):
+        # String format: only roles >= specified role are visible
+        if raw_visible in role_order:
+            min_index = role_order.index(raw_visible)
+            for i, role in enumerate(role_order):
+                role_visible[role] = i >= min_index
+        else:
+            # Default: all visible if not recognized
+            role_visible = {"user": True, "admin": True, "developer": True}
+    else:
+        # No explicit visible config - use permissions to determine
+        # If role has any permission (at least 'r'), it's visible
+        for role in role_order:
+            role_visible[role] = role in role_permissions
+
     # Validate union_key is a list of field names
     if union_key is not None:
         if not isinstance(union_key, list):
@@ -148,7 +220,7 @@ def get_model_fields(
             if isinstance(schema_extra, dict):
                 site_props = schema_extra.get("site_props", {}) or {}
 
-        permissions = site_props.get("permissions", "rcu")
+        permissions = site_props.get("permissions", "rcud")
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
         allow_download = site_props.get("allow_download", True)
@@ -388,4 +460,7 @@ def get_model_fields(
         importable,
         exportable,
         import_key,
+        role_permissions,
+        role_visible,
+        special_me_permissions,
     )

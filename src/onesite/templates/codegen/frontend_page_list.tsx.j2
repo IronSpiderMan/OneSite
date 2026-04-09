@@ -62,6 +62,24 @@ const {{ model.name }}Page: React.FC = () => {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
+
+  // Role-based permissions
+  const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
+  const rolePermissions: Record<string, string> = {{ model.role_permissions | tojson }};
+  const userPerms = rolePermissions[userRole] || '';
+
+  const hasPermission = (perm: 'r' | 'c' | 'u' | 'd') => userPerms.includes(perm);
+
+  // User model special handling: user role can only access /me
+  {% if model.module_name == "user" and model.name == "User" %}
+  useEffect(() => {
+    if (userRole === 'user') {
+      // Redirect to /users/me for user role
+      navigate('/users/me');
+    }
+  }, [userRole, navigate]);
+  {% endif %}
+
   {% if model.importable %}
   const fileInputRef = useRef<HTMLInputElement>(null);
   {% endif %}
@@ -398,14 +416,16 @@ const {{ model.name }}Page: React.FC = () => {
             {% endif %}
           </div>
           {% endif %}
-          {selectedIds.length > 0 && (
+          {selectedIds.length > 0 && hasPermission('d') && (
             <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
               <Trash className="mr-2 h-4 w-4" /> {t('common.bulk_delete', 'Delete')} ({selectedIds.length})
             </Button>
           )}
-          <Button onClick={handleCreate}>
-            <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
-          </Button>
+          {hasPermission('c') && (
+            <Button onClick={handleCreate}>
+              <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+            </Button>
+          )}
         </div>
       </div>
 
@@ -604,11 +624,13 @@ const {{ model.name }}Page: React.FC = () => {
                     {% endif %}
                     {% endfor %}
                     <TableCell className="flex items-center gap-2">
+                        {hasPermission('u') && (
+                        <>
                         {% if model.actions %}
                         {% for action_name, action_config in model.actions.items() %}
-                        <Button 
-                            variant="outline" 
-                            size="sm" 
+                        <Button
+                            variant="outline"
+                            size="sm"
                             onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
@@ -624,15 +646,23 @@ const {{ model.name }}Page: React.FC = () => {
                         </Button>
                         {% endfor %}
                         {% endif %}
+                        </>
+                        )}
+                        {hasPermission('r') && (
                         <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}>
                             <Eye className="h-4 w-4" />
                         </Button>
+                        )}
+                        {hasPermission('u') && (
                         <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}>
                             <Pencil className="h-4 w-4" />
                         </Button>
+                        )}
+                        {hasPermission('d') && (
                         <Button variant="ghost" size="icon" className="text-destructive" onClick={() => requestDelete(item.id)}>
                             <Trash2 className="h-4 w-4" />
                         </Button>
+                        )}
                     </TableCell>
                 </TableRow>
                 ))
@@ -720,18 +750,28 @@ const {{ model.name }}Page: React.FC = () => {
             <Controller
                 control={control}
                 name="{{ field.name }}"
-                render={({ field: { onChange, value } }) => (
+                render={({ field: { onChange, value } }) => {
+                    // Filter enum values based on role for User.role field
+                    {% if model.module_name == "user" and model.name == "User" and field.name == "role" %}
+                    const filteredValues = userRole === 'developer'
+                        ? {{ field.enum_values | tojson }}
+                        : ({{ field.enum_values | tojson }} as string[]).filter(v => v !== 'developer');
+                    {% else %}
+                    const filteredValues = {{ field.enum_values | tojson }};
+                    {% endif %}
+                    return (
                     <Select onValueChange={onChange} defaultValue={value}>
                         <SelectTrigger>
                             <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
                         </SelectTrigger>
                         <SelectContent>
-                            {% for enum_val in field.enum_values %}
-                            <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
-                            {% endfor %}
+                            {filteredValues.map((enumVal: string) => (
+                                <SelectItem key={enumVal} value={enumVal}>{enumVal}</SelectItem>
+                            ))}
                         </SelectContent>
                     </Select>
-                )}
+                    )
+                }}
             />
             {% elif field.fk_info %}
             <Controller

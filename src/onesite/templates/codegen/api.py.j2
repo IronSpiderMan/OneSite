@@ -1,7 +1,7 @@
 from typing import List, Any, Optional
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table or model.actions or model.importable %}, Body{% endif %}{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -26,8 +26,12 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 
 {% if model.is_notification_table %}
 router = APIRouter()
-{% elif model.model_permissions == 'admin' %}
-router = APIRouter(dependencies=[Depends(deps.get_current_active_superuser)])
+{% elif "user" in model.role_permissions %}
+router = APIRouter(dependencies=[Depends(deps.get_current_user)])
+{% elif "admin" in model.role_permissions %}
+router = APIRouter(dependencies=[Depends(deps.get_current_active_admin)])
+{% elif "developer" in model.role_permissions %}
+router = APIRouter(dependencies=[Depends(deps.get_current_active_developer)])
 {% else %}
 router = APIRouter(dependencies=[Depends(deps.get_current_user)])
 {% endif %}
@@ -181,7 +185,16 @@ async def read_{{ model.lower_name }}s(
     {{ fk.name }}: Optional[int] = Query(None, description="Filter by {{ fk.name }}"),
     {% endfor %}
     session: AsyncSession = Depends(db.get_session),
+    {% if model.module_name == "user" and model.name == "User" %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
 ) -> Any:
+    {% if model.module_name == "user" and model.name == "User" %}
+    # User list: only admin and developer
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
+    {% endif %}
     """
     List {{ model.name }} records with optional search and filter support.
     """
@@ -215,8 +228,18 @@ async def read_{{ model.lower_name }}s(
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     {{ model.lower_name }}_in: {{ model.name }}Create,
 ) -> Any:
+    # Special permission check: admin cannot create developer role
+    {% if model.module_name == "user" and model.name == "User" %}
+    if hasattr({{ model.lower_name }}_in, 'role') and {{ model.lower_name }}_in.role == 'developer':
+        user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        if user_level < deps.ROLE_HIERARCHY.get('developer', 2):
+            raise HTTPException(status_code=403, detail="Only developers can create developer accounts")
+    {% endif %}
     try:
         return await service.create(session, {{ model.lower_name }}_in)
     except ValueError as e:
@@ -283,6 +306,12 @@ async def read_{{ model.lower_name }}(
     {% if model.is_notification_table %}
     if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Forbidden")
+    {% elif model.module_name == "user" and model.name == "User" %}
+    # User get: only admin and developer (or self)
+    if id != current_user.id:
+        user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
     {% endif %}
     return {{ model.lower_name }}
 
@@ -291,6 +320,8 @@ async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
     {% if model.is_notification_table %}
+    current_user: User = Depends(deps.get_current_user),
+    {% elif model.module_name == "user" and model.name == "User" %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: int,
@@ -303,6 +334,16 @@ async def update_{{ model.lower_name }}(
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Forbidden")
+    {% elif model.module_name == "user" and model.name == "User" %}
+    # User update: admin/developer can update any, user can only update self
+    if id != current_user.id:
+        user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+            raise HTTPException(status_code=403, detail="Insufficient permissions")
+    # Admin cannot promote to developer
+    if hasattr({{ model.lower_name }}_in, 'role') and {{ model.lower_name }}_in.role == 'developer':
+        if user_level < deps.ROLE_HIERARCHY.get("developer", 2):
+            raise HTTPException(status_code=403, detail="Only developers can promote to developer role")
     {% endif %}
     try:
         {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in)
@@ -316,7 +357,7 @@ async def update_{{ model.lower_name }}(
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table %}
+    {% if model.is_notification_table or model.module_name == "user" %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: int,
@@ -327,6 +368,11 @@ async def delete_{{ model.lower_name }}(
     {% if model.is_notification_table %}
     if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
         raise HTTPException(status_code=403, detail="Forbidden")
+    {% elif model.module_name == "user" and model.name == "User" %}
+    # User delete: only admin and developer
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        raise HTTPException(status_code=403, detail="Insufficient permissions")
     {% endif %}
     {{ model.lower_name }} = await service.delete(session, id)
     return {{ model.lower_name }}

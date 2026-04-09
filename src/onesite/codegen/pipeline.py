@@ -156,6 +156,9 @@ def generate_code():
                         importable,
                         exportable,
                         import_key,
+                        role_permissions,
+                        role_visible,
+                        special_me_permissions,
                     ) = get_model_fields(obj, model_module_name)
 
                     if name == "User":
@@ -214,6 +217,9 @@ def generate_code():
                             "is_link_table": is_link_table,
                             "is_singleton": is_singleton,
                             "model_permissions": model_permissions,
+                            "role_permissions": role_permissions,
+                            "role_visible": role_visible,
+                            "special_me_permissions": special_me_permissions,
                             "frontend_only": frontend_only,
                             "translations": translations,
                             "auto_refresh": auto_refresh,

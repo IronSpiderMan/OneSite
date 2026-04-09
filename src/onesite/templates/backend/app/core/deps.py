@@ -6,12 +6,19 @@ from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import config, db
-from app.models.user import User
+from app.models.user import User, UserRole
 from app.core.config import settings
 
 reusable_oauth2 = OAuth2PasswordBearer(
     tokenUrl=f"{settings.API_V1_STR}/login/access-token"
 )
+
+# Role hierarchy: higher index = more privileges
+ROLE_HIERARCHY = {
+    UserRole.USER: 0,
+    UserRole.ADMIN: 1,
+    UserRole.DEVELOPER: 2,
+}
 
 async def get_current_user(
     session: AsyncSession = Depends(db.get_session),
@@ -27,7 +34,7 @@ async def get_current_user(
             raise HTTPException(status_code=403, detail="Could not validate credentials")
     except (JWTError, ValidationError):
         raise HTTPException(status_code=403, detail="Could not validate credentials")
-    
+
     try:
         user_id = int(user_id)
     except ValueError:
@@ -40,11 +47,45 @@ async def get_current_user(
         raise HTTPException(status_code=400, detail="Inactive user")
     return user
 
+def require_role(min_role: UserRole):
+    """Dependency factory that requires user to have at least min_role."""
+    async def checker(current_user: User = Depends(get_current_user)) -> User:
+        user_level = ROLE_HIERARCHY.get(current_user.role, 0)
+        required_level = ROLE_HIERARCHY.get(min_role, 0)
+        if user_level < required_level:
+            raise HTTPException(
+                status_code=403, detail="The user doesn't have enough privileges"
+            )
+        return current_user
+    return checker
+
 async def get_current_active_superuser(
     current_user: User = Depends(get_current_user),
 ) -> User:
-    if not current_user.is_superuser:
+    # Superuser = admin or developer (role >= ADMIN)
+    user_level = ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < ROLE_HIERARCHY.get(UserRole.ADMIN, 0):
         raise HTTPException(
-            status_code=400, detail="The user doesn't have enough privileges"
+            status_code=403, detail="The user doesn't have enough privileges"
+        )
+    return current_user
+
+async def get_current_active_admin(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    user_level = ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < ROLE_HIERARCHY.get(UserRole.ADMIN, 0):
+        raise HTTPException(
+            status_code=403, detail="The user doesn't have enough privileges"
+        )
+    return current_user
+
+async def get_current_active_developer(
+    current_user: User = Depends(get_current_user),
+) -> User:
+    user_level = ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < ROLE_HIERARCHY.get(UserRole.DEVELOPER, 0):
+        raise HTTPException(
+            status_code=403, detail="The user doesn't have enough privileges"
         )
     return current_user

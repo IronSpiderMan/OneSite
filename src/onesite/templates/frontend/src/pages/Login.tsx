@@ -33,6 +33,21 @@ export default function LoginPage() {
       
       const { access_token } = response.data;
       localStorage.setItem('token', access_token);
+
+      // Fetch user info to get role
+      try {
+        const userResponse = await request.get('/users/me');
+        const user = userResponse.data;
+        localStorage.setItem('user_name', user.full_name || user.email);
+        if (user.avatar) {
+          localStorage.setItem('user_avatar', user.avatar);
+        }
+        localStorage.setItem('user_role', user.role || 'user');
+      } catch (err) {
+        console.error('Failed to fetch user info:', err);
+        localStorage.setItem('user_role', 'user');
+      }
+
       navigate('/');
     } catch (err: any) {
       console.error(err);

@@ -6,8 +6,12 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 from app.services.{{ model.module_name }} import service
 
 router = APIRouter(
-{% if model.model_permissions == 'admin' %}
-    dependencies=[Depends(deps.get_current_active_superuser)]
+{% if "user" in model.role_permissions %}
+    dependencies=[Depends(deps.get_current_user)]
+{% elif "admin" in model.role_permissions %}
+    dependencies=[Depends(deps.get_current_active_admin)]
+{% elif "developer" in model.role_permissions %}
+    dependencies=[Depends(deps.get_current_active_developer)]
 {% else %}
     dependencies=[Depends(deps.get_current_user)]
 {% endif %}

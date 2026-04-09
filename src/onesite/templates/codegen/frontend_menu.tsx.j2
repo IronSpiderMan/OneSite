@@ -6,20 +6,45 @@ export const GeneratedMenu = [
     key: '/dashboard',
     icon: <Home className="h-4 w-4" />,
     label: 'menu.dashboard',
+    minRole: 'user',
   },
 {% for model in models %}
 {% if not model.is_singleton %}
   {
     key: '/{{ model.module_name }}s',
     icon: <LayoutDashboard className="h-4 w-4" />,
-    label: 'models.{{ model.module_name }}.name', 
+    label: 'models.{{ model.module_name }}.name',
+    visible: {{ model.role_visible | tojson }},
+    minRole: '{% if model.role_visible.get("user", True) %}user{% elif model.role_visible.get("admin", True) %}admin{% else %}developer{% endif %}',
   },
 {% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
   {
     key: '/{{ model.module_name }}',
     icon: <LayoutDashboard className="h-4 w-4" />,
-    label: 'models.{{ model.module_name }}.name', 
+    label: 'models.{{ model.module_name }}.name',
+    visible: {{ model.role_visible | tojson }},
+    minRole: '{% if model.role_visible.get("user", True) %}user{% elif model.role_visible.get("admin", True) %}admin{% else %}developer{% endif %}',
   },
 {% endif %}
 {% endfor %}
 ];
+
+// Role hierarchy for filtering
+const ROLE_HIERARCHY: Record<string, number> = {
+  'user': 0,
+  'admin': 1,
+  'developer': 2,
+};
+
+export function filterMenuByRole(menu: typeof GeneratedMenu, userRole: string): typeof GeneratedMenu {
+  const userLevel = ROLE_HIERARCHY[userRole] ?? 0;
+  return menu.filter(item => {
+    // Check if item has explicit visible config
+    if ('visible' in item && item.visible) {
+      const itemVisible = item.visible as Record<string, boolean>;
+      return itemVisible[userRole] ?? false;
+    }
+    // Fall back to minRole check
+    return (ROLE_HIERARCHY[item.minRole] ?? 0) <= userLevel;
+  });
+}

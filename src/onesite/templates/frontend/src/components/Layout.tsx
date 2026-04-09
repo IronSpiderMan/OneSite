@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { LayoutDashboard, Menu as MenuIcon, X, LogOut, Settings } from 'lucide-react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { GeneratedMenu } from '../Menu';
+import { GeneratedMenu, filterMenuByRole } from '../Menu';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
@@ -16,10 +16,12 @@ const AppLayout: React.FC = () => {
 
   const [userName, setUserName] = useState(localStorage.getItem('user_name') || 'Admin User');
   const [userAvatar, setUserAvatar] = useState(localStorage.getItem('user_avatar'));
+  const [userRole, setUserRole] = useState(localStorage.getItem('user_role') || 'user');
   const [isOnline, setIsOnline] = useState(false);
 
   const handleLogout = () => {
     localStorage.removeItem('token');
+    localStorage.removeItem('user_role');
     navigate('/login');
   };
 
@@ -27,6 +29,7 @@ const AppLayout: React.FC = () => {
     const sync = () => {
       setUserName(localStorage.getItem('user_name') || 'Admin User');
       setUserAvatar(localStorage.getItem('user_avatar'));
+      setUserRole(localStorage.getItem('user_role') || 'user');
     };
     sync();
     window.addEventListener('onesite:user_updated', sync as any);
@@ -53,7 +56,7 @@ const AppLayout: React.FC = () => {
           </Button>
         </div>
         <nav className="p-4 space-y-2">
-          {GeneratedMenu.map((item: any) => (
+          {filterMenuByRole(GeneratedMenu, userRole).map((item: any) => (
             <Link
               key={item.key}
               to={item.key}

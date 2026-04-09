@@ -539,10 +539,10 @@ from typing import Optional
 from sqlmodel import Field, SQLModel
 
 class SystemConfig(SQLModel, table=True):
-    __onesite__ = {"config_role": "system", "permissions": "admin", "is_singleton": True}
-    
+    __onesite__ = {"config_role": "system", "permissions": "developer-rcu", "is_singleton": True}
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    
+
     # Server-side settings
     site_name: str = Field(default="OneSite Admin")
     allow_registration: bool = Field(default=True)
@@ -597,7 +597,7 @@ class User(SQLModel, table=True):
     }}})
 ```
 
-##### Permissions String
+##### Field Permissions String
 A string combining characters to control field behavior:
 
 | Character | Meaning | Description |
@@ -605,12 +605,13 @@ A string combining characters to control field behavior:
 | `r` | Read | Field is included in CSV export |
 | `c` | Create | Field is editable in Create form and CSV import |
 | `u` | Update | Field is editable in Update form and CSV import |
+| `d` | Delete | Field controls delete button visibility |
 
-##### Default Permissions
+##### Default Field Permissions
 
 | Field Type | Default | Notes |
 |------------|---------|-------|
-| Normal fields | `rcu` | Full read/create/update access |
+| Normal fields | `rcud` | Full read/create/update/delete access |
 | `id` | `r` | Always read-only |
 | `created_at` | `r` | Auto-set, never user-provided |
 | `updated_at` | `r` | Auto-updated on every write |
@@ -622,7 +623,83 @@ A string combining characters to control field behavior:
 | `create_optional: True` | Field can be omitted in Create form |
 | `update_optional: True` | Field can be omitted in Update form |
 
-##### Configuration Levels
+##### Model Permissions (`__onesite__.permissions`)
+Controls which users can access the model and what operations they can perform.
+
+**Role Hierarchy**: `developer >= admin >= user`
+
+**Permissions Format** (new - supports per-role permissions):
+
+```python
+class Product(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": {
+            "user": "ru",      # user: read + update only
+            "admin": "rcu",    # admin: full access
+            "developer": "rcu", # developer: full access
+        },
+        "visible": {
+            "user": True,      # user sees it in menu
+            "admin": True,
+            "developer": True,
+        }
+    }
+```
+
+**String Format** (backward compatible - same permission for all roles):
+
+```python
+__onesite__ = {"permissions": "rcu"}  # All roles get rcu
+__onesite__ = {"permissions": "admin-rcu"}  # Only admin+ get access
+__onesite__ = {"permissions": "developer-rcu"}  # Only developer gets access
+```
+
+**Permission Values** (field-level):
+
+| Value | Access | Description |
+|-------|--------|-------------|
+| `r` | Read only | Field appears in CSV export, not in Create/Update forms |
+| `rc` | Read + Create | Field in Create form, not in Update form |
+| `ru` | Read + Update | Field in Update form, not in Create form |
+| `rcu` | Full access | Field in all forms |
+
+**Visible Config** (`__onesite__.visible`):
+
+Controls menu visibility. Can be:
+- **String**: `"admin"` (admin+ visible), `"developer"` (developer only)
+- **Dict**: `{"user": True, "admin": True, "developer": False}`
+
+**Default**: If `visible` is not set, menu visibility is determined by whether the role has any permission.
+
+##### User Roles
+
+The `User` model has a `role` field with three levels:
+
+```python
+class UserRole(str, Enum):
+    USER = "user"
+    ADMIN = "admin"
+    DEVELOPER = "developer"
+```
+
+- **developer**: Full system access, can manage all models including system configs
+- **admin**: Can manage models where role_permissions includes "admin"
+- **user**: Can only access models where role_permissions includes "user"
+
+> **Note**: The `is_superuser` field is deprecated. Use `role` instead for permission control.
+
+##### Frontend Permission Effects
+
+Based on role_permissions, the frontend conditionally renders:
+
+| Permission | Frontend Effect |
+|------------|-----------------|
+| No `r` | Model hidden from left navigation menu |
+| No `c` | Create button hidden |
+| No `u` | Edit button and Action buttons hidden |
+| No `d` | Delete button hidden |
+
+##### Field-Level Configuration
 
 **Field-level** (controls Create/Update/Export):
 ```python
@@ -633,24 +710,6 @@ sa_column_kwargs={"info": {"site_props": {
 }}}
 ```
 
-**Model-level** (via `__onesite__` - controls API access):
-```python
-class User(SQLModel, table=True):
-    __onesite__ = {"permissions": "admin"}  # Only superuser can access this model's APIs
-```
-
-##### Model Permissions (`__onesite__.permissions`)
-
-Controls which users can access the model's API endpoints:
-
-| Value | Access | Description |
-|-------|--------|-------------|
-| `"admin"` | Superuser only | All endpoints require `is_superuser=True` |
-| `"user"` | Any logged-in user | Endpoints accessible to all authenticated users |
-
-- Default: `"admin"`
-- Applies to all endpoints on the router (list, read, create, update, delete, import, export)
-
 ##### Permission Effects
 
 - **`r` permission**: Field appears in CSV export headers
@@ -658,6 +717,98 @@ Controls which users can access the model's API endpoints:
 - **`u` permission**: Field is included in Update form
 
 **Example**: `permissions: "r"` makes a field read-only (exportable but not importable/editable).
+
+##### Configuration Examples
+
+**Per-role permissions** (new):
+```python
+class Product(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": {
+            "user": "ru",      # user can only read and update
+            "admin": "rcu",    # admin has full access
+            "developer": "rcu", # developer has full access
+        }
+    }
+```
+
+**Admin-only model** (only admin and developer can access):
+```python
+class AuditLog(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": {
+            "admin": "rcu",
+            "developer": "rcu",
+        }
+    }
+```
+
+**Developer-only model** (only developers can access):
+```python
+class SystemConfig(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": {
+            "developer": "rcu",
+        }
+    }
+```
+
+**Public model** (all logged-in users can access):
+```python
+class Product(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": "rcu"  # Or {"user": "rcu", "admin": "rcu", "developer": "rcu"}
+    }
+```
+
+**Hidden menu but accessible API** (Notification pattern):
+```python
+class Notification(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": {
+            "user": "rcu",    # All users can call the API
+            "admin": "rcu",
+            "developer": "rcu",
+        },
+        "visible": {
+            "user": False,    # But only admin+ see it in menu
+            "admin": True,
+            "developer": True,
+        }
+    }
+```
+
+**String format equivalent** (backward compatible):
+```python
+__onesite__ = {"permissions": "rcu"}  # All roles get rcu
+__onesite__ = {"permissions": "admin-rcu"}  # admin+ only
+__onesite__ = {"permissions": "developer-rcu"}  # developer only
+```
+
+**Special Case: User Model**
+
+The User model has built-in special handling:
+
+```python
+class User(SQLModel, table=True):
+    __onesite__ = {
+        "permissions": {
+            "user": "r",  # User can access /me endpoint with read
+            "admin": "rcud",  # Admin can CRUD, but cannot create developer role
+            "developer": "rcud",  # Developer has full access
+        },
+        "special_me_permissions": "ru",  # Special: user can access /me with ru
+    }
+```
+
+This configuration means:
+- **user role**: Can only access `/users/me` endpoint (read/update own profile). Redirected from user list page.
+- **admin role**: Can CRUD users, but cannot create or promote to `developer` role.
+- **developer role**: Has full access to all user operations including creating developer accounts.
+
+Backend enforcement:
+- Admin attempting to create/promote to `developer` role returns 403 error
+- Regular users are redirected from `/users` to `/users/me` in the frontend
 
 
 #### Search & Filters
