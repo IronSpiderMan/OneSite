@@ -89,6 +89,7 @@ def get_model_fields(
     Optional[List[str]],
     bool,
     bool,
+    Optional[str],
 ]:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
@@ -114,6 +115,7 @@ def get_model_fields(
     is_notification_table = bool(model_site_props.get("is_notification_table", False))
     union_key = model_site_props.get("union_key", None)
     importable = model_site_props.get("importable", False)
+    import_key = model_site_props.get("import_key", None)
     exportable = model_site_props.get("exportable", False)
     # Validate union_key is a list of field names
     if union_key is not None:
@@ -385,4 +387,5 @@ def get_model_fields(
         union_key,
         importable,
         exportable,
+        import_key,
     )

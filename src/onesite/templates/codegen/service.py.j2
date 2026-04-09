@@ -181,6 +181,14 @@ class {{ model.name }}Service:
             return created_objects[0] if created_objects else {{ model.name }}()
         {% endif %}
         obj = await crud.create(session, obj_in)
+
+        # Auto-set updated_at on create
+        from datetime import datetime as dt
+        obj.updated_at = dt.utcnow()
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+
         {% if model.is_notification_table %}
         # Auto-push for notification
         try:
@@ -221,8 +229,15 @@ class {{ model.name }}Service:
         {% endif %}
         {% endfor %}
         {% endif %}
-        
+
         obj = await crud.update(session, db_obj, obj_in)
+
+        # Auto-update updated_at timestamp
+        obj.updated_at = datetime.utcnow()
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+
         {% if model.is_notification_table %}
         # Auto-push read status
         try:
@@ -403,8 +418,8 @@ class {{ model.name }}Service:
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
 
-            # Header
-            headers = [{% for field in model.fields %}{% if 'r' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+            # Header - exclude id, created_at, updated_at for clean import/export cycle
+            headers = [{% for field in model.fields %}{% if 'r' in field.permissions and field.name not in ['id', 'created_at', 'updated_at'] %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
             writer.writerow(headers)
             
             # Process in batches
@@ -419,7 +434,7 @@ class {{ model.name }}Service:
                 for item in items:
                     row = []
                     {% for field in model.fields %}
-                    {% if 'r' in field.permissions %}
+                    {% if 'r' in field.permissions and field.name not in ['id', 'created_at', 'updated_at'] %}
                     val = getattr(item, "{{ field.name }}", None)
                     # Convert to string, handle Enum/datetime specially
                     if val is None:
@@ -457,25 +472,41 @@ class {{ model.name }}Service:
     ) -> dict:
         """
         Import {{ model.name }} records from CSV.
-        Returns import statistics.
+        Uses upsert logic: if record with same {{ model.import_key }} exists, update it; otherwise create new.
         """
         import csv
         import io
-        
+        import json
+        import ast
+        from datetime import datetime
+
         contents = await file.read()
-        csv_file = io.StringIO(contents.decode('utf-8'))
+        csv_file = io.StringIO(contents.decode('utf-8-sig'))
         reader = csv.DictReader(csv_file)
-        
+
         rows = list(reader)
-        
-        stats = {"success": 0, "failed": 0, "errors": []}
-        
+
+        stats = {"success": 0, "failed": 0, "created": 0, "updated": 0, "errors": []}
+        import_key = "{{ model.import_key }}"
+
         for idx, row in enumerate(rows, 1):
             try:
-                # Build create object from row
+                # Get the unique field value
+                key_value = row.get(import_key)
+                if not key_value:
+                    stats["failed"] += 1
+                    stats["errors"].append(f"Row {idx}: Missing import key '{import_key}'")
+                    continue
+
+                # Check if record exists
+                existing = await crud.get_by_{{ model.import_key }}(session, key_value)
+                is_update = existing is not None
+
+                # Build data object from row
                 obj_data = {}
                 {% for field in model.fields %}
                 {% if field.name != 'id' and 'c' in field.permissions %}
+                {% if field.name not in ['created_at', 'updated_at'] %}
                 if "{{ field.name }}" in row:
                     value = row["{{ field.name }}"]
                     {% if field.ui_type == 'int' %}
@@ -484,22 +515,35 @@ class {{ model.name }}Service:
                     obj_data["{{ field.name }}"] = float(value) if value else None
                     {% elif field.ui_type == 'bool' %}
                     obj_data["{{ field.name }}"] = value.lower() in ('true', '1', 'yes', 'on') if value else False
+                    {% elif field.ui_type == 'json' %}
+                    obj_data["{{ field.name }}"] = ast.literal_eval(value) if value else []
+                    {% elif field.is_enum %}
+                    obj_data["{{ field.name }}"] = value
                     {% else %}
                     obj_data["{{ field.name }}"] = value
                     {% endif %}
                 {% endif %}
+                {% endif %}
                 {% endfor %}
-                
+
                 if not dry_run:
-                    obj_in = {{ model.name }}Create(**obj_data)
-                    await self.create(session, obj_in)
-                
+                    if is_update:
+                        # Update existing record (updated_at auto-set in update method)
+                        obj_in = {{ model.name }}Update(**obj_data)
+                        await self.update(session, existing.id, obj_in)
+                        stats["updated"] += 1
+                    else:
+                        # Create new record (created_at and updated_at auto-set in create method)
+                        obj_in = {{ model.name }}Create(**obj_data)
+                        await self.create(session, obj_in)
+                        stats["created"] += 1
+
                 stats["success"] += 1
-                
+
             except Exception as e:
                 stats["failed"] += 1
                 stats["errors"].append(f"Row {idx}: {str(e)}")
-        
+
         return stats
     {% endif %}
     {% endif %}

@@ -155,6 +155,7 @@ def generate_code():
                         union_key,
                         importable,
                         exportable,
+                        import_key,
                     ) = get_model_fields(obj, model_module_name)
 
                     if name == "User":
@@ -187,6 +188,19 @@ def generate_code():
 
                     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
 
+                    # Validate importable models have import_key
+                    if importable:
+                        if import_key:
+                            # Use configured import_key
+                            pass
+                        elif any(f["name"] == "title" and f.get("is_unique") for f in fields):
+                            # Default to title if it has unique constraint
+                            import_key = "title"
+                        else:
+                            console.print(f"[red]Error: Model '{name}' has importable=True but no import_key configured.[/red]")
+                            console.print(f"[red]Please set __onesite__ = {{'import_key': 'field_name'}} or ensure 'title' field has unique=True[/red]")
+                            return
+
                     found_models.append(
                         {
                             "name": name,
@@ -211,6 +225,7 @@ def generate_code():
                             "union_key": union_key,
                             "importable": importable,
                             "exportable": exportable,
+                            "import_key": import_key,
                             "visualize": model_site_props.get("visualize"),
                         }
                     )

@@ -26,6 +26,8 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 
 {% if model.is_notification_table %}
 router = APIRouter()
+{% elif model.model_permissions == 'admin' %}
+router = APIRouter(dependencies=[Depends(deps.get_current_active_superuser)])
 {% else %}
 router = APIRouter(dependencies=[Depends(deps.get_current_user)])
 {% endif %}
@@ -511,12 +513,12 @@ async def export_{{ model.lower_name }}_template(
     output = io.StringIO()
     writer = csv.writer(output)
 
-    # Write header with field names
-    fields = [{% for field in model.fields %}{% if field.name != 'id' and 'c' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+    # Write header with field names - exclude id, created_at, updated_at
+    fields = [{% for field in model.fields %}{% if field.name not in ['id', 'created_at', 'updated_at'] and 'c' in field.permissions %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
     writer.writerow(fields)
 
     # Write sample row
-    sample = [{% for field in model.fields %}{% if field.name != 'id' and 'c' in field.permissions %}{% if field.ui_type == 'int' %}0{% elif field.ui_type == 'float' %}0.0{% elif field.ui_type == 'bool' %}True{% else %}"sample"{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+    sample = [{% for field in model.fields %}{% if field.name not in ['id', 'created_at', 'updated_at'] and 'c' in field.permissions %}{% if field.ui_type == 'int' %}0{% elif field.ui_type == 'float' %}0.0{% elif field.ui_type == 'bool' %}True{% else %}"sample"{% endif %}{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
     writer.writerow(sample)
 
     output.seek(0)

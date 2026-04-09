@@ -32,6 +32,20 @@ async def check_unique_field(
     return result.first() is None
 {% endif %}
 
+{% if model.importable and model.import_key %}
+async def get_by_{{ model.import_key }}(
+    session: AsyncSession,
+    value: Any,
+) -> Optional[{{ model.name }}]:
+    """
+    Get {{ model.name }} by {{ model.import_key }} value.
+    Used for import upsert logic.
+    """
+    statement = select({{ model.name }}).where(getattr({{ model.name }}, "{{ model.import_key }}") == value)
+    result = await session.exec(statement)
+    return result.first()
+{% endif %}
+
 
 def _apply_filters(
     statement,
