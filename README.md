@@ -286,30 +286,43 @@ class Product(SQLModel, table=True):
     __onesite__ = {
         "importable": True,  # Enable CSV import
         "exportable": True,  # Enable CSV export
+        "import_key": "name",  # Unique field for upsert (required if no title with unique=True)
     }
-    
+
     id: Optional[int] = Field(default=None, primary_key=True)
-    name: str
+    name: str = Field(unique=True)  # unique=True makes this the default import_key
     price: float
     quantity: int = 0
     is_active: bool = True
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    updated_at: datetime = Field(default_factory=datetime.utcnow)
 ```
+
+**Import Key Configuration**:
+- Set `import_key` in `__onesite__` to specify which field identifies unique records
+- If `import_key` is not set, defaults to `title` if it has `unique=True`
+- If neither is configured, `site sync` will error out
 
 Generated features:
 - **Export Button**: Downloads all records as a CSV file directly.
-- **Import Button**: Opens a file picker to upload a CSV file. The import runs synchronously and shows results (success/failed count) when complete.
+- **Import Button**: Opens a file picker to upload a CSV file. The import runs synchronously and shows results (created/updated/failed count) when complete.
 - **Template Download**: If only `importable` is enabled (without `exportable`), a template download button is provided showing the expected CSV format.
 
 **CSV Format**:
 - The first row contains field names (excluding `id`)
-- Each subsequent row represents one record to create
+- Each subsequent row represents one record
 - Boolean values should be `true`/`false`
 - Empty cells are treated as `None`/`null`
 
-**Import Behavior**:
-- Import creates new records (does not update existing)
-- Failed rows are skipped and reported in the result
-- After successful import, the list page automatically refreshes
+**Import Behavior (Upsert)**:
+- Import uses **upsert logic**: if a record with the same `import_key` value exists, it updates that record; otherwise creates a new one
+- `created_at`: Always ignored during import, auto-set to current time on create
+- `updated_at`: Auto-updated to current time on every create and update
+- Enum values should be the actual string value (e.g., `SUCCEED`, not `NotificationStatus.SUCCEED`)
+- Returns detailed statistics: `{success, failed, created, updated, errors}`
+
+**Export Encoding**:
+- All exports use UTF-8 with BOM for Excel compatibility
 
 #### Dashboard & Visualization
 OneSite can generate a dashboard page with statistics and charts. Configure `visualize` in your model's `__onesite__`:
@@ -571,23 +584,81 @@ You can customize field behavior using `site_props` (recommended via `sa_column_
 Note: when you use `sa_column=Column(...)` in SQLModel, you cannot also pass `sa_column_kwargs` (SQLModel limitation). In that case, you can put `site_props` in `schema_extra`/`json_schema_extra`, but support depends on your SQLModel version. The most reliable approach is `sa_column_kwargs.info.site_props`.
 
 #### Field Permissions & Validation
-Control field visibility and validation requirements for Create/Update operations.
+Control field visibility and validation requirements for Create/Update/Export operations.
 
 ```python
 class User(SQLModel, table=True):
     # ...
     email: str = Field(unique=True) # Unique constraint validation
     password: str = Field(sa_column_kwargs={"info": {"site_props": {
-        "permissions": "cu",          # 'c'=Create, 'u'=Update. 'r'=Read (omitted here, so password is never sent to frontend)
+        "permissions": "cu",          # 'c'=Create, 'u'=Update. 'r'=Read (omitted, so password is never sent to frontend)
         "create_optional": False,     # Required when creating a user
         "update_optional": True       # Optional when updating (leave blank to keep current password)
     }}})
 ```
 
-- `unique=True`: Adds a unique constraint to the field. OneSite automatically generates validation logic in Create/Update APIs to prevent duplicate entries (returns `400 Bad Request`).
-- `permissions`: String with `r` (read), `c` (create), `u` (update). Default is `rcu`.
-- `create_optional`: If `True`, field is not required in Create form.
-- `update_optional`: If `True`, field is not required in Update form.
+##### Permissions String
+A string combining characters to control field behavior:
+
+| Character | Meaning | Description |
+|-----------|---------|-------------|
+| `r` | Read | Field is included in CSV export |
+| `c` | Create | Field is editable in Create form and CSV import |
+| `u` | Update | Field is editable in Update form and CSV import |
+
+##### Default Permissions
+
+| Field Type | Default | Notes |
+|------------|---------|-------|
+| Normal fields | `rcu` | Full read/create/update access |
+| `id` | `r` | Always read-only |
+| `created_at` | `r` | Auto-set, never user-provided |
+| `updated_at` | `r` | Auto-updated on every write |
+
+##### Optional Validation Flags
+
+| Flag | Effect |
+|------|--------|
+| `create_optional: True` | Field can be omitted in Create form |
+| `update_optional: True` | Field can be omitted in Update form |
+
+##### Configuration Levels
+
+**Field-level** (controls Create/Update/Export):
+```python
+sa_column_kwargs={"info": {"site_props": {
+    "permissions": "rc",
+    "create_optional": True,
+    "update_optional": True,
+}}}
+```
+
+**Model-level** (via `__onesite__` - controls API access):
+```python
+class User(SQLModel, table=True):
+    __onesite__ = {"permissions": "admin"}  # Only superuser can access this model's APIs
+```
+
+##### Model Permissions (`__onesite__.permissions`)
+
+Controls which users can access the model's API endpoints:
+
+| Value | Access | Description |
+|-------|--------|-------------|
+| `"admin"` | Superuser only | All endpoints require `is_superuser=True` |
+| `"user"` | Any logged-in user | Endpoints accessible to all authenticated users |
+
+- Default: `"admin"`
+- Applies to all endpoints on the router (list, read, create, update, delete, import, export)
+
+##### Permission Effects
+
+- **`r` permission**: Field appears in CSV export headers
+- **`c` permission**: Field is included in CSV import processing and Create form
+- **`u` permission**: Field is included in Update form
+
+**Example**: `permissions: "r"` makes a field read-only (exportable but not importable/editable).
+
 
 #### Search & Filters
 You can mark certain fields as searchable to generate a filter panel at the top of list pages.
