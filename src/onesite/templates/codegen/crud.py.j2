@@ -328,7 +328,7 @@ async def mark_all_read_by_user(session: AsyncSession, user_id: int) -> int:
     )
     result = await session.exec(statement)
     await session.commit()
-    return result.row_count
+    return result.rowcount
 {% endif %}
 
 {% if model.m2m_fields %}

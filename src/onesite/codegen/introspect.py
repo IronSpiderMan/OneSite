@@ -153,20 +153,21 @@ def get_model_fields(
             raw_permissions = "rcu"
 
         model_permissions = raw_permissions
-        model_level = role_hierarchy.get(raw_permissions, 0)
+        model_level = role_hierarchy.get(raw_permissions.rstrip('d'), 0)  # Remove 'd' for level lookup
+        has_delete = 'd' in raw_permissions  # Track if delete permission exists
 
         # Expand to all roles based on hierarchy
         if model_level == 0:  # rcu - all roles
-            role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
+            role_permissions = {"user": "rcu" + ("d" if has_delete else ""), "admin": "rcu" + ("d" if has_delete else ""), "developer": "rcu" + ("d" if has_delete else "")}
         elif model_level == 1:  # admin-rcu - admin+ only
-            role_permissions = {"admin": "rcu", "developer": "rcu"}
+            role_permissions = {"admin": "rcu" + ("d" if has_delete else ""), "developer": "rcu" + ("d" if has_delete else "")}
             # Note: user is excluded (no access)
         elif model_level == 2:  # developer-rcu - developer only
-            role_permissions = {"developer": "rcu"}
+            role_permissions = {"developer": "rcu" + ("d" if has_delete else "")}
             # Note: admin and user are excluded
     else:
-        role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
-        model_permissions = "rcu"
+        role_permissions = {"user": "rcud", "admin": "rcud", "developer": "rcud"}
+        model_permissions = "rcud"
 
     # Parse visible config - support both string and dict formats
     # String format: "admin" (admin+ visible), "developer" (developer only)
@@ -220,13 +221,94 @@ def get_model_fields(
             if isinstance(schema_extra, dict):
                 site_props = schema_extra.get("site_props", {}) or {}
 
-        permissions = site_props.get("permissions", "rcud")
+        raw_field_permissions = site_props.get("permissions", None)  # None = inherit from model config
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
         allow_download = site_props.get("allow_download", True)
 
+        # Parse field permissions - support both string and dict formats
+        # String format: "rcud"
+        # Dict format: {"user": "r", "admin": "rcu", "developer": "rcud"}
+        # None = inherit from model config (onesite permissions)
+        field_role_permissions = {}
+        permissions = "rcud"  # Default
+
+        if raw_field_permissions is None:
+            # Inherit from model-level role_permissions, strip 'd' (delete is model-level)
+            if role_permissions:
+                field_role_permissions = {}
+                for role, perms in role_permissions.items():
+                    field_role_permissions[role] = perms.replace('d', '')
+                # Compute max permission string for backward compatibility
+                max_level = 0
+                for perms in field_role_permissions.values():
+                    level = role_hierarchy.get(perms, 0)
+                    if level > max_level:
+                        max_level = level
+                for perms, level in role_hierarchy.items():
+                    if level == max_level:
+                        permissions = perms
+                        break
+            else:
+                # Fallback to default "rcu" for all roles (no delete for fields)
+                field_role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
+                permissions = "rcu"
+        elif isinstance(raw_field_permissions, dict):
+            # Strip 'd' from field permissions (delete is model-level)
+            field_role_permissions = {}
+            for role, perms in raw_field_permissions.items():
+                field_role_permissions[role] = perms.replace('d', '')
+            # For backward compatibility, use the highest permission as default
+            max_level = 0
+            for perms in field_role_permissions.values():
+                level = role_hierarchy.get(perms, 0)
+                if level > max_level:
+                    max_level = level
+            for perms, level in role_hierarchy.items():
+                if level == max_level:
+                    permissions = perms
+                    break
+        elif isinstance(raw_field_permissions, str):
+            # Strip 'd' from field permissions (delete is model-level)
+            permissions = raw_field_permissions.replace('d', '')
+            field_role_permissions = {
+                "user": permissions,
+                "admin": permissions,
+                "developer": permissions,
+            }
+
         if name == "id":
             permissions = "r"
+            field_role_permissions = {"user": "r", "admin": "r", "developer": "r"}
+        elif name == "created_at":
+            # created_at is auto-set, only read permission
+            permissions = "r"
+            field_role_permissions = {"user": "r", "admin": "r", "developer": "r"}
+        elif name == "updated_at":
+            # updated_at is auto-set, read and update but not create
+            permissions = "ru"
+            field_role_permissions = {"user": "ru", "admin": "ru", "developer": "ru"}
+        elif raw_field_permissions is None:
+            # No explicit permission config - inherit from model, but strip 'd' (delete is model-level)
+            if role_permissions:
+                field_role_permissions = {}
+                for role, perms in role_permissions.items():
+                    # Remove 'd' from field permissions since delete is model-level
+                    field_role_permissions[role] = perms.replace('d', '')
+                # Compute max permission string for backward compatibility
+                max_level = 0
+                for perms in field_role_permissions.values():
+                    level = role_hierarchy.get(perms, 0)
+                    if level > max_level:
+                        max_level = level
+                for perms, level in role_hierarchy.items():
+                    if level == max_level:
+                        permissions = perms
+                        break
+            else:
+                # Fallback to default "rcu" for all roles (no delete for fields)
+                field_role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
+                permissions = "rcu"
 
         console.print(f"Debug: Field {name} - Perms: {permissions}")
 
@@ -401,6 +483,7 @@ def get_model_fields(
                 "json_item_schema": json_item_schema,
                 "py_imports": sorted(set(json_py_imports)),
                 "permissions": permissions,
+                "role_permissions": field_role_permissions,
                 "create_optional": create_optional,
                 "update_optional": update_optional,
                 "required": field.is_required(),

@@ -182,12 +182,14 @@ class {{ model.name }}Service:
         {% endif %}
         obj = await crud.create(session, obj_in)
 
+        {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
         # Auto-set updated_at on create
         from datetime import datetime as dt
         obj.updated_at = dt.utcnow()
         session.add(obj)
         await session.commit()
         await session.refresh(obj)
+        {% endif %}
 
         {% if model.is_notification_table %}
         # Auto-push for notification
@@ -232,11 +234,13 @@ class {{ model.name }}Service:
 
         obj = await crud.update(session, db_obj, obj_in)
 
+        {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
         # Auto-update updated_at timestamp
         obj.updated_at = datetime.utcnow()
         session.add(obj)
         await session.commit()
         await session.refresh(obj)
+        {% endif %}
 
         {% if model.is_notification_table %}
         # Auto-push read status

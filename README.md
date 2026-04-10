@@ -499,7 +499,19 @@ OneSite can generate a notification center if you provide a `Notification` model
 
 ```python
 class Notification(SQLModel, table=True):
-    __onesite__ = {"is_notification_table": True}
+    __onesite__ = {
+        "is_notification_table": True,
+        "permissions": {
+            "user": "rcu",    # All users can access via API
+            "admin": "rcu",
+            "developer": "rcu",
+        },
+        "visible": {
+            "user": False,     # Not visible in menu
+            "admin": True,
+            "developer": True,
+        }
+    }
 
     id: Optional[int] = Field(default=None, primary_key=True)
     title: str
@@ -507,10 +519,12 @@ class Notification(SQLModel, table=True):
     content: str
     created_at: datetime = Field(default_factory=datetime.utcnow)
     is_read: bool = Field(default=False)
-    user_id: int = Field(foreign_key="user.id")
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
 ```
 
 Required fields (names are fixed): `title`, `summary`, `content`, `created_at`, `is_read`, `user_id`.
+
+**Note**: The Notification model does **not** have an `updated_at` field - it uses `is_read` for tracking read status only.
 
 Generated features:
 - **Unified WebSocket Infrastructure**: Generates a central `ConnectionManager` (`app/core/ws.py`) and a unified endpoint `/api/v1/ws` for all real-time communications.
@@ -605,16 +619,28 @@ A string combining characters to control field behavior:
 | `r` | Read | Field is included in CSV export |
 | `c` | Create | Field is editable in Create form and CSV import |
 | `u` | Update | Field is editable in Update form and CSV import |
-| `d` | Delete | Field controls delete button visibility |
+| `d` | Delete | **Model-level only**, controls delete button visibility |
+
+> **Note**: The `d` (delete) permission is **model-level only**, not field-level. Fields cannot have `d` permission. Delete operations are controlled by the model's `role_permissions`, not individual field permissions.
 
 ##### Default Field Permissions
 
 | Field Type | Default | Notes |
 |------------|---------|-------|
-| Normal fields | `rcud` | Full read/create/update/delete access |
+| Normal fields | `rcu` | Inherit from model config, without `d` (delete is model-level) |
 | `id` | `r` | Always read-only |
-| `created_at` | `r` | Auto-set, never user-provided |
-| `updated_at` | `r` | Auto-updated on every write |
+| `created_at` | `r` | Auto-set on create, never user-provided |
+| `updated_at` | `ru` | Auto-updated on every write, readable but not user-settable |
+
+##### Special Fields
+
+OneSite handles these fields with simplified defaults:
+
+| Field | Default Permissions | Auto Behavior |
+|-------|-------------------|---------------|
+| `id` | `r` | Auto-generated primary key |
+| `created_at` | `r` | Auto-set to current UTC time on create |
+| `updated_at` | `ru` | Auto-updated to current UTC time on every create/update |
 
 ##### Optional Validation Flags
 
@@ -627,6 +653,8 @@ A string combining characters to control field behavior:
 Controls which users can access the model and what operations they can perform.
 
 **Role Hierarchy**: `developer >= admin >= user`
+
+**Priority**: Default (`rcud`) > Model (`__onesite__.permissions`) > Field (`permissions`)
 
 **Permissions Format** (new - supports per-role permissions):
 
@@ -649,10 +677,13 @@ class Product(SQLModel, table=True):
 **String Format** (backward compatible - same permission for all roles):
 
 ```python
-__onesite__ = {"permissions": "rcu"}  # All roles get rcu
+__onesite__ = {"permissions": "rcud"}  # All roles get rcud (default)
+__onesite__ = {"permissions": "rcu"}   # All roles get rcu
 __onesite__ = {"permissions": "admin-rcu"}  # Only admin+ get access
 __onesite__ = {"permissions": "developer-rcu"}  # Only developer gets access
 ```
+
+**Default**: If `permissions` is not set, all roles get `rcud`.
 
 **Permission Values** (field-level):
 
@@ -701,16 +732,33 @@ Based on role_permissions, the frontend conditionally renders:
 
 ##### Field-Level Configuration
 
-**Field-level** (controls Create/Update/Export):
+**Field-level permissions** (controls Create/Update/Export):
+
 ```python
+# String format (same permission for all roles)
 sa_column_kwargs={"info": {"site_props": {
     "permissions": "rc",
     "create_optional": True,
     "update_optional": True,
 }}}
+
+# Dict format (per-role permissions) - inherits from model if not specified
+sa_column_kwargs={"info": {"site_props": {
+    "permissions": {
+        "user": "r",           # user can only read
+        "admin": "rcu",        # admin can create and update
+        "developer": "rcu",     # developer has full access
+    },
+    "create_optional": True,
+    "update_optional": True,
+}}}
 ```
 
-##### Permission Effects
+**Field Permission Priority**: Default (inherit from model) > Model config > Field config
+
+When `permissions` is not specified on a field, it inherits from the model's `role_permissions` (with `d` removed since delete is model-level).
+
+##### Special Model: User
 
 - **`r` permission**: Field appears in CSV export headers
 - **`c` permission**: Field is included in CSV import processing and Create form
@@ -785,6 +833,28 @@ __onesite__ = {"permissions": "admin-rcu"}  # admin+ only
 __onesite__ = {"permissions": "developer-rcu"}  # developer only
 ```
 
+##### Permission Summary
+
+| Level | Default | Config Location | Notes |
+|-------|---------|----------------|-------|
+| Model | `rcud` | `__onesite__.permissions` | Controls API access and delete button |
+| Field | Inherit model | `sa_column_kwargs.info.site_props` | `d` is stripped (delete is model-level) |
+| `id` | `r` | Auto | Always read-only |
+| `created_at` | `r` | Auto | Auto-set on create |
+| `updated_at` | `ru` | Auto | Auto-updated on every write |
+
+**Key Points:**
+- Delete (`d`) is **model-level only**, not field-level
+- Field permissions inherit from model config by default
+- Special fields (`id`, `created_at`, `updated_at`) have fixed simplified permissions
+- `user` role: lowest access, often restricted to read-only
+- `admin` role: medium access, can manage most content
+- `developer` role: highest access, can manage system configs
+
+**Special Models:**
+- **User**: `user` role can only access `/me` endpoint, admin cannot create developer role
+- **Notification**: API accessible by all, menu visible only to admin+
+
 **Special Case: User Model**
 
 The User model has built-in special handling:
@@ -810,6 +880,44 @@ Backend enforcement:
 - Admin attempting to create/promote to `developer` role returns 403 error
 - Regular users are redirected from `/users` to `/users/me` in the frontend
 
+##### Special Model: Notification
+
+The Notification model has built-in special handling:
+
+```python
+class Notification(SQLModel, table=True):
+    __onesite__ = {
+        "is_notification_table": True,
+        "permissions": {
+            "user": "rcu",    # All users can access via API
+            "admin": "rcu",
+            "developer": "rcu",
+        },
+        "visible": {
+            "user": False,     # Not visible in menu
+            "admin": True,     # Admin can see notifications menu
+            "developer": True,
+        }
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    summary: str
+    content: str
+    created_at: datetime = Field(default_factory=datetime.utcnow)
+    is_read: bool = Field(default=False)
+    user_id: Optional[int] = Field(default=None, foreign_key="user.id")
+```
+
+**Note**: The Notification model does **not** have an `updated_at` field - it uses `is_read` for tracking read status only.
+
+This configuration means:
+- **API Access**: All authenticated users can access notifications via API
+- **Menu Visibility**: Only admin+ can see the Notifications menu item
+- **Broadcast Support**: `user_id=None` with `broadcast=true` sends to all active users
+- **Real-time Push**: Notifications are automatically pushed via WebSocket when created or read status changes
+
+Required fields (names are fixed): `title`, `summary`, `content`, `created_at`, `is_read`, `user_id`.
 
 #### Search & Filters
 You can mark certain fields as searchable to generate a filter panel at the top of list pages.
