@@ -119,6 +119,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     _ensure_init_py(backend_path / "app" / "schemas")
     _ensure_init_py(backend_path / "app" / "services")
     _ensure_init_py(backend_path / "app" / "consumers")
+    _ensure_init_py(backend_path / "app" / "tasks")
 
     template_endpoints_dir = template_backend_root / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
@@ -132,6 +133,18 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
 
     generate_file("backend_config.py.j2", {"config": site_config}, backend_path / "app" / "core" / "config.py")
     generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
+
+    # Sync scheduler if not exists (tasks depend on it)
+    scheduler_src = template_backend_root / "app" / "core" / "scheduler.py.j2"
+    scheduler_dst = backend_path / "app" / "core" / "scheduler.py"
+    if not scheduler_dst.exists():
+        generate_file("scheduler.py.j2", {}, scheduler_dst)
+        console.print("Generated scheduler.py")
+
+    # Generate tasks API endpoint
+    if site_config.get("scheduled_tasks"):
+        generate_file("app_tasks_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "tasks.py")
+        console.print("Generated tasks API endpoint")
 
     if site_config.get("redis"):
         generate_file("redis.py.j2", {"redis": site_config["redis"]}, backend_path / "app" / "core" / "redis.py")

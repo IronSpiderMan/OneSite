@@ -23,7 +23,8 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 - **Better UX Defaults**: Delete confirmation dialogs; toast notifications for create/update.
 - **Pagination**: Built-in standard pagination support for all list views.
 - **Auto Refresh**: Configurable auto-refresh for real-time data monitoring.
-- **Dashboard**: Auto-generated dashboard page with statistics cards and charts (bar, line, pie).
+- **Dashboard**: Auto-generated dashboard page with statistics cards, charts (bar, line, pie), and scheduled tasks management.
+- **Scheduled Tasks**: Cron and interval tasks with APScheduler, displayed on Dashboard with enable/disable/edit/run controls and toast notifications.
 - **Bulk Delete**: Select multiple items in list pages for batch deletion.
 - **Test Generation**: Auto-generated pytest tests for backend APIs and Vitest tests for frontend services/stores.
 - **Authentication & Security**:
@@ -366,6 +367,66 @@ class NotificationRecord(SQLModel, table=True):
 - Backend: `GET /{module_name}/stats` endpoint returns `{labels: [], values: [], title: "..."}`
 - Frontend: Dashboard page with Recharts visualizations
 - Auto-detects all models with `visualize.show: True`
+
+#### Scheduled Tasks
+OneSite supports scheduled tasks (cron and interval) displayed on the Dashboard page. Configure `scheduled_tasks` in `site_config.json`:
+
+```json
+{
+  "scheduled_tasks": [
+    {
+      "name": "daily_summary",
+      "func": "app.tasks.alarm:daily_summary",
+      "cron": "0 8 * * *",
+      "description": "每天早上8点发送告警汇总",
+      "enabled": true
+    },
+    {
+      "name": "health_check",
+      "func": "app.tasks.alarm:health_check",
+      "interval": 300,
+      "description": "每5分钟检查系统健康状态",
+      "enabled": true
+    }
+  ]
+}
+```
+
+**Task Types**:
+- **Cron Task**: Set `cron` field with standard cron expression (e.g., `0 8 * * *` = daily at 8:00)
+- **Interval Task**: Set `interval` field with seconds (e.g., `300` = every 5 minutes)
+
+**Generated Features**:
+- **Backend**: APScheduler with AsyncIOScheduler manages task execution
+- **Memory-Only Registry**: Task state is lost on restart (enabled/disabled status resets)
+- **Frontend Dashboard**: View all tasks, enable/disable, edit cron/interval, manually trigger
+- **Task Files**: Generated in `backend/app/tasks/{module}.py` (not overwritten if exists)
+  - Example: `app.tasks.alarm:daily_summary` -> `backend/app/tasks/alarm.py`
+  - Functions include `# TODO: 实现业务逻辑` placeholder for user implementation
+
+**Task Configuration Fields**:
+| Field | Type | Description |
+|-------|------|-------------|
+| `name` | string | Unique task identifier |
+| `func` | string | Module path and function: `app.tasks.alarm:daily_summary` |
+| `cron` | string | Cron expression (used if `interval` is 0 or omitted) |
+| `interval` | int | Interval in seconds (takes precedence over `cron` if > 0) |
+| `description` | string | Task description shown in UI |
+| `enabled` | bool | Whether task starts enabled on app startup |
+
+**Frontend API Endpoints**:
+- `GET /tasks/` - List all tasks
+- `GET /tasks/{name}` - Get single task
+- `POST /tasks/{name}/run` - Manually trigger task
+- `POST /tasks/{name}/enable` - Enable task
+- `POST /tasks/{name}/disable` - Disable task
+- `PUT /tasks/{name}` - Update cron/interval/description
+
+**Dashboard UI Features**:
+- Toast notifications for all task operations (run, enable, disable, update)
+- Local time display for next_run (no timezone suffix)
+- Running spinner on run button during execution
+- Cron/Interval switch in edit modal
 
 #### Bulk Delete
 List pages include multi-select checkboxes for batch operations. Selecting items reveals a bulk delete button:

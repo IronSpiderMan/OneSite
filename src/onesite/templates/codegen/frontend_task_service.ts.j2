@@ -1,0 +1,48 @@
+import request from '../utils/request';
+
+export interface Task {
+  name: string;
+  func: string;
+  cron: string;
+  interval: number;  // 0 means cron task, >0 means interval in seconds
+  description: string;
+  enabled: boolean;
+  next_run: string | null;
+}
+
+export interface TaskUpdate {
+  cron?: string;
+  interval?: number;
+  description?: string;
+  enabled?: boolean;
+}
+
+export async function getTasks(): Promise<Task[]> {
+  const response = await request.get<Task[]>("/tasks/");
+  return response.data;
+}
+
+export async function getTask(name: string): Promise<Task> {
+  const response = await request.get<Task>(`/tasks/${name}/`);
+  return response.data;
+}
+
+export async function runTask(name: string): Promise<{ status: string; message: string }> {
+  const response = await request.post(`/tasks/${name}/run`);
+  return response.data;
+}
+
+export async function enableTask(name: string): Promise<{ status: string; message: string }> {
+  const response = await request.post(`/tasks/${name}/enable`);
+  return response.data;
+}
+
+export async function disableTask(name: string): Promise<{ status: string; message: string }> {
+  const response = await request.post(`/tasks/${name}/disable`);
+  return response.data;
+}
+
+export async function updateTask(name: string, config: TaskUpdate): Promise<{ status: string; message: string }> {
+  const response = await request.put(`/tasks/${name}`, config);
+  return response.data;
+}

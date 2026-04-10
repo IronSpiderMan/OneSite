@@ -6,7 +6,7 @@ from rich.console import Console
 console = Console()
 
 
-def update_api_router(models: List[Dict[str, Any]], api_file_path: Path):
+def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, scheduled_tasks: List[Dict[str, Any]] = None):
     imports: List[str] = []
     routers: List[str] = []
 
@@ -19,6 +19,11 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path):
     if any(m.get('is_notification_table') for m in models):
         imports.append("from app.api.endpoints import ws")
         routers.append('api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])')
+
+    # Add tasks router if scheduled_tasks is configured
+    if scheduled_tasks:
+        imports.append("from app.api.endpoints import tasks")
+        routers.append('api_router.include_router(tasks.router, tags=["tasks"])')
 
     for model in models:
         imports.append(f"from app.api.endpoints import {model['module_name']}")

@@ -26,6 +26,14 @@ try:
 except ImportError:
     pass
 {% endif %}
+{% if config.scheduled_tasks %}
+# Import tasks to register them with the scheduler
+try:
+    import app.tasks
+except ImportError:
+    pass
+from app.core.scheduler import task_registry
+{% endif %}
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -41,7 +49,19 @@ async def lifespan(app: FastAPI):
         await rabbitmq_manager.connect()
     {% endif %}
 
+    {% if config.scheduled_tasks %}
+    # Start scheduler
+    task_registry.start()
+    logger.info("Scheduler started")
+    {% endif %}
+
     yield
+
+    {% if config.scheduled_tasks %}
+    # Stop scheduler
+    task_registry.stop()
+    logger.info("Scheduler stopped")
+    {% endif %}
 
     {% if config.rabbitmq %}
     # Disconnect RabbitMQ

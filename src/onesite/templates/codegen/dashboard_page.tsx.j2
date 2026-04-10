@@ -1,13 +1,19 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from 'react';
-import { Loader2 } from 'lucide-react';
+import { Loader2, RefreshCw, Play, Pencil, Power, PowerOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
+import { toast } from 'sonner';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Modal } from '../components/ui/modal';
 {% for model in models %}
 {% if model.visualize and model.visualize.get('show') %}
 import { get{{ model.name }}Stats } from '../services/{{ model.module_name }}';
 {% endif %}
 {% endfor %}
+import { useTaskStore } from '../stores/useTaskStore';
 
 interface ChartData {
     labels: string[];
@@ -17,6 +23,30 @@ interface ChartData {
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
+const formatLocalDateTime = (dateStr: string | null): string => {
+    if (!dateStr) return '';
+    try {
+        const date = new Date(dateStr);
+        return date.toLocaleString(undefined, {
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            second: '2-digit',
+        });
+    } catch {
+        return dateStr;
+    }
+};
+
+const formatInterval = (seconds: number): string => {
+    if (seconds <= 0) return '';
+    if (seconds < 60) return `Every ${seconds}s`;
+    if (seconds < 3600) return `Every ${Math.floor(seconds / 60)}m`;
+    return `Every ${Math.floor(seconds / 3600)}h`;
+};
+
 const DashboardPage: React.FC = () => {
     const { t } = useTranslation();
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
@@ -24,6 +54,22 @@ const DashboardPage: React.FC = () => {
     {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
     const [period, setPeriod] = useState('day');
     {% endif %}
+    const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
+
+    // Task store
+    const {
+        tasks,
+        loading: taskLoading,
+        fetchTasks,
+        runTask,
+        enableTask,
+        disableTask,
+        updateTask,
+        editingTask,
+        isEditModalOpen,
+        setEditingTask,
+        setEditModalOpen,
+    } = useTaskStore();
 
     useEffect(() => {
         const fetchAllStats = async () => {
@@ -48,6 +94,53 @@ const DashboardPage: React.FC = () => {
         fetchAllStats();
     }, [{% if models | selectattr('visualize') | selectattr('visualize.show') | list %}period{% endif %}]);
 
+    useEffect(() => {
+        fetchTasks();
+    }, []);
+
+    const handleRunTask = async (name: string) => {
+        setRunningTasks(prev => new Set(prev).add(name));
+        try {
+            await runTask(name);
+            toast.success(t('dashboard.task_run_success', `Task "${name}" executed successfully`));
+        } catch (error: any) {
+            toast.error(t('dashboard.task_run_error', `Task "${name}" failed: ${error.message}`));
+        } finally {
+            setRunningTasks(prev => {
+                const next = new Set(prev);
+                next.delete(name);
+                return next;
+            });
+        }
+    };
+
+    const handleEnableTask = async (name: string) => {
+        try {
+            await enableTask(name);
+            toast.success(t('dashboard.task_enabled', `Task "${name}" enabled`));
+        } catch (error: any) {
+            toast.error(error.message);
+        }
+    };
+
+    const handleDisableTask = async (name: string) => {
+        try {
+            await disableTask(name);
+            toast.success(t('dashboard.task_disabled', `Task "${name}" disabled`));
+        } catch (error: any) {
+            toast.error(error.message);
+        }
+    };
+
+    const handleRefresh = async () => {
+        try {
+            await fetchTasks();
+            toast.success(t('dashboard.refresh_success', 'Tasks refreshed'));
+        } catch (error: any) {
+            toast.error(error.message);
+        }
+    };
+
     if (loading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -68,7 +161,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0) {
+    if (chartModels.length === 0 && tasks.length === 0) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -77,7 +170,7 @@ const DashboardPage: React.FC = () => {
                     </h1>
                 </div>
                 <div className="text-center py-12 text-muted-foreground">
-                    {t('dashboard.no_visualizations', 'No visualizations configured')}
+                    {t('dashboard.no_visualizations', 'No visualizations or tasks configured')}
                 </div>
             </div>
         );
@@ -181,16 +274,234 @@ const DashboardPage: React.FC = () => {
                 {% endif %}
             </div>
 
-            <div className="grid gap-6 md:grid-cols-2">
-                {chartModels.map((chart) => (
-                    <div key={chart.moduleName} className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
-                        <h3 className="text-lg font-semibold mb-4">
-                            {t(`models.${chart.moduleName}.name`, chart.title)}
-                        </h3>
-                        {renderChart(chart.moduleName, chart.chartType, chart.title)}
+            {chartModels.length > 0 && (
+                <div className="grid gap-6 md:grid-cols-2">
+                    {chartModels.map((chart) => (
+                        <div key={chart.moduleName} className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
+                            <h3 className="text-lg font-semibold mb-4">
+                                {t(`models.${chart.moduleName}.name`, chart.title)}
+                            </h3>
+                            {renderChart(chart.moduleName, chart.chartType, chart.title)}
+                        </div>
+                    ))}
+                </div>
+            )}
+
+            {/* Scheduled Tasks Section */}
+            <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <h3 className="text-lg font-semibold">
+                        {t('dashboard.scheduled_tasks', 'Scheduled Tasks')}
+                    </h3>
+                    <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={handleRefresh}
+                        disabled={taskLoading}
+                    >
+                        <RefreshCw className={`w-4 h-4 mr-1 ${taskLoading ? 'animate-spin' : ''}`} />
+                        {t('common.refresh', 'Refresh')}
+                    </Button>
+                </div>
+
+                {taskLoading && tasks.length === 0 ? (
+                    <div className="flex justify-center items-center h-32">
+                        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
                     </div>
-                ))}
+                ) : tasks.length === 0 ? (
+                    <div className="text-center py-8 text-muted-foreground">
+                        {t('dashboard.no_tasks', 'No scheduled tasks configured')}
+                    </div>
+                ) : (
+                    <div className="space-y-3">
+                        {tasks.map((task) => (
+                            <div
+                                key={task.name}
+                                className="flex items-center justify-between p-4 rounded-lg border bg-background"
+                            >
+                                <div className="flex-1">
+                                    <div className="flex items-center gap-2">
+                                        <span className="font-medium">{task.name}</span>
+                                        <span
+                                            className={`px-2 py-0.5 rounded text-xs ${
+                                                task.enabled
+                                                    ? 'bg-green-100 text-green-700'
+                                                    : 'bg-gray-100 text-gray-500'
+                                            }`}
+                                        >
+                                            {task.enabled
+                                                ? t('dashboard.enabled', 'Enabled')
+                                                : t('dashboard.disabled', 'Disabled')}
+                                        </span>
+                                    </div>
+                                    <div className="text-sm text-muted-foreground mt-1">
+                                        <span className="font-mono">
+                                            {task.interval > 0 ? formatInterval(task.interval) : task.cron}
+                                        </span>
+                                        {task.description && (
+                                            <span className="ml-2">- {task.description}</span>
+                                        )}
+                                    </div>
+                                    {task.next_run && task.enabled && (
+                                        <div className="text-xs text-muted-foreground mt-1">
+                                            {t('dashboard.next_run', 'Next run')}: {formatLocalDateTime(task.next_run)}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="flex items-center gap-2">
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => handleRunTask(task.name)}
+                                        disabled={runningTasks.has(task.name)}
+                                        title={t('dashboard.run_now', 'Run now')}
+                                    >
+                                        {runningTasks.has(task.name) ? (
+                                            <Loader2 className="w-4 h-4 animate-spin" />
+                                        ) : (
+                                            <Play className="w-4 h-4" />
+                                        )}
+                                    </Button>
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => {
+                                            setEditingTask(task);
+                                            setEditModalOpen(true);
+                                        }}
+                                        title={t('dashboard.edit', 'Edit')}
+                                    >
+                                        <Pencil className="w-4 h-4" />
+                                    </Button>
+                                    {task.enabled ? (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleDisableTask(task.name)}
+                                            title={t('dashboard.disable', 'Disable')}
+                                        >
+                                            <PowerOff className="w-4 h-4" />
+                                        </Button>
+                                    ) : (
+                                        <Button
+                                            variant="outline"
+                                            size="sm"
+                                            onClick={() => handleEnableTask(task.name)}
+                                            title={t('dashboard.enable', 'Enable')}
+                                        >
+                                            <Power className="w-4 h-4" />
+                                        </Button>
+                                    )}
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                )}
             </div>
+
+            {/* Edit Task Modal */}
+            {editingTask && (
+                <Modal
+                    isOpen={isEditModalOpen}
+                    onClose={() => setEditModalOpen(false)}
+                    title={t('dashboard.edit_task', 'Edit Task')}
+                >
+                    <div className="space-y-4">
+                        <div>
+                            <Label>{t('dashboard.task_name', 'Task Name')}</Label>
+                            <div className="font-medium">{editingTask.name}</div>
+                        </div>
+                        <div>
+                            <Label>{t('dashboard.task_type', 'Task Type')}</Label>
+                            <div className="flex gap-4 mt-1">
+                                <label className="flex items-center gap-2">
+                                    <input
+                                        type="radio"
+                                        name="taskType"
+                                        value="cron"
+                                        defaultChecked={editingTask.interval === 0}
+                                        onChange={() => {
+                                            const intervalInput = document.getElementById('interval') as HTMLInputElement;
+                                            if (intervalInput) intervalInput.value = '0';
+                                        }}
+                                    />
+                                    {t('dashboard.type_cron', 'Cron')}
+                                </label>
+                                <label className="flex items-center gap-2">
+                                    <input
+                                        type="radio"
+                                        name="taskType"
+                                        value="interval"
+                                        defaultChecked={editingTask.interval > 0}
+                                        onChange={() => {
+                                            const cronInput = document.getElementById('cron') as HTMLInputElement;
+                                            if (cronInput) cronInput.value = '';
+                                        }}
+                                    />
+                                    {t('dashboard.type_interval', 'Interval')}
+                                </label>
+                            </div>
+                        </div>
+                        <div id="cron-section">
+                            <Label>{t('dashboard.cron_expression', 'Cron Expression')}</Label>
+                            <Input
+                                id="cron"
+                                defaultValue={editingTask.cron}
+                                placeholder="0 8 * * *"
+                                className="font-mono"
+                                disabled={editingTask.interval > 0}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                {t('dashboard.cron_help', 'e.g. 0 8 * * * = daily at 8:00')}
+                            </p>
+                        </div>
+                        <div id="interval-section">
+                            <Label>{t('dashboard.interval_seconds', 'Interval (seconds)')}</Label>
+                            <Input
+                                id="interval"
+                                type="number"
+                                min="1"
+                                defaultValue={editingTask.interval > 0 ? editingTask.interval : 60}
+                                placeholder="60"
+                                disabled={editingTask.interval === 0}
+                            />
+                            <p className="text-xs text-muted-foreground mt-1">
+                                {t('dashboard.interval_help', 'e.g. 60 = every 60 seconds')}
+                            </p>
+                        </div>
+                        <div>
+                            <Label>{t('dashboard.description', 'Description')}</Label>
+                            <Input
+                                id="description"
+                                defaultValue={editingTask.description}
+                                placeholder={t('dashboard.description_placeholder', 'Task description')}
+                            />
+                        </div>
+                        <div className="flex justify-end gap-2 pt-4">
+                            <Button variant="outline" onClick={() => setEditModalOpen(false)}>
+                                {t('common.cancel', 'Cancel')}
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    const cronInput = document.getElementById('cron') as HTMLInputElement;
+                                    const intervalInput = document.getElementById('interval') as HTMLInputElement;
+                                    const descInput = document.getElementById('description') as HTMLInputElement;
+                                    const taskTypeRadio = document.querySelector('input[name="taskType"]:checked') as HTMLInputElement;
+                                    const isInterval = taskTypeRadio?.value === 'interval';
+                                    updateTask(editingTask.name, {
+                                        cron: isInterval ? '' : cronInput.value,
+                                        interval: isInterval ? parseInt(intervalInput.value) || 0 : 0,
+                                        description: descInput.value,
+                                    });
+                                    toast.success(t('dashboard.task_updated', `Task "${editingTask.name}" updated`));
+                                }}
+                            >
+                                {t('common.save', 'Save')}
+                            </Button>
+                        </div>
+                    </div>
+                </Modal>
+            )}
         </div>
     );
 };

@@ -1,0 +1,89 @@
+import { create } from "zustand";
+import type { Task, TaskUpdate } from "../services/tasks";
+import * as taskService from "../services/tasks";
+
+interface TaskState {
+  tasks: Task[];
+  loading: boolean;
+  error: string | null;
+  editingTask: Task | null;
+  isEditModalOpen: boolean;
+
+  fetchTasks: () => Promise<void>;
+  runTask: (name: string) => Promise<void>;
+  enableTask: (name: string) => Promise<void>;
+  disableTask: (name: string) => Promise<void>;
+  updateTask: (name: string, config: TaskUpdate) => Promise<void>;
+  setEditingTask: (task: Task | null) => void;
+  setEditModalOpen: (open: boolean) => void;
+}
+
+export const useTaskStore = create<TaskState>((set, get) => ({
+  tasks: [],
+  loading: false,
+  error: null,
+  editingTask: null,
+  isEditModalOpen: false,
+
+  fetchTasks: async () => {
+    set({ loading: true, error: null });
+    try {
+      const tasks = await taskService.getTasks();
+      set({ tasks, loading: false });
+    } catch (error: any) {
+      set({ error: error.message, loading: false });
+    }
+  },
+
+  runTask: async (name: string) => {
+    try {
+      await taskService.runTask(name);
+      await get().fetchTasks();
+    } catch (error: any) {
+      set({ error: error.message });
+      throw error;
+    }
+  },
+
+  enableTask: async (name: string) => {
+    try {
+      await taskService.enableTask(name);
+      await get().fetchTasks();
+    } catch (error: any) {
+      set({ error: error.message });
+      throw error;
+    }
+  },
+
+  disableTask: async (name: string) => {
+    try {
+      await taskService.disableTask(name);
+      await get().fetchTasks();
+    } catch (error: any) {
+      set({ error: error.message });
+      throw error;
+    }
+  },
+
+  updateTask: async (name: string, config: TaskUpdate) => {
+    try {
+      await taskService.updateTask(name, config);
+      set({ isEditModalOpen: false, editingTask: null });
+      await get().fetchTasks();
+    } catch (error: any) {
+      set({ error: error.message });
+      throw error;
+    }
+  },
+
+  setEditingTask: (task: Task | null) => {
+    set({ editingTask: task });
+  },
+
+  setEditModalOpen: (open: boolean) => {
+    set({ isEditModalOpen: open });
+    if (!open) {
+      set({ editingTask: null });
+    }
+  },
+}));

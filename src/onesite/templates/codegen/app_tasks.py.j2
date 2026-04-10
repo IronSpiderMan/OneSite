@@ -1,0 +1,19 @@
+from datetime import datetime
+{% for task in tasks %}
+async def {{ task.name }}():
+    """{{ task.description }}"""
+    # TODO: 实现业务逻辑
+    pass
+
+# 注册任务
+from app.core.scheduler import task_registry
+task_registry.register({
+    "name": "{{ task.name }}",
+    "func": "{{ task.func }}",
+    "cron": "{{ task.cron | default('') }}",
+    "interval": {{ task.interval | default(0) }},
+    "description": "{{ task.description }}",
+    "enabled": {{ True if task.enabled else False }},
+})
+
+{% endfor %}

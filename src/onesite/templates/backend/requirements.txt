@@ -13,3 +13,4 @@ asyncpg
 greenlet
 redis
 aio-pika
+apscheduler

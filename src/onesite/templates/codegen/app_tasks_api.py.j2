@@ -1,0 +1,78 @@
+from typing import Any
+
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+from app.core.scheduler import task_registry
+
+router = APIRouter()
+
+
+class TaskUpdate(BaseModel):
+    cron: str | None = None
+    interval: int | None = None  # 0 means cron task, >0 means interval in seconds
+    description: str | None = None
+    enabled: bool | None = None
+
+
+@router.get("/tasks/")
+def list_tasks() -> list[dict[str, Any]]:
+    """List all registered tasks"""
+    return task_registry.get_tasks()
+
+
+@router.get("/tasks/{name}")
+def get_task(name: str) -> dict[str, Any]:
+    """Get a single task by name"""
+    task = task_registry.get_task(name)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    return task
+
+
+@router.post("/tasks/{name}/run")
+async def run_task(name: str) -> dict[str, str]:
+    """Manually trigger a task"""
+    success = await task_registry.run(name)
+    if not success:
+        raise HTTPException(status_code=404, detail=f"Task '{name}' not found or function could not be resolved")
+    return {"status": "ok", "message": f"Task '{name}' triggered successfully"}
+
+
+@router.post("/tasks/{name}/enable")
+def enable_task(name: str) -> dict[str, str]:
+    """Enable a task"""
+    if not task_registry.enable(name):
+        raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    return {"status": "ok", "message": f"Task '{name}' enabled"}
+
+
+@router.post("/tasks/{name}/disable")
+def disable_task(name: str) -> dict[str, str]:
+    """Disable a task"""
+    if not task_registry.disable(name):
+        raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    return {"status": "ok", "message": f"Task '{name}' disabled"}
+
+
+@router.put("/tasks/{name}")
+def update_task(name: str, config: TaskUpdate) -> dict[str, str]:
+    """Update task configuration"""
+    if not task_registry.get_task(name):
+        raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+
+    if config.interval is not None and config.interval > 0:
+        task_registry.update_interval(name, config.interval)
+    elif config.cron is not None:
+        task_registry.update_cron(name, config.cron)
+
+    if config.description is not None:
+        task_registry.update_description(name, config.description)
+
+    if config.enabled is not None:
+        if config.enabled:
+            task_registry.enable(name)
+        else:
+            task_registry.disable(name)
+
+    return {"status": "ok", "message": f"Task '{name}' updated"}
