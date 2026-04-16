@@ -295,7 +295,7 @@ async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
 async def read_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table %}
+    {% if model.is_notification_table or (model.module_name == "user" and model.name == "User") %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: int,

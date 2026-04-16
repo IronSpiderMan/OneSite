@@ -277,14 +277,14 @@ def get_model_fields(
                 "developer": permissions,
             }
 
-        if name == "id":
+        if name == "id" and raw_field_permissions is None:
             permissions = "r"
             field_role_permissions = {"user": "r", "admin": "r", "developer": "r"}
-        elif name == "created_at":
+        elif name == "created_at" and raw_field_permissions is None:
             # created_at is auto-set, only read permission
             permissions = "r"
             field_role_permissions = {"user": "r", "admin": "r", "developer": "r"}
-        elif name == "updated_at":
+        elif name == "updated_at" and raw_field_permissions is None:
             # updated_at is auto-set, read and update but not create
             permissions = "ru"
             field_role_permissions = {"user": "ru", "admin": "ru", "developer": "ru"}
