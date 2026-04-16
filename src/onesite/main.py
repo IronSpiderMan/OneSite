@@ -181,10 +181,14 @@ def build(
     component: str = typer.Option("all", "--component", "-c", help="Component to build: backend, frontend, or all"),
     engine: str = typer.Option("docker", "--engine", "-e", help="Container engine: docker or podman"),
     tag: str = typer.Option("latest", "--tag", "-t", help="Image tag"),
-    frontend_port: int = typer.Option(3000, "--port", "-p", help="Frontend exposed port")
+    frontend_port: int = typer.Option(3000, "--port", "-p", help="Frontend exposed port"),
 ):
     """
     Build container images for the project and generate docker-compose.yml.
+
+    Note: Frontend API URL can be configured at runtime via docker-compose environment variables:
+    - API_URL: Backend API URL (default: http://backend:80)
+    - WS_URL: WebSocket URL (default: ws://backend:80)
     """
     import subprocess
     from onesite.generator import generate_file
@@ -259,6 +263,7 @@ def build(
 
     # Check for PG usage
     use_pg = False
+    site_config = {}
     site_config_file = base_dir / "site_config.json"
     if site_config_file.exists():
         import json
@@ -268,16 +273,18 @@ def build(
             if db_url.startswith("postgresql"):
                 use_pg = True
         except:
-            pass
+            site_config = {}
 
     context = {
         "project_name": project_name,
         "backend_image": backend_image,
         "frontend_image": frontend_image,
         "frontend_port": frontend_port,
-        "use_pg": use_pg
+        "use_pg": use_pg,
+        "config": site_config,
     }
     generate_file("docker-compose.yml.j2", context, base_dir / "docker-compose.yml")
+
     console.print(f"[green]Generated docker-compose.yml with images: {backend_image}, {frontend_image} and port {frontend_port}[/green]")
     if use_pg:
         console.print("[green]PostgreSQL service added to docker-compose.yml[/green]")

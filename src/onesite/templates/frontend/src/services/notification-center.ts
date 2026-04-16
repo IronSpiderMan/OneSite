@@ -57,6 +57,16 @@ export function buildNotificationWsUrl(): string | null {
   if (!features.notifications.enabled) return null;
   const token = localStorage.getItem('token');
   if (!token) return null;
+
+  // Use explicit WS URL if configured via environment variable
+  if (features.notifications.wsUrl) {
+    const wsUrl = features.notifications.wsUrl.startsWith('ws')
+      ? features.notifications.wsUrl
+      : features.notifications.wsUrl.replace(/^http/, 'ws');
+    return `${wsUrl}${features.notifications.apiBase}/ws?token=${encodeURIComponent(token)}`;
+  }
+
+  // Fall back to deriving from API URL
   const apiPrefix = (import.meta as any).env?.VITE_API_URL || '/api/v1';
   let origin = window.location.origin;
   let prefixPath = String(apiPrefix || '/api/v1');

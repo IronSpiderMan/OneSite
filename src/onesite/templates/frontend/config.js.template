@@ -1,0 +1,5 @@
+// Runtime configuration - values are substituted at container startup
+window.__RUNTIME_CONFIG__ = {
+  API_URL: '${API_URL}',
+  WS_URL: '${WS_URL}',
+};

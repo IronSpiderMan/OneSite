@@ -2,6 +2,7 @@ export const features = {
   notifications: {
     enabled: {{ "true" if notifications_enabled else "false" }},
     apiBase: "{{ notifications_api_base }}",
+    wsUrl: import.meta.env.VITE_WS_URL || "",
   },
 } as const;
 

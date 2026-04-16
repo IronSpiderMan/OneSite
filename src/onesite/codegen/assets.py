@@ -101,6 +101,17 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
 
     generate_file("frontend_nginx.conf.j2", {"config": site_config}, target_frontend_root / "nginx.conf")
 
+    # Sync runtime config files for container startup
+    template_config_js = template_root / "config.js.template"
+    if template_config_js.exists():
+        shutil.copy2(template_config_js, target_frontend_root / "config.js.template")
+        console.print("Synced config.js.template")
+
+    template_env_sh = template_root / "env.sh"
+    if template_env_sh.exists():
+        shutil.copy2(template_env_sh, target_frontend_root / "env.sh")
+        console.print("Synced env.sh")
+
     template_frontend_dockerfile = template_root / "Dockerfile"
     target_frontend_dockerfile = target_frontend_root / "Dockerfile"
     if template_frontend_dockerfile.exists():
