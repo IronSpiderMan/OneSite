@@ -22,7 +22,7 @@ describe('{{ model.name }} Service', () => {
         const mockResponse = {
             data: {
                 items: [
-                    { id: 1{% for field in model.fields %}{% if 'r' in field.permissions %}, {{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} },
+                    { id: 1{% for field in model.fields %}{% if 'r' in field.permissions and field.name != 'id' %}, {{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} },
                 ],
                 total: 1,
                 page: 1,
@@ -40,7 +40,7 @@ describe('{{ model.name }} Service', () => {
     });
 
     it('get{{ model.name }} returns single item', async () => {
-        const mockItem = { id: 1{% for field in model.fields %}{% if 'r' in field.permissions %}, {{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} };
+        const mockItem = { id: 1{% for field in model.fields %}{% if 'r' in field.permissions and field.name != 'id' %}, {{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} };
         const mockResponse = { data: mockItem };
 
         const request = await import('../utils/request');
@@ -51,7 +51,7 @@ describe('{{ model.name }} Service', () => {
     });
 
     it('create{{ model.name }} creates new item', async () => {
-        const newItem = { {% for field in model.fields %}{% if 'c' in field.permissions and field.name != 'id' %}{{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% endif %}{% endfor %} };
+        const newItem = { {% set first = true %}{% for field in model.fields %}{% if 'c' in field.permissions and field.name != 'id' %}{% if not first %}, {% endif %}{{ field.name }}: {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}true{% else %}""{% endif %}{% set first = false %}{% endif %}{% endfor %} };
         const mockResponse = { data: { id: 1, ...newItem } };
 
         const request = await import('../utils/request');
@@ -62,7 +62,7 @@ describe('{{ model.name }} Service', () => {
     });
 
     it('update{{ model.name }} updates existing item', async () => {
-        const updatedItem = { {% for field in model.fields %}{% if 'u' in field.permissions and field.name != 'id' %}{{ field.name }}: {% if field.ui_type == 'int' %}2{% elif field.ui_type == 'float' %}2.0{% elif field.ui_type == 'bool' %}false{% else %}"updated"{% endif %}{% endif %}{% endfor %} };
+        const updatedItem = { {% set first = true %}{% for field in model.fields %}{% if 'u' in field.permissions and field.name != 'id' %}{% if not first %}, {% endif %}{{ field.name }}: {% if field.ui_type == 'int' %}2{% elif field.ui_type == 'float' %}2.0{% elif field.ui_type == 'bool' %}false{% else %}"updated"{% endif %}{% set first = false %}{% endif %}{% endfor %} };
         const mockResponse = { data: { id: 1, ...updatedItem } };
 
         const request = await import('../utils/request');

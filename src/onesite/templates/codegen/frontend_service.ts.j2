@@ -3,8 +3,9 @@ import request from '../utils/request';
 const API_URL = '/{{ model.module_name }}s';
 
 export interface {{ model.name }} {
+    id: number;
 {% for field in model.fields %}
-    {% if 'r' in field.permissions %}
+    {% if field.name != 'id' and 'r' in field.permissions %}
     {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
     {% endif %}
 {% endfor %}
