@@ -23,7 +23,6 @@ async def init_data() -> None:
             user = User(
                 email=settings.FIRST_SUPERUSER,
                 hashed_password=get_password_hash(settings.FIRST_SUPERUSER_PASSWORD),
-                is_superuser=True,
                 is_active=True,
                 role=UserRole.DEVELOPER,
                 full_name="Admin User"
