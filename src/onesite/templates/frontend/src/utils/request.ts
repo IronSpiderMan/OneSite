@@ -1,18 +1,19 @@
 import axios from 'axios';
 
-// Runtime API URL from window.config (set at container startup via envsubst)
+// Runtime API URL from window.__ENV__ (set at container startup via envsubst)
 // Falls back to VITE_API_URL (baked at build time) if not set
 declare global {
   interface Window {
-    __RUNTIME_CONFIG__?: { API_URL?: string; WS_URL?: string };
+    __ENV__?: { API_URL?: string; DOMAIN?: string; NODE_ENV?: string; BUILD_VERSION?: string };
   }
 }
 
 const getBaseURL = () => {
-  if (typeof window !== 'undefined' && window.__RUNTIME_CONFIG__?.API_URL) {
-    return window.__RUNTIME_CONFIG__.API_URL;
+  if (typeof window !== 'undefined' && window.__ENV__?.API_URL) {
+    return window.__ENV__.API_URL;
   }
-  return import.meta.env.VITE_API_URL || '/api/v1';
+  return window.__ENV__?.API_URL || import.meta.env.VITE_API_URL;
+  // return import.meta.env.VITE_API_URL || '/api/v1';
 };
 
 const baseURL = getBaseURL();

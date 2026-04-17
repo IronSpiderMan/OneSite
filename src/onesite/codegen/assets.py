@@ -8,6 +8,7 @@ from .render import generate_file
 
 console = Console()
 
+
 def _ensure_init_py(dir_path: Path) -> None:
     dir_path.mkdir(parents=True, exist_ok=True)
     init_file = dir_path / "__init__.py"
@@ -99,7 +100,7 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
             shutil.copy2(src, dst)
             console.print(f"Synced config file: {config_file}")
 
-    generate_file("frontend_nginx.conf.j2", {"config": site_config}, target_frontend_root / "nginx.conf")
+    generate_file("frontend_nginx.conf.j2", {"config": site_config}, target_frontend_root / "nginx.template.conf")
 
     # Sync runtime config files for container startup
     template_config_js = template_root / "config.js.template"
@@ -107,10 +108,10 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         shutil.copy2(template_config_js, target_frontend_root / "config.js.template")
         console.print("Synced config.js.template")
 
-    template_env_sh = template_root / "env.sh"
+    template_env_sh = template_root / "entrypoint.sh"
     if template_env_sh.exists():
-        shutil.copy2(template_env_sh, target_frontend_root / "env.sh")
-        console.print("Synced env.sh")
+        shutil.copy2(template_env_sh, target_frontend_root / "entrypoint.sh")
+        console.print("Synced entrypoint.sh")
 
     template_frontend_dockerfile = template_root / "Dockerfile"
     target_frontend_dockerfile = target_frontend_root / "Dockerfile"
@@ -159,14 +160,15 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
 
     if site_config.get("redis"):
         generate_file("redis.py.j2", {"redis": site_config["redis"]}, backend_path / "app" / "core" / "redis.py")
-    
+
     if site_config.get("rabbitmq"):
-        generate_file("rabbitmq.py.j2", {"rabbitmq": site_config["rabbitmq"]}, backend_path / "app" / "core" / "rabbitmq.py")
+        generate_file("rabbitmq.py.j2", {"rabbitmq": site_config["rabbitmq"]},
+                      backend_path / "app" / "core" / "rabbitmq.py")
         # Generate an example consumer
         consumer_init = backend_path / "app" / "consumers" / "__init__.py"
         if not consumer_init.exists() or consumer_init.read_text().strip() == "":
             consumer_init.write_text("from . import example\n")
-        
+
         example_consumer = backend_path / "app" / "consumers" / "example.py"
         if not example_consumer.exists():
             generate_file("consumer_example.py.j2", {}, example_consumer)

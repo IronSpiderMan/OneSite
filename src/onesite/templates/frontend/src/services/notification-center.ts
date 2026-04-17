@@ -58,26 +58,7 @@ export function buildNotificationWsUrl(): string | null {
   const token = localStorage.getItem('token');
   if (!token) return null;
 
-  // Use explicit WS URL if configured via environment variable
-  if (features.notifications.wsUrl) {
-    const wsUrl = features.notifications.wsUrl.startsWith('ws')
-      ? features.notifications.wsUrl
-      : features.notifications.wsUrl.replace(/^http/, 'ws');
-    return `${wsUrl}${features.notifications.apiBase}/ws?token=${encodeURIComponent(token)}`;
-  }
-
-  // Fall back to deriving from API URL
-  const apiPrefix = (import.meta as any).env?.VITE_API_URL || '/api/v1';
-  let origin = window.location.origin;
-  let prefixPath = String(apiPrefix || '/api/v1');
-
-  if (/^https?:\/\//i.test(prefixPath)) {
-    const u = new URL(prefixPath);
-    origin = u.origin;
-    prefixPath = u.pathname;
-  }
-
-  prefixPath = prefixPath.replace(/\/$/, '');
-  const wsOrigin = origin.replace(/^http:/, 'ws:').replace(/^https:/, 'wss:');
-  return `${wsOrigin}${prefixPath}/ws?token=${encodeURIComponent(token)}`;
+  // Use current origin's /api/v1/ws endpoint (nginx proxies to backend)
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
 }

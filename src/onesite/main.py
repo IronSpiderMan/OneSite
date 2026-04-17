@@ -282,6 +282,7 @@ def build(
         "frontend_port": frontend_port,
         "use_pg": use_pg,
         "config": site_config,
+        "version": tag,
     }
     generate_file("docker-compose.yml.j2", context, base_dir / "docker-compose.yml")
 

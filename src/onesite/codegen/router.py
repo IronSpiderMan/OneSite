@@ -16,9 +16,9 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, schedul
     imports.append("from app.api.endpoints import login")
     routers.append('api_router.include_router(login.router, tags=["login"])')
 
-    if any(m.get('is_notification_table') for m in models):
-        imports.append("from app.api.endpoints import ws")
-        routers.append('api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])')
+    # WebSocket endpoint (always available for real-time notifications)
+    imports.append("from app.api.endpoints import ws")
+    routers.append('api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])')
 
     # Add tasks router if scheduled_tasks is configured
     if scheduled_tasks:

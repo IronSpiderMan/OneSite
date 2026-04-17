@@ -20,7 +20,7 @@ services:
       - ./app.db:/app/app.db # Persist SQLite DB
       {% endif %}
     networks:
-      - app-network
+      - {{ project_name }}-network
     {% if use_pg %}
     depends_on:
       - db
@@ -33,12 +33,11 @@ services:
     ports:
       - "{{ frontend_port }}:80"
     environment:
-      - API_URL=${API_URL:-http://backend:80}
-      - WS_URL=${WS_URL:-ws://backend:80}
+      - API_URL=http://localhost:{{ frontend_port }}/api/v1
     depends_on:
       - backend
     networks:
-      - app-network
+      - {{ project_name }}-network
 
 {% if use_pg %}
   db:
@@ -54,12 +53,12 @@ services:
     ports:
       - "5432:5432"
     networks:
-      - app-network
+      - {{ project_name }}-network
 
 volumes:
   postgres_data:
 {% endif %}
 
 networks:
-  app-network:
+  {{ project_name }}-network:
     driver: bridge
