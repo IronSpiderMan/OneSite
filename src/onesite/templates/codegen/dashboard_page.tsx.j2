@@ -1,19 +1,23 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from 'react';
-import { Loader2, RefreshCw, Play, Pencil, Power, PowerOff } from 'lucide-react';
+import { Loader2, RefreshCw{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
+{% if scheduled_tasks %}
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Modal } from '../components/ui/modal';
+{% endif %}
 {% for model in models %}
 {% if model.visualize and model.visualize.get('show') %}
 import { get{{ model.name }}Stats } from '../services/{{ model.module_name }}';
 {% endif %}
 {% endfor %}
+{% if scheduled_tasks %}
 import { useTaskStore } from '../stores/useTaskStore';
+{% endif %}
 
 interface ChartData {
     labels: string[];
@@ -54,6 +58,7 @@ const DashboardPage: React.FC = () => {
     {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
     const [period, setPeriod] = useState('day');
     {% endif %}
+    {% if scheduled_tasks %}
     const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
 
     // Task store
@@ -70,6 +75,7 @@ const DashboardPage: React.FC = () => {
         setEditingTask,
         setEditModalOpen,
     } = useTaskStore();
+    {% endif %}
 
     useEffect(() => {
         const fetchAllStats = async () => {
@@ -94,6 +100,7 @@ const DashboardPage: React.FC = () => {
         fetchAllStats();
     }, [{% if models | selectattr('visualize') | selectattr('visualize.show') | list %}period{% endif %}]);
 
+    {% if scheduled_tasks %}
     useEffect(() => {
         fetchTasks();
     }, []);
@@ -140,6 +147,7 @@ const DashboardPage: React.FC = () => {
             toast.error(error.message);
         }
     };
+    {% endif %}
 
     if (loading) {
         return (
@@ -161,7 +169,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0 && tasks.length === 0) {
+    if (chartModels.length === 0 {% if scheduled_tasks %}&& tasks.length === 0{% endif %}) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -287,6 +295,7 @@ const DashboardPage: React.FC = () => {
                 </div>
             )}
 
+            {% if scheduled_tasks %}
             {/* Scheduled Tasks Section */}
             <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
                 <div className="flex items-center justify-between mb-4">
@@ -502,6 +511,7 @@ const DashboardPage: React.FC = () => {
                     </div>
                 </Modal>
             )}
+            {% endif %}
         </div>
     );
 };

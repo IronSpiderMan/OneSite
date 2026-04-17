@@ -628,7 +628,7 @@ def generate_code():
 
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
-    generate_file("dashboard_page.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "pages" / "Dashboard.tsx")
+    generate_file("dashboard_page.tsx.j2", {"models": api_models, "scheduled_tasks": scheduled_tasks}, cwd / "frontend" / "src" / "pages" / "Dashboard.tsx")
     generate_file(
         "frontend_features.ts.j2",
         {"notifications_enabled": notifications_enabled, "notifications_api_base": notifications_api_base},
