@@ -173,6 +173,11 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         if not example_consumer.exists():
             generate_file("consumer_example.py.j2", {}, example_consumer)
 
+    if site_config.get("mqtt"):
+        generate_file("mqtt.py.j2", {"mqtt": site_config["mqtt"]},
+                      backend_path / "app" / "core" / "mqtt.py")
+        console.print("Generated mqtt.py")
+
     for name in ["logger.py", "security.py", "db.py", "deps.py", "tablenames.py"]:
         src = template_backend_root / "app" / "core" / name
         dst = backend_path / "app" / "core" / name

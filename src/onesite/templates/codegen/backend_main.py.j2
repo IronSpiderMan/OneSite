@@ -26,6 +26,9 @@ try:
 except ImportError:
     pass
 {% endif %}
+{% if config.mqtt %}
+from app.core.mqtt import mqtt_manager
+{% endif %}
 {% if config.scheduled_tasks %}
 # Import tasks to register them with the scheduler
 try:
@@ -49,6 +52,12 @@ async def lifespan(app: FastAPI):
         await rabbitmq_manager.connect()
     {% endif %}
 
+    {% if config.mqtt %}
+    # Initialize MQTT
+    if mqtt_manager:
+        await mqtt_manager.connect()
+    {% endif %}
+
     {% if config.scheduled_tasks %}
     # Start scheduler
     task_registry.start()
@@ -67,6 +76,12 @@ async def lifespan(app: FastAPI):
     # Disconnect RabbitMQ
     if rabbitmq_manager:
         await rabbitmq_manager.disconnect()
+    {% endif %}
+
+    {% if config.mqtt %}
+    # Disconnect MQTT
+    if mqtt_manager:
+        await mqtt_manager.disconnect()
     {% endif %}
 
 app = FastAPI(

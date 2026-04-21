@@ -555,6 +555,93 @@ if rabbitmq_manager:
 
 3.  **Import your consumer**: Make sure your consumer file is imported in `backend/app/consumers/__init__.py`. OneSite automatically imports this directory on startup to start all registered consumers.
 
+#### MQTT (EMQX)
+
+OneSite can automatically generate MQTT client initialization code if configured in `site_config.json`.
+
+```json
+{
+  "mqtt": {
+    "url": "mqtt://localhost:1883",
+    "username": "admin",
+    "password": "public",
+    "client_id": "onesite_backend"
+  }
+}
+```
+
+Generated features:
+- **Automatic Client Initialization**: Generates `app/core/mqtt.py` with pre-configured `mqtt_manager`.
+- **Lifecycle Management**: MQTT connection is automatically established on startup and closed on shutdown in the FastAPI lifespan.
+- **Environment Integration**: Configuration is automatically synced to the backend `.env` file.
+- **Dependency Management**: Automatically adds `gmqtt` to the generated `requirements.txt`.
+
+##### MQTT Handlers (Message Callbacks)
+
+If you have MQTT enabled, OneSite provides a standard way to handle message callbacks:
+
+1.  **Define your handlers**: Add handlers in `backend/app/consumers/__init__.py` (e.g., `mqtt_handlers.py`).
+
+Example `app/consumers/mqtt_handlers.py`:
+```python
+from app.core.mqtt import mqtt_manager
+
+async def on_device_data(topic: str, payload: str):
+    """
+    Handle device data messages.
+    
+    Args:
+        topic: MQTT topic (e.g., 'device/001/data')
+        payload: Message content (string, usually JSON)
+    """
+    import json
+    try:
+        data = json.loads(payload)
+        device_id = data.get("device_id")
+        value = data.get("value")
+        print(f"Device {device_id} reported: {value}")
+    except json.JSONDecodeError:
+        print(f"Raw message: {payload}")
+
+async def on_alarm(topic: str, payload: str):
+    """Handle alarm messages."""
+    print(f"Alarm: {payload}")
+
+# Register handlers - must be done before mqtt_manager.connect()
+# Supports MQTT wildcards: + (single level), # (multi-level)
+mqtt_manager.register_handler("device/+/data", on_device_data)
+mqtt_manager.register_handler("alarm/#", on_alarm)
+```
+
+2.  **Import your handlers**: Make sure your handler file is imported in `backend/app/consumers/__init__.py`.
+
+```python
+from . import mqtt_handlers  # noqa
+```
+
+##### MQTT Manager API
+
+`mqtt_manager` provides the following methods:
+
+| Method | Description |
+|--------|-------------|
+| `register_handler(topic, callback, qos=1)` | Register a message handler for a topic pattern |
+| `subscribe(topic, qos=1)` | Subscribe to a topic (async) |
+| `unsubscribe(topic)` | Unsubscribe from a topic (async) |
+| `publish(topic, payload, qos=1, retain=False)` | Publish a message to a topic (async) |
+| `disconnect()` | Gracefully disconnect from the broker (async) |
+
+**Topic Wildcards**:
+- `+` matches a single level (e.g., `device/+/data` matches `device/001/data`)
+- `#` matches multiple levels (e.g., `sensor/#` matches `sensor/temperature/room1`)
+
+**on_message callback parameters**:
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `topic` | str | Message topic |
+| `payload` | str | Message content (decoded from bytes) |
+| `qos` | int | Quality of Service level (0, 1, 2) |
+
 #### Notifications (Optional)
 OneSite can generate a notification center if you provide a `Notification` model and mark it as the notification table:
 

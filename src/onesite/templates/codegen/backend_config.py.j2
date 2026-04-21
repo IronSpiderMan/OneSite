@@ -23,6 +23,12 @@ class Settings(BaseSettings):
     {% if config.rabbitmq %}
     RABBITMQ_URL: str = "{{ config.rabbitmq.url or 'amqp://guest:guest@localhost:5672/' }}"
     {% endif %}
+    {% if config.mqtt %}
+    MQTT_URL: str = "{{ config.mqtt.url or 'mqtt://localhost:1883' }}"
+    MQTT_USERNAME: Optional[str] = "{{ config.mqtt.username or '' }}"
+    MQTT_PASSWORD: Optional[str] = "{{ config.mqtt.password or '' }}"
+    MQTT_CLIENT_ID: str = "{{ config.mqtt.client_id or 'onesite_backend' }}"
+    {% endif %}
 
     {% if config.extra %}
     # Custom extra config from site_config.json

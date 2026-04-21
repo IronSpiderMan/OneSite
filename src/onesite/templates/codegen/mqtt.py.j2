@@ -1,0 +1,203 @@
+import asyncio
+from typing import Callable, Awaitable, Dict, List, Optional, Any
+import json
+
+from gmqtt import Client as MQTTClient
+from app.core.config import settings
+from app.core.logger import get_logger
+
+logger = get_logger(__name__)
+
+{% if mqtt.url %}
+class MQTTManager:
+    def __init__(self):
+        self.client: Optional[MQTTClient] = None
+        self._handlers: Dict[str, List[Callable[[str, str], Awaitable[None]]]] = {}
+        self._pending_subscriptions: List[tuple] = []
+
+    def _on_connect(self, client, flags, rc, properties):
+        """Callback when connected to MQTT broker."""
+        logger.info(f"Connected to MQTT broker at {settings.MQTT_URL}")
+        # Subscribe to all registered topics
+        for topic, qos in self._pending_subscriptions:
+            client.subscribe(topic, qos=qos)
+            logger.info(f"Subscribed to MQTT topic: {topic}")
+
+    def _on_message(self, client, topic, payload, qos, properties):
+        """Callback when message is received."""
+        payload_str = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else str(payload)
+        logger.debug(f"MQTT message on {topic}: {payload_str[:100]}...")
+
+        # Dispatch to matching handlers
+        asyncio.create_task(self._dispatch_message(topic, payload_str))
+
+    def _on_disconnect(self, client, packet, exc=None):
+        """Callback when disconnected from MQTT broker."""
+        logger.warning(f"Disconnected from MQTT broker: {exc}")
+
+    def _on_subscribe(self, client, mid, qos, properties):
+        """Callback when subscription is confirmed."""
+        logger.debug(f"Subscribed with mid {mid}, qos {qos}")
+
+    async def connect(self):
+        """
+        Connect to MQTT broker and start the message loop.
+        """
+        try:
+            client_id = settings.MQTT_CLIENT_ID if hasattr(settings, 'MQTT_CLIENT_ID') else "onesite_backend"
+
+            self.client = MQTTClient(client_id)
+
+            # Set callbacks
+            self.client.on_connect = self._on_connect
+            self.client.on_message = self._on_message
+            self.client.on_disconnect = self._on_disconnect
+            self.client.on_subscribe = self._on_subscribe
+
+            # Set authentication if configured
+            if hasattr(settings, 'MQTT_USERNAME') and settings.MQTT_USERNAME:
+                self.client.set_auth_credentials(
+                    settings.MQTT_USERNAME,
+                    settings.MQTT_PASSWORD if hasattr(settings, 'MQTT_PASSWORD') else None
+                )
+
+            # Parse MQTT URL
+            mqtt_url = settings.MQTT_URL
+            if "://" in mqtt_url:
+                # Extract host and port from URL like mqtt://localhost:1883
+                host_part = mqtt_url.split("://")[1]
+                if ":" in host_part:
+                    host, port_str = host_part.rsplit(":", 1)
+                    port = int(port_str)
+                else:
+                    host = host_part
+                    port = 1883
+            else:
+                host = mqtt_url
+                port = 1883
+
+            # Connect to broker
+            await self.client.connect(host, port=port, keepalive=60)
+
+            logger.info(f"MQTT connection initiated to {host}:{port}")
+
+        except Exception as e:
+            logger.error(f"Failed to connect to MQTT broker: {e}")
+            raise
+
+    def register_handler(self, topic: str, callback: Callable[[str, str], Awaitable[None]], qos: int = 1):
+        """
+        Register a message handler for a topic pattern.
+        The callback receives (topic: str, payload: str).
+
+        Args:
+            topic: MQTT topic pattern (supports wildcards # and +)
+            callback: Async function to handle messages
+            qos: Quality of Service level (0, 1, or 2)
+        """
+        if topic not in self._handlers:
+            self._handlers[topic] = []
+
+        self._handlers[topic].append(callback)
+        self._pending_subscriptions.append((topic, qos))
+        logger.info(f"Registered MQTT handler for topic: {topic}")
+
+    async def _dispatch_message(self, topic: str, payload: str):
+        """
+        Dispatch message to all matching handlers.
+        Supports MQTT wildcard matching (# for multi-level, + for single-level).
+        """
+        matched = False
+
+        # Direct match
+        if topic in self._handlers:
+            for callback in self._handlers[topic]:
+                try:
+                    await callback(topic, payload)
+                    matched = True
+                except Exception as e:
+                    logger.error(f"MQTT handler error for {topic}: {e}")
+
+        # Wildcard matching
+        topic_parts = topic.split("/")
+        for pattern, callbacks in self._handlers.items():
+            if self._topic_matches(pattern, topic_parts):
+                for callback in callbacks:
+                    try:
+                        await callback(topic, payload)
+                        matched = True
+                    except Exception as e:
+                        logger.error(f"MQTT wildcard handler error for {topic}: {e}")
+
+        if not matched:
+            logger.debug(f"No handler matched topic: {topic}")
+
+    def _topic_matches(self, pattern: str, topic_parts: List[str]) -> bool:
+        """
+        Check if a topic matches a subscription pattern with wildcards.
+        """
+        if pattern == topic_parts:
+            return True
+
+        pattern_parts = pattern.split("/")
+        pattern_len = len(pattern_parts)
+        topic_len = len(topic_parts)
+
+        i = 0
+        while i < pattern_len and i < topic_len:
+            if pattern_parts[i] == "#":
+                return True
+            if pattern_parts[i] != "+" and pattern_parts[i] != topic_parts[i]:
+                return False
+            i += 1
+
+        # Handle trailing #
+        if pattern_len > 0 and pattern_parts[-1] == "#":
+            return i <= topic_len
+
+        return i == pattern_len == topic_len
+
+    async def publish(self, topic: str, payload: str | Dict | Any, qos: int = 1, retain: bool = False):
+        """
+        Publish a message to a topic.
+
+        Args:
+            topic: MQTT topic
+            payload: Message payload (str, dict, or any JSON-serializable object)
+            qos: Quality of Service level (0, 1, or 2)
+            retain: Whether to retain the message
+        """
+        if not self.client:
+            logger.warning("MQTT client not connected, cannot publish")
+            return
+
+        if isinstance(payload, dict):
+            payload = json.dumps(payload)
+        elif not isinstance(payload, str):
+            payload = str(payload)
+
+        try:
+            self.client.publish(topic, payload, qos=qos, retain=retain)
+            logger.debug(f"Published to MQTT topic {topic}: {payload[:100]}...")
+        except Exception as e:
+            logger.error(f"Failed to publish to {topic}: {e}")
+
+    async def disconnect(self):
+        """
+        Gracefully disconnect from the MQTT broker.
+        """
+        if self.client:
+            try:
+                await self.client.disconnect()
+                logger.info("Disconnected from MQTT broker")
+            except Exception as e:
+                logger.error(f"Error disconnecting from MQTT: {e}")
+            finally:
+                self.client = None
+
+
+mqtt_manager = MQTTManager()
+{% else %}
+# MQTT not configured in site_config.json
+mqtt_manager = None
+{% endif %}

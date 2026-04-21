@@ -32,6 +32,17 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         if isinstance(mq_cfg, dict):
             new_keys["RABBITMQ_URL"] = mq_cfg.get("url", "amqp://guest:guest@localhost:5672/")
 
+    if config.get("mqtt"):
+        mqtt_cfg = config["mqtt"]
+        if isinstance(mqtt_cfg, dict):
+            new_keys["MQTT_URL"] = mqtt_cfg.get("url", "mqtt://localhost:1883")
+            if mqtt_cfg.get("username"):
+                new_keys["MQTT_USERNAME"] = mqtt_cfg["username"]
+            if mqtt_cfg.get("password"):
+                new_keys["MQTT_PASSWORD"] = mqtt_cfg["password"]
+            if mqtt_cfg.get("client_id"):
+                new_keys["MQTT_CLIENT_ID"] = mqtt_cfg["client_id"]
+
     import json
 
     allowed_origins = config.get("allowed_origins", [])
