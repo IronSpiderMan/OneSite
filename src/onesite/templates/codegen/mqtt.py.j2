@@ -197,6 +197,14 @@ class MQTTManager:
 
 
 mqtt_manager = MQTTManager()
+
+{# Import MQTT callbacks to register handlers #}
+{% if mqtt.callbacks %}
+try:
+    import app.consumers.mqtt
+except ImportError:
+    pass
+{% endif %}
 {% else %}
 # MQTT not configured in site_config.json
 mqtt_manager = None

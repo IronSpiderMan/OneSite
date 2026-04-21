@@ -1,3 +1,4 @@
+import ast
 import shutil
 from pathlib import Path
 from typing import Any, Dict, List
@@ -14,6 +15,22 @@ def _ensure_init_py(dir_path: Path) -> None:
     init_file = dir_path / "__init__.py"
     if not init_file.exists():
         init_file.write_text("")
+
+
+def _function_exists(file_path: Path, func_name: str) -> bool:
+    """Check if a function exists in a Python file."""
+    if not file_path.exists():
+        return False
+    try:
+        tree = ast.parse(file_path.read_text())
+        for node in ast.walk(tree):
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == func_name:
+                return True
+            if isinstance(node, ast.FunctionDef) and node.name == func_name:
+                return True
+    except Exception:
+        pass
+    return False
 
 
 def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
@@ -174,9 +191,34 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
             generate_file("consumer_example.py.j2", {}, example_consumer)
 
     if site_config.get("mqtt"):
-        generate_file("mqtt.py.j2", {"mqtt": site_config["mqtt"]},
+        mqtt_config = site_config["mqtt"]
+        generate_file("mqtt.py.j2", {"mqtt": mqtt_config},
                       backend_path / "app" / "core" / "mqtt.py")
         console.print("Generated mqtt.py")
+
+        # Generate MQTT callback files
+        callbacks = mqtt_config.get("callbacks", [])
+        if callbacks:
+            mqtt_consumers_dir = backend_path / "app" / "consumers" / "mqtt"
+            mqtt_consumers_dir.mkdir(parents=True, exist_ok=True)
+
+            # Generate __init__.py
+            generate_file("mqtt_callbacks_init.py.j2", {"callbacks": callbacks},
+                          mqtt_consumers_dir / "__init__.py")
+            console.print("Generated mqtt callbacks __init__.py")
+
+            # Generate each callback file (only if function doesn't exist)
+            for callback in callbacks:
+                handler_name = callback.get("handler", "")
+                if not handler_name:
+                    continue
+
+                callback_file = mqtt_consumers_dir / f"{handler_name}.py"
+                if not _function_exists(callback_file, handler_name):
+                    generate_file("mqtt_callback.py.j2", {"callback": callback}, callback_file)
+                    console.print(f"Generated mqtt callback: {handler_name}")
+                else:
+                    console.print(f"Skipped existing callback: {handler_name}")
 
     for name in ["logger.py", "security.py", "db.py", "deps.py", "tablenames.py"]:
         src = template_backend_root / "app" / "core" / name

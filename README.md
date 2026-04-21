@@ -497,9 +497,9 @@ You can control the sidebar menu order via `site_config.json`:
 
 Items not listed in `nav_order` will be appended after the listed ones.
 
-#### Global Resources (Redis & RabbitMQ)
+#### Global Resources (Redis, RabbitMQ & MQTT)
 
-OneSite can automatically generate initialization code for global resources like Redis and RabbitMQ if configured in `site_config.json`.
+OneSite can automatically generate initialization code for global resources like Redis, RabbitMQ and MQTT if configured in `site_config.json`.
 
 ```json
 {
@@ -509,20 +509,29 @@ OneSite can automatically generate initialization code for global resources like
   },
   "rabbitmq": {
     "url": "amqp://guest:guest@localhost:5672/"
+  },
+  "mqtt": {
+    "url": "mqtt://localhost:1883",
+    "username": "admin",
+    "password": "public",
+    "callbacks": [
+      {"topic": "device/+/data", "handler": "on_device_data"}
+    ]
   }
 }
 ```
 
 Generated features:
-- **Automatic Client Initialization**: Generates `app/core/redis.py` and `app/core/rabbitmq.py` with pre-configured async clients.
-- **Lifecycle Management**: RabbitMQ connections are automatically established on startup and closed on shutdown in the FastAPI lifespan.
+- **Automatic Client Initialization**: Generates `app/core/redis.py`, `app/core/rabbitmq.py` and `app/core/mqtt.py` with pre-configured clients.
+- **Lifecycle Management**: RabbitMQ and MQTT connections are automatically established on startup and closed on shutdown in the FastAPI lifespan.
 - **Environment Integration**: Configuration is automatically synced to the backend `.env` file.
-- **Dependency Management**: Automatically adds `redis` and `aio-pika` to the generated `requirements.txt`.
+- **Dependency Management**: Automatically adds `redis`, `aio-pika` and `gmqtt` to the generated `requirements.txt`.
 
 Usage in your code:
 ```python
 from app.core.redis import redis_client
 from app.core.rabbitmq import rabbitmq_manager
+from app.core.mqtt import mqtt_manager
 
 # Redis (Async)
 await redis_client.set("key", "value")
@@ -530,6 +539,9 @@ await redis_client.set("key", "value")
 # RabbitMQ (aio-pika)
 async with rabbitmq_manager.channel.transaction():
     await rabbitmq_manager.channel.default_exchange.publish(...)
+
+# MQTT
+await mqtt_manager.publish("topic", {"key": "value"})
 ```
 
 ##### RabbitMQ Consumers (Callbacks)
@@ -557,7 +569,7 @@ if rabbitmq_manager:
 
 #### MQTT (EMQX)
 
-OneSite can automatically generate MQTT client initialization code if configured in `site_config.json`.
+OneSite can automatically generate MQTT client initialization code and message handlers if configured in `site_config.json`.
 
 ```json
 {
@@ -565,59 +577,64 @@ OneSite can automatically generate MQTT client initialization code if configured
     "url": "mqtt://localhost:1883",
     "username": "admin",
     "password": "public",
-    "client_id": "onesite_backend"
+    "client_id": "onesite_backend",
+    "callbacks": [
+      {"topic": "device/+/data", "handler": "on_device_data"},
+      {"topic": "alarm/#", "handler": "on_alarm"}
+    ]
   }
 }
 ```
 
+**Configuration Fields**:
+| Field | Type | Description |
+|-------|------|-------------|
+| `url` | string | MQTT broker URL (e.g., `mqtt://localhost:1883`) |
+| `username` | string | Optional username for authentication |
+| `password` | string | Optional password for authentication |
+| `client_id` | string | MQTT client identifier |
+| `callbacks` | array | List of message callbacks to generate |
+
+**Callback Fields**:
+| Field | Type | Description |
+|-------|------|-------------|
+| `topic` | string | MQTT topic pattern (supports wildcards `+` and `#`) |
+| `handler` | string | Handler function name (used as filename and function name) |
+
 Generated features:
 - **Automatic Client Initialization**: Generates `app/core/mqtt.py` with pre-configured `mqtt_manager`.
+- **Callback Files**: Generates `app/consumers/mqtt/<handler>.py` for each callback.
+- **Handler Registration**: Automatically imports callbacks module to register handlers before connecting.
 - **Lifecycle Management**: MQTT connection is automatically established on startup and closed on shutdown in the FastAPI lifespan.
 - **Environment Integration**: Configuration is automatically synced to the backend `.env` file.
 - **Dependency Management**: Automatically adds `gmqtt` to the generated `requirements.txt`.
 
-##### MQTT Handlers (Message Callbacks)
+##### MQTT Callback Implementation
 
-If you have MQTT enabled, OneSite provides a standard way to handle message callbacks:
+OneSite generates a callback file for each configured handler. Example for `on_device_data`:
 
-1.  **Define your handlers**: Add handlers in `backend/app/consumers/__init__.py` (e.g., `mqtt_handlers.py`).
-
-Example `app/consumers/mqtt_handlers.py`:
+Generated file `app/consumers/mqtt/on_device_data.py`:
 ```python
+# MQTT callback for topic: device/+/data
 from app.core.mqtt import mqtt_manager
 
 async def on_device_data(topic: str, payload: str):
     """
-    Handle device data messages.
-    
+    MQTT message callback for topic: device/+/data
+
     Args:
-        topic: MQTT topic (e.g., 'device/001/data')
-        payload: Message content (string, usually JSON)
+        topic: MQTT topic
+        payload: Message payload (usually JSON string)
     """
-    import json
-    try:
-        data = json.loads(payload)
-        device_id = data.get("device_id")
-        value = data.get("value")
-        print(f"Device {device_id} reported: {value}")
-    except json.JSONDecodeError:
-        print(f"Raw message: {payload}")
+    # TODO: Implement your business logic here
+    pass
 
-async def on_alarm(topic: str, payload: str):
-    """Handle alarm messages."""
-    print(f"Alarm: {payload}")
-
-# Register handlers - must be done before mqtt_manager.connect()
-# Supports MQTT wildcards: + (single level), # (multi-level)
-mqtt_manager.register_handler("device/+/data", on_device_data)
-mqtt_manager.register_handler("alarm/#", on_alarm)
+# Register handler
+if mqtt_manager:
+    mqtt_manager.register_handler("device/+/data", on_device_data)
 ```
 
-2.  **Import your handlers**: Make sure your handler file is imported in `backend/app/consumers/__init__.py`.
-
-```python
-from . import mqtt_handlers  # noqa
-```
+**Important**: OneSite will NOT overwrite the callback file if the handler function already exists. This allows you to implement your business logic without losing changes on subsequent `site sync` runs.
 
 ##### MQTT Manager API
 

@@ -1,0 +1,5 @@
+# MQTT callbacks module
+# This file imports all MQTT callback modules to trigger handler registration
+{% for callback in callbacks %}
+from . import {{ callback.handler }}
+{% endfor %}
