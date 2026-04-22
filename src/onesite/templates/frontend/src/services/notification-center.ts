@@ -54,11 +54,11 @@ export const getNotificationDetail = async (id: number) => {
 };
 
 export function buildNotificationWsUrl(): string | null {
-  if (!features.notifications.enabled) return null;
   const token = localStorage.getItem('token');
   if (!token) return null;
 
-  // Use current origin's /api/v1/ws endpoint (nginx proxies to backend)
+  // Always build WS URL if user is authenticated
+  // The connection is used for both online status and notifications
   const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
   return `${protocol}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
 }

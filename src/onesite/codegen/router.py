@@ -16,7 +16,7 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, schedul
     imports.append("from app.api.endpoints import login")
     routers.append('api_router.include_router(login.router, tags=["login"])')
 
-    # WebSocket endpoint (always available for real-time notifications)
+    # WebSocket endpoint (always available for online status tracking)
     imports.append("from app.api.endpoints import ws")
     routers.append('api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])')
 

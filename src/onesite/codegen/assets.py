@@ -124,6 +124,18 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
     if template_config_js.exists():
         shutil.copy2(template_config_js, target_frontend_root / "config.js.template")
         console.print("Synced config.js.template")
+        # Also generate config.js with default values for local development
+        config_js_content = """// Runtime configuration - defaults for local development
+window.__ENV__ = {
+  DOMAIN: window.location.origin,
+  API_URL: '/api/v1',
+  NODE_ENV: 'development',
+  BUILD_VERSION: 'local',
+};
+"""
+        config_js_path = target_frontend_root / "config.js"
+        config_js_path.write_text(config_js_content)
+        console.print("Generated config.js with defaults")
 
     template_env_sh = template_root / "entrypoint.sh"
     if template_env_sh.exists():

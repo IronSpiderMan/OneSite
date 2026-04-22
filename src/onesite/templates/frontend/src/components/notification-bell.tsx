@@ -112,7 +112,6 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
   }, [enabled]);
 
   useEffect(() => {
-    if (!enabled) return;
     let ws: WebSocket | null = null;
     let retryCount = 0;
     let timeoutId: ReturnType<typeof setTimeout>;
@@ -131,6 +130,8 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
         };
 
         ws.onmessage = (ev) => {
+          // Only process notifications if enabled
+          if (!enabled) return;
           try {
             const payload = JSON.parse(ev.data || '{}');
             if (payload?.type === 'notification' && payload?.data) {
@@ -184,7 +185,7 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
       }
       wsRef.current = null;
     };
-  }, [enabled, t]);
+  }, [enabled, t, onStatusChange]);
 
   useEffect(() => {
     const onClick = (e: MouseEvent) => {
@@ -205,128 +206,131 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
 
   const title = useMemo(() => t('notifications.title', 'Notifications'), [t]);
 
-  if (!enabled) return null;
-
+  // Render container div for online status tracking, but notification UI only shows if enabled
   return (
     <div className="relative" ref={boxRef}>
-      <Button
-        variant="ghost"
-        size="icon"
-        type="button"
-        onClick={() => setOpen((v) => !v)}
-        title={title}
-        className="relative"
-      >
-        <Bell className="h-5 w-5" />
-        {unread > 0 ? (
-          <span className="absolute -right-1 -top-1">
-            <Badge variant="destructive" className="h-5 px-1.5 text-[11px]">
-              {unread > 99 ? '99+' : unread}
-            </Badge>
-          </span>
-        ) : null}
-      </Button>
+      {enabled && (
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            type="button"
+            onClick={() => setOpen((v) => !v)}
+            title={title}
+            className="relative"
+          >
+            <Bell className="h-5 w-5" />
+            {unread > 0 ? (
+              <span className="absolute -right-1 -top-1">
+                <Badge variant="destructive" className="h-5 px-1.5 text-[11px]">
+                  {unread > 99 ? '99+' : unread}
+                </Badge>
+              </span>
+            ) : null}
+          </Button>
 
-      {open ? (
-        <div
-          ref={panelRef}
-          className="absolute right-0 mt-2 w-[360px] max-w-[90vw] rounded-lg border bg-background shadow-lg z-50"
-        >
-          <Card className="border-0 shadow-none">
-            <CardHeader className="py-3">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-base">{title}</CardTitle>
-                <div className="flex items-center gap-1">
-                  {unread > 0 ? (
-                    <Button variant="ghost" size="sm" type="button" onClick={handleMarkAllRead} disabled={markingAllRead}>
-                      {markingAllRead ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                      {t('notifications.mark_all_read', 'Mark all read')}
-                    </Button>
-                  ) : null}
-                  <Button variant="ghost" size="sm" type="button" onClick={loadUnread}>
-                    {t('common.retry', 'Retry')}
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="p-0">
-              <div
-                className="max-h-[420px] overflow-auto"
-                onScroll={(e) => {
-                  const el = e.currentTarget;
-                  if (loading || !hasMore) return;
-                  if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
-                    loadPage(page + 1);
-                  }
-                }}
-              >
-                {items.length === 0 && !loading ? (
-                  <div className="p-4 text-sm text-muted-foreground">
-                    {t('notifications.empty', 'No notifications')}
+          {open ? (
+            <div
+              ref={panelRef}
+              className="absolute right-0 mt-2 w-[360px] max-w-[90vw] rounded-lg border bg-background shadow-lg z-50"
+            >
+              <Card className="border-0 shadow-none">
+                <CardHeader className="py-3">
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-base">{title}</CardTitle>
+                    <div className="flex items-center gap-1">
+                      {unread > 0 ? (
+                        <Button variant="ghost" size="sm" type="button" onClick={handleMarkAllRead} disabled={markingAllRead}>
+                          {markingAllRead ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
+                          {t('notifications.mark_all_read', 'Mark all read')}
+                        </Button>
+                      ) : null}
+                      <Button variant="ghost" size="sm" type="button" onClick={loadUnread}>
+                        {t('common.retry', 'Retry')}
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  <div className="divide-y">
-                    {items.map((n) => (
-                      <button
-                        key={n.id}
-                        type="button"
-                        className="w-full text-left p-4 hover:bg-accent/50 transition-colors"
-                        onClick={() => openDetail(n.id)}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <div className="flex items-center gap-2">
-                              {!n.is_read ? (
-                                <span className="h-2 w-2 rounded-full bg-primary mt-1" />
-                              ) : null}
-                              <div className="font-medium truncate">{n.title}</div>
-                            </div>
-                            <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
-                              {n.summary}
-                            </div>
-                          </div>
-                          <div className="text-xs text-muted-foreground whitespace-nowrap">
-                            {formatDateTime(n.created_at, timeZone)}
-                          </div>
-                        </div>
-                      </button>
-                    ))}
-                    {loading ? (
-                      <div className="p-4 flex items-center justify-center text-muted-foreground">
-                        <Loader2 className="h-5 w-5 animate-spin" />
+                </CardHeader>
+                <CardContent className="p-0">
+                  <div
+                    className="max-h-[420px] overflow-auto"
+                    onScroll={(e) => {
+                      const el = e.currentTarget;
+                      if (loading || !hasMore) return;
+                      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 24) {
+                        loadPage(page + 1);
+                      }
+                    }}
+                  >
+                    {items.length === 0 && !loading ? (
+                      <div className="p-4 text-sm text-muted-foreground">
+                        {t('notifications.empty', 'No notifications')}
                       </div>
-                    ) : null}
+                    ) : (
+                      <div className="divide-y">
+                        {items.map((n) => (
+                          <button
+                            key={n.id}
+                            type="button"
+                            className="w-full text-left p-4 hover:bg-accent/50 transition-colors"
+                            onClick={() => openDetail(n.id)}
+                          >
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="min-w-0">
+                                <div className="flex items-center gap-2">
+                                  {!n.is_read ? (
+                                    <span className="h-2 w-2 rounded-full bg-primary mt-1" />
+                                  ) : null}
+                                  <div className="font-medium truncate">{n.title}</div>
+                                </div>
+                                <div className="mt-1 text-sm text-muted-foreground line-clamp-2">
+                                  {n.summary}
+                                </div>
+                              </div>
+                              <div className="text-xs text-muted-foreground whitespace-nowrap">
+                                {formatDateTime(n.created_at, timeZone)}
+                              </div>
+                            </div>
+                          </button>
+                        ))}
+                        {loading ? (
+                          <div className="p-4 flex items-center justify-center text-muted-foreground">
+                            <Loader2 className="h-5 w-5 animate-spin" />
+                          </div>
+                        ) : null}
+                      </div>
+                    )}
                   </div>
-                )}
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-      ) : null}
-
-      <Modal
-        title={t('notifications.detail', 'Notification')}
-        isOpen={detailOpen}
-        onClose={() => setDetailOpen(false)}
-      >
-        <div className="space-y-3">
-          {detailLoading ? (
-            <div className="flex items-center justify-center text-muted-foreground py-8">
-              <Loader2 className="h-5 w-5 animate-spin" />
+                </CardContent>
+              </Card>
             </div>
-          ) : detail ? (
-            <>
-              <div className="text-lg font-semibold">{detail.title}</div>
-              <div className="text-sm text-muted-foreground">{formatDateTime(detail.created_at, timeZone)}</div>
-              <div className="whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 text-sm">
-                {detail.content}
-              </div>
-            </>
-          ) : (
-            <div className="text-sm text-muted-foreground">{t('common.error')}</div>
-          )}
-        </div>
-      </Modal>
+          ) : null}
+
+          <Modal
+            title={t('notifications.detail', 'Notification')}
+            isOpen={detailOpen}
+            onClose={() => setDetailOpen(false)}
+          >
+            <div className="space-y-3">
+              {detailLoading ? (
+                <div className="flex items-center justify-center text-muted-foreground py-8">
+                  <Loader2 className="h-5 w-5 animate-spin" />
+                </div>
+              ) : detail ? (
+                <>
+                  <div className="text-lg font-semibold">{detail.title}</div>
+                  <div className="text-sm text-muted-foreground">{formatDateTime(detail.created_at, timeZone)}</div>
+                  <div className="whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 text-sm">
+                    {detail.content}
+                  </div>
+                </>
+              ) : (
+                <div className="text-sm text-muted-foreground">{t('common.error')}</div>
+              )}
+            </div>
+          </Modal>
+        </>
+      )}
     </div>
   );
 }

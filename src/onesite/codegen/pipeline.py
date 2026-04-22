@@ -561,9 +561,12 @@ def generate_code():
     notification_model = next((m for m in found_models if m.get("is_notification_table")), None)
     notifications_enabled = bool(notification_model)
     notifications_api_base = f"/{notification_model['module_name']}s" if notification_model else "/notifications"
+
+    # Always generate WS files for online status tracking
+    generate_file("ws.py.j2", {}, backend_path / "app" / "core" / "ws.py")
+    generate_file("ws_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "ws.py")
+
     if notification_model:
-        generate_file("ws.py.j2", {}, backend_path / "app" / "core" / "ws.py")
-        generate_file("ws_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "ws.py")
         names = {f["name"] for f in notification_model.get("fields", [])}
         required = {"title", "summary", "content", "created_at", "is_read", "user_id"}
         missing = sorted([x for x in required if x not in names])

@@ -40,6 +40,72 @@ def render_template(template_path: Path, context: dict, output_path: Path):
     output_path.write_text(content)
 
 @app.command()
+def init():
+    """
+    Initialize site_config.json and base models in an existing project.
+    Ensures necessary models (User, SystemConfig, CustomConfig) exist.
+    """
+    base_dir = get_cwd_safely()
+
+    # Check current state
+    has_models = (base_dir / "models").exists()
+    has_site_config = (base_dir / "site_config.json").exists()
+    has_backend = (base_dir / "backend").exists()
+    has_frontend = (base_dir / "frontend").exists()
+
+    # If any project files exist, treat as existing project
+    if has_models or has_site_config or has_backend or has_frontend:
+        console.print("[blue]Existing project detected[/blue]")
+    else:
+        console.print("[yellow]No existing project files found, will initialize from scratch[/yellow]")
+
+    template_models_dir = Path(__file__).parent / "templates" / "models"
+    models_dir = base_dir / "models"
+    site_config_file = base_dir / "site_config.json"
+
+    # Create site_config.json if not exists
+    if not has_site_config:
+        import json
+        project_name = base_dir.name.lower().replace("-", "_")
+        site_config = {
+            "project_name": project_name,
+            "database_url": "sqlite:///./app.db",
+            "upload_dir": "uploads",
+            "secret_key": "changeme",
+            "allowed_origins": [
+                "http://localhost:5173",
+                "http://localhost:3000",
+                "http://127.0.0.1:5173",
+                "http://127.0.0.1:3000",
+            ]
+        }
+        site_config_file.write_text(json.dumps(site_config, indent=4))
+        console.print(f"[green]Created site_config.json[/green]")
+    else:
+        console.print(f"[blue]site_config.json already exists[/blue]")
+
+    # Create models directory if not exists
+    if not has_models:
+        models_dir.mkdir(parents=True, exist_ok=True)
+
+        # Ensure necessary models exist
+        necessary_models = ["user.py", "system_config.py", "custom_config.py"]
+        for model_file in necessary_models:
+            src = template_models_dir / model_file
+            dst = models_dir / model_file
+            if src.exists():
+                shutil.copy2(src, dst)
+                console.print(f"[green]Created {model_file} from template[/green]")
+            else:
+                console.print(f"[yellow]Template {model_file} not found[/yellow]")
+    else:
+        console.print(f"[blue]models directory already exists[/blue]")
+
+    console.print("[bold green]Initialization complete![/bold green]")
+    console.print("[green]Run 'site sync' to generate API code.[/green]")
+
+
+@app.command()
 def create(
     project_name: str = typer.Argument(..., help="The name of the project to create"),
 ):

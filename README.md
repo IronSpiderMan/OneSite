@@ -51,12 +51,23 @@ pip install -e .
 
 ## Quick Start
 
-### 1. Create a New Project
+### 1. Create or Initialize a Project
 
+You have two options:
+
+**Option A: Create a new project from scratch**
 ```bash
 site create myproject
 cd myproject
 ```
+
+**Option B: Initialize an existing project**
+If you already have a directory with existing models or backend/frontend structure:
+```bash
+cd existing_project
+site init
+```
+This creates `site_config.json` and `models/` with base models (User, SystemConfig, CustomConfig) if they don't exist.
 
 This creates a new directory structure:
 ```
@@ -1259,6 +1270,7 @@ site compose up -d
 
 ```
 myproject/
+├── site_config.json    # Project configuration
 ├── models/             # Define your SQLModel classes here
 ├── backend/
 │   ├── app/
@@ -1284,6 +1296,7 @@ myproject/
 
 ## Commands Reference
 
+- **`site init`**: Initialize an existing project. Creates `site_config.json` and/or `models/` with base models (User, SystemConfig, CustomConfig) if they don't exist.
 - **`site create <name>`**: Create a new project scaffold.
 - **`site sync [--install/-i]`**: Sync models and generate code. Use `-i` to install Python and Node dependencies.
 - **`site run [component]`**: Run the project locally. `component` can be `backend`, `frontend`, or `all` (default).
