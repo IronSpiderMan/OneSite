@@ -1,4 +1,4 @@
-from typing import Optional, List, Any
+from typing import Optional, List, Dict, Any
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -144,6 +144,96 @@ async def get_multi(
     
     result = await session.exec(statement)
     return list(result.all())
+
+
+async def get_multi_with_fk_labels(
+    session: AsyncSession,
+    *,
+    page: int = 1,
+    size: int = 20,
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.ui_type == 'bool' %}
+    {{ field.name }}: Optional[bool] = None,
+    {% elif field.ui_type == 'datetime' %}
+    {{ field.name }}_from: Optional[datetime] = None,
+    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type == 'time' %}
+    {{ field.name }}: Optional[time] = None,
+    {% elif field.is_enum %}
+    {{ field.name }}: Optional[str] = None,
+    {% elif field.ui_type == 'str' %}
+    {{ field.name }}: Optional[str] = None,
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}: Optional[int] = None,
+    {% endfor %}
+) -> List[Dict[str, Any]]:
+    """
+    Get list of users with FK label fields enriched.
+    Returns list of dicts with original fields plus {fk_name}_label for each FK.
+    """
+    # Get base items
+    items = await get_multi(
+        session,
+        page=page,
+        size=size,
+        {% for field in model.fields %}
+        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.ui_type == 'bool' %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.ui_type == 'datetime' %}
+        {{ field.name }}_from={{ field.name }}_from,
+        {{ field.name }}_to={{ field.name }}_to,
+        {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.ui_type == 'str' %}
+        {{ field.name }}={{ field.name }},
+        {% endif %}
+        {% endif %}
+        {% endfor %}
+        {% for fk in model.foreign_keys %}
+        {{ fk.name }}={{ fk.name }},
+        {% endfor %}
+    )
+    
+    if not items:
+        return []
+    
+    {% if model.foreign_keys %}
+    # Collect unique FK IDs for batch fetch
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}_ids = list(set(getattr(item, "{{ fk.name }}") for item in items if getattr(item, "{{ fk.name }}") is not None))
+    {% endfor %}
+    
+    # Batch fetch FK targets
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}_map = {}
+    if {{ fk.name }}_ids:
+        from app.models.{{ fk.target_service }} import {{ fk.target_model }}
+        stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
+        result = await session.exec(stmt)
+        for obj in result.all():
+            {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+    {% endfor %}
+    
+    # Enrich items with labels
+    enriched = []
+    for item in items:
+        item_dict = item.model_dump()
+        {% for fk in model.foreign_keys %}
+        fk_id = getattr(item, "{{ fk.name }}", None)
+        item_dict["{{ fk.name }}_label"] = {{ fk.name }}_map.get(fk_id) if fk_id else None
+        {% endfor %}
+        enriched.append(item_dict)
+    
+    return enriched
+    {% else %}
+    # No FKs, just convert to dicts
+    return [item.model_dump() for item in items]
+    {% endif %}
 
 
 async def count(

@@ -86,6 +86,9 @@ class {{ model.name }}Update(SQLModel):
 
 class {{ model.name }}Read({{ model.name }}Base):
     id: int
+{% for fk in model.foreign_keys %}
+    {{ fk.name }}_label: Optional[str] = None
+{% endfor %}
 {% if model.m2m_fields %}
     # For now, we don't return m2m fields in Read schema by default to avoid N+1 queries
     # Frontend will fetch them separately if needed, or we can add them later

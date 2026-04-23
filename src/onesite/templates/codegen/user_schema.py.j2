@@ -45,3 +45,6 @@ class UserUpdate(SQLModel):
 
 class UserRead(UserBase):
     id: int
+{% for fk in model.foreign_keys %}
+    {{ fk.name }}_label: Optional[str] = None
+{% endfor %}

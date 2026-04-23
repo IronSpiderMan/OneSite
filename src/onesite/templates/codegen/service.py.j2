@@ -78,8 +78,8 @@ class {{ model.name }}Service:
             {% endfor %}
         )
         
-        # Get items
-        items = await crud.get_multi(
+        # Get items with FK labels
+        items = await crud.get_multi_with_fk_labels(
             session,
             page=page,
             size=size,

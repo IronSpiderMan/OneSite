@@ -564,7 +564,9 @@ const {{ model.name }}Page: React.FC = () => {
                     {% for field in model.fields %}
                     {% if 'r' in field.permissions %}
                     <TableCell>
-                        {% if field.ui_type == 'bool' %}
+                        {% if field.fk_info %}
+                        {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
+                        {% elif field.ui_type == 'bool' %}
                         <Badge variant={item.{{ field.name }} ? "default" : "secondary"}>
                             {item.{{ field.name }} ? 'Yes' : 'No'}
                         </Badge>

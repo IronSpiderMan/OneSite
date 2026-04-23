@@ -9,7 +9,8 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
 - **Full-Stack Generation**: Generates Backend (FastAPI, SQLModel, Pydantic) and Frontend (React, Tailwind, Zustand, Lucide Icons).
 - **Model-Driven**: Define your data models in standard Python code, and let OneSite handle the rest.
 - **Auto CRUD & Validation**: Automatically generates Create, Read, Update, Delete APIs and UI, including unique constraints validation.
-- **Search & Filters**: Mark fields as searchable to generate list-page filters (bool/enum/string contains/datetime range).
+- **Search & Filters**: Mark fields as searchable to generate list-page filters (bool/enum/string contains/datetime range). Each `is_search_field` appears as an individual filter input.
+- **Smart Foreign Key Display**: List pages automatically display the related record's label field (first `unique + is_search_field` field from the target model) instead of raw IDs.
 - **Smart UI Components**:
   - `bool` -> **Switch** / **Badge**
   - `Enum` -> **Select** / **Badge**
@@ -18,6 +19,8 @@ It automates the repetitive work of building CRUD APIs, database schemas, and fr
   - **File Attachment**: Detects file fields (e.g. `report_file`, `_file` suffix) and generates file upload components with built-in preview.
     - **Preview Support**: PDF, Word (docx), Excel (xlsx, csv), Markdown, Code/Text, Video, Audio, Images.
   - **Foreign Key**: Auto-detects foreign keys and generates searchable select dropdowns (`SearchableSelect`).
+    - **Label Field**: SearchableSelect uses the first field marked as both `unique=True` and `is_search_field=True` from the target model for searching and display.
+    - **List Page Display**: FK columns show the resolved label (e.g., username, book title) instead of raw IDs.
   - **Many-to-Many**: Supports M2M relationships via link tables, generating multi-select components.
   - **One-to-Many (Reverse FK)**: Displays related items in a paginated list on the detail page (e.g. Products under a Category). Configurable.
 - **Better UX Defaults**: Delete confirmation dialogs; toast notifications for create/update.
@@ -222,7 +225,7 @@ OneSite will automatically inject a `tag_ids` field into the `Post` form, allowi
 Notes:
 - Link tables are treated as relationship carriers by default and are not exposed as standalone pages/menus.
 - If a link table contains extra non-FK fields (association table), OneSite will generate standalone CRUD pages/endpoints for it so you can edit those extra fields. You can hide it from frontend menu/routes via `__onesite__ = {"show_in_menu": False}`.
-- Selection UI for both Foreign Keys and M2M uses `SearchableSelect`, which queries the target model list endpoint with `q=...` (fuzzy match on the target model's `search_field`).
+- Selection UI for both Foreign Keys and M2M uses `SearchableSelect`, which queries the target model list endpoint with filters on the target's label field (first `unique + is_search_field` field).
 - OneSite generates relationship endpoints like:
   - `GET /posts/{id}/tags` (targets related to a source item)
   - `GET /tags/{id}/posts` (reverse M2M: sources related to a target item)
@@ -1115,6 +1118,36 @@ class Product(SQLModel, table=True):
 - `Enum`: exact match (All + enum values)
 - `str`: fuzzy contains (`ilike "%value%"`)
 - `datetime`: range filter (from/to)
+
+#### Foreign Key Labels
+When a model has foreign keys, OneSite automatically resolves and displays the related record's human-readable label in list pages:
+
+```python
+class Author(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(
+        unique=True,
+        sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}}
+    )
+
+class Book(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}})
+    
+    # This FK will display the author's name (not the ID) in list pages
+    author_id: Optional[int] = Field(default=None, foreign_key="author.id")
+```
+
+**Label Field Selection**:
+- OneSite uses the **first field** that is both `unique=True` and `is_search_field=True` as the label field
+- Common pattern: Use `name`, `username`, `email`, or similar identifier fields
+- If no `unique + is_search_field` field exists, falls back to the first `is_search_field` field
+- **Recommendation**: FK target models should have at least one field with both `unique=True` and `is_search_field=True` for optimal SearchableSelect and list page display
+
+**Generated Behavior**:
+- **Backend**: Returns enriched data with `{fk_name}_label` fields (e.g., `author_id_label: "John Doe"`)
+- **Frontend**: Displays the label in list pages, falls back to "ID: 123" if label is unavailable
+- **Performance**: Uses batch fetching to avoid N+1 queries (single query per FK with `WHERE id IN (...)`)
 
 #### JSON Fields (Object & Array)
 OneSite supports two JSON field kinds:
