@@ -33,6 +33,7 @@ ENV/
 .vscode/
 *.swp
 *.swo
+.claude
 
 # Mac
 .DS_Store
