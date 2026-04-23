@@ -402,10 +402,12 @@ class {{ model.name }}Service:
         """
         Export {{ model.name }} records to CSV.
         Returns the file path of the exported CSV.
+        Foreign key fields are exported as labels (not IDs).
         """
         import csv
         import os
         from datetime import datetime
+        from sqlmodel import select
         
         upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
         export_dir = os.path.join(upload_dir, "exports")
@@ -423,6 +425,13 @@ class {{ model.name }}Service:
             headers = [{% for field in model.fields %}{% if 'r' in field.permissions and field.name not in ['id', 'created_at', 'updated_at'] %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
             writer.writerow(headers)
             
+            {% if model.foreign_keys %}
+            # Build FK label caches
+            {% for fk in model.foreign_keys %}
+            {{ fk.name }}_label_cache = {}
+            {% endfor %}
+            {% endif %}
+            
             # Process in batches
             batch_size = 1000
             page = 1
@@ -432,10 +441,41 @@ class {{ model.name }}Service:
                 if not items:
                     break
                 
+                {% if model.foreign_keys %}
+                # Collect unique FK IDs for batch label resolution
+                {% for fk in model.foreign_keys %}
+                {{ fk.name }}_ids = list(set(
+                    getattr(item, "{{ fk.name }}") for item in items 
+                    if getattr(item, "{{ fk.name }}") is not None 
+                    and getattr(item, "{{ fk.name }}") not in {{ fk.name }}_label_cache
+                ))
+                {% endfor %}
+                
+                # Batch fetch FK labels
+                {% for fk in model.foreign_keys %}
+                if {{ fk.name }}_ids:
+                    from app.models.{{ fk.target_service }} import {{ fk.target_model }}
+                    stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
+                    result = await session.exec(stmt)
+                    for obj in result.all():
+                        {{ fk.name }}_label_cache[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+                {% endfor %}
+                {% endif %}
+                
                 for item in items:
                     row = []
                     {% for field in model.fields %}
                     {% if 'r' in field.permissions and field.name not in ['id', 'created_at', 'updated_at'] %}
+                    {% if field.fk_info %}
+                    # FK field - export label instead of ID
+                    fk_id = getattr(item, "{{ field.name }}", None)
+                    if fk_id is None:
+                        row.append("")
+                    elif fk_id in {{ field.name }}_label_cache:
+                        row.append({{ field.name }}_label_cache[fk_id])
+                    else:
+                        row.append(str(fk_id))
+                    {% else %}
                     val = getattr(item, "{{ field.name }}", None)
                     # Convert to string, handle Enum/datetime specially
                     if val is None:
@@ -448,6 +488,7 @@ class {{ model.name }}Service:
                         row.append(val.isoformat())
                     else:
                         row.append(str(val))
+                    {% endif %}
                     {% endif %}
                     {% endfor %}
                     writer.writerow(row)
@@ -474,12 +515,14 @@ class {{ model.name }}Service:
         """
         Import {{ model.name }} records from CSV.
         Uses upsert logic: if record with same {{ model.import_key }} exists, update it; otherwise create new.
+        Foreign key fields in CSV should be labels (not IDs), and will be resolved to IDs.
         """
         import csv
         import io
         import json
         import ast
         from datetime import datetime
+        from sqlmodel import select
 
         contents = await file.read()
         csv_file = io.StringIO(contents.decode('utf-8-sig'))
@@ -489,6 +532,24 @@ class {{ model.name }}Service:
 
         stats = {"success": 0, "failed": 0, "created": 0, "updated": 0, "errors": []}
         import_key = "{{ model.import_key }}"
+
+        {% if model.foreign_keys %}
+        # Build FK label-to-ID caches
+        {% for fk in model.foreign_keys %}
+        {{ fk.name }}_cache = {}
+        {% endfor %}
+        
+        # Pre-fetch all FK targets for label resolution
+        {% for fk in model.foreign_keys %}
+        from app.models.{{ fk.target_service }} import {{ fk.target_model }} as {{ fk.target_model }}_model
+        stmt = select({{ fk.target_model }}_model)
+        result = await session.exec(stmt)
+        for obj in result.all():
+            label = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+            {{ fk.name }}_cache[label] = obj.id
+            {{ fk.name }}_cache[str(obj.id)] = obj.id  # Also allow ID as fallback
+        {% endfor %}
+        {% endif %}
 
         for idx, row in enumerate(rows, 1):
             try:
@@ -510,7 +571,26 @@ class {{ model.name }}Service:
                 {% if field.name not in ['created_at', 'updated_at'] %}
                 if "{{ field.name }}" in row:
                     value = row["{{ field.name }}"]
-                    {% if field.ui_type == 'int' %}
+                    {% if field.fk_info %}
+                    # FK field - resolve label to ID
+                    if not value:
+                        obj_data["{{ field.name }}"] = None
+                    elif value in {{ field.name }}_cache:
+                        obj_data["{{ field.name }}"] = {{ field.name }}_cache[value]
+                    else:
+                        # Try to find by searching
+                        from app.models.{{ field.fk_info.target_service }} import {{ field.fk_info.target_model }} as {{ field.fk_info.target_model }}_import
+                        stmt = select({{ field.fk_info.target_model }}_import).where(
+                            getattr({{ field.fk_info.target_model }}_import, "{{ field.fk_info.label_field }}") == value
+                        )
+                        fk_result = await session.exec(stmt)
+                        fk_obj = fk_result.first()
+                        if fk_obj:
+                            obj_data["{{ field.name }}"] = fk_obj.id
+                            {{ field.name }}_cache[value] = fk_obj.id
+                        else:
+                            raise ValueError(f"Foreign key '{value}' not found for field '{{ field.name }}'")
+                    {% elif field.ui_type == 'int' %}
                     obj_data["{{ field.name }}"] = int(value) if value else None
                     {% elif field.ui_type == 'float' %}
                     obj_data["{{ field.name }}"] = float(value) if value else None

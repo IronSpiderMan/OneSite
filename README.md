@@ -328,16 +328,23 @@ Generated features:
 - Each subsequent row represents one record
 - Boolean values should be `true`/`false`
 - Empty cells are treated as `None`/`null`
+- **Foreign Key Fields**: Use the label field value (e.g., author name, username) instead of IDs. The label field is the first `unique + is_search_field` field from the target model.
 
 **Import Behavior (Upsert)**:
 - Import uses **upsert logic**: if a record with the same `import_key` value exists, it updates that record; otherwise creates a new one
 - `created_at`: Always ignored during import, auto-set to current time on create
 - `updated_at`: Auto-updated to current time on every create and update
 - Enum values should be the actual string value (e.g., `SUCCEED`, not `NotificationStatus.SUCCEED`)
+- **Foreign Key Resolution**: FK fields in CSV use labels (e.g., author name). OneSite resolves them to IDs automatically:
+  - First, checks a pre-built cache of all FK target records
+  - If not found, performs a database lookup by the label field
+  - Falls back to accepting numeric IDs for backward compatibility
+  - Raises an error if the label/ID cannot be resolved
 - Returns detailed statistics: `{success, failed, created, updated, errors}`
 
 **Export Encoding**:
 - All exports use UTF-8 with BOM for Excel compatibility
+- **Foreign Key Fields**: Exported as human-readable labels (e.g., author name, username) instead of raw IDs, making CSV files more readable and easier to edit manually
 
 #### Dashboard & Visualization
 OneSite can generate a dashboard page with statistics and charts. Configure `visualize` in your model's `__onesite__`:

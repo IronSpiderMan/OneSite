@@ -34,6 +34,7 @@ import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ImageUpload } from '../../components/ui/image-upload';
 import { FileUpload } from '../../components/ui/file-upload';
+import { FileInput } from '../../components/ui/file-input';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
@@ -62,6 +63,11 @@ const {{ model.name }}Page: React.FC = () => {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
+  {% if model.importable %}
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [importingFile, setImportingFile] = useState<File | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
+  {% endif %}
 
   // Role-based permissions
   const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
@@ -80,9 +86,6 @@ const {{ model.name }}Page: React.FC = () => {
   }, [userRole, navigate]);
   {% endif %}
 
-  {% if model.importable %}
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  {% endif %}
   {% for field in model.fields %}
   {% if field.fk_info %}
   const [{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels, set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels] = useState<Record<string, string>>({});
@@ -145,16 +148,19 @@ const {{ model.name }}Page: React.FC = () => {
 
   {% if model.importable %}
   const handleImportClick = () => {
-    // Trigger file input click
-    fileInputRef.current?.click();
+    setImportingFile(null);
+    setImportModalOpen(true);
   };
 
-  const handleFileSelect = async (event: React.ChangeEvent<HTMLInputElement>) => {
-    const file = event.target.files?.[0];
-    if (!file) return;
+  const handleImportSubmit = async () => {
+    if (!importingFile) {
+      toast.error(t('import.no_file', 'Please select a file'));
+      return;
+    }
 
     try {
-      const result = await import{{ model.name }}s(file);
+      setIsImporting(true);
+      const result = await import{{ model.name }}s(importingFile);
       if (result.failed > 0) {
         toast.warning(t('import.partial', `Imported ${result.success} records, ${result.failed} failed`));
       } else {
@@ -162,13 +168,12 @@ const {{ model.name }}Page: React.FC = () => {
       }
       // Refresh data after import
       fetchData();
+      setImportModalOpen(false);
+      setImportingFile(null);
     } catch (error) {
       toast.error(t('import.failed', 'Import failed'));
-    }
-    
-    // Reset file input
-    if (fileInputRef.current) {
-      fileInputRef.current.value = '';
+    } finally {
+      setIsImporting(false);
     }
   };
   {% endif %}
@@ -390,18 +395,9 @@ const {{ model.name }}Page: React.FC = () => {
           {% if model.importable or model.exportable %}
           <div className="flex items-center gap-2">
             {% if model.importable %}
-            <>
-              <input
-                type="file"
-                accept=".csv"
-                ref={fileInputRef}
-                onChange={handleFileSelect}
-                className="hidden"
-              />
-              <Button variant="outline" onClick={handleImportClick}>
-                <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
-              </Button>
-            </>
+            <Button variant="outline" onClick={handleImportClick}>
+              <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
+            </Button>
             {% endif %}
             {% if model.exportable %}
             <Button variant="outline" onClick={handleExport}>
@@ -908,6 +904,44 @@ const {{ model.name }}Page: React.FC = () => {
         </form>
             </div>
       </Modal>
+
+      {% if model.importable %}
+      {/* Import Modal */}
+      <Modal
+        isOpen={importModalOpen}
+        onClose={() => setImportModalOpen(false)}
+        title={t('common.import', 'Import')}
+      >
+        <div className="space-y-4">
+          <div className="flex flex-col gap-2">
+            <Label>{t('import.file', 'CSV File')}</Label>
+            <FileInput
+              accept=".csv"
+              value={importingFile}
+              onChange={setImportingFile}
+            />
+          </div>
+          {% raw %}<div className="flex justify-end space-x-2 pt-4">{% endraw %}
+            <Button variant="outline" onClick={() => setImportModalOpen(false)}>
+              {t('common.cancel', 'Cancel')}
+            </Button>
+            <Button onClick={handleImportSubmit} disabled={!importingFile || isImporting}>
+              {isImporting ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  {t('common.importing', 'Importing...')}
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4" />
+                  {t('common.import', 'Import')}
+                </>
+              )}
+            </Button>
+          </div>
+        </div>
+      </Modal>
+      {% endif %}
     </div>
   );
 };
