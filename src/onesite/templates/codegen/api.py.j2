@@ -164,7 +164,6 @@ async def get_{{ model.lower_name }}_stats(
 async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
-    q: Optional[str] = Query(None, description="Search query"),
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
     {% if field.ui_type == 'bool' %}
@@ -200,7 +199,6 @@ async def read_{{ model.lower_name }}s(
     """
     return await service.get_multi(
         session,
-        q=q,
         page=page,
         size=size,
         {% for field in model.fields %}

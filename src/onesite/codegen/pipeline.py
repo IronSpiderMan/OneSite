@@ -141,6 +141,7 @@ def generate_code():
                         fields,
                         foreign_keys,
                         search_field,
+                        unique_search_field,
                         is_link_table,
                         is_singleton,
                         model_permissions,
@@ -214,6 +215,7 @@ def generate_code():
                             "schema_imports": schema_imports,
                             "foreign_keys": foreign_keys,
                             "search_field": search_field,
+                            "unique_search_field": unique_search_field,
                             "is_link_table": is_link_table,
                             "is_singleton": is_singleton,
                             "model_permissions": model_permissions,
@@ -266,7 +268,7 @@ def generate_code():
         for fk in model["foreign_keys"]:
             target_model = model_map.get(fk["target_model"])
             if target_model:
-                fk["label_field"] = target_model["search_field"]
+                fk["label_field"] = target_model.get("unique_search_field") or target_model["search_field"]
                 fk["target_readable_fields"] = [
                     f
                     for f in target_model["fields"]
@@ -286,7 +288,7 @@ def generate_code():
                             "source_model": model["name"],
                             "source_service": model["module_name"],
                             "source_fk_field": fk["name"],
-                            "label_field": model["search_field"],
+                            "label_field": model.get("unique_search_field") or model["search_field"],
                             "display": fk.get("reverse_display", True),
                         }
                     )
@@ -360,7 +362,7 @@ def generate_code():
                                     "target_model": to_model["name"],
                                     "target_service": to_model["module_name"],
                                     "target_endpoint": f"{to_model['module_name']}s",
-                                    "label_field": to_model["search_field"],
+                                    "label_field": to_model.get("unique_search_field") or to_model["search_field"],
                                     "link_model": model["name"],
                                     "link_module": model["source_module"],
                                     "target_source_module": to_model["source_module"],
@@ -394,7 +396,7 @@ def generate_code():
                                 "source_model": from_model["name"],
                                 "source_service": from_model["module_name"],
                                 "source_endpoint": f"{from_model['module_name']}s",
-                                "label_field": from_model["search_field"],
+                                "label_field": from_model.get("unique_search_field") or from_model["search_field"],
                                 "display": to_fk.get("reverse_display", True),
                                 "link_model": model["name"],
                                 "link_module": model["source_module"],

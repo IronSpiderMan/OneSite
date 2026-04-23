@@ -75,6 +75,7 @@ def get_model_fields(
     List[Dict[str, Any]],
     List[Dict[str, Any]],
     str,
+    Optional[str],
     bool,
     bool,
     str,
@@ -523,11 +524,13 @@ def get_model_fields(
 
     foreign_keys = [f["fk_info"] for f in fields if f["fk_info"]]
     search_field = next((f["name"] for f in fields if f.get("is_search_field")), "id")
+    unique_search_field = next((f["name"] for f in fields if f.get("is_search_field") and f.get("is_unique")), None)
 
     return (
         fields,
         foreign_keys,
         search_field,
+        unique_search_field,
         is_link_table,
         is_singleton,
         model_permissions,

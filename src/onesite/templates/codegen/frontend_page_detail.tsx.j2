@@ -199,7 +199,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         try {
             // Filter by foreign key
             const filters = { {{ rfk.source_fk_field }}: itemId };
-            const result = await get{{ rfk.source_model }}s(page, 5, '', filters);
+            const result = await get{{ rfk.source_model }}s(page, 5, filters);
             set{{ rfk.source_model }}Data(result.items);
             set{{ rfk.source_model }}Total(result.total);
             set{{ rfk.source_model }}Page(result.page);

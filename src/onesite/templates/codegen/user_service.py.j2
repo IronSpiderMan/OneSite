@@ -14,7 +14,6 @@ class UserService:
         self,
         session: AsyncSession,
         *,
-        q: Optional[str] = None,
         page: int = 1,
         size: int = 20,
         {% for field in model.fields %}
@@ -44,7 +43,6 @@ class UserService:
         # Get total count first
         total = await crud.count(
             session,
-            q=q,
             {% for field in model.fields %}
             {% if field.is_search_field and field.name != 'id' %}
             {% if field.ui_type == 'bool' %}
@@ -69,7 +67,6 @@ class UserService:
         # Get items
         items = await crud.get_multi(
             session,
-            q=q,
             page=page,
             size=size,
             {% for field in model.fields %}

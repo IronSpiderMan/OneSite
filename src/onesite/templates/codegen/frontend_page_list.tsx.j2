@@ -321,12 +321,12 @@ const {{ model.name }}Page: React.FC = () => {
     {% endif %}
     {% endif %}
     {% endfor %}
-    fetchData(1, use{{ model.name }}Store.getState().size, undefined, next);
+    fetchData(1, use{{ model.name }}Store.getState().size, next);
   };
 
   const resetSearch = () => {
     setSearchValues({});
-    fetchData(1, use{{ model.name }}Store.getState().size, undefined, {});
+    fetchData(1, use{{ model.name }}Store.getState().size, {});
   };
 
   return (
@@ -785,7 +785,8 @@ const {{ model.name }}Page: React.FC = () => {
                         searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
                         valueLabels={ {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
                         loadOptions={async (query) => {
-                            const response = await get{{ field.fk_info.target_model }}s(1, 20, query);
+                            const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                            const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
                             return response.items.map((item: any) => ({
                                 label: item.{{ field.fk_info.label_field }} || item.id,
                                 value: item.id
@@ -867,7 +868,8 @@ const {{ model.name }}Page: React.FC = () => {
                         searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
                         valueLabels={ {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
                         loadOptions={async (query) => {
-                            const response = await get{{ m2m.target_model }}s(1, 20, query);
+                            const filters = query ? { {{ m2m.label_field }}: query } : undefined;
+                            const response = await get{{ m2m.target_model }}s(1, 20, filters);
                             return response.items.map((item: any) => ({
                                 label: item.{{ m2m.label_field }} || item.id,
                                 value: item.id
@@ -883,7 +885,8 @@ const {{ model.name }}Page: React.FC = () => {
                         searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
                         valueLabels={ {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
                         loadOptions={async (query) => {
-                            const response = await get{{ m2m.target_model }}s(1, 20, query);
+                            const filters = query ? { {{ m2m.label_field }}: query } : undefined;
+                            const response = await get{{ m2m.target_model }}s(1, 20, filters);
                             return response.items.map((item: any) => ({
                                 label: item.{{ m2m.label_field }} || item.id,
                                 value: item.id

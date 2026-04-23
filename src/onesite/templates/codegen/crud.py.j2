@@ -50,7 +50,6 @@ async def get_by_{{ model.import_key }}(
 def _apply_filters(
     statement,
     *,
-    q: Optional[str] = None,
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
     {% if field.ui_type == 'bool' %}
@@ -72,12 +71,6 @@ def _apply_filters(
     {% endfor %}
 ):
     """Apply search and filter conditions to statement. Shared by get_multi and count."""
-    # Apply search filter if query is present
-    {% if model.search_field != 'id' %}
-    if q:
-        statement = statement.where(col({{ model.name }}.{{ model.search_field }}).ilike(f"%{q}%"))
-    {% endif %}
-
     # Apply per-field filters (configured via site_props.is_search_field)
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
@@ -114,7 +107,6 @@ def _apply_filters(
 async def get_multi(
     session: AsyncSession,
     *,
-    q: Optional[str] = None,
     page: int = 1,
     size: int = 20,
     {% for field in model.fields %}
@@ -145,7 +137,6 @@ async def get_multi(
     statement = select({{ model.name }})
     statement = _apply_filters(
         statement,
-        q=q,
         {% for field in model.fields %}
         {% if field.is_search_field and field.name != 'id' %}
         {% if field.ui_type == 'bool' %}
@@ -177,7 +168,6 @@ async def get_multi(
 async def count(
     session: AsyncSession,
     *,
-    q: Optional[str] = None,
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
     {% if field.ui_type == 'bool' %}
@@ -204,7 +194,6 @@ async def count(
     statement = select(func.count()).select_from({{ model.name }})
     statement = _apply_filters(
         statement,
-        q=q,
         {% for field in model.fields %}
         {% if field.is_search_field and field.name != 'id' %}
         {% if field.ui_type == 'bool' %}
