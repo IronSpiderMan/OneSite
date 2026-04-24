@@ -5,7 +5,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
-from app.models.{{ model.source_module }} import {{ model.name }}
+from app.schemas.{{ model.source_module }} import {{ model.name }}Read
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -21,8 +21,9 @@ from app.core.ws import manager
 {% endif %}
 
 class {{ model.name }}Service:
-    async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
-        return await crud.get(session, id)
+    async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}Read]:
+        obj = await crud.get(session, id)
+        return {{ model.name }}Read.model_validate(obj) if obj else None
 
     async def get_multi(
         self,
@@ -49,7 +50,7 @@ class {{ model.name }}Service:
         {% for fk in model.foreign_keys %}
         {{ fk.name }}: Optional[int] = None,
         {% endfor %}
-    ) -> PaginatedResponse[{{ model.name }}]:
+    ) -> PaginatedResponse[{{ model.name }}Read]:
         """
         Get paginated list with optional search and filter support.
         Combines CRUD get_multi and count into PaginatedResponse.
@@ -105,11 +106,12 @@ class {{ model.name }}Service:
         )
         
         # Build response
+        items_read = [{{ model.name }}Read.model_validate(item) for item in items]
         if size == -1:
-            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
-        return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+            return PaginatedResponse.create(data=items_read, total=total, page=1, size=total)
+        return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
 
-    async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}:
+    async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}Read:
         {% if model.fields | selectattr('is_unique') | list %}
         # Check unique field constraints
         {% for field in model.fields %}
@@ -131,13 +133,13 @@ class {{ model.name }}Service:
             
             if not user_ids:
                 # No active users, return placeholder
-                return {{ model.name }}(
+                return {{ model.name }}Read.model_validate({{ model.name }}(
                     title=obj_in.title,
                     summary=obj_in.summary,
                     content=obj_in.content,
                     is_read=False,
                     user_id=0
-                )
+                ))
             
             from datetime import datetime as dt
             created_at = dt.utcnow()
@@ -175,7 +177,7 @@ class {{ model.name }}Service:
                     pass
             
             # Return the first created object as representative
-            return created_objects[0] if created_objects else {{ model.name }}()
+            return {{ model.name }}Read.model_validate(created_objects[0]) if created_objects else {{ model.name }}Read.model_validate({{ model.name }}())
         {% endif %}
         obj = await crud.create(session, obj_in)
 
@@ -206,9 +208,9 @@ class {{ model.name }}Service:
         except Exception:
             pass
         {% endif %}
-        return obj
+        return {{ model.name }}Read.model_validate(obj)
 
-    async def update(self, session: AsyncSession, id: int, obj_in: {{ model.name }}Update) -> {{ model.name }}:
+    async def update(self, session: AsyncSession, id: int, obj_in: {{ model.name }}Update) -> {{ model.name }}Read:
         """
         Update {{ model.name }} by ID with validation.
         Raises ValueError if unique constraint is violated.
@@ -247,9 +249,9 @@ class {{ model.name }}Service:
         except Exception:
             pass
         {% endif %}
-        return obj
+        return {{ model.name }}Read.model_validate(obj)
 
-    async def delete(self, session: AsyncSession, id: int) -> {{ model.name }}:
+    async def delete(self, session: AsyncSession, id: int) -> int:
         return await crud.delete(session, id)
 
     {% if model.is_notification_table %}
@@ -306,9 +308,11 @@ class {{ model.name }}Service:
         result = await session.exec(statement)
         items = result.all()
 
+        # Convert to ReadSchema
+        items_read = [{{ m2m.target_model }}Read.model_validate(item) for item in items]
         if size == -1:
-            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
-        return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+            return PaginatedResponse.create(data=items_read, total=total, page=1, size=total)
+        return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
 
     {% if m2m.order_field %}
     async def get_{{ m2m.target_endpoint }}_with_meta(
@@ -384,9 +388,11 @@ class {{ model.name }}Service:
         result = await session.exec(statement)
         items = result.all()
 
+        # Convert to ReadSchema
+        items_read = [{{ rel.source_model }}Read.model_validate(item) for item in items]
         if size == -1:
-            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
-        return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+            return PaginatedResponse.create(data=items_read, total=total, page=1, size=total)
+        return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
     {% endfor %}
     {% endif %}
 
@@ -399,17 +405,18 @@ class {{ model.name }}Service:
         {{ key_field }}: {% if key_field.endswith('_id') %}int{% else %}str{% endif %}{% if not loop.last %},
         {% endif %}
         {% endfor %}
-    ) -> Optional[{{ model.name }}]:
+    ) -> Optional[{{ model.name }}Read]:
         """
         Get {{ model.name }} by composite key: {{ model.union_key | join(', ') }}.
         """
-        return await crud.get_by_{{ model.union_key | join('_') }}(
+        obj = await crud.get_by_{{ model.union_key | join('_') }}(
             session,
             {% for key_field in model.union_key %}
             {{ key_field }}{% if not loop.last %},
             {% endif %}
             {% endfor %}
         )
+        return {{ model.name }}Read.model_validate(obj) if obj else None
     {% endif %}
 
     {% if model.importable or model.exportable %}

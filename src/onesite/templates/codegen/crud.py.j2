@@ -385,11 +385,11 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     await session.refresh(db_obj)
     return db_obj
 
-async def delete(session: AsyncSession, id: int) -> {{ model.name }}:
+async def delete(session: AsyncSession, id: int) -> int:
     db_obj = await session.get({{ model.name }}, id)
     await session.delete(db_obj)
     await session.commit()
-    return db_obj
+    return db_obj.id
 
 {% if model.is_notification_table %}
 async def mark_all_read_by_user(session: AsyncSession, user_id: int) -> int:
