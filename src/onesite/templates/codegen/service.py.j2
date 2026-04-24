@@ -293,16 +293,21 @@ class {{ model.name }}Service:
         
         # Count total
         total = len(target_ids)
-        
-        # Pagination
-        skip = (page - 1) * size
-        paginated_ids = target_ids[skip:skip + size]
-        
+
+        # Get all if size == -1
+        if size == -1:
+            paginated_ids = target_ids
+        else:
+            skip = (page - 1) * size
+            paginated_ids = target_ids[skip:skip + size]
+
         # Get items
         statement = select({{ m2m.target_model }}).where(col({{ m2m.target_model }}.id).in_(paginated_ids))
         result = await session.exec(statement)
         items = result.all()
-        
+
+        if size == -1:
+            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
         return PaginatedResponse.create(data=items, total=total, page=page, size=size)
 
     {% if m2m.order_field %}
@@ -316,13 +321,28 @@ class {{ model.name }}Service:
         """
         Get {{ m2m.target_model }}s related to {{ model.name }} with link-table order.
         """
-        rows, total = await crud.get_{{ m2m.target_endpoint }}_with_order(session, {{ model.lower_name }}_id, page, size)
-        
+        # Count total first
+        total = await crud.count_{{ m2m.target_endpoint }}(session, {{ model.lower_name }}_id)
+
+        if total == 0:
+            return PaginatedResponse.create(data=[], total=0, page=page, size=size)
+
+        # Get all if size == -1
+        if size == -1:
+            rows, _ = await crud.get_{{ m2m.target_endpoint }}_with_order(session, {{ model.lower_name }}_id, page=1, size=total)
+            items = [
+                {{ model.name }}{{ m2m.target_model }}Meta(id=r[0], label=str(r[1]), order=int(r[2] or 0))
+                for r in rows
+            ]
+            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
+
+        rows, _ = await crud.get_{{ m2m.target_endpoint }}_with_order(session, {{ model.lower_name }}_id, page, size)
+
         items = [
             {{ model.name }}{{ m2m.target_model }}Meta(id=r[0], label=str(r[1]), order=int(r[2] or 0))
             for r in rows
         ]
-        
+
         return PaginatedResponse.create(data=items, total=total, page=page, size=size)
     {% endif %}
     {% endfor %}
@@ -351,16 +371,21 @@ class {{ model.name }}Service:
         
         # Count total
         total = len(source_ids)
-        
-        # Pagination
-        skip = (page - 1) * size
-        paginated_ids = source_ids[skip:skip + size]
-        
+
+        # Get all if size == -1
+        if size == -1:
+            paginated_ids = source_ids
+        else:
+            skip = (page - 1) * size
+            paginated_ids = source_ids[skip:skip + size]
+
         # Get items
         statement = select({{ rel.source_model }}).where(col({{ rel.source_model }}.id).in_(paginated_ids))
         result = await session.exec(statement)
         items = result.all()
-        
+
+        if size == -1:
+            return PaginatedResponse.create(data=items, total=total, page=1, size=total)
         return PaginatedResponse.create(data=items, total=total, page=page, size=size)
     {% endfor %}
     {% endif %}
