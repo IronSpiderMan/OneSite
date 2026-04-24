@@ -285,28 +285,14 @@ class {{ model.name }}Service:
         """
         Get {{ m2m.target_model }}s related to {{ model.name }}.
         """
-        from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }}
-        
-        # Get target IDs
-        target_ids = await crud.get_{{ m2m.target_endpoint }}(session, {{ model.lower_name }}_id)
-        
-        if not target_ids:
+        # Get total count
+        total = await crud.count_{{ m2m.target_endpoint }}(session, {{ model.lower_name }}_id)
+
+        if total == 0:
             return PaginatedResponse.create(data=[], total=0, page=page, size=size)
-        
-        # Count total
-        total = len(target_ids)
 
-        # Get all if size == -1
-        if size == -1:
-            paginated_ids = target_ids
-        else:
-            skip = (page - 1) * size
-            paginated_ids = target_ids[skip:skip + size]
-
-        # Get items
-        statement = select({{ m2m.target_model }}).where(col({{ m2m.target_model }}.id).in_(paginated_ids))
-        result = await session.exec(statement)
-        items = result.all()
+        # Get items (CRUD returns objects directly with pagination)
+        items = await crud.get_{{ m2m.target_endpoint }}(session, {{ model.lower_name }}_id, page=page, size=size)
 
         # Convert to ReadSchema
         items_read = [{{ m2m.target_model }}Read.model_validate(item) for item in items]
@@ -365,28 +351,14 @@ class {{ model.name }}Service:
         """
         Get {{ rel.source_model }}s related to {{ model.name }} (via M2M).
         """
-        from app.models.{{ rel.source_source_module }} import {{ rel.source_model }}
-        
-        # Get source IDs
-        source_ids = await crud.get_{{ rel.name }}(session, {{ model.lower_name }}_id)
-        
-        if not source_ids:
+        # Get total count
+        total = await crud.count_{{ rel.name }}(session, {{ model.lower_name }}_id)
+
+        if total == 0:
             return PaginatedResponse.create(data=[], total=0, page=page, size=size)
-        
-        # Count total
-        total = len(source_ids)
 
-        # Get all if size == -1
-        if size == -1:
-            paginated_ids = source_ids
-        else:
-            skip = (page - 1) * size
-            paginated_ids = source_ids[skip:skip + size]
-
-        # Get items
-        statement = select({{ rel.source_model }}).where(col({{ rel.source_model }}.id).in_(paginated_ids))
-        result = await session.exec(statement)
-        items = result.all()
+        # Get items (CRUD returns objects directly with pagination)
+        items = await crud.get_{{ rel.name }}(session, {{ model.lower_name }}_id, page=page, size=size)
 
         # Convert to ReadSchema
         items_read = [{{ rel.source_model }}Read.model_validate(item) for item in items]
