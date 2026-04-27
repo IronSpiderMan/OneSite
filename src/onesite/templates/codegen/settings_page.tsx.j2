@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Loader2, Save } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { JsonInput } from '../components/ui/json-input';
@@ -88,8 +89,10 @@ const SettingsPage: React.FC = () => {
     try {
       setIsSavingSystem(true);
       await updateSystemData(formData);
+      toast.success(t('toast.save_success', 'Saved'));
     } catch (e) {
       console.error(e);
+      toast.error(t('toast.save_failed', 'Save failed'));
     } finally {
       setIsSavingSystem(false);
     }
@@ -117,8 +120,10 @@ const SettingsPage: React.FC = () => {
       if (shouldReload) {
         window.location.reload();
       }
+      toast.success(t('toast.save_success', 'Saved'));
     } catch (e) {
       console.error(e);
+      toast.error(t('toast.save_failed', 'Save failed'));
     } finally {
       setIsSavingCustom(false);
     }
