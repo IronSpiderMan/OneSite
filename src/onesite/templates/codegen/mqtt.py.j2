@@ -17,6 +17,9 @@ class MQTTManager:
 
     def _on_connect(self, client, flags, rc, properties):
         """Callback when connected to MQTT broker."""
+        if rc != 0:
+            logger.error(f"Failed to connect to MQTT broker at {settings.MQTT_URL}, rc={rc}")
+            return
         logger.info(f"Connected to MQTT broker at {settings.MQTT_URL}")
         # Subscribe to all registered topics
         for topic, qos in self._pending_subscriptions:
@@ -26,10 +29,15 @@ class MQTTManager:
     def _on_message(self, client, topic, payload, qos, properties):
         """Callback when message is received."""
         payload_str = payload.decode("utf-8", errors="replace") if isinstance(payload, bytes) else str(payload)
-        logger.debug(f"MQTT message on {topic}: {payload_str[:100]}...")
+        logger.info(f"MQTT message received on {topic}: {payload_str[:200]}")
 
         # Dispatch to matching handlers
-        asyncio.create_task(self._dispatch_message(topic, payload_str))
+        # Note: gmqtt callbacks run in a background thread, so we use run_coroutine_threadsafe
+        try:
+            loop = asyncio.get_running_loop()
+            asyncio.run_coroutine_threadsafe(self._dispatch_message(topic, payload_str), loop)
+        except Exception as e:
+            logger.error(f"Failed to dispatch MQTT message: {e}")
 
     def _on_disconnect(self, client, packet, exc=None):
         """Callback when disconnected from MQTT broker."""
@@ -37,7 +45,7 @@ class MQTTManager:
 
     def _on_subscribe(self, client, mid, qos, properties):
         """Callback when subscription is confirmed."""
-        logger.debug(f"Subscribed with mid {mid}, qos {qos}")
+        logger.info(f"Subscribed with mid {mid}, qos {qos}")
 
     async def connect(self):
         """
@@ -79,7 +87,11 @@ class MQTTManager:
             # Connect to broker
             await self.client.connect(host, port=port, keepalive=60)
 
-            logger.info(f"MQTT connection initiated to {host}:{port}")
+            logger.info(f"Connected to MQTT broker at {mqtt_url}")
+            # Subscribe to all registered topics directly after connection
+            for topic, qos in self._pending_subscriptions:
+                self.client.subscribe(topic, qos=qos)
+                logger.info(f"Subscribed to MQTT topic: {topic}")
 
         except Exception as e:
             logger.error(f"Failed to connect to MQTT broker: {e}")
@@ -108,9 +120,11 @@ class MQTTManager:
         Supports MQTT wildcard matching (# for multi-level, + for single-level).
         """
         matched = False
+        logger.info(f"Dispatching message on topic: {topic}, registered handlers: {list(self._handlers.keys())}")
 
         # Direct match
         if topic in self._handlers:
+            logger.info(f"Direct match found for topic: {topic}")
             for callback in self._handlers[topic]:
                 try:
                     await callback(topic, payload)
@@ -122,6 +136,7 @@ class MQTTManager:
         topic_parts = topic.split("/")
         for pattern, callbacks in self._handlers.items():
             if self._topic_matches(pattern, topic_parts):
+                logger.info(f"Wildcard match found: pattern={pattern}, topic={topic}")
                 for callback in callbacks:
                     try:
                         await callback(topic, payload)
@@ -130,15 +145,12 @@ class MQTTManager:
                         logger.error(f"MQTT wildcard handler error for {topic}: {e}")
 
         if not matched:
-            logger.debug(f"No handler matched topic: {topic}")
+            logger.warning(f"No handler matched topic: {topic}")
 
     def _topic_matches(self, pattern: str, topic_parts: List[str]) -> bool:
         """
         Check if a topic matches a subscription pattern with wildcards.
         """
-        if pattern == topic_parts:
-            return True
-
         pattern_parts = pattern.split("/")
         pattern_len = len(pattern_parts)
         topic_len = len(topic_parts)
@@ -202,8 +214,8 @@ mqtt_manager = MQTTManager()
 {% if mqtt.callbacks %}
 try:
     import app.consumers.mqtt
-except ImportError:
-    pass
+except Exception as e:
+    logger.error(f"Failed to import app.consumers.mqtt: {e}")
 {% endif %}
 {% else %}
 # MQTT not configured in site_config.json

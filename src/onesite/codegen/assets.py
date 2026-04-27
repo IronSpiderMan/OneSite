@@ -211,7 +211,15 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         # Generate MQTT callback files
         callbacks = mqtt_config.get("callbacks", [])
         if callbacks:
-            mqtt_consumers_dir = backend_path / "app" / "consumers" / "mqtt"
+            consumers_dir = backend_path / "app" / "consumers"
+            consumers_dir.mkdir(parents=True, exist_ok=True)
+            # Create __init__.py for consumers package
+            consumers_init = consumers_dir / "__init__.py"
+            if not consumers_init.exists():
+                consumers_init.write_text("")
+                console.print("Generated consumers __init__.py")
+
+            mqtt_consumers_dir = consumers_dir / "mqtt"
             mqtt_consumers_dir.mkdir(parents=True, exist_ok=True)
 
             # Generate __init__.py
