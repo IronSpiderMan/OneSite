@@ -264,19 +264,27 @@ Example: `post_id` then `tag_id` means `Post` gets `tag_ids` and `GET /posts/{id
 
 #### Model Actions
 
-OneSite allows you to define custom "actions" for your models. An action is a predefined set of field updates that can be triggered from the UI with a single click.
+OneSite allows you to define custom "actions" for your models. An action is a predefined set of field updates with optional conditions that can be triggered from the UI with a single click.
 
 ```python
 class AlarmStatus(str, Enum):
     ACTIVE = "ACTIVE"
+    RECOVERED = "RECOVERED"
     ACKED = "ACKED"
 
 class AlarmRecord(SQLModel, table=True):
     __onesite__ = {
         "actions": {
             "ack": {
-                "status": "ACKED",
-                "user_id": "{{user_id}}" # Automatically resolved to current user ID
+                "condition": {
+                    "field": "status",
+                    "op": "in",
+                    "value": ["ACTIVE", "RECOVERED"]
+                },
+                "data": {
+                    "status": "ACKED",
+                    "user_id": "{{user_id}}"
+                }
             }
         }
     }
@@ -286,8 +294,28 @@ class AlarmRecord(SQLModel, table=True):
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")
 ```
 
+**Supported Condition Operators:**
+
+| Operator | Description | Example |
+|----------|-------------|---------|
+| `eq` | Equal | `{"op": "eq", "value": "ACTIVE"}` |
+| `ne` | Not equal | `{"op": "ne", "value": "PENDING"}` |
+| `in` | Value in list | `{"op": "in", "value": ["ACTIVE", "RECOVERED"]}` |
+| `not_in` | Value not in list | `{"op": "not_in", "value": ["CLOSED"]}` |
+| `gt` | Greater than | `{"op": "gt", "value": 0}` |
+| `gte` | Greater than or equal | `{"op": "gte", "value": 10}` |
+| `lt` | Less than | `{"op": "lt", "value": 100}` |
+| `lte` | Less than or equal | `{"op": "lte", "value": 50}` |
+| `contains` | String contains | `{"op": "contains", "value": "error"}` |
+| `startswith` | String starts with | `{"op": "startswith", "value": "tmp_"}` |
+| `endswith` | String ends with | `{"op": "endswith", "value": ".tmp"}` |
+| `is_null` | Value is null | `{"op": "is_null"}` |
+| `is_not_null` | Value is not null | `{"op": "is_not_null"}` |
+
 Generated features:
-- **Action Buttons**: OneSite automatically adds buttons for each defined action in the list page table rows.
+- **Action Buttons**: OneSite automatically adds buttons for each defined action in the list page table rows and detail page.
+- **Frontend Condition Check**: Buttons are hidden when the condition is not met based on current row data.
+- **Backend Validation**: The API endpoint validates conditions before performing updates; returns 400 error if not met.
 - **Dynamic Field Updates**: Clicking the button sends a request to a dedicated endpoint (e.g., `POST /api/v1/alarm_records/{id}/actions/ack`) which performs the configured updates.
 - **User ID Resolution**: The `{{user_id}}` placeholder is automatically resolved to the ID of the authenticated user performing the action at runtime.
 - **Type Safety**: Actions use the model's generated Update schema, ensuring type consistency and validation.

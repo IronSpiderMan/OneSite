@@ -404,21 +404,61 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
     obj = await service.get(session, id)
     if not obj:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
-    
+
     import json
     action_data = json.loads("""{{ action_config | tojson }}""")
-    
-    # Resolve special placeholders
+
+    # Check condition if defined
+    condition = action_data.get("condition")
+    if condition:
+        field = condition.get("field")
+        op = condition.get("op")
+        expected_value = condition.get("value")
+        actual_value = getattr(obj, field, None)
+
+        # Evaluate condition
+        condition_passed = False
+        if op == "eq":
+            condition_passed = actual_value == expected_value
+        elif op == "ne":
+            condition_passed = actual_value != expected_value
+        elif op == "in":
+            condition_passed = actual_value in (expected_value if isinstance(expected_value, list) else [expected_value])
+        elif op == "not_in":
+            condition_passed = actual_value not in (expected_value if isinstance(expected_value, list) else [expected_value])
+        elif op == "gt":
+            condition_passed = actual_value > expected_value
+        elif op == "gte":
+            condition_passed = actual_value >= expected_value
+        elif op == "lt":
+            condition_passed = actual_value < expected_value
+        elif op == "lte":
+            condition_passed = actual_value <= expected_value
+        elif op == "contains":
+            condition_passed = expected_value in actual_value if actual_value else False
+        elif op == "startswith":
+            condition_passed = str(actual_value).startswith(expected_value) if actual_value else False
+        elif op == "endswith":
+            condition_passed = str(actual_value).endswith(expected_value) if actual_value else False
+        elif op == "is_null":
+            condition_passed = actual_value is None
+        elif op == "is_not_null":
+            condition_passed = actual_value is not None
+
+        if not condition_passed:
+            raise HTTPException(status_code=400, detail=f"Action '{{ action_name }}' not allowed: condition not met")
+
+    # Resolve special placeholders in data
     resolved_data = {}
-    for k, v in action_data.items():
+    for k, v in action_data.get("data", {}).items():
         if isinstance(v, str) and v == "{% raw %}{{user_id}}{% endraw %}":
             resolved_data[k] = current_user.id
         else:
             resolved_data[k] = v
-            
+
     try:
         update_obj = {{ model.name }}Update(**resolved_data)
-        return await service.update(session, obj, update_obj)
+        return await service.update(session, id, update_obj)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
 {% endfor %}

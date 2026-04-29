@@ -626,6 +626,30 @@ const {{ model.name }}Page: React.FC = () => {
                         <>
                         {% if model.actions %}
                         {% for action_name, action_config in model.actions.items() %}
+                        {(() => {
+                            const cond = {{ action_config.condition | tojson }};
+                            let enabled = true;
+                            if (cond) {
+                                const field = cond.field;
+                                const op = cond.op;
+                                const expected = cond.value;
+                                const actual = item[field];
+                                if (op === 'eq') enabled = actual === expected;
+                                else if (op === 'ne') enabled = actual !== expected;
+                                else if (op === 'in') enabled = Array.isArray(expected) ? expected.includes(actual) : false;
+                                else if (op === 'not_in') enabled = Array.isArray(expected) ? !expected.includes(actual) : true;
+                                else if (op === 'gt') enabled = actual > expected;
+                                else if (op === 'gte') enabled = actual >= expected;
+                                else if (op === 'lt') enabled = actual < expected;
+                                else if (op === 'lte') enabled = actual <= expected;
+                                else if (op === 'contains') enabled = actual?.includes(expected);
+                                else if (op === 'startswith') enabled = String(actual).startsWith(expected);
+                                else if (op === 'endswith') enabled = String(actual).endsWith(expected);
+                                else if (op === 'is_null') enabled = actual === null || actual === undefined;
+                                else if (op === 'is_not_null') enabled = actual !== null && actual !== undefined;
+                            }
+                            return enabled;
+                        })() && (
                         <Button
                             variant="outline"
                             size="sm"
@@ -642,6 +666,7 @@ const {{ model.name }}Page: React.FC = () => {
                         >
                             {{ action_name }}
                         </Button>
+                        )}
                         {% endfor %}
                         {% endif %}
                         </>
