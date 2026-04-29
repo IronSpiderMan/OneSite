@@ -1,0 +1,6 @@
+# Tasks module
+# Auto-generated - do not edit manually
+
+{% for task in tasks %}
+from app.tasks import {{ task.name }}
+{% endfor %}

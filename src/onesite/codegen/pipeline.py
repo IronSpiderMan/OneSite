@@ -581,52 +581,6 @@ def generate_code():
     scheduled_tasks = site_config.get("scheduled_tasks", [])
     update_api_router(api_models, backend_path / "app" / "api" / "api.py", scheduled_tasks)
 
-    if scheduled_tasks:
-        # Group tasks by module (extracted from func path like "app.tasks.alarm:daily_summary")
-        tasks_by_module: Dict[str, List[dict]] = {}
-        for task in scheduled_tasks:
-            func_path = task.get("func", "")
-            if ":" in func_path:
-                module_path = func_path.split(":")[0]  # e.g. "app.tasks.alarm"
-                module_name = module_path.split(".")[-1]  # e.g. "alarm"
-            else:
-                module_name = "default"
-                module_path = "app.tasks.default"
-
-            if module_name not in tasks_by_module:
-                tasks_by_module[module_name] = []
-
-            tasks_by_module[module_name].append({
-                "name": task.get("name", ""),
-                "func": func_path,
-                "cron": task.get("cron", "0 0 * * *"),
-                "description": task.get("description", ""),
-                "enabled": task.get("enabled", True),
-            })
-
-        # Generate task files for each module
-        for module_name, tasks in tasks_by_module.items():
-            task_file_path = backend_path / "app" / "tasks" / f"{module_name}.py"
-            # Only generate if file doesn't exist (don't overwrite existing user code)
-            if not task_file_path.exists():
-                generate_file(
-                    "app_tasks.py.j2",
-                    {"tasks": tasks},
-                    task_file_path,
-                )
-                console.print(f"Generated task file: {module_name}.py")
-
-        # Generate/overwrite tasks __init__.py when there are tasks
-        tasks_init = backend_path / "app" / "tasks" / "__init__.py"
-        init_content = f"""# Tasks module
-# Auto-generated - do not edit manually
-
-"""
-        for module_name in tasks_by_module.keys():
-            init_content += f"from app.tasks import {module_name}\n"
-        tasks_init.write_text(init_content)
-        console.print("Updated tasks __init__.py")
-
     system_model = next((m for m in found_models if m["module_name"] == "system_config" and m["name"] == "SystemConfig"), None)
     custom_model = next((m for m in found_models if m["module_name"] == "custom_config" and m["name"] == "CustomConfig"), None)
     generate_file("settings_page.tsx.j2", {"system_model": system_model, "custom_model": custom_model}, cwd / "frontend" / "src" / "pages" / "Settings.tsx")

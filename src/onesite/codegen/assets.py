@@ -187,6 +187,24 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         generate_file("app_tasks_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "tasks.py")
         console.print("Generated tasks API endpoint")
 
+        # Generate each task as a separate file (only if function doesn't exist)
+        tasks = site_config["scheduled_tasks"]
+        for task in tasks:
+            task_name = task.get("name", "")
+            if not task_name:
+                continue
+
+            task_file = backend_path / "app" / "tasks" / f"{task_name}.py"
+            if not _function_exists(task_file, task_name):
+                generate_file("task.py.j2", {"task": task}, task_file)
+                console.print(f"Generated task: {task_name}")
+            else:
+                console.print(f"Skipped existing task: {task_name}")
+
+        # Generate __init__.py for tasks package
+        generate_file("tasks_init.py.j2", {"tasks": tasks}, backend_path / "app" / "tasks" / "__init__.py")
+        console.print("Generated tasks __init__.py")
+
     if site_config.get("redis"):
         generate_file("redis.py.j2", {"redis": site_config["redis"]}, backend_path / "app" / "core" / "redis.py")
 

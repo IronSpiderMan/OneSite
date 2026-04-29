@@ -1,0 +1,22 @@
+# Task: {{ task.name }}
+# Description: {{ task.description }}
+from app.core.scheduler import task_registry
+
+
+async def {{ task.name }}():
+    """
+    {{ task.description }}
+    """
+    # TODO: 实现业务逻辑
+    pass
+
+
+# 注册任务
+task_registry.register({
+    "name": "{{ task.name }}",
+    "func": "app.tasks.{{ task.name }}:{{ task.name }}",
+    "cron": "{{ task.cron | default('') }}",
+    "interval": {{ task.interval | default(0) }},
+    "description": "{{ task.description }}",
+    "enabled": {{ True if task.enabled else False }},
+})
