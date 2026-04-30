@@ -267,6 +267,17 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         en_model = {"name": model_name_en, "fields": {}}
         zh_model = {"name": model_name_zh, "fields": {}}
 
+        # Generate translations for model groups (e.g., settings.groups.general)
+        site_props = model.get("site_props", {})
+        groups = site_props.get("groups", [])
+        for g in groups:
+            group_key = g.get("key")
+            if group_key:
+                label_en = g.get("en", group_key)
+                label_zh = g.get("zh", g.get("en", group_key))
+                set_by_path(en_translations, f"settings.groups.{group_key}", label_en)
+                set_by_path(zh_translations, f"settings.groups.{group_key}", label_zh)
+
         for field in model["fields"]:
             field_name = field["name"]
             label_en = field_name.replace("_", " ").title()

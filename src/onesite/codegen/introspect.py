@@ -208,6 +208,10 @@ def get_model_fields(
 
         info = sa_column_kwargs.get("info", {})
         site_props = info.get("site_props", {})
+        # Also support group directly in info (for backward compatibility)
+        if "group" in info and not site_props.get("group"):
+            site_props = dict(site_props)
+            site_props["group"] = info["group"]
         if not site_props:
             json_schema_extra = getattr(field, "json_schema_extra", None)
             if json_schema_extra is PydanticUndefined or json_schema_extra is None:
@@ -470,6 +474,9 @@ def get_model_fields(
         # Check if local storage
         is_local_storage = site_props.get("storage") == "local" or frontend_only
 
+        # Get field group for UI grouping
+        field_group = site_props.get("group")
+
         default_value = None if field.default is PydanticUndefined else field.default
         if is_enum and default_value is not None and hasattr(default_value, "value"):
             default_value = default_value.value
@@ -505,6 +512,7 @@ def get_model_fields(
                 "translations": translations,
                 "is_unique": is_unique,
                 "is_local_storage": is_local_storage,
+                "group": field_group,
             }
         )
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Loader2, Save } from 'lucide-react';
+import { Loader2, Save, ChevronRight, ChevronDown } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -25,6 +25,7 @@ const SettingsPage: React.FC = () => {
   const { t, i18n } = useTranslation();
   const [isSavingSystem, setIsSavingSystem] = useState(false);
   const [isSavingCustom, setIsSavingCustom] = useState(false);
+  const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const { register, handleSubmit, reset, control } = useForm();
 
   {% if system_model %}
@@ -129,7 +130,41 @@ const SettingsPage: React.FC = () => {
     }
   };
 
+  const toggleGroup = (groupKey: string) => {
+    setExpandedGroups(prev => {
+      const next = new Set(prev);
+      if (next.has(groupKey)) {
+        next.delete(groupKey);
+      } else {
+        next.add(groupKey);
+      }
+      return next;
+    });
+  };
+
   const showSystemSection = systemData !== null;
+
+  {#
+  Build groups list with 'default' first:
+  - If system_model has groups defined, add 'default' if not present and put it first
+  - If no groups defined, use single 'default' group
+  #}
+  {% if system_model and system_model.site_props.groups %}
+  {% set defined_groups = system_model.site_props.groups %}
+  {% set has_default = false %}
+  {% for g in defined_groups %}
+  {% if g.key == 'default' %}
+  {% set has_default = true %}
+  {% endif %}
+  {% endfor %}
+  {% if has_default %}
+  {% set system_groups = defined_groups %}
+  {% else %}
+  {% set system_groups = [{'key': 'default'}] + defined_groups %}
+  {% endif %}
+  {% else %}
+  {% set system_groups = [{'key': 'default'}] %}
+  {% endif %}
 
   return (
     <div className="max-w-4xl mx-auto space-y-6">
@@ -148,103 +183,132 @@ const SettingsPage: React.FC = () => {
               </div>
 
               {% if system_model %}
+              {% for group in system_groups %}
+              {% set group_key = group.key %}
+              {% set group_fields = [] %}
               {% for field in system_model.fields %}
               {% if 'u' in field.permissions and field.name != 'id' %}
-              <div className="space-y-2">
-                <Label htmlFor="{{ field.name }}">
-                  {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
-                </Label>
+              {% if field.group == group_key or (not field.group and group_key == 'default') %}
+              {% set _ = group_fields.append(field) %}
+              {% endif %}
+              {% endif %}
+              {% endfor %}
+              {% if group_fields %}
+              <div className="border rounded-lg overflow-hidden">
+                <button
+                  type="button"
+                  onClick={() => toggleGroup('{{ group_key }}')}
+                  className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                >
+                  <span className="font-medium">{t('settings.groups.{{ group_key }}', '{{ group_key }}')}</span>
+                  {expandedGroups.has('{{ group_key }}') ? (
+                    <ChevronDown className="w-5 h-5 text-gray-500" />
+                  ) : (
+                    <ChevronRight className="w-5 h-5 text-gray-500" />
+                  )}
+                </button>
+                {expandedGroups.has('{{ group_key }}') && (
+                  <div className="p-4 space-y-4">
+                    {% for field in group_fields %}
+                    <div className="space-y-2">
+                      <Label htmlFor="{{ field.name }}">
+                        {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+                      </Label>
 
-                {% if field.ui_type == 'bool' %}
-                <div className="flex items-center space-x-2">
-                  <Controller
-                    name="{{ field.name }}"
-                    control={control}
-                    render={({ field: { onChange, value } }) => (
-                      <Switch checked={!!value} onCheckedChange={onChange} />
-                    )}
-                  />
-                </div>
-                {% elif field.ui_type == 'image' %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <ImageUpload value={value} onChange={onChange} />
-                  )}
-                />
-                {% elif field.ui_type == 'file' %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <FileUpload value={value} onChange={onChange} />
-                  )}
-                />
-                {% elif field.ui_type == 'json' %}
-                  {% if field.json_model_schema %}
-                    {% if field.json_kind == 'array' %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <JsonModelArrayEditor value={value} onChange={onChange} schema={{ field.json_item_schema | tojson }} />
-                  )}
-                />
-                    {% else %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} />
-                  )}
-                />
-                    {% endif %}
-                  {% else %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <JsonInput value={value} onChange={onChange} />
-                  )}
-                />
-                  {% endif %}
-                {% elif field.ui_type == 'time' %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <TimePicker
-                      value={value}
-                      onChange={onChange}
-                      placeholder={t('common.select_time', 'Select time')}
-                    />
-                  )}
-                />
-                {% elif field.is_enum %}
-                <Controller
-                  name="{{ field.name }}"
-                  control={control}
-                  render={({ field: { onChange, value } }) => (
-                    <Select value={value || ''} onValueChange={onChange}>
-                      <SelectTrigger>
-                        <SelectValue placeholder={t('common.select', 'Select...')} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {% for enum_val in field.enum_values %}
-                        <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
-                        {% endfor %}
-                      </SelectContent>
-                    </Select>
-                  )}
-                />
-                {% else %}
-                <Input
-                  id="{{ field.name }}"
-                  type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
-                  {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
-                />
-                {% endif %}
+                      {% if field.ui_type == 'bool' %}
+                      <div className="flex items-center space-x-2">
+                        <Controller
+                          name="{{ field.name }}"
+                          control={control}
+                          render={({ field: { onChange, value } }) => (
+                            <Switch checked={!!value} onCheckedChange={onChange} />
+                          )}
+                        />
+                      </div>
+                      {% elif field.ui_type == 'image' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <ImageUpload value={value} onChange={onChange} />
+                        )}
+                      />
+                      {% elif field.ui_type == 'file' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <FileUpload value={value} onChange={onChange} />
+                        )}
+                      />
+                      {% elif field.ui_type == 'json' %}
+                        {% if field.json_model_schema %}
+                          {% if field.json_kind == 'array' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } />
+                        )}
+                      />
+                          {% else %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } />
+                        )}
+                      />
+                          {% endif %}
+                        {% else %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <JsonInput value={value} onChange={onChange} />
+                        )}
+                      />
+                        {% endif %}
+                      {% elif field.ui_type == 'time' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <TimePicker
+                            value={value}
+                            onChange={onChange}
+                            placeholder={t('common.select_time', 'Select time')}
+                          />
+                        )}
+                      />
+                      {% elif field.is_enum %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <Select value={value || ''} onValueChange={onChange}>
+                            <SelectTrigger>
+                              <SelectValue placeholder={t('common.select', 'Select...')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {% for enum_val in field.enum_values %}
+                              <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+                              {% endfor %}
+                            </SelectContent>
+                          </Select>
+                        )}
+                      />
+                      {% else %}
+                      <Input
+                        id="{{ field.name }}"
+                        type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
+                        {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
+                      />
+                      {% endif %}
+                    </div>
+                    {% endfor %}
+                  </div>
+                )}
               </div>
               {% endif %}
               {% endfor %}
@@ -305,7 +369,7 @@ const SettingsPage: React.FC = () => {
                 name="{{ field.name }}"
                 control={control}
                 render={({ field: { onChange, value } }) => (
-                  <JsonModelArrayEditor value={value} onChange={onChange} schema={{ field.json_item_schema | tojson }} />
+                  <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } />
                 )}
               />
                   {% else %}
@@ -313,7 +377,7 @@ const SettingsPage: React.FC = () => {
                 name="{{ field.name }}"
                 control={control}
                 render={({ field: { onChange, value } }) => (
-                  <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} />
+                  <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } />
                 )}
               />
                   {% endif %}
