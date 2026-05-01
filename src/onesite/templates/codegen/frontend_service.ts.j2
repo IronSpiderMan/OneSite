@@ -7,6 +7,9 @@ export interface {{ model.name }} {
 {% for field in model.fields %}
     {% if field.name != 'id' and 'r' in field.permissions %}
     {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+    {% if field.fk_info %}
+    {{ field.name }}_label?: string;
+    {% endif %}
     {% endif %}
 {% endfor %}
 }

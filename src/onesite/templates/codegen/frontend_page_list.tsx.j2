@@ -633,7 +633,7 @@ const {{ model.name }}Page: React.FC = () => {
                                 const field = cond.field;
                                 const op = cond.op;
                                 const expected = cond.value;
-                                const actual = item[field];
+                                const actual = (item as any)[field];
                                 if (op === 'eq') enabled = actual === expected;
                                 else if (op === 'ne') enabled = actual !== expected;
                                 else if (op === 'in') enabled = Array.isArray(expected) ? expected.includes(actual) : false;
@@ -643,8 +643,8 @@ const {{ model.name }}Page: React.FC = () => {
                                 else if (op === 'lt') enabled = actual < expected;
                                 else if (op === 'lte') enabled = actual <= expected;
                                 else if (op === 'contains') enabled = actual?.includes(expected);
-                                else if (op === 'startswith') enabled = String(actual).startsWith(expected);
-                                else if (op === 'endswith') enabled = String(actual).endsWith(expected);
+                                else if (op === 'startswith') enabled = String(actual).startsWith(String(expected));
+                                else if (op === 'endswith') enabled = String(actual).endsWith(String(expected));
                                 else if (op === 'is_null') enabled = actual === null || actual === undefined;
                                 else if (op === 'is_not_null') enabled = actual !== null && actual !== undefined;
                             }
