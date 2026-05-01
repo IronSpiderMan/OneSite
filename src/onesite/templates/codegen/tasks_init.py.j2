@@ -2,5 +2,5 @@
 # Auto-generated - do not edit manually
 
 {% for task in tasks %}
-from app.tasks import {{ task.name }}
+from app.tasks.{{ task.name }} import {{ task.name }}
 {% endfor %}
