@@ -8,6 +8,7 @@ from app.models.user import User
 from sqlmodel import select, func, col
 {% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.is_notification_table %}, {{ model.name }}Send{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
@@ -372,7 +373,11 @@ async def delete_{{ model.lower_name }}(
     if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     {% endif %}
-    deleted = await service.delete(session, id)
+    try:
+        deleted = await service.delete(session, id)
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="Cannot delete: related records still exist")
     return {"deleted": deleted}
 
 @router.post("/bulk_delete")
@@ -388,8 +393,12 @@ async def bulk_delete_{{ model.lower_name }}(
     for id in ids:
         obj = await service.get(session, id)
         if obj:
-            await service.delete(session, id)
-            deleted_count += 1
+            try:
+                await service.delete(session, id)
+                deleted_count += 1
+            except IntegrityError:
+                await session.rollback()
+                raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
     return {"deleted": deleted_count}
 
 {% if model.actions %}

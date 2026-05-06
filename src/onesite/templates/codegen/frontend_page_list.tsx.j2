@@ -251,8 +251,9 @@ const {{ model.name }}Page: React.FC = () => {
     try {
       await deleteItem(deleteId);
       toast.success(t('toast.delete_success', 'Deleted'));
-    } catch (error) {
-      toast.error(t('toast.delete_failed', 'Delete failed'));
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || t('toast.delete_failed', 'Delete failed');
+      toast.error(detail);
       console.error(error);
     } finally {
       setIsDeleting(false);
@@ -282,8 +283,9 @@ const {{ model.name }}Page: React.FC = () => {
       await bulkDeleteItem(selectedIds);
       toast.success(t('toast.delete_success', 'Deleted'));
       setSelectedIds([]);
-    } catch (error) {
-      toast.error(t('toast.delete_failed', 'Delete failed'));
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || t('toast.delete_failed', 'Delete failed');
+      toast.error(detail);
       console.error(error);
     } finally {
       setIsBulkDeleting(false);
