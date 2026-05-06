@@ -1,6 +1,6 @@
-from typing import List, Any, Optional
+from typing import List, Any, Optional, Annotated
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
-from fastapi import APIRouter, Depends, HTTPException, Query{% if model.is_notification_table or model.actions or model.importable %}, Body{% endif %}{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
+from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
 {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" %}
 from app.models.user import User
 {% endif %}
@@ -351,7 +351,7 @@ async def update_{{ model.lower_name }}(
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, int]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -372,14 +372,14 @@ async def delete_{{ model.lower_name }}(
     if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
     {% endif %}
-    {{ model.lower_name }} = await service.delete(session, id)
-    return {{ model.lower_name }}
+    deleted = await service.delete(session, id)
+    return {"deleted": deleted}
 
 @router.post("/bulk_delete")
 async def bulk_delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    ids: List[int],
+    ids: Annotated[List[int], Body(embed=True)],
 ) -> Any:
     """
     Delete multiple {{ model.name }} records by their IDs.
