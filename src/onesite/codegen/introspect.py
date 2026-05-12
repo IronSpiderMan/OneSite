@@ -113,6 +113,10 @@ def get_model_fields(
     refresh_interval = model_site_props.get("refresh_interval", 5000)
     reverse_fk_display = model_site_props.get("reverse_fk_display", True)
     actions = model_site_props.get("actions", {})
+    # Normalize action-level permissions (default: developer + admin)
+    for action_config in actions.values():
+        if isinstance(action_config, dict):
+            action_config.setdefault("permissions", "da")
     is_notification_table = bool(model_site_props.get("is_notification_table", False))
     union_key = model_site_props.get("union_key", None)
     importable = model_site_props.get("importable", False)

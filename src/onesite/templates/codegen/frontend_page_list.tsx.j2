@@ -630,11 +630,13 @@ const {{ model.name }}Page: React.FC = () => {
                     {% endif %}
                     {% endfor %}
                     <TableCell className="flex items-center gap-2">
-                        {hasPermission('u') && (
                         <>
                         {% if model.actions %}
                         {% for action_name, action_config in model.actions.items() %}
                         {(() => {
+                            const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
+                            const roleChar = userRole[0];
+                            if (!actionPerms.includes(roleChar)) return false;
                             const cond = {{ action_config.get("condition", None) | tojson }};
                             let enabled = true;
                             if (cond) {
@@ -678,7 +680,6 @@ const {{ model.name }}Page: React.FC = () => {
                         {% endfor %}
                         {% endif %}
                         </>
-                        )}
                         {hasPermission('r') && (
                         <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}>
                             <Eye className="h-4 w-4" />

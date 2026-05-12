@@ -50,6 +50,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
     const { fetchItem, currentItem, loading } = use{{ model.name }}Store();
+    const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
     
     // State to store resolved foreign key data
     {% for fk in model.foreign_keys %}
@@ -244,6 +245,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% if model.actions %}
                 {% for action_name, action_config in model.actions.items() %}
                 {(() => {
+                    const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
+                    const roleChar = userRole[0];
+                    if (!actionPerms.includes(roleChar)) return false;
                     const cond = {{ action_config.get("condition", None) | tojson }};
                     let enabled = true;
                     if (cond && currentItem) {

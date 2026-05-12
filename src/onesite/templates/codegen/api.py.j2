@@ -421,6 +421,13 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
     import json
     action_data = json.loads("""{{ action_config | tojson }}""")
 
+    # Check action-level permissions
+    action_perms = action_data.get("permissions", "da")
+    role_char_map = {"user": "u", "admin": "a", "developer": "d"}
+    user_role_char = role_char_map.get(current_user.role.value, "")
+    if user_role_char not in action_perms:
+        raise HTTPException(status_code=403, detail="Permission denied")
+
     # Check condition if defined
     condition = action_data.get("condition")
     if condition:

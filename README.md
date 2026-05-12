@@ -319,6 +319,34 @@ Generated features:
 - **Dynamic Field Updates**: Clicking the button sends a request to a dedicated endpoint (e.g., `POST /api/v1/alarm_records/{id}/actions/ack`) which performs the configured updates.
 - **Placeholder Resolution**: The `{{user_id}}` placeholder is automatically resolved to the ID of the authenticated user. The `{{value}}` placeholder allows referencing and operating on a field's current value (see below).
 - **Type Safety**: Actions use the model's generated Update schema, ensuring type consistency and validation.
+- **Action-Level Permissions**: Each action can define its own `permissions` field to control which roles can execute it. Role mapping: `d` = developer, `a` = admin, `u` = user. Default is `"da"` (developer + admin). Set `"dau"` for all roles, `"d"` for developer only, etc.
+
+Example with per-action permissions:
+```python
+__onesite__ = {
+    "actions": {
+        "switch": {
+            "permissions": "da",          # Only admin and developer can toggle
+            "data": {
+                "is_enabled": '!{{value}}'
+            }
+        },
+        "ack": {
+            "permissions": "dau",         # All roles can acknowledge
+            "condition": {
+                "field": "status",
+                "op": "in",
+                "value": ["ACTIVE", "RECOVERED"]
+            },
+            "data": {
+                "status": "ACKED",
+                "user_id": "{{user_id}}"
+            }
+        }
+    }
+}
+```
+The permission check is enforced on both the **frontend** (button visibility) and the **backend** (API returns 403 for unauthorized roles).
 
 #### `{{value}}` Expressions
 
