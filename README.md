@@ -317,8 +317,49 @@ Generated features:
 - **Frontend Condition Check**: Buttons are hidden when the condition is not met based on current row data.
 - **Backend Validation**: The API endpoint validates conditions before performing updates; returns 400 error if not met.
 - **Dynamic Field Updates**: Clicking the button sends a request to a dedicated endpoint (e.g., `POST /api/v1/alarm_records/{id}/actions/ack`) which performs the configured updates.
-- **User ID Resolution**: The `{{user_id}}` placeholder is automatically resolved to the ID of the authenticated user performing the action at runtime.
+- **Placeholder Resolution**: The `{{user_id}}` placeholder is automatically resolved to the ID of the authenticated user. The `{{value}}` placeholder allows referencing and operating on a field's current value (see below).
 - **Type Safety**: Actions use the model's generated Update schema, ensuring type consistency and validation.
+
+#### `{{value}}` Expressions
+
+When configuring `data` for an action, you can use `{{value}}` to reference the current value of the field being updated, and apply operations on it:
+
+```python
+__onesite__ = {
+    "actions": {
+        "switch": {
+            "data": {
+                "is_enabled": '!{{value}}'       # Toggle boolean
+            }
+        },
+        "increment": {
+            "data": {
+                "count": '{{value}} + 1'         # Increment by 1
+            }
+        },
+        "extend_name": {
+            "data": {
+                "name": '{{value}} + "_copy"'    # Append suffix
+            }
+        },
+        "extend_deadline": {
+            "data": {
+                "deadline": '{{value}} + 86400'  # Add 24 hours (in seconds)
+            }
+        }
+    }
+}
+```
+
+**Supported Operations by Field Type:**
+
+| Type | Expressions | Description |
+|------|------------|-------------|
+| `bool` | `!{{value}}` | Toggle the boolean |
+| `int` / `float` | `{{value}} + N`, `{{value}} - N`, `{{value}} * N`, `{{value}} / N` | Arithmetic operations |
+| `str` | `{{value}} + "suffix"` or `{{value}} + 'suffix'` | String concatenation |
+| `datetime` | `{{value}} + N`, `{{value}} - N` | Add/subtract N seconds |
+| any | `{{value}}` | Return the current value as-is |
 
 #### CSV Import & Export
 

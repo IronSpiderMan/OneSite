@@ -244,7 +244,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% if model.actions %}
                 {% for action_name, action_config in model.actions.items() %}
                 {(() => {
-                    const cond = {{ action_config.condition | tojson }};
+                    const cond = {{ action_config.get("condition", None) | tojson }};
                     let enabled = true;
                     if (cond && currentItem) {
                         const field = cond.field;

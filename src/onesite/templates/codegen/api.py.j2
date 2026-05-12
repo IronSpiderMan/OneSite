@@ -462,10 +462,59 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
             raise HTTPException(status_code=400, detail=f"Action '{{ action_name }}' not allowed: condition not met")
 
     # Resolve special placeholders in data
+    import re
+    from datetime import datetime, timedelta
+
     resolved_data = {}
     for k, v in action_data.get("data", {}).items():
         if isinstance(v, str) and v == "{% raw %}{{user_id}}{% endraw %}":
             resolved_data[k] = current_user.id
+        elif isinstance(v, str) and "{% raw %}{{value}}{% endraw %}" in v:
+            current_val = getattr(obj, k, None)
+            v_stripped = v.strip()
+            # Simple {% raw %}{{value}}{% endraw %} - return current value as-is
+            if v_stripped == "{% raw %}{{value}}{% endraw %}":
+                resolved_data[k] = current_val
+            # Boolean toggle: !{% raw %}{{value}}{% endraw %}
+            elif isinstance(current_val, bool) and v_stripped == "!{% raw %}{{value}}{% endraw %}":
+                resolved_data[k] = not current_val
+            # String concatenation: {% raw %}{{value}}{% endraw %} + "suffix"
+            elif isinstance(current_val, str):
+                m = re.match(r'\{\{value\}\}\s*\+\s*["\'](.+?)["\']', v_stripped)
+                if m:
+                    resolved_data[k] = current_val + m.group(1)
+                else:
+                    resolved_data[k] = v
+            # Numeric operations: {% raw %}{{value}}{% endraw %} + N, {% raw %}{{value}}{% endraw %} - N, {% raw %}{{value}}{% endraw %} * N, {% raw %}{{value}}{% endraw %} / N
+            elif isinstance(current_val, (int, float)):
+                m = re.match(r'\{\{value\}\}\s*([+\-*/])\s*(\d+(?:\.\d+)?)', v_stripped)
+                if m:
+                    op, num_str = m.groups()
+                    num = float(num_str) if '.' in num_str else int(num_str)
+                    if op == '+':
+                        resolved_data[k] = current_val + num
+                    elif op == '-':
+                        resolved_data[k] = current_val - num
+                    elif op == '*':
+                        resolved_data[k] = current_val * num
+                    elif op == '/':
+                        resolved_data[k] = current_val / num
+                else:
+                    resolved_data[k] = v
+            # Datetime operations: {% raw %}{{value}}{% endraw %} + N or {% raw %}{{value}}{% endraw %} - N (seconds)
+            elif isinstance(current_val, datetime):
+                m = re.match(r'\{\{value\}\}\s*([+\-])\s*(\d+)', v_stripped)
+                if m:
+                    op, num_str = m.groups()
+                    seconds = int(num_str)
+                    if op == '+':
+                        resolved_data[k] = current_val + timedelta(seconds=seconds)
+                    elif op == '-':
+                        resolved_data[k] = current_val - timedelta(seconds=seconds)
+                else:
+                    resolved_data[k] = v
+            else:
+                resolved_data[k] = v
         else:
             resolved_data[k] = v
 

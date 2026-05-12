@@ -563,7 +563,9 @@ const {{ model.name }}Page: React.FC = () => {
                     {% if 'r' in field.permissions %}
                     <TableCell>
                         {% if field.fk_info %}
+                        <span className="block max-w-[250px] truncate" title={item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}>
                         {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
+                        </span>
                         {% elif field.ui_type == 'bool' %}
                         <Badge variant={item.{{ field.name }} ? "default" : "secondary"}>
                             {item.{{ field.name }} ? 'Yes' : 'No'}
@@ -614,11 +616,15 @@ const {{ model.name }}Page: React.FC = () => {
                         {% elif field.ui_type == 'time' %}
                         <span className="text-muted-foreground">{formatTime(item.{{ field.name }})}</span>
                         {% elif field.ui_type == 'json' %}
+                        <span className="block max-w-[250px] truncate" title={item.{{ field.name }} !== undefined && item.{{ field.name }} !== null ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }})) : '-'}>
                         {item.{{ field.name }} !== undefined && item.{{ field.name }} !== null
                           ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }}))
                           : '-'}
+                        </span>
                         {% else %}
+                        <span className="block max-w-[250px] truncate" title={String(item.{{ field.name }})}>
                         {String(item.{{ field.name }})}
+                        </span>
                         {% endif %}
                     </TableCell>
                     {% endif %}
@@ -629,7 +635,7 @@ const {{ model.name }}Page: React.FC = () => {
                         {% if model.actions %}
                         {% for action_name, action_config in model.actions.items() %}
                         {(() => {
-                            const cond = {{ action_config.condition | tojson }};
+                            const cond = {{ action_config.get("condition", None) | tojson }};
                             let enabled = true;
                             if (cond) {
                                 const field = cond.field;
