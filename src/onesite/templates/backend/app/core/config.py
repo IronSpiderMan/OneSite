@@ -6,7 +6,7 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "{{ project_name }}"
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "changeme"
-    ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24 * 8
+    ACCESS_TOKEN_EXPIRE_MINUTES: int = {{ access_token_expire_minutes }}
     DATABASE_URI: str = "sqlite:///./app.db"
     FIRST_SUPERUSER: str = "admin@example.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin"

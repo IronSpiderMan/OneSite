@@ -50,6 +50,7 @@ def generate_code():
     site_config.setdefault("database_url", "sqlite:///./app.db")
     site_config.setdefault("upload_dir", "uploads")
     site_config.setdefault("secret_key", "changeme")
+    site_config.setdefault("access_token_expire_minutes", 11520)
     site_config.setdefault(
         "allowed_origins",
         [

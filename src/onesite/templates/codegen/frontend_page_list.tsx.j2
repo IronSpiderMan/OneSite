@@ -637,7 +637,7 @@ const {{ model.name }}Page: React.FC = () => {
                             const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
                             const roleChar = userRole[0];
                             if (!actionPerms.includes(roleChar)) return false;
-                            const cond = {{ action_config.get("condition", None) | tojson }};
+                            const cond = {{ action_config.get("condition", None) | tojson }} as any;
                             let enabled = true;
                             if (cond) {
                                 const field = cond.field;

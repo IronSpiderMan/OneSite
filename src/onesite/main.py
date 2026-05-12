@@ -72,6 +72,7 @@ def init():
             "database_url": "sqlite:///./app.db",
             "upload_dir": "uploads",
             "secret_key": "changeme",
+            "access_token_expire_minutes": 11520,
             "allowed_origins": [
                 "http://localhost:5173",
                 "http://localhost:3000",
@@ -138,6 +139,7 @@ def create(
     if config_file.exists():
         content = config_file.read_text()
         content = content.replace("{{ project_name }}", project_name)
+        content = content.replace("{{ access_token_expire_minutes }}", "11520")
         config_file.write_text(content)
 
     index_html = target_dir / "frontend/index.html"
@@ -153,6 +155,7 @@ def create(
         "database_url": "sqlite:///./app.db",
         "upload_dir": "uploads",
         "secret_key": "changeme",
+        "access_token_expire_minutes": 11520,
         "allowed_origins": ["http://localhost:5173", "http://localhost:3000"]
     }
     (target_dir / "site_config.json").write_text(json.dumps(site_config, indent=4))
