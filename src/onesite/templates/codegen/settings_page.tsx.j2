@@ -151,13 +151,13 @@ const SettingsPage: React.FC = () => {
   #}
   {% if system_model and system_model.site_props.groups %}
   {% set defined_groups = system_model.site_props.groups %}
-  {% set has_default = false %}
+  {% set ns = namespace(has_default=false) %}
   {% for g in defined_groups %}
   {% if g.key == 'default' %}
-  {% set has_default = true %}
+  {% set ns.has_default = true %}
   {% endif %}
   {% endfor %}
-  {% if has_default %}
+  {% if ns.has_default %}
   {% set system_groups = defined_groups %}
   {% else %}
   {% set system_groups = [{'key': 'default'}] + defined_groups %}

@@ -645,6 +645,8 @@ class {{ model.name }}Service:
         {% if model.visualize.get('time_field') %}
         time_field: Optional[str] = None,
         period: Optional[str] = "day",
+        start_time: Optional[str] = None,
+        end_time: Optional[str] = None,
         {% endif %}
     ) -> dict:
         """
@@ -664,24 +666,40 @@ class {{ model.name }}Service:
             if period == "day":
                 date_trunc = func.date(time_col)
             elif period == "week":
-                date_trunc = func.date(func.date_trunc('week', time_col))
+                date_trunc = func.strftime('%Y-%W', time_col)
             elif period == "month":
-                date_trunc = func.date(func.date_trunc('month', time_col))
+                date_trunc = func.strftime('%Y-%m', time_col)
             else:
                 date_trunc = func.date(time_col)
 
             if aggregation == "count":
-                stmt = select(date_trunc, func.count(model.id)).group_by(date_trunc)
+                stmt = select(date_trunc, func.count(model.id))
             elif aggregation == "sum":
-                stmt = select(date_trunc, func.coalesce(func.sum(value_col), 0)).group_by(date_trunc)
+                stmt = select(date_trunc, func.coalesce(func.sum(value_col), 0))
             elif aggregation == "avg":
-                stmt = select(date_trunc, func.coalesce(func.avg(value_col), 0)).group_by(date_trunc)
+                stmt = select(date_trunc, func.coalesce(func.avg(value_col), 0))
             elif aggregation == "min":
-                stmt = select(date_trunc, func.min(value_col)).group_by(date_trunc)
+                stmt = select(date_trunc, func.min(value_col))
             elif aggregation == "max":
-                stmt = select(date_trunc, func.max(value_col)).group_by(date_trunc)
+                stmt = select(date_trunc, func.max(value_col))
             else:
-                stmt = select(date_trunc, func.count(model.id)).group_by(date_trunc)
+                stmt = select(date_trunc, func.count(model.id))
+
+            # Apply time range filter
+            if start_time:
+                try:
+                    st = datetime.fromisoformat(start_time)
+                    stmt = stmt.where(time_col >= st)
+                except ValueError:
+                    pass
+            if end_time:
+                try:
+                    et = datetime.fromisoformat(end_time)
+                    stmt = stmt.where(time_col <= et)
+                except ValueError:
+                    pass
+
+            stmt = stmt.group_by(date_trunc)
 
             result = await session.exec(stmt)
             rows = result.all()

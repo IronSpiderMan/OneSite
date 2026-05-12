@@ -56,7 +56,15 @@ const DashboardPage: React.FC = () => {
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
     const [loading, setLoading] = useState(true);
     {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
-    const [period, setPeriod] = useState('day');
+    {% set ns = namespace(has_time_field=false) %}
+    {% for model in models %}
+    {% if model.visualize and model.visualize.get('show') and model.visualize.get('time_field') %}
+    {% set ns.has_time_field = true %}
+    {% endif %}
+    {% endfor %}
+    {% if ns.has_time_field %}
+    const [chartPeriods, setChartPeriods] = useState<Record<string, { period: string; startTime: string; endTime: string }>>({});
+    {% endif %}
     {% endif %}
     {% if scheduled_tasks %}
     const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
@@ -85,7 +93,11 @@ const DashboardPage: React.FC = () => {
             {% for model in models %}
             {% if model.visualize and model.visualize.get('show') %}
             try {
-                const data = await get{{ model.name }}Stats({% if model.visualize.get('time_field') %}period{% endif %});
+                const data = await get{{ model.name }}Stats({% if model.visualize.get('time_field') %}
+                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: '', endTime: '' }).period,
+                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: '', endTime: '' }).startTime || undefined,
+                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: '', endTime: '' }).endTime || undefined
+                {% endif %});
                 results['{{ model.module_name }}'] = data;
             } catch (error) {
                 console.error('Failed to fetch stats for {{ model.module_name }}:', error);
@@ -98,7 +110,7 @@ const DashboardPage: React.FC = () => {
         };
 
         fetchAllStats();
-    }, [{% if models | selectattr('visualize') | selectattr('visualize.show') | list %}period{% endif %}]);
+    }, [{% if models | selectattr('visualize') | selectattr('visualize.show') | list %}{% if ns.has_time_field %}chartPeriods{% endif %}{% endif %}]);
 
     {% if scheduled_tasks %}
     useEffect(() => {
@@ -164,6 +176,9 @@ const DashboardPage: React.FC = () => {
             moduleName: '{{ model.module_name }}',
             chartType: '{{ model.visualize.get('chart_type', 'bar') }}',
             title: '{{ model.visualize.get('title', model.name) }}',
+            {% if model.visualize.get('time_field') %}
+            hasTimeField: true,
+            {% endif %}
         },
         {% endif %}
         {% endfor %}
@@ -261,34 +276,64 @@ const DashboardPage: React.FC = () => {
                 <h1 className="text-3xl font-bold tracking-tight">
                     {t('menu.dashboard', 'Dashboard')}
                 </h1>
-                {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
-                {% set has_time_field = false %}
-                {% for model in models %}
-                {% if model.visualize and model.visualize.get('show') and model.visualize.get('time_field') %}
-                {% set has_time_field = true %}
-                {% endif %}
-                {% endfor %}
-                {% if has_time_field %}
-                <select
-                    className="border rounded-md px-3 py-2 text-sm"
-                    value={period}
-                    onChange={(e) => setPeriod(e.target.value)}
-                >
-                    <option value="day">{t('dashboard.period_day', 'Daily')}</option>
-                    <option value="week">{t('dashboard.period_week', 'Weekly')}</option>
-                    <option value="month">{t('dashboard.period_month', 'Monthly')}</option>
-                </select>
-                {% endif %}
-                {% endif %}
             </div>
 
             {chartModels.length > 0 && (
                 <div className="grid gap-6 md:grid-cols-2">
                     {chartModels.map((chart) => (
                         <div key={chart.moduleName} className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
-                            <h3 className="text-lg font-semibold mb-4">
-                                {t(`models.${chart.moduleName}.name`, chart.title)}
-                            </h3>
+                            <div className="flex items-center justify-between mb-4">
+                                <h3 className="text-lg font-semibold">
+                                    {t(`models.${chart.moduleName}.name`, chart.title)}
+                                </h3>
+                                {chart.hasTimeField && (
+                                    <div className="flex items-center gap-2">
+                                        <input
+                                            type="date"
+                                            className="border rounded-md px-2 py-1.5 text-xs"
+                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).startTime}
+                                            onChange={(e) => setChartPeriods(prev => ({
+                                                ...prev,
+                                                [chart.moduleName]: {
+                                                    period: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).period,
+                                                    startTime: e.target.value,
+                                                    endTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).endTime,
+                                                }
+                                            }))}
+                                        />
+                                        <span className="text-xs text-muted-foreground">—</span>
+                                        <input
+                                            type="date"
+                                            className="border rounded-md px-2 py-1.5 text-xs"
+                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).endTime}
+                                            onChange={(e) => setChartPeriods(prev => ({
+                                                ...prev,
+                                                [chart.moduleName]: {
+                                                    period: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).period,
+                                                    startTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).startTime,
+                                                    endTime: e.target.value,
+                                                }
+                                            }))}
+                                        />
+                                        <select
+                                            className="border rounded-md px-2 py-1.5 text-xs"
+                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).period}
+                                            onChange={(e) => setChartPeriods(prev => ({
+                                                ...prev,
+                                                [chart.moduleName]: {
+                                                    period: e.target.value,
+                                                    startTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).startTime,
+                                                    endTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).endTime,
+                                                }
+                                            }))}
+                                        >
+                                            <option value="day">{t('dashboard.period_day', 'Daily')}</option>
+                                            <option value="week">{t('dashboard.period_week', 'Weekly')}</option>
+                                            <option value="month">{t('dashboard.period_month', 'Monthly')}</option>
+                                        </select>
+                                    </div>
+                                )}
+                            </div>
                             {renderChart(chart.moduleName, chart.chartType, chart.title)}
                         </div>
                     ))}

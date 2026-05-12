@@ -67,12 +67,15 @@ export interface {{ model.name }}Stats {
     title: string;
 }
 
-export const get{{ model.name }}Stats = async ({% if model.visualize.get('time_field') %}period?: string{% endif %}) => {
+export const get{{ model.name }}Stats = async ({% if model.visualize.get('time_field') %}period?: string, startTime?: string, endTime?: string{% endif %}) => {
     let url = `${API_URL}/stats`;
     {% if model.visualize.get('time_field') %}
-    if (period) {
-        url += `?period=${period}`;
-    }
+    const params = new URLSearchParams();
+    if (period) params.append('period', period);
+    if (startTime) params.append('start_time', startTime);
+    if (endTime) params.append('end_time', endTime);
+    const query = params.toString();
+    if (query) url += `?${query}`;
     {% endif %}
     const response = await request.get<{{ model.name }}Stats>(url);
     return response.data;

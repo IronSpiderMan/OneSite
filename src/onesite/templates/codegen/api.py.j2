@@ -144,6 +144,8 @@ async def get_{{ model.lower_name }}_stats(
     session: AsyncSession = Depends(db.get_session),
     {% if model.visualize.get('time_field') %}
     period: Optional[str] = Query("day", description="Time period: day, week, month"),
+    start_time: Optional[str] = Query(None, description="Start time (ISO format, e.g. 2024-01-01)"),
+    end_time: Optional[str] = Query(None, description="End time (ISO format, e.g. 2024-12-31)"),
     {% endif %}
 ) -> Any:
     """
@@ -157,6 +159,8 @@ async def get_{{ model.lower_name }}_stats(
         {% if model.visualize.get('time_field') %}
         time_field="{{ model.visualize.get('time_field') }}",
         period=period,
+        start_time=start_time,
+        end_time=end_time,
         {% endif %}
     )
 {% endif %}
