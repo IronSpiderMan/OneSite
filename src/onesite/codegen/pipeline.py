@@ -235,6 +235,7 @@ def generate_code():
                             "exportable": exportable,
                             "import_key": import_key,
                             "visualize": model_site_props.get("visualize"),
+                            "has_created_at": any(f["name"] == "created_at" for f in fields),
                         }
                     )
 

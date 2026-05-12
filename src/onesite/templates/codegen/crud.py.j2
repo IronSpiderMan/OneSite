@@ -161,12 +161,16 @@ async def get_multi(
         {{ fk.name }}={{ fk.name }},
         {% endfor %}
     )
-    
+
+    {% if model.has_created_at %}
+    statement = statement.order_by(col({{ model.name }}.created_at).desc())
+    {% endif %}
+
     # Apply pagination (skip if size == -1, meaning get all)
     if size != -1:
         skip = (page - 1) * size
         statement = statement.offset(skip).limit(size)
-    
+
     result = await session.exec(statement)
     return list(result.all())
 
