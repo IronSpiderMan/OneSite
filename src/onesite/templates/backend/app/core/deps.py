@@ -31,14 +31,14 @@ async def get_current_user(
         # In a real app, define TokenPayload schema
         user_id = payload.get("sub")
         if user_id is None:
-            raise HTTPException(status_code=403, detail="Could not validate credentials")
+            raise HTTPException(status_code=401, detail="Could not validate credentials")
     except (JWTError, ValidationError):
-        raise HTTPException(status_code=403, detail="Could not validate credentials")
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
 
     try:
         user_id = int(user_id)
     except ValueError:
-        raise HTTPException(status_code=403, detail="Could not validate credentials")
+        raise HTTPException(status_code=401, detail="Could not validate credentials")
 
     user = await session.get(User, user_id)
     if not user:

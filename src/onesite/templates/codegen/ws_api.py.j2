@@ -28,14 +28,15 @@ async def websocket_endpoint(
                 await websocket.close(code=1008)
                 return
 
-            # Note: manager.connect usually calls accept(), but we already did it.
-            # We need to modify manager.connect or just handle it here.
-            if user.id not in manager.active_connections:
-                manager.active_connections[user.id] = set()
-            manager.active_connections[user.id].add(websocket)
+        # Session is closed here — DB connection released back to pool.
+        # The receive loop must NOT hold a DB session: SQLite concurrency
+        # limits will block other WebSocket auth attempts otherwise.
+        if user.id not in manager.active_connections:
+            manager.active_connections[user.id] = set()
+        manager.active_connections[user.id].add(websocket)
 
-            while True:
-                await websocket.receive_text()
+        while True:
+            await websocket.receive_text()
     except WebSocketDisconnect:
         if user:
             manager.disconnect(user.id, websocket)

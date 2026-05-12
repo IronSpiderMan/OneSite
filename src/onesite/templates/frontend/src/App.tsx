@@ -26,11 +26,7 @@ function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/error/:code"
-          element={
-            <RequireAuth>
-              <ErrorPage />
-            </RequireAuth>
-          }
+          element={<ErrorPage />}
         />
         
         <Route path="/" element={

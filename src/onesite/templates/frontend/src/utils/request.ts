@@ -54,7 +54,15 @@ request.interceptors.response.use(
             window.location.href = '/login';
         }
       } else if (error.response.status === 403) {
-        if (!window.location.pathname.startsWith('/error/403')) {
+        // If the 403 is actually an auth failure (stale/expired token),
+        // treat it like 401: clear token and redirect to login
+        const detail = error.response.data?.detail || '';
+        if (detail.includes('Could not validate credentials')) {
+          localStorage.removeItem('token');
+          if (window.location.pathname !== '/login') {
+            window.location.href = '/login';
+          }
+        } else if (!window.location.pathname.startsWith('/error/403')) {
           window.location.href = '/error/403';
         }
       } else if (error.response.status >= 500) {
