@@ -71,25 +71,36 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     console.print("Synced backend .env")
 
     frontend_env = frontend_path / ".env"
+    project_name = config.get("project_name", "OneSite")
     api_url = config.get("api_url", "/api/v1")
 
     f_env_content = ""
     if frontend_env.exists():
         f_env_content = frontend_env.read_text()
 
-    if "VITE_API_URL" not in f_env_content:
-        frontend_path.mkdir(parents=True, exist_ok=True)
-        with frontend_env.open("a") as f:
-            f.write(f"\nVITE_API_URL={api_url}\n")
-        console.print("Updated frontend .env with VITE_API_URL")
-    else:
-        lines = f_env_content.splitlines()
-        updated_lines = []
-        for line in lines:
-            if line.startswith("VITE_API_URL="):
-                updated_lines.append(f"VITE_API_URL={api_url}")
+    f_new_keys = {
+        "VITE_PROJECT_NAME": project_name,
+        "VITE_API_URL": api_url,
+    }
+
+    f_lines = f_env_content.splitlines()
+    f_updated_lines = []
+    for line in f_lines:
+        if "=" in line and not line.startswith("#"):
+            key, _ = line.split("=", 1)
+            key = key.strip()
+            if key in f_new_keys:
+                f_updated_lines.append(f"{key}={f_new_keys[key]}")
+                del f_new_keys[key]
             else:
-                updated_lines.append(line)
-        frontend_env.write_text("\n".join(updated_lines))
-        console.print(f"Updated frontend .env VITE_API_URL to {api_url}")
+                f_updated_lines.append(line)
+        else:
+            f_updated_lines.append(line)
+
+    for key, val in f_new_keys.items():
+        f_updated_lines.append(f"{key}={val}")
+
+    frontend_path.mkdir(parents=True, exist_ok=True)
+    frontend_env.write_text("\n".join(f_updated_lines))
+    console.print("Synced frontend .env")
 

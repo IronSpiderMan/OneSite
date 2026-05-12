@@ -71,9 +71,9 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         "tsconfig.json",
         "tsconfig.node.json",
         "vite.config.ts",
-        "index.html",
         "src/main.tsx",
         "src/App.tsx",
+        "index.html",
         "src/components/ui/button.tsx",
         "src/components/ui/input.tsx",
         "src/components/ui/label.tsx",
@@ -108,6 +108,10 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
     for config_file in config_files:
         if config_file == "vite.config.ts":
             generate_file("frontend_vite.config.ts.j2", {"config": site_config}, target_frontend_root / config_file)
+            continue
+
+        if config_file == "index.html":
+            generate_file("frontend_index.html.j2", {"config": site_config}, target_frontend_root / config_file)
             continue
 
         src = template_root / config_file

@@ -50,7 +50,7 @@ const AppLayout: React.FC = () => {
         )}
       >
         <div className="h-16 flex items-center justify-between px-4 border-b">
-          <span className="text-xl font-bold">OneSite</span>
+          <span className="text-xl font-bold">{import.meta.env.VITE_PROJECT_NAME || 'OneSite'}</span>
           <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(false)}>
             <X className="h-5 w-5" />
           </Button>

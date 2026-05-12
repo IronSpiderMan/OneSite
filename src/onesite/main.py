@@ -140,6 +140,12 @@ def create(
         content = content.replace("{{ project_name }}", project_name)
         config_file.write_text(content)
 
+    index_html = target_dir / "frontend/index.html"
+    if index_html.exists():
+        content = index_html.read_text()
+        content = content.replace("{{ project_name }}", project_name)
+        index_html.write_text(content)
+
     # Generate site_config.json
     import json
     site_config = {
