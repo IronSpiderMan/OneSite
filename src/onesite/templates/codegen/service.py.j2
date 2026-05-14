@@ -52,7 +52,9 @@ class {{ model.name }}Service:
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
+        {% if fk.name != model.owner_field %}
         {{ fk.name }}: Optional[int] = None,
+        {% endif %}
         {% endfor %}
         {% if model.owner_field %}
         owner_id: Optional[int] = None,
@@ -82,7 +84,9 @@ class {{ model.name }}Service:
             {% endif %}
             {% endfor %}
             {% for fk in model.foreign_keys %}
+            {% if fk.name != model.owner_field %}
             {{ fk.name }}={{ fk.name }},
+            {% endif %}
             {% endfor %}
             {% if model.owner_field %}
             owner_id=owner_id,
@@ -111,13 +115,15 @@ class {{ model.name }}Service:
             {% endif %}
             {% endfor %}
             {% for fk in model.foreign_keys %}
+            {% if fk.name != model.owner_field %}
             {{ fk.name }}={{ fk.name }},
+            {% endif %}
             {% endfor %}
             {% if model.owner_field %}
             owner_id=owner_id,
             {% endif %}
         )
-        
+
         # Build response
         items_read = [{{ model.name }}Read.model_validate(item) for item in items]
         if size == -1:

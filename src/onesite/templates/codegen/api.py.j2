@@ -180,7 +180,9 @@ async def read_{{ model.lower_name }}s(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
+    {% if fk.name != model.owner_field %}
     {{ fk.name }}: Optional[int] = Query(None, description="Filter by {{ fk.name }}"),
+    {% endif %}
     {% endfor %}
     session: AsyncSession = Depends(db.get_session),
     {% if model.module_name == "user" and model.name == "User" %}
@@ -226,7 +228,9 @@ async def read_{{ model.lower_name }}s(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
+        {% if fk.name != model.owner_field %}
         {{ fk.name }}={{ fk.name }},
+        {% endif %}
         {% endfor %}
         {% if model.owner_field %}
         owner_id=owner_id,

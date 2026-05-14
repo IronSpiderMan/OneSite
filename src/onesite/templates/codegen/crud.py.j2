@@ -73,7 +73,9 @@ def _apply_filters(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
+    {% if fk.name != model.owner_field %}
     {{ fk.name }}: Optional[int] = None,
+    {% endif %}
     {% endfor %}
     {% if model.owner_field %}
     owner_id: Optional[int] = None,
@@ -110,8 +112,10 @@ def _apply_filters(
 
     # Apply foreign key filters
     {% for fk in model.foreign_keys %}
+    {% if fk.name != model.owner_field %}
     if {{ fk.name }}:
         statement = statement.where({{ model.name }}.{{ fk.name }} == {{ fk.name }})
+    {% endif %}
     {% endfor %}
 
     {% if model.owner_field %}
@@ -145,7 +149,9 @@ async def get_multi(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
+    {% if fk.name != model.owner_field %}
     {{ fk.name }}: Optional[int] = None,
+    {% endif %}
     {% endfor %}
     {% if model.owner_field %}
     owner_id: Optional[int] = None,
@@ -174,7 +180,9 @@ async def get_multi(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
+        {% if fk.name != model.owner_field %}
         {{ fk.name }}={{ fk.name }},
+        {% endif %}
         {% endfor %}
         {% if model.owner_field %}
         owner_id=owner_id,
@@ -216,7 +224,9 @@ async def get_multi_with_fk_labels(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
+    {% if fk.name != model.owner_field %}
     {{ fk.name }}: Optional[int] = None,
+    {% endif %}
     {% endfor %}
     {% if model.owner_field %}
     owner_id: Optional[int] = None,
@@ -246,13 +256,15 @@ async def get_multi_with_fk_labels(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
+        {% if fk.name != model.owner_field %}
         {{ fk.name }}={{ fk.name }},
+        {% endif %}
         {% endfor %}
         {% if model.owner_field %}
         owner_id=owner_id,
         {% endif %}
     )
-    
+
     if not items:
         return []
     
@@ -310,7 +322,9 @@ async def count(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
+    {% if fk.name != model.owner_field %}
     {{ fk.name }}: Optional[int] = None,
+    {% endif %}
     {% endfor %}
     {% if model.owner_field %}
     owner_id: Optional[int] = None,
@@ -337,13 +351,15 @@ async def count(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
+        {% if fk.name != model.owner_field %}
         {{ fk.name }}={{ fk.name }},
+        {% endif %}
         {% endfor %}
         {% if model.owner_field %}
         owner_id=owner_id,
         {% endif %}
     )
-    
+
     result = await session.exec(statement)
     return result.one()
 
