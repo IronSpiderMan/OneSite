@@ -1,7 +1,7 @@
 from typing import Optional
 from enum import Enum
 from sqlmodel import Field, SQLModel
-from datetime import datetime
+from datetime import datetime, timezone
 
 class UserRole(str, Enum):
     USER = "user"
@@ -43,5 +43,5 @@ class User(UserBase, table=True):
 
     id: Optional[int] = Field(default=None, primary_key=True)
     hashed_password: str = Field(sa_column_kwargs={"info": {"site_props": {"permissions": ""}}}) # Hidden
-    created_at: datetime = Field(default_factory=datetime.utcnow, sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
-    updated_at: datetime = Field(default_factory=datetime.utcnow, sa_column_kwargs={"onupdate": datetime.utcnow, "info": {"site_props": {"permissions": "r"}}})
+    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column_kwargs={"onupdate": lambda: datetime.now(timezone.utc), "info": {"site_props": {"permissions": "r"}}})
