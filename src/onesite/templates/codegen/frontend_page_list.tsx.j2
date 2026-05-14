@@ -77,6 +77,20 @@ const {{ model.name }}Page: React.FC = () => {
 
   const hasPermission = (perm: 'r' | 'c' | 'u' | 'd') => userPerms.includes(perm);
 
+  // Field-level role-based permissions (Layer 2)
+  const fieldRolePerms: Record<string, Record<string, string>> = {
+  {% for field in model.fields %}
+  {% if field.role_permissions %}
+    "{{ field.name }}": {{ field.role_permissions | tojson }},
+  {% endif %}
+  {% endfor %}
+  };
+  const hasFieldPerm = (fieldName: string, perm: 'c' | 'r' | 'u') => {
+    const fp = fieldRolePerms[fieldName];
+    if (!fp) return true; // no restrictions = allowed
+    return (fp[userRole] || '').includes(perm);
+  };
+
   // User model special handling: user role can only access /me
   {% if model.module_name == "user" and model.name == "User" %}
   useEffect(() => {
@@ -202,7 +216,7 @@ const {{ model.name }}Page: React.FC = () => {
     const item = full || record;
     // Set form values
     {% for field in model.fields %}
-    {% if ('c' in field.permissions or 'u' in field.permissions) and 'r' in field.permissions %}
+    {% if 'r' in field.permissions %}
     setValue('{{ field.name }}', item.{{ field.name }});
     {% endif %}
     {% endfor %}
@@ -535,9 +549,9 @@ const {{ model.name }}Page: React.FC = () => {
                 />
               </TableHead>
               {% for field in model.fields %}
-              {% if 'r' in field.permissions %}
+              {% if 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r') && (
               <TableHead>{t('{{ field.label_key }}')}</TableHead>
-              {% endif %}
+              )}{% endif %}
               {% endfor %}
               <TableHead className="w-[100px]">{t('common.actions')}</TableHead>
             </TableRow>
@@ -567,7 +581,7 @@ const {{ model.name }}Page: React.FC = () => {
                       />
                     </TableCell>
                     {% for field in model.fields %}
-                    {% if 'r' in field.permissions %}
+                    {% if 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r') && (
                     <TableCell>
                         {% if field.fk_info %}
                         <span className="block max-w-[250px] truncate" title={item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}>
@@ -634,7 +648,7 @@ const {{ model.name }}Page: React.FC = () => {
                         </span>
                         {% endif %}
                     </TableCell>
-                    {% endif %}
+                    )}{% endif %}
                     {% endfor %}
                     <TableCell className="flex items-center gap-2">
                         <>
@@ -803,9 +817,7 @@ const {{ model.name }}Page: React.FC = () => {
             <div className="max-h-[80vh] overflow-y-auto pr-2">
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {% for field in model.fields %}
-          {% set can_create = 'c' in field.permissions %}
-          {% set can_update = 'u' in field.permissions %}
-          {(!editingId ? {{ 'true' if can_create else 'false' }} : {{ 'true' if can_update else 'false' }}) && (
+          {(!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')) && (
           <div className="space-y-2">
             <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}</Label>
             {% if field.ui_type == 'bool' %}

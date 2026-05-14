@@ -16,7 +16,7 @@ class ThemeEnum(str, Enum):
     IOTHUB = "iothub"
 
 class CustomConfig(SQLModel):
-    __onesite__ = {"config_role": "custom", "frontend_only": True}
+    __onesite__ = {"frontend_only": True}
 
     # Local Settings (Stored only in browser localStorage)
     language: LanguageEnum = Field(

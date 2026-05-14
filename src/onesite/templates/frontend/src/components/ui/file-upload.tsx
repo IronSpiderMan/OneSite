@@ -180,7 +180,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                 ref={inputRef}
                 type="file"
                 accept={accept}
-                className="hidden"
+                className="sr-only"
                 onChange={handleUpload}
                 disabled={uploading}
             />

@@ -116,7 +116,7 @@ export const ImageUpload: React.FC<ImageUploadProps> = ({
                 ref={inputRef}
                 type="file"
                 accept="image/*"
-                className="hidden"
+                className="sr-only"
                 onChange={handleUpload}
                 disabled={uploading}
             />

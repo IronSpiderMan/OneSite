@@ -28,6 +28,36 @@ const SettingsPage: React.FC = () => {
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const { register, handleSubmit, reset, control } = useForm();
 
+  // Role-based field permissions (Layer 2)
+  const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
+  {% if system_model %}
+  const systemFieldRolePerms: Record<string, Record<string, string>> = {
+  {% for field in system_model.fields %}
+  {% if field.role_permissions %}
+    "{{ field.name }}": {{ field.role_permissions | tojson }},
+  {% endif %}
+  {% endfor %}
+  };
+  const canEditSystem = Object.values(systemFieldRolePerms).some(
+    (fp) => (fp[userRole] || '').includes('u')
+  );
+  {% endif %}
+  {% if custom_model %}
+  const customFieldRolePerms: Record<string, Record<string, string>> = {
+  {% for field in custom_model.fields %}
+  {% if field.role_permissions %}
+    "{{ field.name }}": {{ field.role_permissions | tojson }},
+  {% endif %}
+  {% endfor %}
+  };
+  {% endif %}
+  const hasFieldPerm = (fieldRolePerms: Record<string, Record<string, string>> | undefined, fieldName: string, perm: 'c' | 'r' | 'u') => {
+    if (!fieldRolePerms) return true;
+    const fp = fieldRolePerms[fieldName];
+    if (!fp) return true;
+    return (fp[userRole] || '').includes(perm);
+  };
+
   {% if system_model %}
   const {
     data: systemData,
@@ -176,7 +206,7 @@ const SettingsPage: React.FC = () => {
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold">{t('settings.system_title')}</h2>
-                <Button onClick={handleSubmit(onSaveSystem)} disabled={isSavingSystem} className="flex items-center space-x-2">
+                <Button onClick={handleSubmit(onSaveSystem)} disabled={isSavingSystem || !canEditSystem} className="flex items-center space-x-2">
                   {isSavingSystem ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
                   <span>{t('settings.save_system')}</span>
                 </Button>
@@ -210,6 +240,7 @@ const SettingsPage: React.FC = () => {
                 {expandedGroups.has('{{ group_key }}') && (
                   <div className="p-4 space-y-4">
                     {% for field in group_fields %}
+                    {hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'r') && (
                     <div className="space-y-2">
                       <Label htmlFor="{{ field.name }}">
                         {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
@@ -221,7 +252,7 @@ const SettingsPage: React.FC = () => {
                           name="{{ field.name }}"
                           control={control}
                           render={({ field: { onChange, value } }) => (
-                            <Switch checked={!!value} onCheckedChange={onChange} />
+                            <Switch checked={!!value} onCheckedChange={onChange} disabled={!hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'u')} />
                           )}
                         />
                       </div>
@@ -286,7 +317,7 @@ const SettingsPage: React.FC = () => {
                         name="{{ field.name }}"
                         control={control}
                         render={({ field: { onChange, value } }) => (
-                          <Select value={value || ''} onValueChange={onChange}>
+                          <Select value={value || ''} onValueChange={onChange} disabled={!hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'u')}>
                             <SelectTrigger>
                               <SelectValue placeholder={t('common.select', 'Select...')} />
                             </SelectTrigger>
@@ -302,10 +333,12 @@ const SettingsPage: React.FC = () => {
                       <Input
                         id="{{ field.name }}"
                         type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
+                        disabled={!hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'u')}
                         {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
                       />
                       {% endif %}
                     </div>
+                    )}
                     {% endfor %}
                   </div>
                 )}
@@ -327,7 +360,7 @@ const SettingsPage: React.FC = () => {
 
             {% if custom_model %}
             {% for field in custom_model.fields %}
-            {% if 'u' in field.permissions and field.name != 'id' %}
+            {% if 'u' in field.permissions and field.name != 'id' %}{hasFieldPerm(customFieldRolePerms, '{{ field.name }}', 'u') && (
             <div className="space-y-2">
               <Label htmlFor="{{ field.name }}">
                 {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
@@ -427,6 +460,7 @@ const SettingsPage: React.FC = () => {
               />
               {% endif %}
             </div>
+            )}
             {% endif %}
             {% endfor %}
             {% endif %}

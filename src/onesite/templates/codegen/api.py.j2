@@ -27,14 +27,8 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 
 {% if model.is_notification_table %}
 router = APIRouter()
-{% elif "user" in model.role_permissions %}
-router = APIRouter(dependencies=[Depends(deps.get_current_user)])
-{% elif "admin" in model.role_permissions %}
-router = APIRouter(dependencies=[Depends(deps.get_current_active_admin)])
-{% elif "developer" in model.role_permissions %}
-router = APIRouter(dependencies=[Depends(deps.get_current_active_developer)])
 {% else %}
-router = APIRouter(dependencies=[Depends(deps.get_current_user)])
+router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
 {% endif %}
 
 {% if model.is_notification_table %}
@@ -227,7 +221,7 @@ async def read_{{ model.lower_name }}s(
         {% endfor %}
     )
 
-@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))]{% endif %})
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -326,7 +320,7 @@ async def read_{{ model.lower_name }}(
     {% endif %}
     return {{ model.lower_name }}
 
-@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))]{% endif %})
 async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -364,7 +358,7 @@ async def update_{{ model.lower_name }}(
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, int]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, int], dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -392,7 +386,7 @@ async def delete_{{ model.lower_name }}(
         raise HTTPException(status_code=400, detail="Cannot delete: related records still exist")
     return {"deleted": deleted}
 
-@router.post("/bulk_delete")
+@router.post("/bulk_delete", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))])
 async def bulk_delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),

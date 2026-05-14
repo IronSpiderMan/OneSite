@@ -69,6 +69,138 @@ def _build_json_model_schema(
     return {"name": model.__name__, "fields": fields}
 
 
+# ═══════════════════════════════════════════════════════════════════════════
+# Three-layer permission system
+# ═══════════════════════════════════════════════════════════════════════════
+
+ROLE_ORDER = ["user", "admin", "developer"]
+ROLE_LEVELS = {"user": 0, "admin": 1, "developer": 2}
+
+
+def _parse_model_permissions(raw: Any, model_name: str) -> dict[str, str]:
+    """Layer 1: Parse model-level CRUD permissions.
+
+    Returns a dict like {"user": "crud", "admin": "crud", "developer": "crud"}.
+    """
+    if isinstance(raw, dict):
+        return {role: raw.get(role, "") for role in ROLE_ORDER}
+
+    if isinstance(raw, str):
+        # Legacy string: "admin-crud", "crud/rcud", or bare "admin"/"user"
+        if raw == "admin":
+            console.print(
+                f"[yellow]Warning: Model '{model_name}' uses legacy 'admin', "
+                f"please use 'admin-crud'[/yellow]"
+            )
+            raw = "admin-crud"
+        elif raw == "user":
+            console.print(
+                f"[yellow]Warning: Model '{model_name}' uses legacy 'user', "
+                f"please use 'crud'[/yellow]"
+            )
+            raw = "crud"
+
+        parts = raw.split("-", 1)
+        if len(parts) == 2:
+            prefix_role, perm_chars = parts
+        else:
+            prefix_role, perm_chars = "user", parts[0]
+
+        min_level = ROLE_LEVELS.get(prefix_role, 0)
+        return {
+            role: perm_chars if ROLE_LEVELS[role] >= min_level else ""
+            for role in ROLE_ORDER
+        }
+
+    # Default: full access for all
+    return {role: "crud" for role in ROLE_ORDER}
+
+
+def _compute_flat_perms(role_permissions: dict[str, str]) -> str:
+    """Derive a flat permission string as the UNION of all roles' permissions.
+
+    Used for backward-compat template code — includes any permission character
+    that at least one role possesses, so schemas include all fields that any
+    role can access.
+    """
+    canonical_order = "crud"
+    chars: set[str] = set()
+    for perms in role_permissions.values():
+        chars.update(perms)
+    return "".join(c for c in canonical_order if c in chars)
+
+
+def _parse_visible(raw: Any, role_permissions: dict[str, str] | None = None) -> dict[str, bool]:
+    """Layer 3: Parse frontend visibility config.
+
+    Config formats (in priority order):
+      list:  ["admin", "developer"]   → only those roles can see it
+      dict:  {"user": True, "admin": True, "developer": False}
+      string legacy: "admin"  → admin+ visible
+
+    Default fallback: a role is visible if it has any model-level permission.
+    This keeps backward compat — models with restricted permissions are
+    automatically hidden from unauthorized roles unless explicitly overridden.
+    """
+    if isinstance(raw, list):
+        return {role: role in raw for role in ROLE_ORDER}
+
+    if isinstance(raw, dict):
+        return {role: bool(raw.get(role, False)) for role in ROLE_ORDER}
+
+    if isinstance(raw, str) and raw in ROLE_ORDER:
+        min_idx = ROLE_ORDER.index(raw)
+        return {role: i >= min_idx for i, role in enumerate(ROLE_ORDER)}
+
+    # Default: visible if role has any model permission
+    if role_permissions is not None:
+        return {role: bool(role_permissions.get(role, "")) for role in ROLE_ORDER}
+    return {role: True for role in ROLE_ORDER}
+
+
+def _parse_field_permissions(
+    raw: Any,
+    model_role_permissions: dict[str, str],
+    field_name: str,
+) -> tuple[dict[str, str], str]:
+    """Layer 2: Parse field-level CRU permissions.
+
+    Returns (field_role_permissions, flat_permission_string).
+
+    Inherits from model-level when not set, strips 'd' (delete is model-level).
+    Special defaults for id (r), created_at (r), updated_at (ru).
+    """
+    # Special field defaults
+    if raw is None:
+        if field_name == "id":
+            return {role: "r" for role in ROLE_ORDER}, "r"
+        if field_name == "created_at":
+            return {role: "r" for role in ROLE_ORDER}, "r"
+        if field_name == "updated_at":
+            return {role: "ru" for role in ROLE_ORDER}, "ru"
+
+    if raw is None:
+        # Inherit from model-level, strip 'd'
+        result = {
+            role: perms.replace("d", "")
+            for role, perms in model_role_permissions.items()
+        }
+    elif isinstance(raw, dict):
+        # Per-role dict: missing roles inherit from model, strip 'd'
+        result = {}
+        for role in ROLE_ORDER:
+            perms = raw.get(role, model_role_permissions.get(role, ""))
+            result[role] = perms.replace("d", "")
+    elif isinstance(raw, str):
+        perms = raw.replace("d", "")
+        result = {role: perms for role in ROLE_ORDER}
+    else:
+        result = {role: "cru" for role in ROLE_ORDER}
+
+    flat = _compute_flat_perms(result)
+    return result, flat
+
+
 def get_model_fields(
     model_cls: type[SQLModel], module_name: str | None = None
 ) -> Tuple[
@@ -108,6 +240,13 @@ def get_model_fields(
     is_singleton = model_site_props.get("is_singleton", False)
     raw_permissions = model_site_props.get("permissions", "rcud")
     frontend_only = model_site_props.get("frontend_only", False)
+
+    # Built-in model auto-detection — these flags can be omitted from __onesite__
+    model_cls_name = getattr(model_cls, "__name__", "")
+    if model_cls_name == "SystemConfig" and module_name == "system_config":
+        is_singleton = True
+    if model_cls_name == "CustomConfig" and module_name == "custom_config":
+        frontend_only = True
     model_translations = model_site_props.get("translations", {})
     auto_refresh = model_site_props.get("auto_refresh", False)
     refresh_interval = model_site_props.get("refresh_interval", 5000)
@@ -125,75 +264,32 @@ def get_model_fields(
     raw_visible = model_site_props.get("visible", None)
     special_me_permissions = model_site_props.get("special_me_permissions", None)  # For /me endpoint special handling
 
-    # Role hierarchy for permission validation
-    role_hierarchy = {"rcu": 0, "admin-rcu": 1, "developer-rcu": 2}
-    role_order = ["user", "admin", "developer"]
+    # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
+    # Config formats:
+    #   dict:  {"developer": "crud", "admin": "crud", "user": "crud"}
+    #   string legacy: "admin-crud", "crud", "rcud"
+    #   not set → all roles get full "crud"
+    #
+    # Permission chars:
+    #   c = can call create API, has create button
+    #   r = can call get/get_multi, sees data in list/detail
+    #   u = can call update API, has update button
+    #   d = can call delete API, has delete button
+    # ────────────────────────────────────────────────────────────────────────
+    ROLE_ORDER = ["user", "admin", "developer"]
+    ROLE_LEVELS = {"user": 0, "admin": 1, "developer": 2}
 
-    # Parse permissions - support both string and dict formats
-    # String format (backward compatible): "rcu", "admin-rcu", "developer-rcu"
-    # Dict format (new): {"user": "ru", "admin": "rcu", "developer": "rcu"}
-    role_permissions = {}
-    model_permissions = "rcu"  # Default for API router
+    role_permissions = _parse_model_permissions(raw_permissions, model_cls.__name__)
+    model_permissions = _compute_flat_perms(role_permissions)
 
-    if isinstance(raw_permissions, dict):
-        role_permissions = raw_permissions.copy()
-        # Model-level permission is the maximum across all roles (for API router)
-        max_level = 0
-        for role, perms in raw_permissions.items():
-            level = role_hierarchy.get(perms, 0)
-            if level > max_level:
-                max_level = level
-        # Find the permission string with the max level
-        for perms, level in role_hierarchy.items():
-            if level == max_level:
-                model_permissions = perms
-                break
-    elif isinstance(raw_permissions, str):
-        # Legacy string format
-        if raw_permissions == "admin":
-            console.print(f"[yellow]Warning: Model '{model_cls.__name__}' uses legacy 'admin' permission, please update to 'admin-rcu'[/yellow]")
-            raw_permissions = "admin-rcu"
-        elif raw_permissions == "user":
-            console.print(f"[yellow]Warning: Model '{model_cls.__name__}' uses legacy 'user' permission, please update to 'rcu'[/yellow]")
-            raw_permissions = "rcu"
-
-        model_permissions = raw_permissions
-        model_level = role_hierarchy.get(raw_permissions.rstrip('d'), 0)  # Remove 'd' for level lookup
-        has_delete = 'd' in raw_permissions  # Track if delete permission exists
-
-        # Expand to all roles based on hierarchy
-        if model_level == 0:  # rcu - all roles
-            role_permissions = {"user": "rcu" + ("d" if has_delete else ""), "admin": "rcu" + ("d" if has_delete else ""), "developer": "rcu" + ("d" if has_delete else "")}
-        elif model_level == 1:  # admin-rcu - admin+ only
-            role_permissions = {"admin": "rcu" + ("d" if has_delete else ""), "developer": "rcu" + ("d" if has_delete else "")}
-            # Note: user is excluded (no access)
-        elif model_level == 2:  # developer-rcu - developer only
-            role_permissions = {"developer": "rcu" + ("d" if has_delete else "")}
-            # Note: admin and user are excluded
-    else:
-        role_permissions = {"user": "rcud", "admin": "rcud", "developer": "rcud"}
-        model_permissions = "rcud"
-
-    # Parse visible config - support both string and dict formats
-    # String format: "admin" (admin+ visible), "developer" (developer only)
-    # Dict format: {"user": True, "admin": True, "developer": False}
-    role_visible = {}
-    if isinstance(raw_visible, dict):
-        role_visible = raw_visible.copy()
-    elif isinstance(raw_visible, str):
-        # String format: only roles >= specified role are visible
-        if raw_visible in role_order:
-            min_index = role_order.index(raw_visible)
-            for i, role in enumerate(role_order):
-                role_visible[role] = i >= min_index
-        else:
-            # Default: all visible if not recognized
-            role_visible = {"user": True, "admin": True, "developer": True}
-    else:
-        # No explicit visible config - use permissions to determine
-        # If role has any permission (at least 'r'), it's visible
-        for role in role_order:
-            role_visible[role] = role in role_permissions
+    # ── Layer 3: Frontend visibility ──────────────────────────────────────
+    # Config formats:
+    #   list:  ["admin", "developer"]   → those roles can see it
+    #   dict:  {"user": True, "admin": True, "developer": False}
+    #   string legacy: "admin"  → admin+ visible
+    #   not set → all roles visible (independent of permissions)
+    # ────────────────────────────────────────────────────────────────────────
+    role_visible = _parse_visible(raw_visible, role_permissions)
 
     # Validate union_key is a list of field names
     if union_key is not None:
@@ -237,103 +333,29 @@ def get_model_fields(
                 if isinstance(sa_column_info, dict):
                     site_props = sa_column_info.get("site_props", {}) or {}
 
-        raw_field_permissions = site_props.get("permissions", None)  # None = inherit from model config
+        raw_field_permissions = site_props.get("permissions", None)  # None = inherit from model
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
         allow_download = site_props.get("allow_download", True)
 
-        # Parse field permissions - support both string and dict formats
-        # String format: "rcud"
-        # Dict format: {"user": "r", "admin": "rcu", "developer": "rcud"}
-        # None = inherit from model config (onesite permissions)
-        field_role_permissions = {}
-        permissions = "rcud"  # Default
-
-        if raw_field_permissions is None:
-            # Inherit from model-level role_permissions, strip 'd' (delete is model-level)
-            if role_permissions:
-                field_role_permissions = {}
-                for role, perms in role_permissions.items():
-                    field_role_permissions[role] = perms.replace('d', '')
-                # Compute max permission string for backward compatibility
-                max_level = 0
-                for perms in field_role_permissions.values():
-                    level = role_hierarchy.get(perms, 0)
-                    if level > max_level:
-                        max_level = level
-                for perms, level in role_hierarchy.items():
-                    if level == max_level:
-                        permissions = perms
-                        break
-            else:
-                # Fallback to default "rcu" for all roles (no delete for fields)
-                field_role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
-                permissions = "rcu"
-        elif isinstance(raw_field_permissions, dict):
-            # Strip 'd' from field permissions (delete is model-level)
-            field_role_permissions = {}
-            for role, perms in raw_field_permissions.items():
-                field_role_permissions[role] = perms.replace('d', '')
-            # For backward compatibility, use the highest permission as default
-            max_level = 0
-            for perms in field_role_permissions.values():
-                level = role_hierarchy.get(perms, 0)
-                if level > max_level:
-                    max_level = level
-            for perms, level in role_hierarchy.items():
-                if level == max_level:
-                    permissions = perms
-                    break
-        elif isinstance(raw_field_permissions, str):
-            # Strip 'd' from field permissions (delete is model-level)
-            permissions = raw_field_permissions.replace('d', '')
-            field_role_permissions = {
-                "user": permissions,
-                "admin": permissions,
-                "developer": permissions,
-            }
-
-        if name == "id" and raw_field_permissions is None:
-            permissions = "r"
-            field_role_permissions = {"user": "r", "admin": "r", "developer": "r"}
-        elif name == "created_at" and raw_field_permissions is None:
-            # created_at is auto-set, only read permission
-            permissions = "r"
-            field_role_permissions = {"user": "r", "admin": "r", "developer": "r"}
-        elif name == "updated_at" and raw_field_permissions is None:
-            # updated_at is auto-set, read and update but not create
-            permissions = "ru"
-            field_role_permissions = {"user": "ru", "admin": "ru", "developer": "ru"}
-        elif raw_field_permissions is None:
-            # No explicit permission config - inherit from model, but strip 'd' (delete is model-level)
-            if role_permissions:
-                field_role_permissions = {}
-                for role, perms in role_permissions.items():
-                    # Remove 'd' from field permissions since delete is model-level
-                    field_role_permissions[role] = perms.replace('d', '')
-                # Compute max permission string for backward compatibility
-                max_level = 0
-                for perms in field_role_permissions.values():
-                    level = role_hierarchy.get(perms, 0)
-                    if level > max_level:
-                        max_level = level
-                for perms, level in role_hierarchy.items():
-                    if level == max_level:
-                        permissions = perms
-                        break
-            else:
-                # Fallback to default "rcu" for all roles (no delete for fields)
-                field_role_permissions = {"user": "rcu", "admin": "rcu", "developer": "rcu"}
-                permissions = "rcu"
-
-        console.print(f"Debug: Field {name} - Perms: {permissions}")
+        # ── Layer 2: Field-level CRU permissions ──────────────────────────
+        # Config formats:
+        #   dict:  {"developer": "cru", "admin": "cru", "user": "r"}
+        #   string: "cru"  (applies to all roles)
+        #   not set → inherit from model role_permissions, strip 'd'
+        #
+        # Permission chars:
+        #   c = field can be included in create API request
+        #   r = field is returned in get API responses
+        #   u = field can be modified in update request
+        # Note: 'd' is model-level only, always stripped from field config
+        # ────────────────────────────────────────────────────────────────────
+        field_role_permissions, permissions = _parse_field_permissions(
+            raw_field_permissions, role_permissions, name
+        )
 
         type_annotation = field.annotation
         type_str = str(type_annotation)
-
-        console.print(
-            f"Debug: Field {name} - Type Annotation: {type_annotation} (Type: {type(type_annotation)}) - Type Str: {type_str}"
-        )
 
         is_enum = False
         enum_values: List[Any] = []

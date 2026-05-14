@@ -31,6 +31,21 @@ export default function ProfilePage() {
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
 
+  // Field-level role-based permissions (Layer 2)
+  const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
+  const fieldRolePerms: Record<string, Record<string, string>> = {
+  {% for field in model.fields %}
+  {% if field.role_permissions %}
+    "{{ field.name }}": {{ field.role_permissions | tojson }},
+  {% endif %}
+  {% endfor %}
+  };
+  const hasFieldPerm = (fieldName: string, perm: 'c' | 'r' | 'u') => {
+    const fp = fieldRolePerms[fieldName];
+    if (!fp) return true;
+    return (fp[userRole] || '').includes(perm);
+  };
+
   const displayName = useMemo(() => {
     if (!me) return '';
     return (me.full_name || me.email || '').trim();
@@ -122,10 +137,10 @@ export default function ProfilePage() {
           ) : me ? (
             <>
 {% for field in model.fields %}
-  {% if 'r' in field.permissions and field.name not in ['hashed_password', 'password', 'id'] %}
+  {% if 'r' in field.permissions and field.name not in ['hashed_password', 'password', 'id'] %}{hasFieldPerm('{{ field.name }}', 'r') && (
               <div className="space-y-2">
                 <Label>{t('{{ field.label_key }}')}</Label>
-    {% if 'u' in field.permissions %}
+    {% if 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u') ? (
       {% if field.ui_type == 'image' %}
                 <ImageUpload
                   value={me.{{ field.name }} || ''}
@@ -194,7 +209,34 @@ export default function ProfilePage() {
         {% endif %}
                 />
       {% endif %}
-    {% else %}
+    ) : (<>
+      {# Read-only field display #}
+      {% if field.ui_type == 'bool' %}
+                <div className="font-medium">
+                  {me.{{ field.name }} ? '{{ 'Yes' }}' : '{{ 'No' }}'}
+                </div>
+      {% elif field.ui_type == 'image' %}
+                {me.{{ field.name }} ? (
+                  <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
+                    <img src={me.{{ field.name }}} alt="{{ field.name }}" className="h-full w-full object-cover" />
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic">No image</span>
+                )}
+      {% elif field.is_enum %}
+                <div className="font-medium">{me.{{ field.name }} || '-'}</div>
+      {% elif field.ui_type == 'datetime' %}
+                <div className="text-muted-foreground">{me.{{ field.name }} || '-'}</div>
+      {% elif field.ui_type == 'json' %}
+                <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+                  {me.{{ field.name }} !== undefined && me.{{ field.name }} !== null
+                    ? JSON.stringify(me.{{ field.name }}, null, 2)
+                    : '-'}
+                </pre>
+      {% else %}
+                <Input value={me.{{ field.name }} || ''} disabled />
+      {% endif %}
+    </>)}{% else %}
       {# Read-only field display #}
       {% if field.ui_type == 'bool' %}
                 <div className="font-medium">
@@ -223,7 +265,7 @@ export default function ProfilePage() {
       {% endif %}
     {% endif %}
               </div>
-  {% endif %}
+  )}{% endif %}
 {% endfor %}
             </>
           ) : (

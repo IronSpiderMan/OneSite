@@ -51,6 +51,23 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const navigate = useNavigate();
     const { fetchItem, currentItem, loading } = use{{ model.name }}Store();
     const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
+    const rolePermissions: Record<string, string> = {{ model.role_permissions | tojson }};
+    const userPerms = rolePermissions[userRole] || '';
+    const hasPermission = (perm: 'r' | 'c' | 'u' | 'd') => userPerms.includes(perm);
+
+    // Field-level role-based permissions (Layer 2)
+    const fieldRolePerms: Record<string, Record<string, string>> = {
+    {% for field in model.fields %}
+    {% if field.role_permissions %}
+      "{{ field.name }}": {{ field.role_permissions | tojson }},
+    {% endif %}
+    {% endfor %}
+    };
+    const hasFieldPerm = (fieldName: string, perm: 'c' | 'r' | 'u') => {
+      const fp = fieldRolePerms[fieldName];
+      if (!fp) return true;
+      return (fp[userRole] || '').includes(perm);
+    };
     
     // State to store resolved foreign key data
     {% for fk in model.foreign_keys %}
@@ -320,7 +337,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {% for field in model.fields %}
-                        {% if not field.fk_info and 'r' in field.permissions %}
+                        {% if not field.fk_info and 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r') && (
                         <div className="space-y-1">
                             <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
                             <div className="font-medium">
@@ -368,7 +385,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 {% endif %}
                             </div>
                         </div>
-                        {% endif %}
+                        )}{% endif %}
                         {% endfor %}
                     </CardContent>
                 </Card>

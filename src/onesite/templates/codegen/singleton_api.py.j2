@@ -6,15 +6,7 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 from app.services.{{ model.module_name }} import service
 
 router = APIRouter(
-{% if "user" in model.role_permissions %}
-    dependencies=[Depends(deps.get_current_user)]
-{% elif "admin" in model.role_permissions %}
-    dependencies=[Depends(deps.get_current_active_admin)]
-{% elif "developer" in model.role_permissions %}
-    dependencies=[Depends(deps.get_current_active_developer)]
-{% else %}
-    dependencies=[Depends(deps.get_current_user)]
-{% endif %}
+    dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))]
 )
 
 @router.get("/", response_model={{ model.name }}Read)
@@ -23,7 +15,7 @@ async def get_{{ model.lower_name }}(
 ) -> Any:
     return await service.get(session)
 
-@router.put("/", response_model={{ model.name }}Read)
+@router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))])
 async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
