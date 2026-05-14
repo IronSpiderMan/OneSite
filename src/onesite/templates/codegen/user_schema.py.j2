@@ -43,6 +43,24 @@ class UserUpdate(SQLModel):
     {% endif %}
 {% endfor %}
 
+class UserUpdateMe(SQLModel):
+    """Current user updates their own profile.
+
+    Excludes admin-only fields (role, is_active, is_superuser).
+    Includes old_password for password change verification.
+    """
+    full_name: Optional[str] = None
+    avatar: Optional[str] = None
+    password: Optional[str] = None
+    old_password: Optional[str] = None
+
+    # Auto-include any additional updatable fields from the model
+{% for field in model.fields %}
+    {% if 'u' in field.permissions and field.name not in ['id', 'email', 'password', 'full_name', 'avatar', 'is_active', 'is_superuser', 'hashed_password', 'created_at', 'updated_at', 'role'] %}
+    {{ field.name }}: {{ field.type }} = None
+    {% endif %}
+{% endfor %}
+
 class UserRead(UserBase):
     id: int
 {% for fk in model.foreign_keys %}

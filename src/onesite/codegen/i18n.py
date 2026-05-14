@@ -111,6 +111,12 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         "profile": {
             "basic": "Basic Info",
             "full_name_placeholder": "Enter your name",
+            "change_password": "Change Password",
+            "old_password": "Old Password",
+            "new_password": "New Password",
+            "confirm_password": "Confirm Password",
+            "password_mismatch": "Passwords do not match",
+            "password_changed": "Password changed successfully",
         },
         "alert": {
             "delete_title": "Confirm deletion",
@@ -215,6 +221,12 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         "profile": {
             "basic": "基础信息",
             "full_name_placeholder": "请输入姓名",
+            "change_password": "修改密码",
+            "old_password": "当前密码",
+            "new_password": "新密码",
+            "confirm_password": "确认密码",
+            "password_mismatch": "两次输入的密码不一致",
+            "password_changed": "密码修改成功",
         },
         "alert": {
             "delete_title": "确认删除",

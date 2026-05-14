@@ -1,0 +1,274 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { ImageUpload } from '../components/ui/image-upload';
+import { FileUpload } from '../components/ui/file-upload';
+import { Switch } from '../components/ui/switch';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { getMe, updateMe } from '../services/user';
+import { toast } from 'sonner';
+
+type Me = {
+  id: number;
+{% for field in model.fields %}
+  {% if 'r' in field.permissions and field.name != 'hashed_password' and field.name != 'id' %}
+  {{ field.name }}{% if not field.required %}?{% endif %}: {% if field.ui_type == 'int' or field.ui_type == 'float' %}number{% elif field.ui_type == 'bool' %}boolean{% elif field.is_enum %}string{% elif field.ui_type == 'json' %}any{% else %}string{% endif %} | null;
+  {% endif %}
+{% endfor %}
+};
+
+export default function ProfilePage() {
+  const { t } = useTranslation();
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [me, setMe] = useState<Me | null>(null);
+
+  // Password change state
+  const [oldPassword, setOldPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+
+  const displayName = useMemo(() => {
+    if (!me) return '';
+    return (me.full_name || me.email || '').trim();
+  }, [me]);
+
+  useEffect(() => {
+    let mounted = true;
+    (async () => {
+      try {
+        setLoading(true);
+        const data = await getMe();
+        if (!mounted) return;
+        setMe(data as any);
+      } catch (e) {
+        console.error(e);
+      } finally {
+        if (mounted) setLoading(false);
+      }
+    })();
+    return () => {
+      mounted = false;
+    };
+  }, []);
+
+  const handleSave = async () => {
+    if (!me) return;
+    try {
+      setSaving(true);
+
+      // Collect all updatable fields
+      const updateData: Record<string, any> = {};
+{% for field in model.fields %}
+  {% if 'u' in field.permissions and field.name != 'password' and field.name != 'hashed_password' %}
+      updateData.{{ field.name }} = me.{{ field.name }};
+  {% endif %}
+{% endfor %}
+
+      // Handle password change
+      if (newPassword) {
+        if (newPassword !== confirmPassword) {
+          toast.error(t('profile.password_mismatch'));
+          setSaving(false);
+          return;
+        }
+        updateData.old_password = oldPassword;
+        updateData.password = newPassword;
+      }
+
+      const updated = await updateMe(updateData);
+      setMe(updated as any);
+      localStorage.setItem('user_name', (updated as any).full_name || (updated as any).email || '');
+      localStorage.setItem('user_avatar', (updated as any).avatar || '');
+      window.dispatchEvent(new Event('onesite:user_updated'));
+
+      // Reset password fields on success
+      setOldPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+
+      toast.success(t('toast.update_success'));
+    } catch (e: any) {
+      console.error(e);
+      const detail = e?.response?.data?.detail;
+      toast.error(detail || t('toast.save_failed'));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <div className="max-w-3xl space-y-6">
+      <div className="flex items-center justify-between">
+        <div>
+          <div className="text-sm text-muted-foreground">{t('common.profile')}</div>
+          <div className="text-2xl font-semibold">{displayName}</div>
+        </div>
+        <Button type="button" onClick={handleSave} disabled={loading || saving || !me}>
+          {saving ? t('common.loading') : t('common.save')}
+        </Button>
+      </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('profile.basic')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          {loading ? (
+            <div className="text-muted-foreground">{t('common.loading')}</div>
+          ) : me ? (
+            <>
+{% for field in model.fields %}
+  {% if 'r' in field.permissions and field.name not in ['hashed_password', 'password', 'id'] %}
+              <div className="space-y-2">
+                <Label>{t('{{ field.label_key }}')}</Label>
+    {% if 'u' in field.permissions %}
+      {% if field.ui_type == 'image' %}
+                <ImageUpload
+                  value={me.{{ field.name }} || ''}
+                  onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                />
+      {% elif field.ui_type == 'file' %}
+                <FileUpload
+                  value={me.{{ field.name }} || ''}
+                  onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                />
+      {% elif field.ui_type == 'bool' %}
+                <div className="flex items-center space-x-2">
+                  <Switch
+                    checked={!!me.{{ field.name }}}
+                    onCheckedChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                    id="{{ field.name }}"
+                  />
+                  <Label htmlFor="{{ field.name }}" className="font-normal text-muted-foreground">
+                    {t('{{ field.label_key }}')}
+                  </Label>
+                </div>
+      {% elif field.is_enum %}
+                <Select
+                  value={me.{{ field.name }} || ''}
+                  onValueChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                >
+                  <SelectTrigger>
+                    <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
+                  </SelectTrigger>
+                  <SelectContent>
+      {% for enum_val in field.enum_values %}
+                    <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+      {% endfor %}
+                  </SelectContent>
+                </Select>
+      {% elif field.ui_type == 'datetime' %}
+                <Input
+                  type="datetime-local"
+                  value={me.{{ field.name }} ? me.{{ field.name }}.slice(0, 16) : ''}
+                  onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: e.target.value } : prev))}
+                />
+      {% elif field.ui_type == 'int' or field.ui_type == 'float' %}
+                <Input
+                  type="number"
+                  value={me.{{ field.name }} ?? ''}
+                  onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: Number(e.target.value) } : prev))}
+                />
+      {% elif field.ui_type == 'json' %}
+                <Input
+                  value={me.{{ field.name }} ? (typeof me.{{ field.name }} === 'object' ? JSON.stringify(me.{{ field.name }}) : String(me.{{ field.name }})) : ''}
+                  onChange={(e) => {
+                    try {
+                      const parsed = JSON.parse(e.target.value);
+                      setMe((prev) => (prev ? { ...prev, {{ field.name }}: parsed } : prev));
+                    } catch {
+                      setMe((prev) => (prev ? { ...prev, {{ field.name }}: e.target.value } : prev));
+                    }
+                  }}
+                />
+      {% else %}
+                <Input
+                  value={me.{{ field.name }} || ''}
+                  onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: e.target.value } : prev))}
+        {% if field.name == 'full_name' %}
+                  placeholder={t('profile.full_name_placeholder')}
+        {% endif %}
+                />
+      {% endif %}
+    {% else %}
+      {# Read-only field display #}
+      {% if field.ui_type == 'bool' %}
+                <div className="font-medium">
+                  {me.{{ field.name }} ? '{{ 'Yes' }}' : '{{ 'No' }}'}
+                </div>
+      {% elif field.ui_type == 'image' %}
+                {me.{{ field.name }} ? (
+                  <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
+                    <img src={me.{{ field.name }}} alt="{{ field.name }}" className="h-full w-full object-cover" />
+                  </div>
+                ) : (
+                  <span className="text-muted-foreground italic">No image</span>
+                )}
+      {% elif field.is_enum %}
+                <div className="font-medium">{me.{{ field.name }} || '-'}</div>
+      {% elif field.ui_type == 'datetime' %}
+                <div className="text-muted-foreground">{me.{{ field.name }} || '-'}</div>
+      {% elif field.ui_type == 'json' %}
+                <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+                  {me.{{ field.name }} !== undefined && me.{{ field.name }} !== null
+                    ? JSON.stringify(me.{{ field.name }}, null, 2)
+                    : '-'}
+                </pre>
+      {% else %}
+                <Input value={me.{{ field.name }} || ''} disabled />
+      {% endif %}
+    {% endif %}
+              </div>
+  {% endif %}
+{% endfor %}
+            </>
+          ) : (
+            <div className="text-muted-foreground">{t('toast.save_failed')}</div>
+          )}
+        </CardContent>
+      </Card>
+
+{% set has_password = model.fields | selectattr('name', 'equalto', 'password') | list %}
+{% if has_password %}
+      <Card>
+        <CardHeader>
+          <CardTitle>{t('profile.change_password')}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="space-y-2">
+            <Label>{t('profile.old_password')}</Label>
+            <Input
+              type="password"
+              value={oldPassword}
+              onChange={(e) => setOldPassword(e.target.value)}
+              placeholder={t('profile.old_password')}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('profile.new_password')}</Label>
+            <Input
+              type="password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              placeholder={t('profile.new_password')}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label>{t('profile.confirm_password')}</Label>
+            <Input
+              type="password"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              placeholder={t('profile.confirm_password')}
+            />
+          </div>
+        </CardContent>
+      </Card>
+{% endif %}
+    </div>
+  );
+}

@@ -587,6 +587,11 @@ def generate_code():
     custom_model = next((m for m in found_models if m["module_name"] == "custom_config" and m["name"] == "CustomConfig"), None)
     generate_file("settings_page.tsx.j2", {"system_model": system_model, "custom_model": custom_model}, cwd / "frontend" / "src" / "pages" / "Settings.tsx")
 
+    # Generate profile page for User model
+    user_model = next((m for m in found_models if m["name"] == "User"), None)
+    if user_model:
+        generate_file("profile.tsx.j2", {"model": user_model}, cwd / "frontend" / "src" / "pages" / "Profile.tsx")
+
     generate_file("frontend_routes.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Routes.tsx")
     generate_file("frontend_menu.tsx.j2", {"models": api_models}, cwd / "frontend" / "src" / "Menu.tsx")
     generate_file("dashboard_page.tsx.j2", {"models": api_models, "scheduled_tasks": scheduled_tasks}, cwd / "frontend" / "src" / "pages" / "Dashboard.tsx")
