@@ -672,17 +672,21 @@ class {{ model.name }}Service:
                 start_time = (now - timedelta(days=15)).strftime("%Y-%m-%d")
                 end_time = now.strftime("%Y-%m-%d")
 
-            # Parse datetime strings
+            # Parse datetime strings (assume UTC for naive inputs to stay compatible with timezone-aware now)
             st = None
             et = None
             if start_time:
                 try:
                     st = datetime.fromisoformat(start_time)
+                    if st.tzinfo is None:
+                        st = st.replace(tzinfo=timezone.utc)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"Invalid start_time: {start_time}")
             if end_time:
                 try:
                     et = datetime.fromisoformat(end_time)
+                    if et.tzinfo is None:
+                        et = et.replace(tzinfo=timezone.utc)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"Invalid end_time: {end_time}")
 

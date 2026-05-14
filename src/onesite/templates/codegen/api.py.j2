@@ -1,5 +1,5 @@
 from typing import List, Any, Optional, Annotated
-from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
 {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" %}
 from app.models.user import User

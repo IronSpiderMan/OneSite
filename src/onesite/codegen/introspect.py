@@ -230,6 +230,13 @@ def get_model_fields(
             if isinstance(schema_extra, dict):
                 site_props = schema_extra.get("site_props", {}) or {}
 
+        if not site_props:
+            sa_column = getattr(field, "sa_column", None)
+            if sa_column is not None and sa_column is not PydanticUndefined:
+                sa_column_info = getattr(sa_column, "info", {})
+                if isinstance(sa_column_info, dict):
+                    site_props = sa_column_info.get("site_props", {}) or {}
+
         raw_field_permissions = site_props.get("permissions", None)  # None = inherit from model config
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)

@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.models.user import User
@@ -60,8 +60,12 @@ def _apply_filters(
         statement = statement.where(User.{{ field.name }} == {{ field.name }})
     {% elif field.ui_type == 'datetime' %}
     if {{ field.name }}_from is not None:
+        if isinstance({{ field.name }}_from, datetime) and {{ field.name }}_from.tzinfo is None:
+            {{ field.name }}_from = {{ field.name }}_from.replace(tzinfo=timezone.utc)
         statement = statement.where(User.{{ field.name }} >= {{ field.name }}_from)
     if {{ field.name }}_to is not None:
+        if isinstance({{ field.name }}_to, datetime) and {{ field.name }}_to.tzinfo is None:
+            {{ field.name }}_to = {{ field.name }}_to.replace(tzinfo=timezone.utc)
         statement = statement.where(User.{{ field.name }} <= {{ field.name }}_to)
     {% elif field.ui_type == 'time' %}
     if {{ field.name }} is not None:
