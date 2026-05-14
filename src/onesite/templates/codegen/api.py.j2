@@ -1,7 +1,7 @@
 from typing import List, Any, Optional, Annotated
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -185,6 +185,8 @@ async def read_{{ model.lower_name }}s(
     session: AsyncSession = Depends(db.get_session),
     {% if model.module_name == "user" and model.name == "User" %}
     current_user: User = Depends(deps.get_current_user),
+    {% elif model.owner_field %}
+    current_user: User = Depends(deps.get_current_user),
     {% endif %}
 ) -> Any:
     {% if model.module_name == "user" and model.name == "User" %}
@@ -192,6 +194,13 @@ async def read_{{ model.lower_name }}s(
     user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
     if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+    {% endif %}
+    {% if model.owner_field %}
+    # Owner-scoped: non-admin users can only see their own records
+    owner_id = None
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        owner_id = current_user.id
     {% endif %}
     """
     List {{ model.name }} records with optional search and filter support.
@@ -219,13 +228,16 @@ async def read_{{ model.lower_name }}s(
         {% for fk in model.foreign_keys %}
         {{ fk.name }}={{ fk.name }},
         {% endfor %}
+        {% if model.owner_field %}
+        owner_id=owner_id,
+        {% endif %}
     )
 
 @router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))]{% endif %})
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" %}
+    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     {{ model.lower_name }}_in: {{ model.name }}Create,
@@ -236,6 +248,12 @@ async def create_{{ model.lower_name }}(
         user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
         if user_level < deps.ROLE_HIERARCHY.get('developer', 2):
             raise HTTPException(status_code=403, detail="Only developers can create developer accounts")
+    {% endif %}
+    {% if model.owner_field %}
+    # Owner-scoped: force owner_field to current_user.id for non-admin users
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        setattr({{ model.lower_name }}_in, "{{ model.owner_field }}", current_user.id)
     {% endif %}
     try:
         return await service.create(session, {{ model.lower_name }}_in)
@@ -300,7 +318,7 @@ async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
 async def read_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table or (model.module_name == "user" and model.name == "User") %}
+    {% if model.is_notification_table or (model.module_name == "user" and model.name == "User") or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: int,
@@ -317,6 +335,12 @@ async def read_{{ model.lower_name }}(
         user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
         if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
             raise HTTPException(status_code=403, detail="Insufficient permissions")
+    {% elif model.owner_field %}
+    # Owner-scoped: non-admin users can only access their own records
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        if getattr({{ model.lower_name }}, "{{ model.owner_field }}", None) != current_user.id:
+            raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% endif %}
     return {{ model.lower_name }}
 
@@ -327,6 +351,8 @@ async def update_{{ model.lower_name }}(
     {% if model.is_notification_table %}
     current_user: User = Depends(deps.get_current_user),
     {% elif model.module_name == "user" and model.name == "User" %}
+    current_user: User = Depends(deps.get_current_user),
+    {% elif model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: int,
@@ -349,6 +375,15 @@ async def update_{{ model.lower_name }}(
     if hasattr({{ model.lower_name }}_in, 'role') and {{ model.lower_name }}_in.role == 'developer':
         if user_level < deps.ROLE_HIERARCHY.get("developer", 2):
             raise HTTPException(status_code=403, detail="Only developers can promote to developer role")
+    {% elif model.owner_field %}
+    # Owner-scoped: non-admin users can only update their own records
+    {{ model.lower_name }} = await service.get(session, id)
+    if not {{ model.lower_name }}:
+        raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        if getattr({{ model.lower_name }}, "{{ model.owner_field }}", None) != current_user.id:
+            raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% endif %}
     try:
         {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in)
@@ -362,7 +397,7 @@ async def update_{{ model.lower_name }}(
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table or model.module_name == "user" %}
+    {% if model.is_notification_table or model.module_name == "user" or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: int,
@@ -378,6 +413,12 @@ async def delete_{{ model.lower_name }}(
     user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
     if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+    {% elif model.owner_field %}
+    # Owner-scoped: non-admin users can only delete their own records
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        if getattr({{ model.lower_name }}, "{{ model.owner_field }}", None) != current_user.id:
+            raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% endif %}
     try:
         deleted = await service.delete(session, id)
@@ -390,15 +431,27 @@ async def delete_{{ model.lower_name }}(
 async def bulk_delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.owner_field %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     ids: Annotated[List[int], Body(embed=True)],
 ) -> Any:
     """
     Delete multiple {{ model.name }} records by their IDs.
     """
+    {% if model.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    {% endif %}
     deleted_count = 0
     for id in ids:
         obj = await service.get(session, id)
         if obj:
+            {% if model.owner_field %}
+            # Owner-scoped: non-admin users can only delete their own records
+            if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+                if getattr(obj, "{{ model.owner_field }}", None) != current_user.id:
+                    continue
+            {% endif %}
             try:
                 await service.delete(session, id)
                 deleted_count += 1

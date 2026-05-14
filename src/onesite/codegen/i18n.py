@@ -289,6 +289,11 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         en_model = {"name": model_name_en, "fields": {}}
         zh_model = {"name": model_name_zh, "fields": {}}
 
+        # Add "my_name" translation for owner-scoped models (e.g., "My Items")
+        if model.get("owner_field"):
+            en_model["my_name"] = f"My {model_name_en}s"
+            zh_model["my_name"] = f"我的{model_name_zh}"
+
         # Generate translations for model groups (e.g., settings.groups.general)
         site_props = model.get("site_props", {})
         groups = site_props.get("groups", [])

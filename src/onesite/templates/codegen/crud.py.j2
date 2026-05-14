@@ -75,6 +75,9 @@ def _apply_filters(
     {% for fk in model.foreign_keys %}
     {{ fk.name }}: Optional[int] = None,
     {% endfor %}
+    {% if model.owner_field %}
+    owner_id: Optional[int] = None,
+    {% endif %}
 ):
     """Apply search and filter conditions to statement. Shared by get_multi and count."""
     # Apply per-field filters (configured via site_props.is_search_field)
@@ -110,7 +113,13 @@ def _apply_filters(
     if {{ fk.name }}:
         statement = statement.where({{ model.name }}.{{ fk.name }} == {{ fk.name }})
     {% endfor %}
-    
+
+    {% if model.owner_field %}
+    # Apply owner filter (user-scoped access)
+    if owner_id is not None:
+        statement = statement.where({{ model.name }}.{{ model.owner_field }} == owner_id)
+    {% endif %}
+
     return statement
 
 
@@ -138,6 +147,9 @@ async def get_multi(
     {% for fk in model.foreign_keys %}
     {{ fk.name }}: Optional[int] = None,
     {% endfor %}
+    {% if model.owner_field %}
+    owner_id: Optional[int] = None,
+    {% endif %}
 ) -> List[{{ model.name }}]:
     """
     Get list of objects with optional search and filter support.
@@ -164,6 +176,9 @@ async def get_multi(
         {% for fk in model.foreign_keys %}
         {{ fk.name }}={{ fk.name }},
         {% endfor %}
+        {% if model.owner_field %}
+        owner_id=owner_id,
+        {% endif %}
     )
 
     {% if model.has_created_at %}
@@ -203,6 +218,9 @@ async def get_multi_with_fk_labels(
     {% for fk in model.foreign_keys %}
     {{ fk.name }}: Optional[int] = None,
     {% endfor %}
+    {% if model.owner_field %}
+    owner_id: Optional[int] = None,
+    {% endif %}
 ) -> List[Dict[str, Any]]:
     """
     Get list of objects with FK label fields enriched.
@@ -230,6 +248,9 @@ async def get_multi_with_fk_labels(
         {% for fk in model.foreign_keys %}
         {{ fk.name }}={{ fk.name }},
         {% endfor %}
+        {% if model.owner_field %}
+        owner_id=owner_id,
+        {% endif %}
     )
     
     if not items:
@@ -291,6 +312,9 @@ async def count(
     {% for fk in model.foreign_keys %}
     {{ fk.name }}: Optional[int] = None,
     {% endfor %}
+    {% if model.owner_field %}
+    owner_id: Optional[int] = None,
+    {% endif %}
 ) -> int:
     """
     Count total matching records with same filter conditions as get_multi.
@@ -315,6 +339,9 @@ async def count(
         {% for fk in model.foreign_keys %}
         {{ fk.name }}={{ fk.name }},
         {% endfor %}
+        {% if model.owner_field %}
+        owner_id=owner_id,
+        {% endif %}
     )
     
     result = await session.exec(statement)

@@ -54,6 +54,9 @@ class {{ model.name }}Service:
         {% for fk in model.foreign_keys %}
         {{ fk.name }}: Optional[int] = None,
         {% endfor %}
+        {% if model.owner_field %}
+        owner_id: Optional[int] = None,
+        {% endif %}
     ) -> PaginatedResponse[{{ model.name }}Read]:
         """
         Get paginated list with optional search and filter support.
@@ -81,8 +84,11 @@ class {{ model.name }}Service:
             {% for fk in model.foreign_keys %}
             {{ fk.name }}={{ fk.name }},
             {% endfor %}
+            {% if model.owner_field %}
+            owner_id=owner_id,
+            {% endif %}
         )
-        
+
         # Get items with FK labels
         items = await crud.get_multi_with_fk_labels(
             session,
@@ -107,6 +113,9 @@ class {{ model.name }}Service:
             {% for fk in model.foreign_keys %}
             {{ fk.name }}={{ fk.name }},
             {% endfor %}
+            {% if model.owner_field %}
+            owner_id=owner_id,
+            {% endif %}
         )
         
         # Build response

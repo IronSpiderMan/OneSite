@@ -263,6 +263,7 @@ def get_model_fields(
     exportable = model_site_props.get("exportable", False)
     raw_visible = model_site_props.get("visible", None)
     special_me_permissions = model_site_props.get("special_me_permissions", None)  # For /me endpoint special handling
+    owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -590,4 +591,5 @@ def get_model_fields(
         role_permissions,
         role_visible,
         special_me_permissions,
+        owner_field,
     )

@@ -194,6 +194,7 @@ def _build_model_dict(
     importable: bool,
     exportable: bool,
     import_key: str | None,
+    owner_field: str | None = None,
 ) -> dict:
     """Assemble the canonical model metadata dict from introspection results."""
     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
@@ -227,6 +228,7 @@ def _build_model_dict(
         "import_key": import_key,
         "visualize": model_site_props.get("visualize"),
         "has_created_at": any(f["name"] == "created_at" for f in fields),
+        "owner_field": owner_field,
     }
 
 
@@ -315,7 +317,7 @@ def _process_introspected_class(
         translations, auto_refresh, refresh_interval, reverse_fk_display,
         model_site_props, actions, is_notification_table, union_key,
         importable, exportable, import_key, role_permissions,
-        role_visible, special_me_permissions,
+        role_visible, special_me_permissions, owner_field,
     ) = get_model_fields(obj, model_module_name)
 
     if name == "User":
@@ -344,7 +346,7 @@ def _process_introspected_class(
         role_visible, special_me_permissions, frontend_only, translations,
         auto_refresh, refresh_interval, reverse_fk_display, model_site_props,
         actions, is_notification_table, union_key, importable, exportable,
-        import_key,
+        import_key, owner_field,
     )
 
 
@@ -394,6 +396,26 @@ def _init_link_table_flags(models: list[dict]) -> None:
             model["link_order_field"] = None
             model["link_extra_fields"] = []
             model["is_association_table"] = False
+
+        # Validate owner_field: must be an FK field pointing to User
+        owner_field = model.get("owner_field")
+        if owner_field:
+            fk_names = {fk["name"] for fk in model["foreign_keys"]}
+            if owner_field not in fk_names:
+                console.print(
+                    f"[yellow]Warning: Model '{model['name']}' has owner_field='{owner_field}' "
+                    f"but no matching FK field found. Owner filtering disabled.[/yellow]"
+                )
+                model["owner_field"] = None
+            else:
+                # Verify the FK targets the User model
+                fk = next((fk for fk in model["foreign_keys"] if fk["name"] == owner_field), None)
+                if fk and fk["target_model"] != "User":
+                    console.print(
+                        f"[yellow]Warning: Model '{model['name']}' owner_field='{owner_field}' "
+                        f"targets '{fk['target_model']}', not 'User'. Owner filtering disabled.[/yellow]"
+                    )
+                    model["owner_field"] = None
 
         if model.get("is_link_table") and model.get("is_association_table"):
             model["show_in_menu"] = bool(

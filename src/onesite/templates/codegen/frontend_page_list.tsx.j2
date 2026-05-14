@@ -394,7 +394,7 @@ const {{ model.name }}Page: React.FC = () => {
       </AlertDialog>
 
       <div className="flex items-center justify-between">
-        <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')}s</h1>
+        <h1 className="text-3xl font-bold tracking-tight">{% if model.owner_field %}{userRole === 'user' ? t('models.{{ model.module_name }}.my_name') : t('models.{{ model.module_name }}.name')}{% else %}{t('models.{{ model.module_name }}.name')}s{% endif %}</h1>
         <div className="flex items-center gap-4">
           {% if model.auto_refresh %}
           <div className="flex items-center gap-2">

@@ -14,6 +14,9 @@ export const GeneratedMenu = [
     key: '/{{ model.module_name }}s',
     icon: <LayoutDashboard className="h-4 w-4" />,
     label: 'models.{{ model.module_name }}.name',
+    {% if model.owner_field %}
+    myLabel: 'models.{{ model.module_name }}.my_name',
+    {% endif %}
     visible: {{ model.role_visible | tojson }},
     minRole: '{% if model.role_visible.get("user", True) %}user{% elif model.role_visible.get("admin", True) %}admin{% else %}developer{% endif %}',
   },
@@ -22,6 +25,9 @@ export const GeneratedMenu = [
     key: '/{{ model.module_name }}',
     icon: <LayoutDashboard className="h-4 w-4" />,
     label: 'models.{{ model.module_name }}.name',
+    {% if model.owner_field %}
+    myLabel: 'models.{{ model.module_name }}.my_name',
+    {% endif %}
     visible: {{ model.role_visible | tojson }},
     minRole: '{% if model.role_visible.get("user", True) %}user{% elif model.role_visible.get("admin", True) %}admin{% else %}developer{% endif %}',
   },
@@ -46,5 +52,11 @@ export function filterMenuByRole(menu: typeof GeneratedMenu, userRole: string): 
     }
     // Fall back to minRole check
     return (ROLE_HIERARCHY[item.minRole] ?? 0) <= userLevel;
+  }).map(item => {
+    // Use myLabel for user role when available (owner-scoped models)
+    if (userRole === 'user' && 'myLabel' in item) {
+      return { ...item, label: item.myLabel as string };
+    }
+    return item;
   });
 }
