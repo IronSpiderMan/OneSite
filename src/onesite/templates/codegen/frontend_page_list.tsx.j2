@@ -63,6 +63,7 @@ const {{ model.name }}Page: React.FC = () => {
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
+  const [gotoPageInput, setGotoPageInput] = useState('');
   {% if model.importable %}
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importingFile, setImportingFile] = useState<File | null>(null);
@@ -117,6 +118,12 @@ const {{ model.name }}Page: React.FC = () => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  // Sync page input with current page from store
+  const storePage = use{{ model.name }}Store(state => state.page);
+  useEffect(() => {
+    setGotoPageInput(String(storePage));
+  }, [storePage]);
 
   const handleCreate = () => {
     setEditingId(null);
@@ -704,27 +711,87 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 
       {/* Pagination Controls */}
-      <div className="flex items-center justify-end space-x-2">
-        <div className="flex-1 text-sm text-muted-foreground">
-            Page {use{{ model.name }}Store(state => state.page)} of {Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || 1}
+      <div className="flex flex-wrap items-center justify-between gap-4">
+        <div className="flex items-center gap-4">
+          <div className="text-sm text-muted-foreground whitespace-nowrap">
+            {t('common.page_info')} {use{{ model.name }}Store(state => state.page)} {t('common.of_page')} {Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || 1}
+          </div>
+          <div className="flex items-center gap-2">
+            <span className="text-sm text-muted-foreground whitespace-nowrap">{t('common.page_size', 'Page size')}:</span>
+            <Select
+              value={String(use{{ model.name }}Store.getState().size)}
+              onValueChange={(v) => {
+                const newSize = Number(v);
+                fetchData(1, newSize);
+              }}
+            >
+              <SelectTrigger className="w-[80px] h-8">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="10">10</SelectItem>
+                <SelectItem value="20">20</SelectItem>
+                <SelectItem value="50">50</SelectItem>
+                <SelectItem value="100">100</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
         </div>
-        <div className="space-x-2">
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fetchData(use{{ model.name }}Store.getState().page - 1, use{{ model.name }}Store.getState().size)}
-                disabled={use{{ model.name }}Store(state => state.page) <= 1 || loading}
-            >
-                {t('common.previous')}
-            </Button>
-            <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fetchData(use{{ model.name }}Store.getState().page + 1, use{{ model.name }}Store.getState().size)}
-                disabled={use{{ model.name }}Store(state => state.page) >= Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || loading}
-            >
-                {t('common.next')}
-            </Button>
+        <div className="flex items-center gap-2">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchData(1, use{{ model.name }}Store.getState().size)}
+            disabled={use{{ model.name }}Store(state => state.page) <= 1 || loading}
+          >
+            {t('common.first')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchData(use{{ model.name }}Store.getState().page - 1, use{{ model.name }}Store.getState().size)}
+            disabled={use{{ model.name }}Store(state => state.page) <= 1 || loading}
+          >
+            {t('common.previous')}
+          </Button>
+          <div className="flex items-center gap-1">
+            <Input
+              type="number"
+              min={1}
+              max={Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || 1}
+              className="w-16 h-8 text-center"
+              value={gotoPageInput}
+              onChange={(e) => setGotoPageInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const page = Number(gotoPageInput);
+                  const totalPages = Math.ceil(use{{ model.name }}Store.getState().total / use{{ model.name }}Store.getState().size) || 1;
+                  if (page >= 1 && page <= totalPages) {
+                    fetchData(page, use{{ model.name }}Store.getState().size);
+                  }
+                }
+              }}
+            />
+          </div>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => fetchData(use{{ model.name }}Store.getState().page + 1, use{{ model.name }}Store.getState().size)}
+            disabled={use{{ model.name }}Store(state => state.page) >= Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || loading}
+          >
+            {t('common.next')}
+          </Button>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              const totalPages = Math.ceil(use{{ model.name }}Store.getState().total / use{{ model.name }}Store.getState().size) || 1;
+              fetchData(totalPages, use{{ model.name }}Store.getState().size);
+            }}
+            disabled={use{{ model.name }}Store(state => state.page) >= Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || loading}
+          >
+            {t('common.last')}
+          </Button>
         </div>
       </div>
 

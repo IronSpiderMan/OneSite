@@ -27,6 +27,32 @@ interface ChartData {
 
 const CHART_COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16'];
 
+const getDefaultStartTime = (): string => {
+    const d = new Date();
+    d.setDate(d.getDate() - 15);
+    return d.toISOString().split('T')[0];
+};
+
+const MAX_SPAN_DAYS: Record<string, number> = {
+    day: 30,
+    week: 210,
+    month: 900,
+};
+
+const validateDateSpan = (startTime: string, endTime: string, period: string): string | null => {
+    if (!startTime || !endTime) return null;
+    const start = new Date(startTime);
+    const end = new Date(endTime);
+    if (isNaN(start.getTime()) || isNaN(end.getTime())) return null;
+    if (end <= start) return 'End date must be after start date';
+    const spanDays = Math.ceil((end.getTime() - start.getTime()) / (1000 * 60 * 60 * 24));
+    const maxSpan = MAX_SPAN_DAYS[period] || 30;
+    if (spanDays > maxSpan) {
+        return `Time span cannot exceed ${maxSpan} days for ${period} period`;
+    }
+    return null;
+};
+
 const formatLocalDateTime = (dateStr: string | null): string => {
     if (!dateStr) return '';
     try {
@@ -94,9 +120,9 @@ const DashboardPage: React.FC = () => {
             {% if model.visualize and model.visualize.get('show') %}
             try {
                 const data = await get{{ model.name }}Stats({% if model.visualize.get('time_field') %}
-                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: '', endTime: '' }).period,
-                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: '', endTime: '' }).startTime || undefined,
-                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: '', endTime: '' }).endTime || undefined
+                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).period,
+                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).startTime || undefined,
+                    (chartPeriods['{{ model.module_name }}'] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).endTime || undefined
                 {% endif %});
                 results['{{ model.module_name }}'] = data;
             } catch (error) {
@@ -291,41 +317,46 @@ const DashboardPage: React.FC = () => {
                                         <input
                                             type="date"
                                             className="border rounded-md px-2 py-1.5 text-xs"
-                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).startTime}
-                                            onChange={(e) => setChartPeriods(prev => ({
-                                                ...prev,
-                                                [chart.moduleName]: {
-                                                    period: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).period,
-                                                    startTime: e.target.value,
-                                                    endTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).endTime,
-                                                }
-                                            }))}
+                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).startTime}
+                                            onChange={(e) => {
+                                                const newStart = e.target.value;
+                                                setChartPeriods(prev => {
+                                                    const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
+                                                    if (newStart && cur.endTime) {
+                                                        const err = validateDateSpan(newStart, cur.endTime, cur.period);
+                                                        if (err) { toast.error(err); return prev; }
+                                                    }
+                                                    return { ...prev, [chart.moduleName]: { ...cur, startTime: newStart } };
+                                                });
+                                            }}
                                         />
                                         <span className="text-xs text-muted-foreground">—</span>
                                         <input
                                             type="date"
                                             className="border rounded-md px-2 py-1.5 text-xs"
-                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).endTime}
-                                            onChange={(e) => setChartPeriods(prev => ({
-                                                ...prev,
-                                                [chart.moduleName]: {
-                                                    period: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).period,
-                                                    startTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).startTime,
-                                                    endTime: e.target.value,
-                                                }
-                                            }))}
+                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).endTime}
+                                            onChange={(e) => {
+                                                const newEnd = e.target.value;
+                                                setChartPeriods(prev => {
+                                                    const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
+                                                    if (cur.startTime && newEnd) {
+                                                        const err = validateDateSpan(cur.startTime, newEnd, cur.period);
+                                                        if (err) { toast.error(err); return prev; }
+                                                    }
+                                                    return { ...prev, [chart.moduleName]: { ...cur, endTime: newEnd } };
+                                                });
+                                            }}
                                         />
                                         <select
                                             className="border rounded-md px-2 py-1.5 text-xs"
-                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).period}
-                                            onChange={(e) => setChartPeriods(prev => ({
-                                                ...prev,
-                                                [chart.moduleName]: {
-                                                    period: e.target.value,
-                                                    startTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).startTime,
-                                                    endTime: (prev[chart.moduleName] || { period: 'day', startTime: '', endTime: '' }).endTime,
-                                                }
-                                            }))}
+                                            value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).period}
+                                            onChange={(e) => {
+                                                const newPeriod = e.target.value;
+                                                setChartPeriods(prev => ({
+                                                    ...prev,
+                                                    [chart.moduleName]: { period: newPeriod, startTime: getDefaultStartTime(), endTime: '' },
+                                                }));
+                                            }}
                                         >
                                             <option value="day">{t('dashboard.period_day', 'Daily')}</option>
                                             <option value="week">{t('dashboard.period_week', 'Weekly')}</option>
