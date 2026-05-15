@@ -108,6 +108,7 @@ const {{ model.name }}Page: React.FC = () => {
   {% for field in model.fields %}
   {% if field.fk_info %}
   const [{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels, set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels] = useState<Record<string, string>>({});
+  const [search{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels, setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels] = useState<Record<string, string>>({});
   {% endif %}
   {% endfor %}
   {% if model.m2m_fields %}
@@ -363,11 +364,21 @@ const {{ model.name }}Page: React.FC = () => {
     {% endif %}
     {% endif %}
     {% endfor %}
+    {% for field in model.fields %}
+    {% if field.fk_info and field.is_search_field %}
+    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = Number(searchValues['{{ field.name }}']);
+    {% endif %}
+    {% endfor %}
     fetchData(1, use{{ model.name }}Store.getState().size, next);
   };
 
   const resetSearch = () => {
     setSearchValues({});
+    {% for field in model.fields %}
+    {% if field.fk_info and field.is_search_field %}
+    setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels({});
+    {% endif %}
+    {% endfor %}
     fetchData(1, use{{ model.name }}Store.getState().size, {});
   };
 
@@ -466,6 +477,8 @@ const {{ model.name }}Page: React.FC = () => {
       {% for field in model.fields %}
           {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) and field.name != 'id' %}
       {% set ns.has_search_fields = true %}
+      {% elif field.fk_info and field.is_search_field %}
+      {% set ns.has_search_fields = true %}
       {% endif %}
       {% endfor %}
       {% if ns.has_search_fields %}
@@ -542,6 +555,33 @@ const {{ model.name }}Page: React.FC = () => {
               placeholder={t('common.search')}
             />
             {% endif %}
+          </div>
+          {% elif field.fk_info and field.is_search_field %}
+          <div className="space-y-2">
+            <Label>{t('{{ field.label_key }}')}</Label>
+            <SearchableSelect
+              value={searchValues['{{ field.name }}'] || ''}
+              onValueChange={(v) => {
+                setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }));
+                if (v) {
+                  const label = {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels[v] || '';
+                  if (label) {
+                    setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels((s) => ({ ...s, [v]: label }));
+                  }
+                }
+              }}
+              placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+              searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
+              valueLabels={search{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels}
+              loadOptions={async (query) => {
+                const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
+                return response.items.map((item: any) => ({
+                  label: item.{{ field.fk_info.label_field }} || item.id,
+                  value: item.id
+                }));
+              }}
+            />
           </div>
           {% endif %}
           {% endfor %}
