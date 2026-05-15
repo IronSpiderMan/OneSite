@@ -87,31 +87,58 @@ class Item(SQLModel, table=True):
 
 Three-layer permission system: model-level CRUD, field-level CRU, and frontend visibility.
 
+Permission chars: `c` = create, `r` = read, `u` = update, `d` = delete.
+
+### Permission Formats
+
+Both model-level and field-level permissions accept two formats:
+
+- **Dict format** — specify per-role permissions individually
+- **String format** — shorthand that applies the same permission chars to all roles
+
+```python
+# Dict format (per-role)
+"permissions": {"user": "ru", "admin": "rcud", "developer": "rcud"}
+
+# String format (applies to all roles, equivalent to above)
+"permissions": "rcud"
+```
+
+`"r"` is equivalent to `{"user": "r", "admin": "r", "developer": "r"}`. Use string format when all roles have the same permission level, dict format when you need per-role differentiation.
+
+### Layer 1 — Model-level CRUD
+
 ```python
 class Product(SQLModel, table=True):
     __onesite__ = {
+        # Dict format — per-role
         "permissions": {
             "user": "ru",       # read + update
             "admin": "rcud",    # full access
             "developer": "rcud",
         },
+        # String format — all roles get same perms (equivalent)
+        # "permissions": "rcud",
         "visible": ["admin", "developer"],  # menu visibility
     }
 ```
 
-Permission chars: `c` = create, `r` = read, `u` = update, `d` = delete.
+Role hierarchy: `developer >= admin >= user`. Missing roles default to `""` (no access). If unset, all roles get `"crud"`.
 
-Role hierarchy: `developer >= admin >= user`.
+### Layer 2 — Field-level CRU
 
-**Field-level permissions** control field visibility in forms:
+Controls field inclusion in schemas and forms. `d` is model-level only, automatically stripped at field level.
 
 ```python
 email: str = Field(sa_column_kwargs={"info": {"site_props": {
+    # Dict format — per-role
     "permissions": {
         "user": "r",
         "admin": "rcu",
         "developer": "rcu",
     }
+    # String format — all roles get same perms (equivalent)
+    # "permissions": "rcu",
 }}})
 ```
 

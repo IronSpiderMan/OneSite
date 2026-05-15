@@ -27,7 +27,9 @@ import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
 import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
+{% if not model.page_edit or model.importable %}
 import { Modal } from '../../components/ui/modal';
+{% endif %}
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
 import { Switch } from '../../components/ui/switch';
@@ -54,8 +56,10 @@ const {{ model.name }}Page: React.FC = () => {
   const navigate = useNavigate();
   const { data, loading, fetchData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
   const timeZone = getUserTimeZone();
+  {% if not model.page_edit %}
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<number | null>(null);
+  {% endif %}
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<number | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -140,6 +144,9 @@ const {{ model.name }}Page: React.FC = () => {
   }, [storePage]);
 
   const handleCreate = () => {
+    {% if model.page_edit %}
+    navigate('/{{ model.module_name }}s/new');
+    {% else %}
     setEditingId(null);
     reset();
     {% for field in model.fields %}
@@ -154,6 +161,7 @@ const {{ model.name }}Page: React.FC = () => {
     {% endfor %}
     {% endif %}
     setIsModalOpen(true);
+    {% endif %}
   };
 
   {% if model.exportable %}
@@ -211,6 +219,9 @@ const {{ model.name }}Page: React.FC = () => {
   {% endif %}
 
   const handleEdit = async (record: {{ model.name }}) => {
+    {% if model.page_edit %}
+    navigate(`/{{ model.module_name }}s/${record.id}`);
+    {% else %}
     setEditingId(record.id);
     const full = await fetchItem(record.id);
     const item = full || record;
@@ -259,6 +270,7 @@ const {{ model.name }}Page: React.FC = () => {
     {% endfor %}
     {% endif %}
     setIsModalOpen(true);
+    {% endif %}
   };
 
   const requestDelete = (id: number) => {
@@ -314,6 +326,7 @@ const {{ model.name }}Page: React.FC = () => {
     }
   };
 
+  {% if not model.page_edit %}
   const onSubmit = async (values: any) => {
     try {
       if (editingId) {
@@ -329,6 +342,7 @@ const {{ model.name }}Page: React.FC = () => {
       console.error(error);
     }
   };
+  {% endif %}
 
   const applySearch = () => {
     const next: Record<string, any> = {};
@@ -809,6 +823,7 @@ const {{ model.name }}Page: React.FC = () => {
         </div>
       </div>
 
+{% if not model.page_edit %}
       <Modal
         title={editingId ? `${t('common.edit')} {{ model.name }}` : `${t('common.create')} {{ model.name }}`}
         isOpen={isModalOpen}
@@ -1017,6 +1032,7 @@ const {{ model.name }}Page: React.FC = () => {
         </form>
             </div>
       </Modal>
+      {% endif %}
 
       {% if model.importable %}
       {/* Import Modal */}

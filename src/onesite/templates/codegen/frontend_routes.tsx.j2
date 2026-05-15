@@ -5,6 +5,9 @@ import DashboardPage from './pages/Dashboard';
 {% if not model.is_singleton %}
 import {{ model.name }}Page from './pages/{{ model.module_name }}';
 import {{ model.name }}DetailPage from './pages/{{ model.module_name }}/detail';
+{% if model.page_edit %}
+import Create{{ model.name }}Page from './pages/{{ model.module_name }}/create';
+{% endif %}
 {% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
 import {{ model.name }}Page from './pages/{{ model.module_name }}';
 {% endif %}
@@ -25,6 +28,12 @@ export const GeneratedRoutes = [
     path: '/{{ model.module_name }}s',
     element: <{{ model.name }}Page />,
   },
+  {% if model.page_edit %}
+  {
+    path: '/{{ model.module_name }}s/new',
+    element: <Create{{ model.name }}Page />,
+  },
+  {% endif %}
   {
     path: '/{{ model.module_name }}s/:id',
     element: <{{ model.name }}DetailPage />,

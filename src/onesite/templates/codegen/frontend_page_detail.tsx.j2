@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2, Save, Pencil, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
@@ -14,6 +14,18 @@ import { FileUpload } from '../../components/ui/file-upload';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
+{% if model.page_edit %}
+import { useForm, Controller } from 'react-hook-form';
+import { Input } from '../../components/ui/input';
+import { JsonInput } from '../../components/ui/json-input';
+import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
+import { ImageUpload } from '../../components/ui/image-upload';
+import { TimePicker } from '../../components/ui/time-picker';
+import { SearchableSelect } from '../../components/ui/searchable-select';
+{% for fk in model.foreign_keys %}
+import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
+{% endfor %}
+{% endif %}
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -49,7 +61,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const timeZone = getUserTimeZone();
     const { id } = useParams<{ id: string }>();
     const navigate = useNavigate();
-    const { fetchItem, currentItem, loading } = use{{ model.name }}Store();
+    const { fetchItem, currentItem, loading{% if model.page_edit %}, updateItem{% endif %} } = use{{ model.name }}Store();
     const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
     const rolePermissions: Record<string, string> = {{ model.role_permissions | tojson }};
     const userPerms = rolePermissions[userRole] || '';
@@ -106,6 +118,51 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ rfk.name }}Loading, set{{ rfk.source_model }}Loading] = useState(false);
     {% endif %}
     {% endfor %}
+    {% endif %}
+
+    {% if model.page_edit %}
+    const [isEditing, setIsEditing] = useState(false);
+    const { register, handleSubmit: handleEditSubmit, reset, setValue: setEditValue, control: editControl } = useForm();
+
+    {% for field in model.fields %}
+    {% if field.fk_info %}
+    const [edit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels, setEdit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels] = useState<Record<string, string>>({});
+    {% endif %}
+    {% endfor %}
+
+    const onEditSave = async (values: any) => {
+      try {
+        await updateItem(currentItem!.id, values);
+        toast.success(t('toast.update_success', 'Updated'));
+        setIsEditing(false);
+        fetchItem(currentItem!.id);
+      } catch (error) {
+        toast.error(t('toast.save_failed', 'Save failed'));
+        console.error(error);
+      }
+    };
+
+    const startEditing = () => {
+      if (!currentItem) return;
+      const item = currentItem;
+      {% for field in model.fields %}
+      {% if 'r' in field.permissions %}
+      setEditValue('{{ field.name }}', item.{{ field.name }});
+      {% endif %}
+      {% endfor %}
+      {% for field in model.fields %}
+      {% if field.fk_info %}
+      if (item.{{ field.name }}) {
+        get{{ field.fk_info.target_model }}(item.{{ field.name }}).then((fkItem: any) => {
+          if (fkItem) {
+            setEdit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: fkItem.{{ field.fk_info.label_field }} || String(fkItem.id) });
+          }
+        });
+      }
+      {% endif %}
+      {% endfor %}
+      setIsEditing(true);
+    };
     {% endif %}
 
     {% if model.auto_refresh %}
@@ -307,8 +364,26 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 )}
                 {% endfor %}
                 {% endif %}
+
+                {% if model.page_edit %}
+                {hasPermission('u') && !isEditing && (
+                  <Button variant="outline" size="sm" onClick={startEditing}>
+                    <Pencil className="mr-2 h-4 w-4" /> {t('common.edit')}
+                  </Button>
+                )}
+                {isEditing && (
+                  <>
+                    <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                      <X className="mr-2 h-4 w-4" /> {t('common.cancel')}
+                    </Button>
+                    <Button size="sm" type="button" onClick={handleEditSubmit(onEditSave)}>
+                      <Save className="mr-2 h-4 w-4" /> {t('common.save')}
+                    </Button>
+                  </>
+                )}
+                {% endif %}
               </div>
-              
+
               {% if model.auto_refresh %}
               <div className="flex items-center gap-2">
                  <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
@@ -333,11 +408,131 @@ const {{ model.name }}DetailPage: React.FC = () => {
             <div className="grid gap-6 md:grid-cols-2">
                 <Card>
                     <CardHeader>
-                        <CardTitle>Basic Information</CardTitle>
+                        <CardTitle>{% if model.page_edit %}{isEditing ? t('common.edit') + ' ' : ''}{% endif %}Basic Information</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
+                        {% if model.page_edit %}{isEditing ? (
+                        <form id="detail-edit-form" className="space-y-4">
+                            {% for field in model.fields %}
+                            {% if not field.fk_info and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+                            <div className="space-y-2">
+                                <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
+                                {% if field.ui_type == 'bool' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    defaultValue={ {{ 'true' if field.default else 'false' }} }
+                                    render={({ field: { onChange, value } }) => (
+                                        <Switch checked={value} onCheckedChange={onChange} id="edit-{{ field.name }}" />
+                                    )}
+                                />
+                                {% elif field.ui_type == 'image' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <ImageUpload value={value} onChange={onChange} />
+                                    )}
+                                />
+                                {% elif field.ui_type == 'file' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <FileUpload
+                                            value={value}
+                                            onChange={onChange}
+                                            allowDownload={ {{ "true" if field.allow_download else "false" }} }
+                                        />
+                                    )}
+                                />
+                                {% elif field.is_enum %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => {
+                                        {% if model.module_name == "user" and model.name == "User" and field.name == "role" %}
+                                        const filteredValues = userRole === 'developer'
+                                            ? {{ field.enum_values | tojson }}
+                                            : ({{ field.enum_values | tojson }} as string[]).filter(v => v !== 'developer');
+                                        {% else %}
+                                        const filteredValues = {{ field.enum_values | tojson }};
+                                        {% endif %}
+                                        return (
+                                        <Select onValueChange={onChange} defaultValue={value}>
+                                            <SelectTrigger>
+                                                <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
+                                            </SelectTrigger>
+                                            <SelectContent>
+                                                {filteredValues.map((enumVal: string) => (
+                                                    <SelectItem key={enumVal} value={enumVal}>{enumVal}</SelectItem>
+                                                ))}
+                                            </SelectContent>
+                                        </Select>
+                                        );
+                                    }}
+                                />
+                                {% elif field.ui_type == 'time' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <TimePicker
+                                            value={value}
+                                            onChange={onChange}
+                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                                        />
+                                    )}
+                                />
+                                {% elif field.ui_type == 'json' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} }
+                                    render={({ field: { onChange, value } }) => (
+                                        {% if field.json_model_schema %}
+                                        <JsonModelEditor
+                                            schema={ {{ field.json_model_schema | tojson }} }
+                                            value={value}
+                                            onChange={onChange}
+                                        />
+                                        {% elif field.json_item_schema %}
+                                        <JsonModelArrayEditor
+                                            itemSchema={ {{ field.json_item_schema | tojson }} }
+                                            value={value}
+                                            onChange={onChange}
+                                        />
+                                        {% else %}
+                                        <JsonInput
+                                            value={value}
+                                            onChange={onChange}
+                                            jsonKind="{{ field.json_kind or 'object' }}"
+                                            placeholder={ {% if field.json_kind == 'array' %}"[\\n  \\n]"{% else %}"{\\n  \\n}"{% endif %} }
+                                        />
+                                        {% endif %}
+                                    )}
+                                />
+                                {% else %}
+                                <Input
+                                    id="edit-{{ field.name }}"
+                                    {% if field.ui_type == 'int' or field.ui_type == 'float' %}
+                                    type="number"
+                                    {% elif field.ui_type == 'datetime' %}
+                                    type="datetime-local"
+                                    {% else %}
+                                    type="text"
+                                    {% endif %}
+                                    {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })}
+                                />
+                                {% endif %}
+                            </div>
+                            )}{% endif %}
+                            {% endfor %}
+                        </form>
+                        ) : ({% endif %}
+                        {% if model.page_edit %}<>{% endif %}
                         {% for field in model.fields %}
-                        {% if not field.fk_info and 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r') && (
+                        {% if not field.fk_info and 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
                         <div className="space-y-1">
                             <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
                             <div className="font-medium">
@@ -361,9 +556,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 )}
                                 {% elif field.ui_type == 'file' %}
                                 {currentItem.{{ field.name }} ? (
-                                    <FileUpload 
-                                        value={currentItem.{{ field.name }}} 
-                                        onChange={() => {}} 
+                                    <FileUpload
+                                        value={currentItem.{{ field.name }}}
+                                        onChange={() => {}}
                                         readOnly={true}
                                         allowDownload={ {{ "true" if field.allow_download else "false" }} }
                                     />
@@ -387,6 +582,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         </div>
                         )}{% endif %}
                         {% endfor %}
+                        {% if model.page_edit %}</>)}{% endif %}
                     </CardContent>
                 </Card>
 

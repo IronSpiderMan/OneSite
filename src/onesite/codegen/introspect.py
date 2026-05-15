@@ -223,6 +223,7 @@ def get_model_fields(
     bool,
     bool,
     Optional[str],
+    bool,
 ]:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
@@ -263,6 +264,7 @@ def get_model_fields(
     exportable = model_site_props.get("exportable", False)
     raw_visible = model_site_props.get("visible", None)
     special_me_permissions = model_site_props.get("special_me_permissions", None)  # For /me endpoint special handling
+    page_edit = model_site_props.get("page_edit", False)  # Use full page for create/edit instead of modal
     owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
@@ -592,4 +594,5 @@ def get_model_fields(
         role_visible,
         special_me_permissions,
         owner_field,
+        page_edit,
     )

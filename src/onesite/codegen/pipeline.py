@@ -195,6 +195,7 @@ def _build_model_dict(
     exportable: bool,
     import_key: str | None,
     owner_field: str | None = None,
+    page_edit: bool = False,
 ) -> dict:
     """Assemble the canonical model metadata dict from introspection results."""
     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
@@ -229,6 +230,7 @@ def _build_model_dict(
         "visualize": model_site_props.get("visualize"),
         "has_created_at": any(f["name"] == "created_at" for f in fields),
         "owner_field": owner_field,
+        "page_edit": page_edit,
     }
 
 
@@ -318,6 +320,7 @@ def _process_introspected_class(
         model_site_props, actions, is_notification_table, union_key,
         importable, exportable, import_key, role_permissions,
         role_visible, special_me_permissions, owner_field,
+        page_edit,
     ) = get_model_fields(obj, model_module_name)
 
     if name == "User":
@@ -346,7 +349,7 @@ def _process_introspected_class(
         role_visible, special_me_permissions, frontend_only, translations,
         auto_refresh, refresh_interval, reverse_fk_display, model_site_props,
         actions, is_notification_table, union_key, importable, exportable,
-        import_key, owner_field,
+        import_key, owner_field, page_edit,
     )
 
 
@@ -709,6 +712,12 @@ def _generate_regular_model(model: dict, cwd: Path, backend_path: Path) -> None:
         "frontend_page_detail.tsx.j2", context,
         cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
     )
+
+    if model.get("page_edit"):
+        generate_file(
+            "frontend_page_create.tsx.j2", context,
+            cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "create.tsx",
+        )
 
     if not model.get("frontend_only"):
         generate_file(
