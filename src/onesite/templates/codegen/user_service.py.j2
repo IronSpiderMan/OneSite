@@ -5,6 +5,11 @@ from app.cruds import user as crud
 from app.schemas.user import UserCreate, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
+{% if model.reverse_m2m %}
+{% for rel in model.reverse_m2m %}
+from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
+{% endfor %}
+{% endif %}
 
 class UserService:
     async def get(self, session: AsyncSession, id: int) -> Optional[User]:
@@ -146,5 +151,35 @@ class UserService:
 
     async def delete(self, session: AsyncSession, id: int) -> User:
         return await crud.delete(session, id)
+
+    {% if model.reverse_m2m %}
+    # Reverse M2M Relationship methods
+    {% for rel in model.reverse_m2m %}
+    async def get_{{ rel.name }}(
+        self,
+        session: AsyncSession,
+        {{ model.lower_name }}_id: int,
+        page: int = 1,
+        size: int = 20,
+    ) -> PaginatedResponse[{{ rel.source_model }}Read]:
+        """
+        Get {{ rel.source_model }}s related to {{ model.name }} (via M2M).
+        """
+        # Get total count
+        total = await crud.count_{{ rel.name }}(session, {{ model.lower_name }}_id)
+
+        if total == 0:
+            return PaginatedResponse.create(data=[], total=0, page=page, size=size)
+
+        # Get items (CRUD returns objects directly with pagination)
+        items = await crud.get_{{ rel.name }}(session, {{ model.lower_name }}_id, page=page, size=size)
+
+        # Convert to ReadSchema
+        items_read = [{{ rel.source_model }}Read.model_validate(item) for item in items]
+        if size == -1:
+            return PaginatedResponse.create(data=items_read, total=total, page=1, size=total)
+        return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
+    {% endfor %}
+    {% endif %}
 
 service = UserService()
