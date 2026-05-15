@@ -450,6 +450,13 @@ def _resolve_fk_labels_and_reverse(models: list[dict], model_map: dict) -> None:
                 continue
 
             reverse_name = _pluralize(model["module_name"])
+
+            source_readable_fields = [
+                f for f in model["fields"]
+                if "r" in f["permissions"]
+                and f["name"] != "password"
+            ]
+
             target_model["reverse_foreign_keys"].append({
                 "name": reverse_name,
                 "source_model": model["name"],
@@ -457,6 +464,7 @@ def _resolve_fk_labels_and_reverse(models: list[dict], model_map: dict) -> None:
                 "source_fk_field": fk["name"],
                 "label_field": model.get("unique_search_field") or model["search_field"],
                 "display": fk.get("reverse_display", True),
+                "source_readable_fields": source_readable_fields,
             })
 
 

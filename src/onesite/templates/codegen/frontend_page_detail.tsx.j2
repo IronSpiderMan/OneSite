@@ -780,31 +780,49 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <CardTitle>{t('models.{{ rfk.source_service }}.name')}s</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        <div className="rounded-md border">
+                        <div className="rounded-md border overflow-x-auto">
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>ID</TableHead>
-                                        <TableHead>{{ rfk.label_field.title() }}</TableHead>
+                                        {% for field in rfk.source_readable_fields %}
+                                        {% if field.name != rfk.source_fk_field %}
+                                        <TableHead>{t('{{ field.label_key }}')}</TableHead>
+                                        {% endif %}
+                                        {% endfor %}
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     { {{ rfk.name }}Loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={2} className="h-24 text-center">
+                                            <TableCell colSpan={ {{ (rfk.source_readable_fields | length) - 1 }} } className="h-24 text-center">
                                                 <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                                             </TableCell>
                                         </TableRow>
                                     ) : {{ rfk.name }}Data.length > 0 ? (
                                         {{ rfk.name }}Data.map((item) => (
                                             <TableRow key={item.id}>
-                                                <TableCell>{item.id}</TableCell>
-                                                <TableCell>{item.{{ rfk.label_field }} }</TableCell>
+                                                {% for field in rfk.source_readable_fields %}
+                                                {% if field.name != rfk.source_fk_field %}
+                                                <TableCell>
+                                                    {% if field.fk_info %}
+                                                    {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
+                                                    {% elif field.ui_type == 'bool' %}
+                                                    {item.{{ field.name }} ? 'Yes' : 'No'}
+                                                    {% elif field.is_enum %}
+                                                    <Badge variant="outline">{item.{{ field.name }}}</Badge>
+                                                    {% elif field.ui_type == 'datetime' %}
+                                                    {formatDateTime(item.{{ field.name }}, timeZone)}
+                                                    {% else %}
+                                                    {typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }} ?? '-')}
+                                                    {% endif %}
+                                                </TableCell>
+                                                {% endif %}
+                                                {% endfor %}
                                             </TableRow>
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={2} className="h-24 text-center">
+                                            <TableCell colSpan={ {{ (rfk.source_readable_fields | length) - 1 }} } className="h-24 text-center">
                                                 No {{ rfk.source_model.lower() }}s found.
                                             </TableCell>
                                         </TableRow>
