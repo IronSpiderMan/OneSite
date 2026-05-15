@@ -220,7 +220,7 @@ const {{ model.name }}Page: React.FC = () => {
 
   const handleEdit = async (record: {{ model.name }}) => {
     {% if model.page_edit %}
-    navigate(`/{{ model.module_name }}s/${record.id}`);
+    navigate(`/{{ model.module_name }}s/${record.id}?edit=true`);
     {% else %}
     setEditingId(record.id);
     const full = await fetchItem(record.id);

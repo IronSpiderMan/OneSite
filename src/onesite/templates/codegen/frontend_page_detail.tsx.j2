@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
+import React, { useEffect, useState, useRef } from 'react';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Loader2, Save, Pencil, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
@@ -60,6 +60,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const { t } = useTranslation();
     const timeZone = getUserTimeZone();
     const { id } = useParams<{ id: string }>();
+    const [searchParams] = useSearchParams();
     const navigate = useNavigate();
     const { fetchItem, currentItem, loading{% if model.page_edit %}, updateItem{% endif %} } = use{{ model.name }}Store();
     const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
@@ -163,6 +164,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
       {% endfor %}
       setIsEditing(true);
     };
+
+    // Auto-enter edit mode when navigated from list page edit button
+    const hasAutoEdited = useRef(false);
+    useEffect(() => {
+        if (currentItem && !hasAutoEdited.current && searchParams.get('edit') === 'true' && hasPermission('u')) {
+            hasAutoEdited.current = true;
+            startEditing();
+        }
+    }, [currentItem, searchParams]);
     {% endif %}
 
     {% if model.auto_refresh %}
