@@ -23,7 +23,6 @@ class User(UserBase, table=True):
             "admin": "rcud",  # Admin can CRUD users, but cannot create developer role
             "developer": "rcud",  # Developer has full access
         },
-        "special_me_permissions": "ru",  # Special: user can access /me with ru
         "translations": {
             "zh": {
                 "name": "用户",

@@ -181,7 +181,6 @@ def _build_model_dict(
     model_permissions: str,
     role_permissions: dict,
     role_visible: bool,
-    special_me_permissions: bool,
     frontend_only: bool,
     translations: dict,
     auto_refresh: bool,
@@ -214,7 +213,6 @@ def _build_model_dict(
         "model_permissions": model_permissions,
         "role_permissions": role_permissions,
         "role_visible": role_visible,
-        "special_me_permissions": special_me_permissions,
         "frontend_only": frontend_only,
         "translations": translations,
         "auto_refresh": auto_refresh,
@@ -319,7 +317,7 @@ def _process_introspected_class(
         translations, auto_refresh, refresh_interval, reverse_fk_display,
         model_site_props, actions, is_notification_table, union_key,
         importable, exportable, import_key, role_permissions,
-        role_visible, special_me_permissions, owner_field,
+        role_visible, owner_field,
         page_edit,
     ) = get_model_fields(obj, model_module_name)
 
@@ -346,7 +344,7 @@ def _process_introspected_class(
         name, model_module_name, module_name,
         fields, foreign_keys, search_field, unique_search_field,
         is_link_table, is_singleton, model_permissions, role_permissions,
-        role_visible, special_me_permissions, frontend_only, translations,
+        role_visible, frontend_only, translations,
         auto_refresh, refresh_interval, reverse_fk_display, model_site_props,
         actions, is_notification_table, union_key, importable, exportable,
         import_key, owner_field, page_edit,
