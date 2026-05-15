@@ -202,6 +202,7 @@ const DashboardPage: React.FC = () => {
             moduleName: '{{ model.module_name }}',
             chartType: '{{ model.visualize.get('chart_type', 'bar') }}',
             title: '{{ model.visualize.get('title', model.name) }}',
+            fullRow: {{ 'true' if model.visualize.get('full_row') else 'false' }},
             {% if model.visualize.get('time_field') %}
             hasTimeField: true,
             {% endif %}
@@ -307,7 +308,7 @@ const DashboardPage: React.FC = () => {
             {chartModels.length > 0 && (
                 <div className="grid gap-6 md:grid-cols-2">
                     {chartModels.map((chart) => (
-                        <div key={chart.moduleName} className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
+                        <div key={chart.moduleName} className={`rounded-xl border bg-card text-card-foreground shadow-sm p-6${chart.fullRow ? ' md:col-span-2' : ''}`}>
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-semibold">
                                     {t(`models.${chart.moduleName}.name`, chart.title)}
