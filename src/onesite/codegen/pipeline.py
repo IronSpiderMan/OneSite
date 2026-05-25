@@ -39,6 +39,11 @@ def _to_snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
+def _to_pascal(snake: str) -> str:
+    """Convert snake_case to PascalCase, e.g. device_model → DeviceModel."""
+    return "".join(word.capitalize() for word in snake.split("_"))
+
+
 def _install_snake_case_tablenames() -> None:
     """Monkey-patch SQLModel to auto-generate snake_case table names."""
     if getattr(sqlmodel.main, "_onesite_snake_tablename_installed", False):
@@ -195,14 +200,19 @@ def _build_model_dict(
     import_key: str | None,
     owner_field: str | None = None,
     page_edit: bool = False,
+    is_timescaledb: bool = False,
+    timescaledb_entity_field: str | None = None,
+    timescaledb_metric_field: str | None = None,
 ) -> dict:
     """Assemble the canonical model metadata dict from introspection results."""
     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
+    table_name = _to_snake(name)
     return {
         "name": name,
         "module_name": module_name,
         "source_module": source_module,
         "lower_name": name.lower(),
+        "table_name": table_name,
         "fields": fields,
         "schema_imports": schema_imports,
         "foreign_keys": foreign_keys,
@@ -229,6 +239,9 @@ def _build_model_dict(
         "has_created_at": any(f["name"] == "created_at" for f in fields),
         "owner_field": owner_field,
         "page_edit": page_edit,
+        "is_timescaledb": is_timescaledb,
+        "timescaledb_entity_field": timescaledb_entity_field,
+        "timescaledb_metric_field": timescaledb_metric_field,
     }
 
 
@@ -247,14 +260,17 @@ def phase_introspect(backend_path: Path) -> list[dict]:
         return []
 
     models_dir = backend_path / "app" / "models"
-    module_names = [f.stem for f in models_dir.glob("*.py") if f.stem != "__init__"]
+    module_names = [f.stem for f in models_dir.glob("*.py") if f.stem != "__init__" and not f.stem.startswith("_")]
     found_models: list[dict] = []
 
     for module_name in module_names:
         full_module_name = f"app.models.{module_name}"
         try:
             if full_module_name in sys.modules:
-                module = importlib.reload(sys.modules[full_module_name])
+                # Already loaded (e.g. via _model_extensions.py during import app.models).
+                # Don't reload — that would re-execute module code and trigger
+                # "Table 'X' is already defined for this MetaData instance".
+                module = sys.modules[full_module_name]
             else:
                 module = importlib.import_module(full_module_name)
         except ImportError as e:
@@ -318,7 +334,8 @@ def _process_introspected_class(
         model_site_props, actions, is_notification_table, union_key,
         importable, exportable, import_key, role_permissions,
         role_visible, owner_field,
-        page_edit,
+        page_edit, is_timescaledb,
+        timescaledb_entity_field, timescaledb_metric_field,
     ) = get_model_fields(obj, model_module_name)
 
     if name == "User":
@@ -348,6 +365,7 @@ def _process_introspected_class(
         auto_refresh, refresh_interval, reverse_fk_display, model_site_props,
         actions, is_notification_table, union_key, importable, exportable,
         import_key, owner_field, page_edit,
+        is_timescaledb, timescaledb_entity_field, timescaledb_metric_field,
     )
 
 
@@ -428,11 +446,32 @@ def _init_link_table_flags(models: list[dict]) -> None:
 
 def _resolve_fk_labels_and_reverse(models: list[dict], model_map: dict) -> None:
     """Label FK targets and populate reverse_foreign_keys on target models."""
+    # Build name → model map with lowercase keys for case-insensitive fallback
+    model_map_lower: dict[str, dict] = {k.lower(): v for k, v in model_map.items()}
+    # Also build by source_module (filename stem) since introspect.py guesses
+    # target_model from the FK table name, which often matches the filename
+    source_mod_map: dict[str, dict] = {m["source_module"]: m for m in models if m.get("source_module")}
+
     for model in models:
         for fk in model["foreign_keys"]:
             target_model = model_map.get(fk["target_model"])
+            # Fallback: try case-insensitive name match (handles dgroup → Dgroup vs DGroup)
+            if target_model is None:
+                target_model = model_map_lower.get(fk["target_model"].lower())
+                if target_model is not None:
+                    fk["target_model"] = target_model["name"]
+            # Fallback 2: try source_module (handles FK table name = filename)
+            if target_model is None:
+                target_model = source_mod_map.get(fk["target_service"])
+                if target_model is not None:
+                    fk["target_model"] = target_model["name"]
             if target_model is None:
                 continue
+
+            # Override with canonical module_name (introspect.py guesses from FK table name)
+            fk["target_service"] = target_model["module_name"]
+            fk["target_source_module"] = target_model["source_module"]
+            fk["target_endpoint"] = f"{target_model['module_name']}s"
 
             fk["label_field"] = (
                 target_model.get("unique_search_field") or target_model["search_field"]
@@ -444,7 +483,8 @@ def _resolve_fk_labels_and_reverse(models: list[dict], model_map: dict) -> None:
                 and not f.get("fk_info")
             ]
 
-            if model.get("is_link_table"):
+            # Skip self-referencing FKs and link/timeseries tables
+            if model.get("is_link_table") or model.get("is_timescaledb") or model["name"] == target_model["name"]:
                 continue
 
             reverse_name = _pluralize(model["module_name"])
@@ -598,6 +638,290 @@ def _apply_m2m_direction(
         })
 
 
+def _resolve_timescaledb_metadata(models: list[dict]) -> None:
+    """Compute derived fields for timescale models (time column, latest table name)."""
+    for model in models:
+        if not model.get("is_timescaledb"):
+            continue
+
+        # Find the time column (prefer reported_at, then created_at, then first datetime field)
+        time_column = None
+        for f in model["fields"]:
+            if f["ui_type"] == "datetime":
+                if f["name"] in ("reported_at", "created_at"):
+                    time_column = f["name"]
+                    break
+                if time_column is None:
+                    time_column = f["name"]
+        model["timescaledb_time_column"] = time_column or "created_at"
+
+        # Compute latest table name
+        model["timescaledb_latest_table_name"] = f"{model['table_name']}_latest"
+
+        # Compute entity FK SQL type for latest table column
+        entity_field = model.get("timescaledb_entity_field", "")
+        for f in model["fields"]:
+            if f["name"] == entity_field:
+                if f.get("type") == "int":
+                    model["timescaledb_entity_sql_type"] = "INTEGER"
+                else:
+                    model["timescaledb_entity_sql_type"] = "TEXT"
+                if f.get("fk_info"):
+                    table = (
+                        f["fk_info"]["target_service"]
+                        or entity_field.replace("_id", "")
+                    )
+                    model["timescaledb_entity_target_table"] = table
+                    model["timescaledb_entity_model"] = f["fk_info"]["target_model"]
+                break
+        else:
+            model["timescaledb_entity_sql_type"] = "INTEGER"
+            model["timescaledb_entity_target_table"] = entity_field.replace("_id", "")
+
+        # Compute model table class name (PascalCase)
+        model_table = model.get("timescaledb_model_table", "")
+        if model_table:
+            model["timescaledb_model_class"] = _to_pascal(model_table)
+
+
+def _resolve_timeseries_relations(models: list[dict]) -> None:
+    """For each timeseries model, build reverse_timeseries on the parent entity."""
+    # Initialize reverse_timeseries on all models
+    for model in models:
+        model["reverse_timeseries"] = []
+
+    for ts_model in models:
+        if not ts_model.get("is_timescaledb"):
+            continue
+
+        entity_field = ts_model.get("timescaledb_entity_field")
+        if not entity_field:
+            continue
+
+        # Find the FK info for the entity field
+        fk_info = None
+        for fk in ts_model["foreign_keys"]:
+            if fk["name"] == entity_field:
+                fk_info = fk
+                break
+
+        if not fk_info:
+            continue
+
+        target_model_name = fk_info["target_model"]
+        # Find target model in the models list
+        for model in models:
+            if model["name"] == target_model_name:
+                model.setdefault("reverse_timeseries", [])
+                model["reverse_timeseries"].append({
+                    "model_name": ts_model["name"],
+                    "module_name": ts_model["module_name"],
+                    "table_name": ts_model["table_name"],
+                    "latest_table_name": ts_model.get("timescaledb_latest_table_name", f"{ts_model['table_name']}_latest"),
+                    "entity_field": entity_field,
+                    "entity_model": target_model_name,
+                    "metric_field": ts_model.get("timescaledb_metric_field"),
+                    "time_field": ts_model.get("timescaledb_time_column", "created_at"),
+                    "timescaledb_model_table": ts_model.get("timescaledb_model_table"),
+                    "timescaledb_model_class": ts_model.get("timescaledb_model_class"),
+                    "api_base": f"{ts_model['module_name']}s",
+                    "source_module": ts_model["source_module"],
+                })
+                break
+
+
+# ── Model Table Generation ─────────────────────────────────────────────
+# Scans timeseries model definitions for timescaledb_model_table,
+# generates the model table file and FK column extension before introspect.
+
+_MODEL_TABLE_TPL = '''"""Auto-generated model table for timeseries metric definitions."""
+from typing import Optional
+from sqlmodel import Field, SQLModel, Column
+from sqlalchemy import JSON
+
+
+class {class_name}(SQLModel, table=True):
+    __tablename__ = "{table_name}"
+    __onesite__ = {{
+        "permissions": {{"user": "r", "admin": "cru", "developer": "cru"}},
+    }}
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(..., description="Model name")
+    description: str | None = Field(default=None, description="Description")
+    properties: list = Field(
+        default=[],
+        sa_column=Column(JSON),
+        description="Metric definitions: list of {{key, display_name, unit, icon, data_type, ...}}",
+    )
+'''
+
+
+def _scan_model_table_configs(models_dir: Path) -> list[dict]:
+    """Scan model source text files for timescaledb config before full introspect."""
+    import re
+    configs: list[dict] = []
+    for f in sorted(models_dir.glob("*.py")):
+        if f.stem == "__init__":
+            continue
+        content = f.read_text(encoding="utf-8")
+        if "is_timescaledb" not in content:
+            continue
+
+        # Extract timescaledb_model_table (also supports legacy key timescaledb_device_model)
+        m = re.search(
+            r""""timescaledb_model_table"\s*:\s*"([^"]+)"|'timescaledb_model_table'\s*:\s*'([^']+)'"""
+            r"""|"timescaledb_device_model"\s*:\s*"([^"]+)"|'timescaledb_device_model'\s*:\s*'([^']+)'""",
+            content,
+        )
+        if not m:
+            continue
+        model_table = m.group(1) or m.group(2) or m.group(3) or m.group(4)
+
+        # Extract timescaledb_entity_field
+        m = re.search(
+            r""""timescaledb_entity_field"\s*:\s*"([^"]+)"|'timescaledb_entity_field'\s*:\s*'([^']+)'""",
+            content,
+        )
+        entity_field = m.group(1) or m.group(2) if m else None
+        if not entity_field:
+            continue
+
+        # Find the FK target from the model definition to get entity model name
+        entity_stem = entity_field.replace("_id", "")
+        configs.append({
+            "model_table": model_table,
+            "entity_field": entity_field,
+            "entity_stem": entity_stem,
+            "source_file": f.stem,
+        })
+    return configs
+
+
+def phase_generate_model_tables(backend_path: Path) -> None:
+    """Generate model table files and FK extensions for timeseries configs.
+
+    Must run after phase_sync_models and before phase_introspect.
+    """
+    models_dir = backend_path / "app" / "models"
+    if not models_dir.exists():
+        return
+
+    configs = _scan_model_table_configs(models_dir)
+    if not configs:
+        return
+
+    for cfg in configs:
+        class_name = _to_pascal(cfg["model_table"])
+        table_name = cfg["model_table"]
+        filepath = models_dir / f"{table_name}.py"
+        if filepath.exists():
+            console.print(f"  Model table already exists: {table_name}.py")
+        else:
+            filepath.write_text(
+                _MODEL_TABLE_TPL.format(class_name=class_name, table_name=table_name)
+            )
+            console.print(f"[green]Generated model table: {table_name}.py[/green]")
+
+    # Generate FK extension file for DB column injection
+    lines = [
+        '"""Auto-generated model extensions \u2014 adds FK columns for timeseries model tables."""',
+        "from sqlalchemy import Column, Integer, ForeignKey",
+        "",
+    ]
+    for cfg in configs:
+        entity_class = _to_pascal(cfg["entity_stem"])
+        fk_field = f"{cfg['model_table']}_id"
+        target_table = cfg["model_table"]
+        lines.append(f"from app.models.{cfg['entity_stem']} import {entity_class}")
+        lines.append(
+            f"if not any(c.name == '{fk_field}' for c in "
+            f"{entity_class}.__table__.columns):"
+        )
+        lines.append(f"    {entity_class}.__table__.append_column(")
+        lines.append(
+            f"        Column('{fk_field}', Integer, ForeignKey('{target_table}.id'),"
+            f" nullable=True)"
+        )
+        lines.append("    )")
+        lines.append("")
+
+    ext_file = models_dir / "_model_extensions.py"
+    ext_file.write_text("\n".join(lines))
+    console.print(f"[green]Generated model extensions: _model_extensions.py[/green]")
+
+    # Append import to __init__.py
+    init_file = models_dir / "__init__.py"
+    init_content = init_file.read_text() if init_file.exists() else ""
+    if "import _model_extensions" not in init_content:
+        init_content += "from . import _model_extensions  # noqa: F401\n"
+        init_file.write_text(init_content)
+
+
+def _inject_model_table_fks(models: list[dict]) -> None:
+    """After introspection, inject FK to model table into entity model metadata dicts.
+
+    This adds a synthetic FK field (e.g. device_model_id) to the entity model's
+    fields list so that all generated code (schemas, CRUD, API, frontend) includes it.
+    """
+    for ts_model in models:
+        if not ts_model.get("is_timescaledb"):
+            continue
+        model_table = ts_model.get("timescaledb_model_table")
+        if not model_table:
+            continue
+
+        entity_field_name = ts_model.get("timescaledb_entity_field", "")
+        # Find the target entity model via FK info
+        for fk in ts_model["foreign_keys"]:
+            if fk["name"] != entity_field_name:
+                continue
+            target = fk["target_model"]
+            for entity in models:
+                if entity["name"] != target:
+                    continue
+                fk_field = f"{model_table}_id"
+                if any(f["name"] == fk_field for f in entity["fields"]):
+                    break  # already present
+
+                # Extract FK field base table name from model_table
+                fk_service = model_table  # snake_case table name
+                fk_class = ts_model.get("timescaledb_model_class", _to_pascal(model_table))
+
+                entity["fields"].append({
+                    "name": fk_field,
+                    "type": "int",
+                    "ui_type": "int",
+                    "json_kind": None,
+                    "json_model_schema": None,
+                    "json_item_schema": None,
+                    "py_imports": [fk_service],
+                    "permissions": "r",
+                    "create_optional": False,
+                    "update_optional": True,
+                    "required": False,
+                    "default": None,
+                    "is_enum": False,
+                    "enum_values": [],
+                    "is_search_field": False,
+                    "fk_info": {
+                        "name": fk_field,
+                        "target_model": fk_class,
+                        "target_service": fk_service,
+                        "target_endpoint": f"{fk_service}s",
+                        "label_field": "name",
+                        "reverse_display": True,
+                    },
+                    "allow_download": True,
+                    "label_key": f"models.{entity['module_name']}.fields.{fk_field}",
+                    "translations": {},
+                    "is_unique": False,
+                })
+                entity["foreign_keys"].append(entity["fields"][-1]["fk_info"])
+                break
+            break
+
+
 def phase_resolve_relationships(models: list[dict]) -> list[dict]:
     """Resolve FK labels, reverse FK, and M2M relationships across all models.
 
@@ -609,6 +933,9 @@ def phase_resolve_relationships(models: list[dict]) -> list[dict]:
 
     _resolve_min_roles(models)
     _init_link_table_flags(models)
+    _resolve_timescaledb_metadata(models)
+    _resolve_timeseries_relations(models)
+    _inject_model_table_fks(models)
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_m2m(models, model_map, module_map)
 
@@ -706,6 +1033,11 @@ def _generate_regular_model(model: dict, cwd: Path, backend_path: Path) -> None:
         "frontend_service.ts.j2", context,
         cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts",
     )
+
+    # Timeseries models: no standalone pages/store — data is shown on parent entity detail
+    if model.get("is_timescaledb"):
+        return
+
     generate_file(
         "frontend_store.ts.j2", context,
         cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts",
@@ -768,6 +1100,7 @@ def phase_generate_per_model(
     api_models = [
         m for m in models
         if not m.get("frontend_only")
+        and not m.get("is_timescaledb")
         and (not m["is_link_table"] or (m.get("is_association_table") and m.get("show_in_menu")))
     ]
     return _sort_api_models(api_models, site_config)
@@ -810,6 +1143,18 @@ def phase_generate_aggregated(
     backend_path: Path,
 ) -> None:
     """Generate cross-cutting files: router, routes, menu, dashboard, i18n, etc."""
+    # ── TimescaleDB: collect models and generate db.py ──
+    timescaledb_models = [m for m in models if m.get("is_timescaledb")]
+    has_timescaledb = bool(timescaledb_models)
+    generate_file(
+        "db.py.j2",
+        {
+            "has_timescaledb": has_timescaledb,
+            "timescaledb_models": timescaledb_models,
+        },
+        backend_path / "app" / "core" / "db.py",
+    )
+
     # ── Notification model lookup & WS (order preserved from original) ──
     notifications_enabled, notifications_api_base = _validate_notification_model(models)
 
@@ -898,13 +1243,17 @@ def generate_code() -> None:
     cwd = Path(os.getcwd())
 
     # Phase 1 — Config
-    if not (cwd / "backend").exists():
-        console.print("[red]Backend directory not found. Are you in the project root?[/red]")
-        return
+    backend_path = cwd / "backend"
+    if not backend_path.exists():
+        console.print("[yellow]Backend directory not found, creating...[/yellow]")
+        backend_path.mkdir(parents=True, exist_ok=True)
     site_config, backend_path = phase_load_config(cwd)
 
     # Phase 2 — Model files
     phase_sync_models(cwd, backend_path)
+
+    # Phase 2.5 — Generate model tables (before introspect, so auto-generated models are picked up)
+    phase_generate_model_tables(backend_path)
 
     # Phase 3 — Introspect
     models = phase_introspect(backend_path)

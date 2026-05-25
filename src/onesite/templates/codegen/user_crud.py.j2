@@ -225,7 +225,7 @@ async def get_multi_with_fk_labels(
     {% for fk in model.foreign_keys %}
     {{ fk.name }}_map = {}
     if {{ fk.name }}_ids:
-        from app.models.{{ fk.target_service }} import {{ fk.target_model }}
+        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
         stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
         result = await session.exec(stmt)
         for obj in result.all():

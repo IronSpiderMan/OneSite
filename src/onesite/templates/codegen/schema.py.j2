@@ -60,6 +60,7 @@ class {{ model.name }}Create(SQLModel):
     pass
 {% endif %}
 
+{% if not model.is_timescaledb %}
 # Properties to receive via API on update
 class {{ model.name }}Update(SQLModel):
 {% set ns = namespace(has_field=false) %}
@@ -83,9 +84,10 @@ class {{ model.name }}Update(SQLModel):
 {% if not ns.has_field %}
     pass
 {% endif %}
+{% endif %}
 
 class {{ model.name }}Read({{ model.name }}Base):
-    id: int
+    {% if not model.is_timescaledb %}id: int{% endif %}
 {% for fk in model.foreign_keys %}
     {{ fk.name }}_label: Optional[str] = None
 {% endfor %}

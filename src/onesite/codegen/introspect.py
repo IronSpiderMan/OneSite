@@ -15,6 +15,19 @@ def _to_snake(name: str) -> str:
     return re.sub(r"(?<!^)(?=[A-Z])", "_", name).lower()
 
 
+def _is_pydantic_model(cls: Any) -> bool:
+    """Check if cls is a Pydantic model suitable for JSON schema (excludes DB-backed SQLModels).
+
+    Returns True for plain BaseModel subclasses and SQLModel(table=False),
+    but not for SQLModel(table=True) which are real DB tables.
+    """
+    return (
+        inspect.isclass(cls)
+        and issubclass(cls, BaseModel)
+        and not (issubclass(cls, SQLModel) and getattr(cls, "__table__", None) is not None)
+    )
+
+
 def _json_field_kind_from_annotation(annotation: Any) -> str:
     if annotation is bool:
         return "bool"
@@ -29,7 +42,7 @@ def _json_field_kind_from_annotation(annotation: Any) -> str:
         return "datetime"
     if inspect.isclass(annotation) and issubclass(annotation, Enum):
         return "enum"
-    if inspect.isclass(annotation) and issubclass(annotation, BaseModel) and not issubclass(annotation, SQLModel):
+    if inspect.isclass(annotation) and _is_pydantic_model(annotation):
         return "model"
     origin = get_origin(annotation)
     if origin is list or annotation is list:
@@ -52,7 +65,7 @@ def _build_json_model_schema(
         field_schema: Dict[str, Any] = {"name": fname, "kind": kind}
         if kind == "enum" and inspect.isclass(ann) and issubclass(ann, Enum):
             field_schema["enumValues"] = [e.value for e in ann]
-        elif kind == "model" and inspect.isclass(ann) and issubclass(ann, BaseModel) and not issubclass(ann, SQLModel):
+        elif kind == "model" and inspect.isclass(ann) and _is_pydantic_model(ann):
             field_schema["model"] = _build_json_model_schema(ann, visited=visited, depth=depth + 1)
         elif kind == "array":
             origin = get_origin(ann)
@@ -62,7 +75,7 @@ def _build_json_model_schema(
             item_schema: Dict[str, Any] = {"kind": item_kind}
             if item_kind == "enum" and inspect.isclass(item_ann) and issubclass(item_ann, Enum):
                 item_schema["enumValues"] = [e.value for e in item_ann]
-            elif item_kind == "model" and inspect.isclass(item_ann) and issubclass(item_ann, BaseModel) and not issubclass(item_ann, SQLModel):
+            elif item_kind == "model" and inspect.isclass(item_ann) and _is_pydantic_model(item_ann):
                 item_schema["model"] = _build_json_model_schema(item_ann, visited=visited, depth=depth + 1)
             field_schema["item"] = item_schema
         fields.append(field_schema)
@@ -224,6 +237,12 @@ def get_model_fields(
     bool,
     Optional[str],
     bool,
+    bool,
+    Optional[str],
+    bool,
+    bool,
+    Optional[str],
+    Optional[str],
 ]:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
@@ -265,6 +284,11 @@ def get_model_fields(
     raw_visible = model_site_props.get("visible", None)
     page_edit = model_site_props.get("page_edit", False)  # Use full page for create/edit instead of modal
     owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
+
+    # ── TimescaleDB config ────────────────────────────────────────────────
+    is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
+    timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
+    timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -387,13 +411,13 @@ def get_model_fields(
                 item_type = args[0] if args else Any
                 item_origin = get_origin(item_type)
                 item_args = get_args(item_type)
-                if inspect.isclass(item_type) and issubclass(item_type, BaseModel) and not issubclass(item_type, SQLModel):
+                if inspect.isclass(item_type) and _is_pydantic_model(item_type):
                     type_str = f"List[{item_type.__name__}]"
                     json_py_imports.append(item_type.__name__)
                     json_item_schema = _build_json_model_schema(item_type)
                 elif item_type in (dict,) or item_origin is dict:
                     value_type = item_args[1] if len(item_args) >= 2 else Any
-                    if inspect.isclass(value_type) and issubclass(value_type, BaseModel) and not issubclass(value_type, SQLModel):
+                    if inspect.isclass(value_type) and _is_pydantic_model(value_type):
                         type_str = f"List[Dict[str, {value_type.__name__}]]"
                         json_py_imports.append(value_type.__name__)
                     else:
@@ -403,12 +427,12 @@ def get_model_fields(
             else:
                 json_kind = "object"
                 value_type = args[1] if len(args) >= 2 else Any
-                if inspect.isclass(value_type) and issubclass(value_type, BaseModel) and not issubclass(value_type, SQLModel):
+                if inspect.isclass(value_type) and _is_pydantic_model(value_type):
                     type_str = f"Dict[str, {value_type.__name__}]"
                     json_py_imports.append(value_type.__name__)
                 else:
                     type_str = "Dict[str, Any]"
-        elif inspect.isclass(resolved_annotation) and issubclass(resolved_annotation, BaseModel) and not issubclass(resolved_annotation, SQLModel):
+        elif inspect.isclass(resolved_annotation) and _is_pydantic_model(resolved_annotation):
             json_kind = "object"
             type_str = resolved_annotation.__name__
             json_py_imports.append(resolved_annotation.__name__)
@@ -569,6 +593,26 @@ def get_model_fields(
     search_field = next((f["name"] for f in fields if f.get("is_search_field")), "id")
     unique_search_field = next((f["name"] for f in fields if f.get("is_search_field") and f.get("is_unique")), None)
 
+    # Validate TimescaleDB config
+    if is_timescaledb:
+        if not timescaledb_entity_field:
+            console.print(
+                f"[red]Error: Model '{model_cls.__name__}' has is_timescaledb=True "
+                f"but no timescaledb_entity_field configured.[/red]"
+            )
+            raise ValueError(f"Model '{model_cls.__name__}' is_timescaledb requires timescaledb_entity_field")
+        fk_field_names = {f["name"] for f in foreign_keys}
+        if timescaledb_entity_field not in fk_field_names:
+            console.print(
+                f"[red]Error: Model '{model_cls.__name__}' "
+                f"timescaledb_entity_field='{timescaledb_entity_field}' "
+                f"must be a foreign key field.[/red]"
+            )
+            raise ValueError(
+                f"Model '{model_cls.__name__}': '{timescaledb_entity_field}' "
+                f"is not a foreign key"
+            )
+
     return (
         fields,
         foreign_keys,
@@ -593,4 +637,7 @@ def get_model_fields(
         role_visible,
         owner_field,
         page_edit,
+        is_timescaledb,
+        timescaledb_entity_field,
+        timescaledb_metric_field,
     )

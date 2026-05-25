@@ -1,0 +1,60 @@
+from typing import AsyncGenerator
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlmodel import SQLModel
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy import text
+from app.core.config import settings
+
+# Parse DATABASE_URI to determine async driver
+database_url = settings.DATABASE_URI
+if database_url.startswith("sqlite://"):
+    # Ensure aiosqlite driver
+    if not "sqlite+aiosqlite://" in database_url:
+        database_url = database_url.replace("sqlite://", "sqlite+aiosqlite://")
+elif database_url.startswith("postgresql://"):
+    # Ensure asyncpg driver
+    if not "postgresql+asyncpg://" in database_url:
+        database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
+
+# Create Async Engine
+engine = create_async_engine(database_url, future=True)
+
+async def init_db():
+    async with engine.begin() as conn:
+        await conn.run_sync(SQLModel.metadata.create_all)
+    {% if has_timescaledb %}
+    if settings.DATABASE_URI.startswith("postgresql"):
+        # ── TimescaleDB: create hypertables ──
+        {% for ts_model in timescaledb_models %}
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("SELECT create_hypertable('{{ ts_model.table_name }}', '{{ ts_model.timescaledb_time_column }}', if_not_exists => TRUE)")
+            )
+        {% endfor %}
+
+        # ── TimescaleDB: create latest-data tables ──
+        {% for ts_model in timescaledb_models %}
+        async with engine.begin() as conn:
+            await conn.execute(
+                text("""
+                    CREATE TABLE IF NOT EXISTS {{ ts_model.timescaledb_latest_table_name }} (
+                        {{ ts_model.timescaledb_entity_field }} {{ ts_model.get('timescaledb_entity_sql_type', 'INTEGER') }} NOT NULL{% if ts_model.get('timescaledb_entity_target_table') %} REFERENCES {{ ts_model.timescaledb_entity_target_table }}(id){% endif %}
+                        {% if ts_model.timescaledb_metric_field %},
+                        {{ ts_model.timescaledb_metric_field }} TEXT NOT NULL
+                        {% endif %},
+                        value JSONB NOT NULL,
+                        {{ ts_model.timescaledb_time_column }} TIMESTAMPTZ NOT NULL,
+                        PRIMARY KEY ({{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %})
+                    )
+                """)
+            )
+        {% endfor %}
+    {% endif %}
+
+async def get_session() -> AsyncGenerator[AsyncSession, None]:
+    async_session = sessionmaker(
+        engine, class_=AsyncSession, expire_on_commit=False
+    )
+    async with async_session() as session:
+        yield session

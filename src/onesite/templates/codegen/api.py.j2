@@ -1,7 +1,7 @@
 from typing import List, Any, Optional, Annotated
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -10,7 +10,11 @@ from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
+{% if model.is_timescaledb %}
+from app.schemas.{{ model.module_name }} import {{ model.name }}Create
+{% else %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.module_name == "user" and model.name == "User" %}, UserUpdateMe{% endif %}{% if model.is_notification_table %}, {{ model.name }}Send{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
+{% endif %}
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.module_name }} import service
 from app.models.{{ model.source_module }} import {{ model.name }}
@@ -25,13 +29,103 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 {% endfor %}
 {% endif %}
 
-{% if model.is_notification_table %}
+{% if model.is_timescaledb %}
+router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
+{% elif model.is_notification_table %}
 router = APIRouter()
 {% else %}
 router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
 {% endif %}
 
-{% if model.is_notification_table %}
+{% if model.is_timescaledb %}
+
+# ── TimescaleDB: create a new record ──
+@router.post("/", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))])
+async def create_{{ model.lower_name }}(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    {{ model.lower_name }}_in: {{ model.name }}Create,
+) -> Any:
+    """
+    Create a new {{ model.name }} timeseries record.
+    Automatically upserts the latest-data table.
+    """
+    result = await service.create(session, {{ model.lower_name }}_in)
+    return result
+
+
+# ── TimescaleDB: get realtime (latest) data for an entity ──
+@router.get("/realtime")
+async def read_{{ model.lower_name }}_realtime(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    entity_id: str = Query(..., description="Entity ID to query"),
+) -> Any:
+    """
+    Get the latest values for each metric of a given entity.
+    Queries the latest-data table for fast performance.
+    """
+    results = await service.get_realtime_by_entity(session, entity_id)
+
+    # Enrich with DeviceModel properties (filter unknown metrics)
+    properties: dict[str, dict] = {}
+    {% if model.timescaledb_model_table and model.timescaledb_model_class and model.timescaledb_entity_model %}
+    try:
+        eid = int(entity_id)
+    except (ValueError, TypeError):
+        eid = None
+    if eid is not None:
+        entity = await session.get({{ model.timescaledb_entity_model }}, eid)
+        fk_field = "{{ model.timescaledb_model_table }}_id"
+        dm_id = getattr(entity, fk_field, None) if entity else None
+        if dm_id is not None:
+            from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
+            dm = await session.get({{ model.timescaledb_model_class }}, dm_id)
+            if dm and dm.properties:
+                for p in dm.properties:
+                    properties[p.key] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
+
+    # Filter out metrics not defined in properties
+    if properties:
+        metric_field = "{{ model.timescaledb_metric_field }}"
+        results = [r for r in results if r.get(metric_field) in properties]
+    {% endif %}
+
+    return {"data": results, "properties": properties}
+
+
+# ── TimescaleDB: get historical data for an entity ──
+@router.get("/history")
+async def read_{{ model.lower_name }}_history(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    entity_id: str = Query(..., description="Entity ID to query"),
+    {% if model.timescaledb_metric_field %}
+    metric: Optional[str] = Query(None, description="Metric/attribute name to filter"),
+    {% endif %}
+    start_time: Optional[datetime] = Query(None, description="Start time (ISO format)"),
+    end_time: Optional[datetime] = Query(None, description="End time (ISO format)"),
+    limit: int = Query(1000, ge=1, le=10000, description="Max records to return"),
+) -> Any:
+    """
+    Get historical timeseries data for an entity's metric.
+    Queries the hypertable with time-range filtering.
+    """
+    results = await service.get_history_by_entity(
+        session, entity_id,
+        {% if model.timescaledb_metric_field %}
+        metric=metric,
+        {% endif %}
+        start_time=start_time,
+        end_time=end_time,
+        limit=limit,
+    )
+    return {"data": results}
+
+{% elif model.is_notification_table %}
 @router.get("/unread_count")
 async def unread_count(
     *,
@@ -159,6 +253,7 @@ async def get_{{ model.lower_name }}_stats(
     )
 {% endif %}
 
+{% if not model.is_timescaledb %}
 @router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def read_{{ model.lower_name }}s(
     page: int = 1,
@@ -179,8 +274,9 @@ async def read_{{ model.lower_name }}s(
     {% endif %}
     {% endif %}
     {% endfor %}
+    {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
     {% for fk in model.foreign_keys %}
-    {% if fk.name != model.owner_field %}
+    {% if fk.name != model.owner_field and fk.name not in search_field_names %}
     {{ fk.name }}: Optional[int] = Query(None, description="Filter by {{ fk.name }}"),
     {% endif %}
     {% endfor %}
@@ -228,7 +324,7 @@ async def read_{{ model.lower_name }}s(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
-        {% if fk.name != model.owner_field %}
+        {% if fk.name != model.owner_field and fk.name not in search_field_names %}
         {{ fk.name }}={{ fk.name }},
         {% endif %}
         {% endfor %}
@@ -740,5 +836,6 @@ async def export_{{ model.lower_name }}_template(
         media_type="text/csv",
         headers={"Content-Disposition": f"attachment; filename={{ model.module_name }}_template.csv"}
     )
+{% endif %}
 {% endif %}
 {% endif %}

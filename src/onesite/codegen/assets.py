@@ -262,7 +262,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
                 else:
                     console.print(f"Skipped existing callback: {handler_name}")
 
-    for name in ["logger.py", "security.py", "db.py", "deps.py", "tablenames.py"]:
+    for name in ["logger.py", "security.py", "deps.py", "tablenames.py"]:
         src = template_backend_root / "app" / "core" / name
         dst = backend_path / "app" / "core" / name
         if src.exists():

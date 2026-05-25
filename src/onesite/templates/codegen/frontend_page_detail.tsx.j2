@@ -55,6 +55,11 @@ import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service
 {% endif %}
 {% endfor %}
 {% endif %}
+{% if model.reverse_timeseries %}
+{% for ts in model.reverse_timeseries %}
+import { get{{ ts.model_name }}Realtime, get{{ ts.model_name }}History } from '../../services/{{ ts.module_name }}';
+{% endfor %}
+{% endif %}
 
 const {{ model.name }}DetailPage: React.FC = () => {
     const { t } = useTranslation();
@@ -119,6 +124,16 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ rfk.name }}Loading, set{{ rfk.source_model }}Loading] = useState(false);
     {% endif %}
     {% endfor %}
+    {% endif %}
+
+    {% if model.reverse_timeseries %}
+    {% for ts in model.reverse_timeseries %}
+    const [{{ ts.model_name }}Realtime, set{{ ts.model_name }}Realtime] = useState<any[]>([]);
+    const [{{ ts.model_name }}Properties, set{{ ts.model_name }}Properties] = useState<Record<string, any>>({});
+    const [{{ ts.model_name }}History, set{{ ts.model_name }}History] = useState<any[]>([]);
+    const [{{ ts.model_name }}HistoryLoading, set{{ ts.model_name }}HistoryLoading] = useState(false);
+    {% endfor %}
+    const [tsAutoRefresh, setTsAutoRefresh] = useState(false);
     {% endif %}
 
     {% if model.page_edit %}
@@ -235,6 +250,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
             {% endif %}
             {% endfor %}
             {% endif %}
+
+            // Fetch Timeseries realtime data
+            {% if model.reverse_timeseries %}
+            {% for ts in model.reverse_timeseries %}
+            fetch{{ ts.model_name }}Realtime(itemId);
+            {% endfor %}
+            {% endif %}
         }
     }, [id, fetchItem]);
 
@@ -296,6 +318,46 @@ const {{ model.name }}DetailPage: React.FC = () => {
     };
     {% endif %}
     {% endfor %}
+    {% endif %}
+
+    {% if model.reverse_timeseries %}
+    {% for ts in model.reverse_timeseries %}
+    const fetch{{ ts.model_name }}Realtime = async (itemId: number) => {
+        try {
+            const result = await get{{ ts.model_name }}Realtime(itemId);
+            set{{ ts.model_name }}Realtime(result.data || []);
+            set{{ ts.model_name }}Properties(result.properties || {});
+        } catch (error) {
+            console.error(error);
+        }
+    };
+
+    const fetch{{ ts.model_name }}History = async (itemId: number) => {
+        set{{ ts.model_name }}HistoryLoading(true);
+        try {
+            const result = await get{{ ts.model_name }}History(itemId);
+            set{{ ts.model_name }}History(result);
+        } catch (error) {
+            console.error(error);
+        } finally {
+            set{{ ts.model_name }}HistoryLoading(false);
+        }
+    };
+    {% endfor %}
+
+    // Auto-refresh realtime data
+    useEffect(() => {
+        let interval: ReturnType<typeof setInterval>;
+        if (tsAutoRefresh && id) {
+            interval = setInterval(() => {
+                const itemId = parseInt(id);
+                {% for ts in model.reverse_timeseries %}
+                fetch{{ ts.model_name }}Realtime(itemId);
+                {% endfor %}
+            }, 5000);
+        }
+        return () => clearInterval(interval);
+    }, [tsAutoRefresh, id]);
     {% endif %}
 
     if (loading && !currentItem) {
@@ -864,6 +926,182 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     </CardContent>
                 </Card>
                 {% endif %}
+                {% endfor %}
+                {% endif %}
+
+                {% if model.reverse_timeseries %}
+                {% for ts in model.reverse_timeseries %}
+                {/* Timeseries Realtime */}
+                <Card className="md:col-span-2">
+                    <CardHeader>
+                        <div className="flex items-center justify-between">
+                            <CardTitle>{t('models.{{ ts.module_name }}.name')} &mdash; Realtime</CardTitle>
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground">Auto</span>
+                                <Switch checked={tsAutoRefresh} onCheckedChange={setTsAutoRefresh} />
+                            </div>
+                        </div>
+                    </CardHeader>
+                    <CardContent>
+                        {% if ts.timescaledb_model_table and ts.timescaledb_model_class %}
+                        {# Card-style display with properties enrichment #}
+                        {% if ts.metric_field %}
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+                            { {{ ts.model_name }}Realtime.length > 0 ? (
+                                {{ ts.model_name }}Realtime.map((row, idx) => {
+                                    const meta = {{ ts.model_name }}Properties[row.{{ ts.metric_field }}] || {};
+                                    return (
+                                        <Card key={idx} className="p-4">
+                                            <div className="flex items-center gap-2 mb-1">
+                                                {meta.icon && <span className="text-lg">{meta.icon}</span>}
+                                                <span className="font-medium text-sm text-muted-foreground">
+                                                    {meta.display_name || row.{{ ts.metric_field }}}
+                                                </span>
+                                            </div>
+                                            <div className="text-2xl font-bold">
+                                                {typeof row.value === 'object' ? JSON.stringify(row.value) : (
+                                                    meta.data_type === 'float' && meta.decimals != null
+                                                        ? Number(row.value).toFixed(meta.decimals)
+                                                        : String(row.value ?? '-')
+                                                )}
+                                                {meta.unit && <span className="text-lg font-normal text-muted-foreground ml-1">{meta.unit}</span>}
+                                            </div>
+                                            <div className="text-xs text-muted-foreground mt-1">
+                                                {formatDateTime(row.{{ ts.time_field }}, timeZone)}
+                                            </div>
+                                        </Card>
+                                    );
+                                })
+                            ) : (
+                                <div className="col-span-full h-24 flex items-center justify-center text-muted-foreground">
+                                    No realtime data.
+                                </div>
+                            )}
+                        </div>
+                        {% else %}
+                        {# Fallback table display when no metric_field #}
+                        <div className="rounded-md border overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>Value</TableHead>
+                                        <TableHead>{{ ts.time_field.replace('_', ' ')|title }}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    { {{ ts.model_name }}Realtime.length > 0 ? (
+                                        {{ ts.model_name }}Realtime.map((row, idx) => (
+                                            <TableRow key={idx}>
+                                                <TableCell>{typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}</TableCell>
+                                                <TableCell className="text-muted-foreground">{formatDateTime(row.{{ ts.time_field }}, timeZone)}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={2} className="h-24 text-center text-muted-foreground">
+                                                No realtime data.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                        {% endif %}
+                        {% else %}
+                        {# Legacy table display (no model table configured) #}
+                        <div className="rounded-md border overflow-x-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        {% if ts.metric_field %}
+                                        <TableHead>Metric</TableHead>
+                                        {% endif %}
+                                        <TableHead>Value</TableHead>
+                                        <TableHead>{{ ts.time_field.replace('_', ' ')|title }}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    { {{ ts.model_name }}Realtime.length > 0 ? (
+                                        {{ ts.model_name }}Realtime.map((row, idx) => (
+                                            <TableRow key={idx}>
+                                                {% if ts.metric_field %}
+                                                <TableCell className="font-medium">{row.{{ ts.metric_field }}}</TableCell>
+                                                {% endif %}
+                                                <TableCell>{typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}</TableCell>
+                                                <TableCell className="text-muted-foreground">{formatDateTime(row.{{ ts.time_field }}, timeZone)}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={ {{ 3 if ts.metric_field else 2 }} } className="h-24 text-center text-muted-foreground">
+                                                No realtime data.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                        {% endif %}
+                    </CardContent>
+                </Card>
+
+                {/* Timeseries History */}
+                <Card className="md:col-span-2">
+                    <CardHeader>
+                        <CardTitle>{t('models.{{ ts.module_name }}.name')} — History</CardTitle>
+                    </CardHeader>
+                    <CardContent>
+                        <div className="mb-4 flex items-center gap-4">
+                            <Button
+                                variant="outline"
+                                size="sm"
+                                onClick={() => fetch{{ ts.model_name }}History(parseInt(id!))}
+                                disabled={ {{ ts.model_name }}HistoryLoading }
+                            >
+                                { {{ ts.model_name }}HistoryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                Refresh
+                            </Button>
+                        </div>
+                        <div className="rounded-md border overflow-x-auto max-h-80 overflow-y-auto">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        {% if ts.metric_field %}
+                                        <TableHead>Metric</TableHead>
+                                        {% endif %}
+                                        <TableHead>Value</TableHead>
+                                        <TableHead>{{ ts.time_field.replace('_', ' ')|title }}</TableHead>
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    { {{ ts.model_name }}HistoryLoading ? (
+                                        <TableRow>
+                                            <TableCell colSpan={ {{ 3 if ts.metric_field else 2 }} } className="h-24 text-center">
+                                                <Loader2 className="mx-auto h-6 w-6 animate-spin" />
+                                            </TableCell>
+                                        </TableRow>
+                                    ) : {{ ts.model_name }}History.length > 0 ? (
+                                        {{ ts.model_name }}History.map((row, idx) => (
+                                            <TableRow key={idx}>
+                                                {% if ts.metric_field %}
+                                                <TableCell className="font-medium">{row.{{ ts.metric_field }}}</TableCell>
+                                                {% endif %}
+                                                <TableCell>{typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}</TableCell>
+                                                <TableCell className="text-muted-foreground">{formatDateTime(row.{{ ts.time_field }}, timeZone)}</TableCell>
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={ {{ 3 if ts.metric_field else 2 }} } className="h-24 text-center text-muted-foreground">
+                                                No history data.
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+                    </CardContent>
+                </Card>
                 {% endfor %}
                 {% endif %}
             </div>

@@ -16,6 +16,132 @@ from app.models.{{ rel.source_source_module }} import {{ rel.source_model }}
 {% endfor %}
 {% endif %}
 
+{% if model.is_timescaledb %}
+
+# ── TimescaleDB CRUD ──────────────────────────────────────────────────────────
+
+async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> dict:
+    """Insert a timeseries record into hypertable and upsert latest table."""
+    obj_dict = obj_in.dict()
+    {% if model.timescaledb_model_table and model.timescaledb_metric_field and model.timescaledb_model_class and model.timescaledb_entity_model %}
+    # Validate metric_key against {{ model.timescaledb_model_class }}.properties
+    entity_id_val = obj_dict.get("{{ model.timescaledb_entity_field }}")
+    if entity_id_val is not None:
+        # Look up entity FK to find which {{ model.timescaledb_model_class }} it uses
+        entity = await session.get({{ model.timescaledb_entity_model }}, entity_id_val)
+        model_table_id = getattr(entity, "{{ model.timescaledb_model_table }}_id", None) if entity else None
+        if model_table_id is not None:
+            from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
+            dm = await session.get({{ model.timescaledb_model_class }}, model_table_id)
+            if dm and dm.properties:
+                valid_keys = {p.key for p in dm.properties}
+                metric_val = obj_dict.get("{{ model.timescaledb_metric_field }}")
+                if metric_val is not None and metric_val not in valid_keys:
+                    raise ValueError(
+                        "Unknown metric '" + str(metric_val) + "'. "
+                        "Allowed: " + ", ".join(sorted(valid_keys))
+                    )
+    {% endif %}
+    db_obj = {{ model.name }}(**obj_dict)
+    session.add(db_obj)
+    await session.commit()
+    await session.refresh(db_obj)
+
+    # Upsert latest table
+    from sqlalchemy import text
+    entity_val = getattr(db_obj, "{{ model.timescaledb_entity_field }}")
+    time_val = getattr(db_obj, "{{ model.timescaledb_time_column }}")
+    json_val = db_obj.model_dump_json()
+    {% if model.timescaledb_metric_field %}
+    metric_val = getattr(db_obj, "{{ model.timescaledb_metric_field }}")
+    await session.execute(
+        text("""
+            INSERT INTO {{ model.timescaledb_latest_table_name }}
+            ({{ model.timescaledb_entity_field }}, {{ model.timescaledb_metric_field }}, value, {{ model.timescaledb_time_column }})
+            VALUES (:entity, :metric, :value::jsonb, :time)
+            ON CONFLICT ({{ model.timescaledb_entity_field }}, {{ model.timescaledb_metric_field }})
+            DO UPDATE SET value = :value::jsonb, {{ model.timescaledb_time_column }} = :time
+        """),
+        {"entity": entity_val, "metric": metric_val, "value": json_val, "time": time_val},
+    )
+    {% else %}
+    await session.execute(
+        text("""
+            INSERT INTO {{ model.timescaledb_latest_table_name }}
+            ({{ model.timescaledb_entity_field }}, value, {{ model.timescaledb_time_column }})
+            VALUES (:entity, :value::jsonb, :time)
+            ON CONFLICT ({{ model.timescaledb_entity_field }})
+            DO UPDATE SET value = :value::jsonb, {{ model.timescaledb_time_column }} = :time
+        """),
+        {"entity": entity_val, "value": json_val, "time": time_val},
+    )
+    {% endif %}
+    await session.commit()
+
+    return db_obj.model_dump()
+
+
+async def get_realtime_by_entity(
+    session: AsyncSession,
+    entity_id: str,
+) -> list[dict]:
+    """Get latest values for each metric of a given entity from the latest table."""
+    from sqlalchemy import text
+    query = text("""
+        SELECT *
+        FROM {{ model.timescaledb_latest_table_name }}
+        WHERE {{ model.timescaledb_entity_field }} = :entity
+        ORDER BY {{ model.timescaledb_time_column }} DESC
+    """)
+    result = await session.execute(query, {"entity": entity_id})
+    rows = result.fetchall()
+    # Return as list of dicts
+    columns = result.keys()
+    return [dict(zip(columns, row)) for row in rows]
+
+
+async def get_history_by_entity(
+    session: AsyncSession,
+    entity_id: str,
+    metric: str | None = None,
+    start_time: datetime | None = None,
+    end_time: datetime | None = None,
+    limit: int = 1000,
+) -> list[dict]:
+    """Get historical timeseries data for an entity from hypertable."""
+    from sqlalchemy import text
+
+    conditions = ["{{ model.timescaledb_entity_field }} = :entity"]
+    params: dict = {"entity": entity_id}
+
+    {% if model.timescaledb_metric_field %}
+    if metric is not None:
+        conditions.append("{{ model.timescaledb_metric_field }} = :metric")
+        params["metric"] = metric
+    {% endif %}
+    if start_time is not None:
+        conditions.append("{{ model.timescaledb_time_column }} >= :start")
+        params["start"] = start_time
+    if end_time is not None:
+        conditions.append("{{ model.timescaledb_time_column }} <= :end")
+        params["end"] = end_time
+
+    where_clause = " AND ".join(conditions)
+    query = text(f"""
+        SELECT *
+        FROM {{ model.table_name }}
+        WHERE {where_clause}
+        ORDER BY {{ model.timescaledb_time_column }} DESC
+        LIMIT :limit
+    """)
+    params["limit"] = limit
+    result = await session.execute(query, params)
+    rows = result.fetchall()
+    columns = result.keys()
+    return [dict(zip(columns, row)) for row in rows]
+
+{% else %}
+
 async def get(session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
     return await session.get({{ model.name }}, id)
 
@@ -72,8 +198,9 @@ def _apply_filters(
     {% endif %}
     {% endif %}
     {% endfor %}
+    {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
     {% for fk in model.foreign_keys %}
-    {% if fk.name != model.owner_field %}
+    {% if fk.name != model.owner_field and fk.name not in search_field_names %}
     {{ fk.name }}: Optional[int] = None,
     {% endif %}
     {% endfor %}
@@ -112,7 +239,7 @@ def _apply_filters(
 
     # Apply foreign key filters
     {% for fk in model.foreign_keys %}
-    {% if fk.name != model.owner_field %}
+    {% if fk.name != model.owner_field and fk.name not in search_field_names %}
     if {{ fk.name }}:
         statement = statement.where({{ model.name }}.{{ fk.name }} == {{ fk.name }})
     {% endif %}
@@ -149,7 +276,7 @@ async def get_multi(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
-    {% if fk.name != model.owner_field %}
+    {% if fk.name != model.owner_field and fk.name not in search_field_names %}
     {{ fk.name }}: Optional[int] = None,
     {% endif %}
     {% endfor %}
@@ -180,7 +307,7 @@ async def get_multi(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
-        {% if fk.name != model.owner_field %}
+        {% if fk.name != model.owner_field and fk.name not in search_field_names %}
         {{ fk.name }}={{ fk.name }},
         {% endif %}
         {% endfor %}
@@ -224,7 +351,7 @@ async def get_multi_with_fk_labels(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
-    {% if fk.name != model.owner_field %}
+    {% if fk.name != model.owner_field and fk.name not in search_field_names %}
     {{ fk.name }}: Optional[int] = None,
     {% endif %}
     {% endfor %}
@@ -256,7 +383,7 @@ async def get_multi_with_fk_labels(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
-        {% if fk.name != model.owner_field %}
+        {% if fk.name != model.owner_field and fk.name not in search_field_names %}
         {{ fk.name }}={{ fk.name }},
         {% endif %}
         {% endfor %}
@@ -278,7 +405,7 @@ async def get_multi_with_fk_labels(
     {% for fk in model.foreign_keys %}
     {{ fk.name }}_map = {}
     if {{ fk.name }}_ids:
-        from app.models.{{ fk.target_service }} import {{ fk.target_model }}
+        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
         stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
         result = await session.exec(stmt)
         for obj in result.all():
@@ -322,7 +449,7 @@ async def count(
     {% endif %}
     {% endfor %}
     {% for fk in model.foreign_keys %}
-    {% if fk.name != model.owner_field %}
+    {% if fk.name != model.owner_field and fk.name not in search_field_names %}
     {{ fk.name }}: Optional[int] = None,
     {% endif %}
     {% endfor %}
@@ -351,7 +478,7 @@ async def count(
         {% endif %}
         {% endfor %}
         {% for fk in model.foreign_keys %}
-        {% if fk.name != model.owner_field %}
+        {% if fk.name != model.owner_field and fk.name not in search_field_names %}
         {{ fk.name }}={{ fk.name }},
         {% endif %}
         {% endfor %}
@@ -603,4 +730,5 @@ async def get_by_{{ model.union_key | join('_') }}(
     )
     result = await session.exec(statement)
     return result.first()
+{% endif %}
 {% endif %}

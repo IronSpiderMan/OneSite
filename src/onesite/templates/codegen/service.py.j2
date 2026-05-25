@@ -7,7 +7,7 @@ from app.models.{{ model.source_module }} import {{ model.name }}
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create, {{ model.name }}Update{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
-from app.schemas.{{ model.source_module }} import {{ model.name }}Read
+from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -25,6 +25,41 @@ from app.core.ws import manager
 logger = logging.getLogger(__name__)
 
 class {{ model.name }}Service:
+    {% if model.is_timescaledb %}
+
+    async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> dict:
+        return await crud.create(session, obj_in)
+
+    async def get_realtime_by_entity(
+        self,
+        session: AsyncSession,
+        entity_id: str,
+    ) -> list[dict]:
+        return await crud.get_realtime_by_entity(session, entity_id)
+
+    async def get_history_by_entity(
+        self,
+        session: AsyncSession,
+        entity_id: str,
+        {% if model.timescaledb_metric_field %}
+        metric: str | None = None,
+        {% endif %}
+        start_time: datetime | None = None,
+        end_time: datetime | None = None,
+        limit: int = 1000,
+    ) -> list[dict]:
+        return await crud.get_history_by_entity(
+            session, entity_id,
+            {% if model.timescaledb_metric_field %}
+            metric=metric,
+            {% endif %}
+            start_time=start_time,
+            end_time=end_time,
+            limit=limit,
+        )
+
+    {% else %}
+
     async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}Read]:
         obj = await crud.get(session, id)
         return {{ model.name }}Read.model_validate(obj) if obj else None
@@ -51,8 +86,9 @@ class {{ model.name }}Service:
         {% endif %}
         {% endif %}
         {% endfor %}
+        {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
         {% for fk in model.foreign_keys %}
-        {% if fk.name != model.owner_field %}
+        {% if fk.name != model.owner_field and fk.name not in search_field_names %}
         {{ fk.name }}: Optional[int] = None,
         {% endif %}
         {% endfor %}
@@ -84,7 +120,7 @@ class {{ model.name }}Service:
             {% endif %}
             {% endfor %}
             {% for fk in model.foreign_keys %}
-            {% if fk.name != model.owner_field %}
+            {% if fk.name != model.owner_field and fk.name not in search_field_names %}
             {{ fk.name }}={{ fk.name }},
             {% endif %}
             {% endfor %}
@@ -115,7 +151,7 @@ class {{ model.name }}Service:
             {% endif %}
             {% endfor %}
             {% for fk in model.foreign_keys %}
-            {% if fk.name != model.owner_field %}
+            {% if fk.name != model.owner_field and fk.name not in search_field_names %}
             {{ fk.name }}={{ fk.name }},
             {% endif %}
             {% endfor %}
@@ -475,7 +511,7 @@ class {{ model.name }}Service:
                 # Batch fetch FK labels
                 {% for fk in model.foreign_keys %}
                 if {{ fk.name }}_ids:
-                    from app.models.{{ fk.target_service }} import {{ fk.target_model }}
+                    from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
                     stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
                     result = await session.exec(stmt)
                     for obj in result.all():
@@ -562,7 +598,7 @@ class {{ model.name }}Service:
         
         # Pre-fetch all FK targets for label resolution
         {% for fk in model.foreign_keys %}
-        from app.models.{{ fk.target_service }} import {{ fk.target_model }} as {{ fk.target_model }}_model
+        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }} as {{ fk.target_model }}_model
         stmt = select({{ fk.target_model }}_model)
         result = await session.exec(stmt)
         for obj in result.all():
@@ -723,14 +759,23 @@ class {{ model.name }}Service:
                     et = st + timedelta(days=30)
                 end_time = et.strftime("%Y-%m-%d")
 
-            if period == "day":
-                date_trunc = func.date(time_col)
-            elif period == "week":
-                date_trunc = func.strftime('%Y-%W', time_col)
-            elif period == "month":
-                date_trunc = func.strftime('%Y-%m', time_col)
+            # ── Database-agnostic date truncation ──
+            # SQLite uses strftime/date, PostgreSQL uses date_trunc
+            dialect = getattr(getattr(session, 'bind', None), 'dialect', None)
+            dialect_name = dialect.name if dialect else "sqlite"
+
+            if dialect_name == "postgresql":
+                pg_period = period if period in ("day", "week", "month") else "day"
+                date_trunc = func.date_trunc(pg_period, time_col)
             else:
-                date_trunc = func.date(time_col)
+                if period == "day":
+                    date_trunc = func.date(time_col)
+                elif period == "week":
+                    date_trunc = func.strftime('%Y-%W', time_col)
+                elif period == "month":
+                    date_trunc = func.strftime('%Y-%m', time_col)
+                else:
+                    date_trunc = func.date(time_col)
 
             if aggregation == "count":
                 stmt = select(date_trunc, func.count(model.id))
@@ -815,5 +860,6 @@ class {{ model.name }}Service:
         }
         {% endif %}
     {% endif %}
+{% endif %}
 
 service = {{ model.name }}Service()
