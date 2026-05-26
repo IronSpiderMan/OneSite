@@ -119,9 +119,9 @@ const {{ model.name }}Page: React.FC = () => {
 
   const { register, handleSubmit, reset, setValue, control } = useForm();
 
-  {% if model.auto_refresh %}
-  const [autoRefresh, setAutoRefresh] = useState(false);
-  const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval or 5000 }});
+  {% if model.refresh_interval %}
+  const [autoRefresh, setAutoRefresh] = useState(true);
+  const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval }});
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
@@ -421,7 +421,7 @@ const {{ model.name }}Page: React.FC = () => {
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">{% if model.owner_field %}{userRole === 'user' ? t('models.{{ model.module_name }}.my_name') : t('models.{{ model.module_name }}.name')}{% else %}{t('models.{{ model.module_name }}.name')}s{% endif %}</h1>
         <div className="flex items-center gap-4">
-          {% if model.auto_refresh %}
+          {% if model.refresh_interval %}
           <div className="flex items-center gap-2">
              <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
              <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />

@@ -268,8 +268,7 @@ def get_model_fields(
     if model_cls_name == "CustomConfig" and module_name == "custom_config":
         frontend_only = True
     model_translations = model_site_props.get("translations", {})
-    auto_refresh = model_site_props.get("auto_refresh", False)
-    refresh_interval = model_site_props.get("refresh_interval", 5000)
+    refresh_interval = model_site_props.get("refresh_interval", 0)
     reverse_fk_display = model_site_props.get("reverse_fk_display", True)
     actions = model_site_props.get("actions", {})
     # Normalize action-level permissions (default: developer + admin)
@@ -623,7 +622,6 @@ def get_model_fields(
         model_permissions,
         frontend_only,
         model_translations,
-        auto_refresh,
         refresh_interval,
         reverse_fk_display,
         model_site_props,

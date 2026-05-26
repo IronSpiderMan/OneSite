@@ -190,9 +190,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
     }, [currentItem, searchParams]);
     {% endif %}
 
-    {% if model.auto_refresh %}
-    const [autoRefresh, setAutoRefresh] = useState(false);
-    const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval or 5000 }});
+    {% if model.refresh_interval %}
+    const [autoRefresh, setAutoRefresh] = useState(true);
+    const [refreshInterval, setRefreshInterval] = useState({{ model.refresh_interval }});
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
@@ -200,8 +200,6 @@ const {{ model.name }}DetailPage: React.FC = () => {
             interval = setInterval(() => {
                 const itemId = parseInt(id);
                 fetchItem(itemId);
-                // Also refresh M2M if needed? Maybe too heavy.
-                // For now just refresh main item.
             }, refreshInterval);
         }
         return () => clearInterval(interval);
@@ -456,7 +454,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% endif %}
               </div>
 
-              {% if model.auto_refresh %}
+              {% if model.refresh_interval %}
               <div className="flex items-center gap-2">
                  <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
                  <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
