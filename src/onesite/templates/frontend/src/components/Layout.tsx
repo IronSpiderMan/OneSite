@@ -50,8 +50,21 @@ const AppLayout: React.FC = () => {
         )}
       >
         <div className="h-16 flex items-center justify-between px-4 border-b">
-          <span className="text-xl font-bold">{import.meta.env.VITE_PROJECT_NAME || 'OneSite'}</span>
-          <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(false)}>
+          <div className="flex items-center gap-3 min-w-0">
+            {(() => {
+              const logoUrl = import.meta.env.VITE_PROJECT_LOGO;
+              const projectName = import.meta.env.VITE_PROJECT_NAME || 'OneSite';
+              return logoUrl ? (
+                <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
+              ) : (
+                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+                  {projectName.charAt(0).toUpperCase()}
+                </div>
+              );
+            })()}
+            <span className="text-xl font-bold truncate">{import.meta.env.VITE_PROJECT_NAME || 'OneSite'}</span>
+          </div>
+          <Button variant="ghost" size="icon" className="md:hidden flex-shrink-0" onClick={() => setSidebarOpen(false)}>
             <X className="h-5 w-5" />
           </Button>
         </div>

@@ -79,6 +79,7 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
     site_config = load_site_config(cwd)
 
     site_config.setdefault("project_name", "MyApp")
+    site_config.setdefault("logo", "")
     site_config.setdefault("database_url", "sqlite:///./app.db")
     site_config.setdefault("upload_dir", "uploads")
     site_config.setdefault("secret_key", "changeme")

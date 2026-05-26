@@ -564,9 +564,10 @@ const {{ model.name }}Page: React.FC = () => {
               onValueChange={(v) => {
                 setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }));
                 if (v) {
-                  const label = {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels[v] || '';
+                  const key = String(v);
+                  const label = {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels[key] || '';
                   if (label) {
-                    setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels((s) => ({ ...s, [v]: label }));
+                    setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels((s) => ({ ...s, [key]: label }));
                   }
                 }
               }}

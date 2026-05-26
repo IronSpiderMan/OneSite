@@ -78,7 +78,8 @@ def init():
                 "http://localhost:3000",
                 "http://127.0.0.1:5173",
                 "http://127.0.0.1:3000",
-            ]
+            ],
+            "logo": "",
         }
         site_config_file.write_text(json.dumps(site_config, indent=4))
         console.print(f"[green]Created site_config.json[/green]")

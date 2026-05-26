@@ -78,9 +78,12 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     if frontend_env.exists():
         f_env_content = frontend_env.read_text()
 
+    logo = config.get("logo", "")
+
     f_new_keys = {
         "VITE_PROJECT_NAME": project_name,
         "VITE_API_URL": api_url,
+        "VITE_PROJECT_LOGO": logo,
     }
 
     f_lines = f_env_content.splitlines()
