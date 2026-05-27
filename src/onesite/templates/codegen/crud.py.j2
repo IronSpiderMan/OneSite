@@ -138,7 +138,7 @@ async def get_history_by_entity(
         FROM {{ model.table_name }}
         WHERE {where_clause}
         ORDER BY {{ model.timescaledb_time_column }} DESC
-        LIMIT :limit
+        LIMIT NULLIF(:limit, -1)
     """)
     params["limit"] = limit
     result = await session.execute(query, params)

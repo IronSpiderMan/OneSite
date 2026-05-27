@@ -135,13 +135,21 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ ts.model_name }}Properties, set{{ ts.model_name }}Properties] = useState<Record<string, any>>({});
     const [{{ ts.model_name }}History, set{{ ts.model_name }}History] = useState<any[]>([]);
     const [{{ ts.model_name }}HistoryLoading, set{{ ts.model_name }}HistoryLoading] = useState(false);
-    const [tsHistoryAutoRefresh, setTsHistoryAutoRefresh] = useState(false);
+    const [tsHistoryAutoRefresh, setTsHistoryAutoRefresh] = useState(true);
     const [tsHistoryLastRefreshed, setTsHistoryLastRefreshed] = useState<Date | null>(null);
     const [{{ ts.model_name }}SelectedMetrics, set{{ ts.model_name }}SelectedMetrics] = useState<string[]>([]);
-    const [{{ ts.model_name }}TimeRange, set{{ ts.model_name }}TimeRange] = useState('1h');
+    const [{{ ts.model_name }}TimeRange, set{{ ts.model_name }}TimeRange] = useState('latest100');
+    const [{{ ts.model_name }}CustomStartTime, set{{ ts.model_name }}CustomStartTime] = useState('');
+    const [{{ ts.model_name }}CustomEndTime, set{{ ts.model_name }}CustomEndTime] = useState('');
     {% endfor %}
-    const [tsAutoRefresh, setTsAutoRefresh] = useState(false);
+    const [tsAutoRefresh, setTsAutoRefresh] = useState(true);
     {% endif %}
+
+    const calcStartTime = (range: string): string | undefined => {
+        const ms: Record<string, number> = { '1h': 3600000, '6h': 21600000, '24h': 86400000 };
+        const m = ms[range];
+        return m ? new Date(Date.now() - m).toISOString() : undefined;
+    };
 
     {% if model.page_edit %}
     const [isEditing, setIsEditing] = useState(false);
@@ -347,7 +355,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const fetch{{ ts.model_name }}History = async (itemId: number) => {
         set{{ ts.model_name }}HistoryLoading(true);
         try {
-            const result = await get{{ ts.model_name }}History(itemId);
+            let limit = -1;
+            let startTime: string | undefined;
+            let endTime: string | undefined;
+            if ({{ ts.model_name }}TimeRange === 'latest100') {
+                limit = 100;
+            } else if ({{ ts.model_name }}TimeRange === 'custom') {
+                startTime = {{ ts.model_name }}CustomStartTime || undefined;
+                endTime = {{ ts.model_name }}CustomEndTime || undefined;
+            } else {
+                startTime = calcStartTime({{ ts.model_name }}TimeRange);
+            }
+            const result = await get{{ ts.model_name }}History(itemId, undefined, startTime, endTime, limit);
             set{{ ts.model_name }}History(result);
             setTsHistoryLastRefreshed(new Date());
         } catch (error) {
@@ -359,7 +378,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     const refresh{{ ts.model_name }}History = async (itemId: number) => {
         try {
-            const result = await get{{ ts.model_name }}History(itemId);
+            let limit = -1;
+            let startTime: string | undefined;
+            let endTime: string | undefined;
+            if ({{ ts.model_name }}TimeRange === 'latest100') {
+                limit = 100;
+            } else if ({{ ts.model_name }}TimeRange === 'custom') {
+                startTime = {{ ts.model_name }}CustomStartTime || undefined;
+                endTime = {{ ts.model_name }}CustomEndTime || undefined;
+            } else {
+                startTime = calcStartTime({{ ts.model_name }}TimeRange);
+            }
+            const result = await get{{ ts.model_name }}History(itemId, undefined, startTime, endTime, limit);
             set{{ ts.model_name }}History(result);
             setTsHistoryLastRefreshed(new Date());
         } catch (error) {
@@ -421,16 +451,22 @@ const {{ model.name }}DetailPage: React.FC = () => {
     }, [{{ ts.model_name }}Metrics.length]);
 
     const {{ ts.model_name }}ChartData = React.useMemo(() => {
-        const cutoff = {{ ts.model_name }}TimeRange === 'all' ? null : Date.now() - {
-            '1h': 3600000, '6h': 21600000, '24h': 86400000,
-            '7d': 604800000, '30d': 2592000000,
-        }[{{ ts.model_name }}TimeRange];
-
-        const filtered = {{ ts.model_name }}TimeRange === 'all'
-            ? {{ ts.model_name }}History
-            : {{ ts.model_name }}History.filter((row: any) =>
-                new Date(row.{{ ts.time_field }}).getTime() >= cutoff!
+        let filtered = {{ ts.model_name }}History;
+        if ({{ ts.model_name }}TimeRange === 'custom') {
+            const cs = {{ ts.model_name }}CustomStartTime ? new Date({{ ts.model_name }}CustomStartTime).getTime() : 0;
+            const ce = {{ ts.model_name }}CustomEndTime ? new Date({{ ts.model_name }}CustomEndTime).getTime() : Infinity;
+            filtered = {{ ts.model_name }}History.filter((row: any) => {
+                const t = new Date(row.{{ ts.time_field }}).getTime();
+                return t >= cs && t <= ce;
+            });
+        } else if ({{ ts.model_name }}TimeRange !== 'latest100') {
+            const cutoff = Date.now() - {
+                '1h': 3600000, '6h': 21600000, '24h': 86400000,
+            }[{{ ts.model_name }}TimeRange]!;
+            filtered = {{ ts.model_name }}History.filter((row: any) =>
+                new Date(row.{{ ts.time_field }}).getTime() >= cutoff
             );
+        }
 
         const numGroups: Record<string, { time: number; value: number }[]> = {};
         const nonNumGroups: Record<string, { time: number; value: any }[]> = {};
@@ -450,8 +486,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
         Object.values(numGroups).forEach(g => g.sort((a, b) => a.time - b.time));
         Object.values(nonNumGroups).forEach(g => g.sort((a, b) => a.time - b.time));
         return { numeric: numGroups, nonNumeric: nonNumGroups };
-    }, [{{ ts.model_name }}History, {{ ts.model_name }}TimeRange]);
+    }, [{{ ts.model_name }}History, {{ ts.model_name }}TimeRange, {{ ts.model_name }}CustomStartTime, {{ ts.model_name }}CustomEndTime]);
     {% endif %}
+
+    // Re-fetch history when time range changes
+    useEffect(() => {
+        if (!id) return;
+        fetch{{ ts.model_name }}History(parseInt(id));
+    }, [{{ ts.model_name }}TimeRange, {{ ts.model_name }}CustomStartTime, {{ ts.model_name }}CustomEndTime]);
     {% endfor %}
     {% endif %}
 
@@ -1032,6 +1074,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <div className="flex items-center justify-between">
                             <CardTitle>{t('models.{{ ts.module_name }}.name')} &mdash; Realtime</CardTitle>
                             <div className="flex items-center gap-2">
+                                {tsAutoRefresh && <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
                                 <span className="text-sm text-muted-foreground">Auto</span>
                                 <Switch checked={tsAutoRefresh} onCheckedChange={setTsAutoRefresh} />
                             </div>
@@ -1057,11 +1100,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 </div>
                                                 <div className="flex items-baseline gap-1">
                                                     <span className="text-3xl font-bold tracking-tight">
-                                                        {typeof row.value === 'object' ? JSON.stringify(row.value) : (
-                                                            meta.data_type === 'float' && meta.decimals != null
-                                                                ? Number(row.value).toFixed(meta.decimals)
-                                                                : String(row.value ?? '-')
-                                                        )}
+                                                        {(() => {
+                                                            const v = row.value?.value;
+                                                            if (v === null || v === undefined) return '-';
+                                                            if (typeof v === 'object') return JSON.stringify(v);
+                                                            if (meta.data_type === 'float' && meta.decimals != null) return Number(v).toFixed(meta.decimals);
+                                                            return String(v);
+                                                        })()}
                                                     </span>
                                                     {meta.unit && <span className="text-sm font-medium text-muted-foreground">{meta.unit}</span>}
                                                 </div>
@@ -1093,7 +1138,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     { {{ ts.model_name }}Realtime.length > 0 ? (
                                         {{ ts.model_name }}Realtime.map((row, idx) => (
                                             <TableRow key={idx}>
-                                                <TableCell>{typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}</TableCell>
+                                                <TableCell>{(() => { const v = row.value?.value; return v !== null && v !== undefined ? (typeof v === 'object' ? JSON.stringify(v) : String(v)) : '-'; })()}</TableCell>
                                                 <TableCell className="text-muted-foreground">{formatDateTime(row.{{ ts.time_field }}, timeZone)}</TableCell>
                                             </TableRow>
                                         ))
@@ -1128,7 +1173,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 {% if ts.metric_field %}
                                                 <TableCell className="font-medium">{row.{{ ts.metric_field }}}</TableCell>
                                                 {% endif %}
-                                                <TableCell>{typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}</TableCell>
+                                                <TableCell>{(() => { const v = row.value?.value; return v !== null && v !== undefined ? (typeof v === 'object' ? JSON.stringify(v) : String(v)) : '-'; })()}</TableCell>
                                                 <TableCell className="text-muted-foreground">{formatDateTime(row.{{ ts.time_field }}, timeZone)}</TableCell>
                                             </TableRow>
                                         ))
@@ -1186,17 +1231,40 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 {/* Time Range Selector */}
                                 <div className="flex items-center gap-2 mb-4 flex-wrap">
                                     <span className="text-sm text-muted-foreground">Time Range:</span>
-                                    {['1h', '6h', '24h', '7d', '30d', 'all'].map(range => (
+                                    {['latest100', '1h', '6h', '24h', 'custom'].map(range => (
                                         <Button
                                             key={range}
                                             variant={ {{ ts.model_name }}TimeRange === range ? 'default' : 'outline' }
                                             size="sm"
                                             onClick={() => set{{ ts.model_name }}TimeRange(range)}
                                         >
-                                            {range === 'all' ? 'All' : range}
+                                            {range === 'latest100' ? 'Last 100' : range === 'custom' ? 'Custom' : range}
                                         </Button>
                                     ))}
                                 </div>
+
+                                { {{ ts.model_name }}TimeRange === 'custom' && (
+                                    <div className="flex items-center gap-2 mb-4 flex-wrap">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs text-muted-foreground">From:</span>
+                                            <input
+                                                type="datetime-local"
+                                                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                                                value={ {{ ts.model_name }}CustomStartTime }
+                                                onChange={(e) => set{{ ts.model_name }}CustomStartTime(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs text-muted-foreground">To:</span>
+                                            <input
+                                                type="datetime-local"
+                                                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                                                value={ {{ ts.model_name }}CustomEndTime }
+                                                onChange={(e) => set{{ ts.model_name }}CustomEndTime(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
 
                                 {/* Metric Checkbox Selector */}
                                 <div className="flex flex-wrap items-center gap-2 mb-6 p-3 bg-muted/20 rounded-lg border">
@@ -1363,27 +1431,57 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 {/* Time Range Selector */}
                                 <div className="flex items-center gap-2 mb-4 flex-wrap">
                                     <span className="text-sm text-muted-foreground">Time Range:</span>
-                                    {['1h', '6h', '24h', '7d', '30d', 'all'].map(range => (
+                                    {['latest100', '1h', '6h', '24h', 'custom'].map(range => (
                                         <Button
                                             key={range}
                                             variant={ {{ ts.model_name }}TimeRange === range ? 'default' : 'outline' }
                                             size="sm"
                                             onClick={() => set{{ ts.model_name }}TimeRange(range)}
                                         >
-                                            {range === 'all' ? 'All' : range}
+                                            {range === 'latest100' ? 'Last 100' : range === 'custom' ? 'Custom' : range}
                                         </Button>
                                     ))}
                                 </div>
 
+                                { {{ ts.model_name }}TimeRange === 'custom' && (
+                                    <div className="flex items-center gap-2 mb-4 flex-wrap">
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs text-muted-foreground">From:</span>
+                                            <input
+                                                type="datetime-local"
+                                                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                                                value={ {{ ts.model_name }}CustomStartTime }
+                                                onChange={(e) => set{{ ts.model_name }}CustomStartTime(e.target.value)}
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-1">
+                                            <span className="text-xs text-muted-foreground">To:</span>
+                                            <input
+                                                type="datetime-local"
+                                                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                                                value={ {{ ts.model_name }}CustomEndTime }
+                                                onChange={(e) => set{{ ts.model_name }}CustomEndTime(e.target.value)}
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+
                                 {(() => {
-                                    const cutoff = {{ ts.model_name }}TimeRange === 'all' ? null : Date.now() - {
-                                        '1h': 3600000, '6h': 21600000, '24h': 86400000,
-                                        '7d': 604800000, '30d': 2592000000,
-                                    }[{{ ts.model_name }}TimeRange];
-                                    const rawData = {{ ts.model_name }}History
-                                        .filter((row: any) =>
-                                            !cutoff || new Date(row.{{ ts.time_field }}).getTime() >= cutoff
-                                        )
+                                    const rawData = (() => {
+                                        let rows = {{ ts.model_name }}History;
+                                        if ({{ ts.model_name }}TimeRange === 'custom') {
+                                            const cs = {{ ts.model_name }}CustomStartTime ? new Date({{ ts.model_name }}CustomStartTime).getTime() : 0;
+                                            const ce = {{ ts.model_name }}CustomEndTime ? new Date({{ ts.model_name }}CustomEndTime).getTime() : Infinity;
+                                            rows = rows.filter((row: any) => {
+                                                const t = new Date(row.{{ ts.time_field }}).getTime();
+                                                return t >= cs && t <= ce;
+                                            });
+                                        } else if ({{ ts.model_name }}TimeRange !== 'latest100') {
+                                            const cutoff = Date.now() - { '1h': 3600000, '6h': 21600000, '24h': 86400000 }[{{ ts.model_name }}TimeRange]!;
+                                            rows = rows.filter((row: any) => new Date(row.{{ ts.time_field }}).getTime() >= cutoff);
+                                        }
+                                        return rows;
+                                    })()
                                         .map((row: any) => {
                                             const v = row.value?.value ?? row.value;
                                             return { time: new Date(row.{{ ts.time_field }}).getTime(), value: v };
