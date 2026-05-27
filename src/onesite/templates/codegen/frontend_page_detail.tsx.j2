@@ -59,6 +59,9 @@ import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service
 {% for ts in model.reverse_timeseries %}
 import { get{{ ts.model_name }}Realtime, get{{ ts.model_name }}History } from '../../services/{{ ts.module_name }}';
 {% endfor %}
+{% if model.reverse_timeseries %}
+import { LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
+{% endif %}
 {% endif %}
 
 const {{ model.name }}DetailPage: React.FC = () => {
@@ -132,6 +135,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ ts.model_name }}Properties, set{{ ts.model_name }}Properties] = useState<Record<string, any>>({});
     const [{{ ts.model_name }}History, set{{ ts.model_name }}History] = useState<any[]>([]);
     const [{{ ts.model_name }}HistoryLoading, set{{ ts.model_name }}HistoryLoading] = useState(false);
+    const [tsHistoryAutoRefresh, setTsHistoryAutoRefresh] = useState(false);
+    const [tsHistoryLastRefreshed, setTsHistoryLastRefreshed] = useState<Date | null>(null);
+    const [{{ ts.model_name }}SelectedMetrics, set{{ ts.model_name }}SelectedMetrics] = useState<string[]>([]);
+    const [{{ ts.model_name }}TimeRange, set{{ ts.model_name }}TimeRange] = useState('1h');
     {% endfor %}
     const [tsAutoRefresh, setTsAutoRefresh] = useState(false);
     {% endif %}
@@ -255,6 +262,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
             fetch{{ ts.model_name }}Realtime(itemId);
             {% endfor %}
             {% endif %}
+
+            // Fetch Timeseries history data
+            {% if model.reverse_timeseries %}
+            {% for ts in model.reverse_timeseries %}
+            fetch{{ ts.model_name }}History(itemId);
+            {% endfor %}
+            {% endif %}
         }
     }, [id, fetchItem]);
 
@@ -335,6 +349,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         try {
             const result = await get{{ ts.model_name }}History(itemId);
             set{{ ts.model_name }}History(result);
+            setTsHistoryLastRefreshed(new Date());
         } catch (error) {
             console.error(error);
         } finally {
@@ -356,6 +371,78 @@ const {{ model.name }}DetailPage: React.FC = () => {
         }
         return () => clearInterval(interval);
     }, [tsAutoRefresh, id]);
+
+    // Auto-refresh history data
+    useEffect(() => {
+        let interval: ReturnType<typeof setInterval>;
+        if (tsHistoryAutoRefresh && id) {
+            interval = setInterval(() => {
+                const itemId = parseInt(id);
+                {% for ts in model.reverse_timeseries %}
+                fetch{{ ts.model_name }}History(itemId);
+                {% endfor %}
+            }, 10000);
+        }
+        return () => clearInterval(interval);
+    }, [tsHistoryAutoRefresh, id]);
+
+    {% for ts in model.reverse_timeseries %}
+    const toggle{{ ts.model_name }}Metric = (metric: string) => {
+        set{{ ts.model_name }}SelectedMetrics(prev =>
+            prev.includes(metric)
+                ? prev.filter(m => m !== metric)
+                : [...prev, metric]
+        );
+    };
+
+    {% if ts.metric_field %}
+    const {{ ts.model_name }}Metrics = React.useMemo(() => {
+        const set = new Set<string>();
+        {{ ts.model_name }}History.forEach((row: any) => {
+            if (row.{{ ts.metric_field }}) set.add(row.{{ ts.metric_field }});
+        });
+        return Array.from(set);
+    }, [{{ ts.model_name }}History]);
+
+    useEffect(() => {
+        if ({{ ts.model_name }}Metrics.length > 0 && {{ ts.model_name }}SelectedMetrics.length === 0) {
+            set{{ ts.model_name }}SelectedMetrics({{ ts.model_name }}Metrics);
+        }
+    }, [{{ ts.model_name }}Metrics.length]);
+
+    const {{ ts.model_name }}ChartData = React.useMemo(() => {
+        const cutoff = {{ ts.model_name }}TimeRange === 'all' ? null : Date.now() - {
+            '1h': 3600000, '6h': 21600000, '24h': 86400000,
+            '7d': 604800000, '30d': 2592000000,
+        }[{{ ts.model_name }}TimeRange];
+
+        const filtered = {{ ts.model_name }}TimeRange === 'all'
+            ? {{ ts.model_name }}History
+            : {{ ts.model_name }}History.filter((row: any) =>
+                new Date(row.{{ ts.time_field }}).getTime() >= cutoff!
+            );
+
+        const numGroups: Record<string, { time: number; value: number }[]> = {};
+        const nonNumGroups: Record<string, { time: number; value: any }[]> = {};
+        filtered.forEach((row: any) => {
+            const metric = row.{{ ts.metric_field }};
+            const rawVal = row.value?.value;
+            if (rawVal === undefined || rawVal === null) return;
+            const numVal = Number(rawVal);
+            if (!isNaN(numVal) && typeof rawVal !== 'boolean') {
+                if (!numGroups[metric]) numGroups[metric] = [];
+                numGroups[metric].push({ time: new Date(row.{{ ts.time_field }}).getTime(), value: numVal });
+            } else {
+                if (!nonNumGroups[metric]) nonNumGroups[metric] = [];
+                nonNumGroups[metric].push({ time: new Date(row.{{ ts.time_field }}).getTime(), value: rawVal });
+            }
+        });
+        Object.values(numGroups).forEach(g => g.sort((a, b) => a.time - b.time));
+        Object.values(nonNumGroups).forEach(g => g.sort((a, b) => a.time - b.time));
+        return { numeric: numGroups, nonNumeric: nonNumGroups };
+    }, [{{ ts.model_name }}History, {{ ts.model_name }}TimeRange]);
+    {% endif %}
+    {% endfor %}
     {% endif %}
 
     if (loading && !currentItem) {
@@ -948,24 +1035,30 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             { {{ ts.model_name }}Realtime.length > 0 ? (
                                 {{ ts.model_name }}Realtime.map((row, idx) => {
                                     const meta = {{ ts.model_name }}Properties[row.{{ ts.metric_field }}] || {};
+                                    const rtColors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
                                     return (
-                                        <Card key={idx} className="p-4">
-                                            <div className="flex items-center gap-2 mb-1">
-                                                {meta.icon && <span className="text-lg">{meta.icon}</span>}
-                                                <span className="font-medium text-sm text-muted-foreground">
-                                                    {meta.display_name || row.{{ ts.metric_field }}}
-                                                </span>
-                                            </div>
-                                            <div className="text-2xl font-bold">
-                                                {typeof row.value === 'object' ? JSON.stringify(row.value) : (
-                                                    meta.data_type === 'float' && meta.decimals != null
-                                                        ? Number(row.value).toFixed(meta.decimals)
-                                                        : String(row.value ?? '-')
-                                                )}
-                                                {meta.unit && <span className="text-lg font-normal text-muted-foreground ml-1">{meta.unit}</span>}
-                                            </div>
-                                            <div className="text-xs text-muted-foreground mt-1">
-                                                {formatDateTime(row.{{ ts.time_field }}, timeZone)}
+                                        <Card key={idx} className="relative overflow-hidden transition-shadow hover:shadow-md" style={{ "{{" }} borderLeft: `4px solid ${rtColors[idx % rtColors.length]}` {{ "}}" }}>
+                                            <div className="p-4">
+                                                <div className="flex items-center gap-2 mb-2">
+                                                    {meta.icon && <span className="text-lg">{meta.icon}</span>}
+                                                    <span className="font-medium text-sm text-muted-foreground">
+                                                        {meta.display_name || row.{{ ts.metric_field }}}
+                                                    </span>
+                                                </div>
+                                                <div className="flex items-baseline gap-1">
+                                                    <span className="text-3xl font-bold tracking-tight">
+                                                        {typeof row.value === 'object' ? JSON.stringify(row.value) : (
+                                                            meta.data_type === 'float' && meta.decimals != null
+                                                                ? Number(row.value).toFixed(meta.decimals)
+                                                                : String(row.value ?? '-')
+                                                        )}
+                                                    </span>
+                                                    {meta.unit && <span className="text-sm font-medium text-muted-foreground">{meta.unit}</span>}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
+                                                    <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
+                                                    {formatDateTime(row.{{ ts.time_field }}, timeZone)}
+                                                </div>
                                             </div>
                                         </Card>
                                     );
@@ -1046,58 +1139,339 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {/* Timeseries History */}
                 <Card className="md:col-span-2">
                     <CardHeader>
-                        <CardTitle>{t('models.{{ ts.module_name }}.name')} — History</CardTitle>
+                        <div className="flex items-center justify-between">
+                            <CardTitle>{t('models.{{ ts.module_name }}.name')} — History</CardTitle>
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
+                                    {tsHistoryAutoRefresh && <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+                                    <span className="text-sm text-muted-foreground">Auto</span>
+                                    <Switch checked={tsHistoryAutoRefresh} onCheckedChange={setTsHistoryAutoRefresh} />
+                                </div>
+                                {tsHistoryLastRefreshed && (
+                                    <span className="text-xs text-muted-foreground tabular-nums">
+                                        {tsHistoryLastRefreshed.toLocaleTimeString()}
+                                    </span>
+                                )}
+                                <Button
+                                    variant="outline"
+                                    size="sm"
+                                    onClick={() => fetch{{ ts.model_name }}History(parseInt(id!))}
+                                    disabled={ {{ ts.model_name }}HistoryLoading }
+                                >
+                                    { {{ ts.model_name }}HistoryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                                    Refresh
+                                </Button>
+                            </div>
+                        </div>
                     </CardHeader>
                     <CardContent>
-                        <div className="mb-4 flex items-center gap-4">
-                            <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => fetch{{ ts.model_name }}History(parseInt(id!))}
-                                disabled={ {{ ts.model_name }}HistoryLoading }
-                            >
-                                { {{ ts.model_name }}HistoryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                Refresh
-                            </Button>
-                        </div>
-                        <div className="rounded-md border overflow-x-auto max-h-80 overflow-y-auto">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        {% if ts.metric_field %}
-                                        <TableHead>Metric</TableHead>
-                                        {% endif %}
-                                        <TableHead>Value</TableHead>
-                                        <TableHead>{{ ts.time_field.replace('_', ' ')|title }}</TableHead>
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    { {{ ts.model_name }}HistoryLoading ? (
-                                        <TableRow>
-                                            <TableCell colSpan={ {{ 3 if ts.metric_field else 2 }} } className="h-24 text-center">
-                                                <Loader2 className="mx-auto h-6 w-6 animate-spin" />
-                                            </TableCell>
-                                        </TableRow>
-                                    ) : {{ ts.model_name }}History.length > 0 ? (
-                                        {{ ts.model_name }}History.map((row, idx) => (
-                                            <TableRow key={idx}>
-                                                {% if ts.metric_field %}
-                                                <TableCell className="font-medium">{row.{{ ts.metric_field }}}</TableCell>
-                                                {% endif %}
-                                                <TableCell>{typeof row.value === 'object' ? JSON.stringify(row.value) : String(row.value ?? '-')}</TableCell>
-                                                <TableCell className="text-muted-foreground">{formatDateTime(row.{{ ts.time_field }}, timeZone)}</TableCell>
-                                            </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={ {{ 3 if ts.metric_field else 2 }} } className="h-24 text-center text-muted-foreground">
-                                                No history data.
-                                            </TableCell>
-                                        </TableRow>
+                    {% if ts.metric_field %}
+                        {# Chart-based history with metric selector #}
+                        { {{ ts.model_name }}HistoryLoading ? (
+                            <div className="flex h-48 items-center justify-center text-muted-foreground">
+                                <Loader2 className="h-6 w-6 animate-spin" />
+                            </div>
+                        ) : {{ ts.model_name }}History.length > 0 ? (
+                            <>
+                                {/* Time Range Selector */}
+                                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                                    <span className="text-sm text-muted-foreground">Time Range:</span>
+                                    {['1h', '6h', '24h', '7d', '30d', 'all'].map(range => (
+                                        <Button
+                                            key={range}
+                                            variant={ {{ ts.model_name }}TimeRange === range ? 'default' : 'outline' }
+                                            size="sm"
+                                            onClick={() => set{{ ts.model_name }}TimeRange(range)}
+                                        >
+                                            {range === 'all' ? 'All' : range}
+                                        </Button>
+                                    ))}
+                                </div>
+
+                                {/* Metric Checkbox Selector */}
+                                <div className="flex flex-wrap items-center gap-2 mb-6 p-3 bg-muted/20 rounded-lg border">
+                                    <span className="text-sm text-muted-foreground mr-1">Metrics:</span>
+                                    { {{ ts.model_name }}Metrics.map((metric: string) => {
+                                        const meta = {{ ts.model_name }}Properties[metric] || {};
+                                        const colors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
+                                        const accent = colors[metric.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length];
+                                        const isSelected = {{ ts.model_name }}SelectedMetrics.includes(metric);
+                                        return (
+                                            <button
+                                                key={metric}
+                                                onClick={() => toggle{{ ts.model_name }}Metric(metric)}
+                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border"
+                                                style={{"{{"}}
+                                                    backgroundColor: isSelected ? `${accent}15` : 'transparent',
+                                                    borderColor: isSelected ? accent : 'var(--border)',
+                                                    color: isSelected ? accent : undefined,
+                                                {{"}}"}}
+                                            >
+                                                {meta.icon && <span>{meta.icon}</span>}
+                                                <span>{meta.display_name || metric}</span>
+                                                {meta.unit && <span className="text-xs opacity-60">({meta.unit})</span>}
+                                            </button>
+                                        );
+                                    })}
+                                    { {{ ts.model_name }}Metrics.length === 0 && (
+                                        <span className="text-sm text-muted-foreground">No metrics available</span>
                                     )}
-                                </TableBody>
-                            </Table>
-                        </div>
+                                </div>
+
+                                {/* Charts */}
+                                { {{ ts.model_name }}SelectedMetrics.length > 0 ? (
+                                    <div className="space-y-6">
+                                        { {{ ts.model_name }}SelectedMetrics.map((metric: string) => {
+                                            const meta = {{ ts.model_name }}Properties[metric] || {};
+                                            const colors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
+                                            const accent = colors[metric.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length];
+                                            const dataType = meta.data_type || 'float';
+                                            const isNumeric = dataType === 'float' || dataType === 'int';
+                                            const chartData = {{ ts.model_name }}ChartData.numeric[metric] || [];
+                                            const nonNumericData = {{ ts.model_name }}ChartData.nonNumeric[metric] || [];
+                                            if (isNumeric && chartData.length > 0) {
+                                                const lastEntry = chartData[chartData.length - 1];
+                                                return (
+                                                    <div key={metric} className="rounded-lg border p-4">
+                                                        <div className="flex items-center gap-2 mb-3">
+                                                            {meta.icon && <span className="text-lg">{meta.icon}</span>}
+                                                            <h4 className="font-medium">{meta.display_name || metric}</h4>
+                                                            {meta.unit && <span className="text-xs text-muted-foreground">({meta.unit})</span>}
+                                                            <span className="ml-auto text-2xl font-bold tabular-nums" style={{"{{"}} color: accent {{"}}"}}>
+                                                                {meta.decimals != null ? Number(lastEntry.value).toFixed(meta.decimals) : lastEntry.value}
+                                                            </span>
+                                                            {meta.unit && <span className="text-sm text-muted-foreground">{meta.unit}</span>}
+                                                        </div>
+                                                        <ResponsiveContainer width="100%" height={220}>
+                                                            <LineChart data={chartData} margin={{"{{"}} top: 5, right: 20, left: 20, bottom: 5 {{"}}"}}>
+                                                                <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
+                                                                <XAxis
+                                                                    dataKey="time"
+                                                                    type="number"
+                                                                    domain={['auto', 'auto']}
+                                                                    tickFormatter={(ts) => {
+                                                                        const d = new Date(ts);
+                                                                        return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                                                    }}
+                                                                    stroke="var(--muted-foreground)"
+                                                                    fontSize={12}
+                                                                />
+                                                                <YAxis
+                                                                    type="number"
+                                                                    domain={['auto', 'auto']}
+                                                                    tickFormatter={(v) => meta.decimals != null ? Number(v).toFixed(meta.decimals) : String(v)}
+                                                                    stroke="var(--muted-foreground)"
+                                                                    fontSize={12}
+                                                                    width={60}
+                                                                />
+                                                                <Tooltip
+                                                                    contentStyle={{"{{"}} background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '13px' {{"}}"}}
+                                                                    labelFormatter={(ts) => formatDateTime(new Date(ts).toISOString(), timeZone)}
+                                                                    formatter={(value: number) => [
+                                                                        meta.decimals != null ? Number(value).toFixed(meta.decimals) + (meta.unit ? ` ${meta.unit}` : '') : value,
+                                                                        meta.display_name || metric
+                                                                    ]}
+                                                                />
+                                                                <Line
+                                                                    type="monotone"
+                                                                    dataKey="value"
+                                                                    stroke={accent}
+                                                                    strokeWidth={2}
+                                                                    dot={false}
+                                                                    activeDot={{"{{"}} r: 4, fill: accent {{"}}"}}
+                                                                />
+                                                            </LineChart>
+                                                        </ResponsiveContainer>
+                                                    </div>
+                                                );
+                                            } else if (!isNumeric && nonNumericData.length > 0) {
+                                                const lastEntry = nonNumericData[nonNumericData.length - 1];
+                                                const displayVal = typeof lastEntry.value === 'object' ? JSON.stringify(lastEntry.value) : String(lastEntry.value);
+                                                return (
+                                                    <div key={metric} className="rounded-lg border p-4">
+                                                        <div className="flex items-center gap-2 mb-3">
+                                                            {meta.icon && <span className="text-lg">{meta.icon}</span>}
+                                                            <h4 className="font-medium">{meta.display_name || metric}</h4>
+                                                        </div>
+                                                        <div className="flex items-center gap-2 mb-4">
+                                                            <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border" style={{"{{"}} backgroundColor: `${accent}20`, borderColor: accent, color: accent {{"}}"}}>
+                                                                {displayVal}
+                                                            </span>
+                                                            <span className="text-xs text-muted-foreground">
+                                                                {formatDateTime(new Date(lastEntry.time).toISOString(), timeZone)}
+                                                            </span>
+                                                        </div>
+                                                        <div className="flex h-10 w-full overflow-hidden rounded-md border bg-muted/10">
+                                                            {nonNumericData.map((entry: any, i: number) => {
+                                                                const val = typeof entry.value === 'object' ? JSON.stringify(entry.value) : String(entry.value);
+                                                                const c = val.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                                                                const blockColor = colors[c % colors.length];
+                                                                const pct = 100 / nonNumericData.length;
+                                                                return (
+                                                                    <div
+                                                                        key={i}
+                                                                        className="relative cursor-pointer transition-all hover:flex-[2] hover:opacity-80 group"
+                                                                        style={{"{{"}} flex: `${pct} 1 0`, backgroundColor: blockColor, minWidth: 0 {{"}}"}}
+                                                                    >
+                                                                        <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-foreground text-background text-xs px-2 py-1 rounded whitespace-nowrap z-10 shadow-lg">
+                                                                            {val} — {formatDateTime(new Date(entry.time).toISOString(), timeZone)}
+                                                                            </div>
+                                                                    </div>
+                                                                );
+                                                            })}
+                                                        </div>
+                                                        <div className="text-xs text-muted-foreground mt-1.5 flex justify-between">
+                                                            <span>{nonNumericData.length} records</span>
+                                                            <span>{formatDateTime(new Date(nonNumericData[0].time).toISOString(), timeZone)} — {formatDateTime(new Date(lastEntry.time).toISOString(), timeZone)}</span>
+                                                        </div>
+                                                    </div>
+                                                );
+                                            } else {
+                                                return null;
+                                            }
+                                        })}
+                                    </div>
+                                ) : (
+                                    <div className="flex h-24 items-center justify-center text-muted-foreground">
+                                        Select at least one metric to display.
+                                    </div>
+                                )}
+                            </>
+                        ) : (
+                            <div className="flex h-48 items-center justify-center text-muted-foreground">
+                                No history data.
+                            </div>
+                        )}
+                    {% else %}
+                        {# Single value chart (no metric_field) #}
+                        { {{ ts.model_name }}HistoryLoading ? (
+                            <div className="flex h-48 items-center justify-center text-muted-foreground">
+                                <Loader2 className="h-6 w-6 animate-spin" />
+                            </div>
+                        ) : {{ ts.model_name }}History.length > 0 ? (
+                            <>
+                                {/* Time Range Selector */}
+                                <div className="flex items-center gap-2 mb-4 flex-wrap">
+                                    <span className="text-sm text-muted-foreground">Time Range:</span>
+                                    {['1h', '6h', '24h', '7d', '30d', 'all'].map(range => (
+                                        <Button
+                                            key={range}
+                                            variant={ {{ ts.model_name }}TimeRange === range ? 'default' : 'outline' }
+                                            size="sm"
+                                            onClick={() => set{{ ts.model_name }}TimeRange(range)}
+                                        >
+                                            {range === 'all' ? 'All' : range}
+                                        </Button>
+                                    ))}
+                                </div>
+
+                                {(() => {
+                                    const cutoff = {{ ts.model_name }}TimeRange === 'all' ? null : Date.now() - {
+                                        '1h': 3600000, '6h': 21600000, '24h': 86400000,
+                                        '7d': 604800000, '30d': 2592000000,
+                                    }[{{ ts.model_name }}TimeRange];
+                                    const rawData = {{ ts.model_name }}History
+                                        .filter((row: any) =>
+                                            !cutoff || new Date(row.{{ ts.time_field }}).getTime() >= cutoff
+                                        )
+                                        .map((row: any) => {
+                                            const v = row.value?.value ?? row.value;
+                                            return { time: new Date(row.{{ ts.time_field }}).getTime(), value: v };
+                                        })
+                                        .sort((a: any, b: any) => a.time - b.time);
+                                    const numData = rawData.filter((d: any) => !isNaN(Number(d.value)) && typeof d.value !== 'boolean');
+                                    const nonNumData = rawData.filter((d: any) => isNaN(Number(d.value)) || typeof d.value === 'boolean');
+                                    if (numData.length > 0) {
+                                        return (
+                                            <ResponsiveContainer width="100%" height={300}>
+                                                <LineChart data={numData} margin={{"{{"}} top: 5, right: 20, left: 20, bottom: 5 {{"}}"}}>
+                                                    <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
+                                                    <XAxis
+                                                        dataKey="time"
+                                                        type="number"
+                                                        domain={['auto', 'auto']}
+                                                        tickFormatter={(ts) => {
+                                                            const d = new Date(ts);
+                                                            return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                                                        }}
+                                                        stroke="var(--muted-foreground)"
+                                                        fontSize={12}
+                                                    />
+                                                    <YAxis
+                                                        type="number"
+                                                        domain={['auto', 'auto']}
+                                                        stroke="var(--muted-foreground)"
+                                                        fontSize={12}
+                                                        width={60}
+                                                    />
+                                                    <Tooltip
+                                                        contentStyle={{"{{"}} background: 'var(--background)', border: '1px solid var(--border)', borderRadius: '8px', fontSize: '13px' {{"}}"}}
+                                                        labelFormatter={(ts) => formatDateTime(new Date(ts).toISOString(), timeZone)}
+                                                    />
+                                                    <Line
+                                                        type="monotone"
+                                                        dataKey="value"
+                                                        stroke="#0ea5e9"
+                                                        strokeWidth={2}
+                                                        dot={false}
+                                                        activeDot={{"{{"}} r: 4 {{"}}"}}
+                                                    />
+                                                </LineChart>
+                                            </ResponsiveContainer>
+                                        );
+                                    } else if (nonNumData.length > 0) {
+                                        const lastEntry = nonNumData[nonNumData.length - 1];
+                                        const displayVal = typeof lastEntry.value === 'object' ? JSON.stringify(lastEntry.value) : String(lastEntry.value);
+                                        const colors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
+                                        return (
+                                            <div>
+                                                <div className="flex items-center gap-2 mb-3">
+                                                    <span className="inline-flex items-center px-3 py-1 rounded-full text-sm font-medium border" style={{"{{"}} backgroundColor: '#0ea5e920', borderColor: '#0ea5e9', color: '#0ea5e9' {{"}}"}}>
+                                                        {displayVal}
+                                                    </span>
+                                                    <span className="text-xs text-muted-foreground">
+                                                        {formatDateTime(new Date(lastEntry.time).toISOString(), timeZone)}
+                                                    </span>
+                                                </div>
+                                                <div className="flex h-10 w-full overflow-hidden rounded-md border bg-muted/10">
+                                                    {nonNumData.map((entry: any, i: number) => {
+                                                        const val = typeof entry.value === 'object' ? JSON.stringify(entry.value) : String(entry.value);
+                                                        const c = val.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+                                                        const blockColor = colors[c % colors.length];
+                                                        const pct = 100 / nonNumData.length;
+                                                        return (
+                                                            <div
+                                                                key={i}
+                                                                className="relative cursor-pointer transition-all hover:flex-[2] hover:opacity-80 group"
+                                                                style={{"{{"}} flex: `${pct} 1 0`, backgroundColor: blockColor, minWidth: 0 {{"}}"}}
+                                                            >
+                                                                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-1 hidden group-hover:block bg-foreground text-background text-xs px-2 py-1 rounded whitespace-nowrap z-10 shadow-lg">
+                                                                    {val} — {formatDateTime(new Date(entry.time).toISOString(), timeZone)}
+                                                                </div>
+                                                            </div>
+                                                        );
+                                                    })}
+                                                </div>
+                                                <div className="text-xs text-muted-foreground mt-1.5">
+                                                    {nonNumData.length} records
+                                                </div>
+                                            </div>
+                                        );
+                                    } else {
+                                        return (
+                                            <div className="flex h-24 items-center justify-center text-muted-foreground">
+                                                No data in selected range.
+                                            </div>
+                                        );
+                                    }
+                                })()}
+                            </>
+                        ) : (
+                            <div className="flex h-48 items-center justify-center text-muted-foreground">
+                                No history data.
+                            </div>
+                        )}
+                    {% endif %}
                     </CardContent>
                 </Card>
                 {% endfor %}

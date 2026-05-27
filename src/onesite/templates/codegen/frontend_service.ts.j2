@@ -107,7 +107,7 @@ export const updateMe = async (data: any) => {
 
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
-import { {{ m2m.target_model }} } from './{{ m2m.target_model.lower() }}';
+import { {{ m2m.target_model }} } from './{{ m2m.target_service }}';
 export const get{{ model.name }}{{ m2m.target_model }}s = async (id: number, page = 1, size = 20) => {
     const response = await request.get<PaginatedResponse<{{ m2m.target_model }}>>(`${API_URL}/${id}/{{ m2m.target_endpoint }}?page=${page}&size=${size}`);
     return response.data;
@@ -124,7 +124,7 @@ export const get{{ model.name }}{{ m2m.target_model }}sWithMeta = async (id: num
 
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
-import { {{ rel.source_model }} } from './{{ rel.source_model.lower() }}';
+import { {{ rel.source_model }} } from './{{ rel.source_service }}';
 export const get{{ model.name }}{{ rel.source_model }}s = async (id: number, page = 1, size = 20) => {
     const response = await request.get<PaginatedResponse<{{ rel.source_model }}>>(`${API_URL}/${id}/{{ rel.name }}?page=${page}&size=${size}`);
     return response.data;
@@ -221,7 +221,7 @@ export const get{{ model.name }}History = async (
     if (metric) url += `&metric=${encodeURIComponent(metric)}`;
     if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
     if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;
-    const response = await request.get<{{ model.name }}[]>(url);
-    return response.data;
+    const response = await request.get(url);
+    return response.data.data || [];
 };
 {% endif %}

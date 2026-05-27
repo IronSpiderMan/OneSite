@@ -239,6 +239,7 @@ def _build_model_dict(
         "owner_field": owner_field,
         "page_edit": page_edit,
         "is_timescaledb": is_timescaledb,
+        "is_latest_table": model_site_props.get("is_latest_table", False),
         "timescaledb_entity_field": timescaledb_entity_field,
         "timescaledb_metric_field": timescaledb_metric_field,
     }
@@ -482,8 +483,8 @@ def _resolve_fk_labels_and_reverse(models: list[dict], model_map: dict) -> None:
                 and not f.get("fk_info")
             ]
 
-            # Skip self-referencing FKs and link/timeseries tables
-            if model.get("is_link_table") or model.get("is_timescaledb") or model["name"] == target_model["name"]:
+            # Skip self-referencing FKs and link/timeseries/latest tables
+            if model.get("is_link_table") or model.get("is_timescaledb") or model.get("is_latest_table") or model["name"] == target_model["name"]:
                 continue
 
             reverse_name = _pluralize(model["module_name"])
@@ -734,9 +735,42 @@ def _resolve_timeseries_relations(models: list[dict]) -> None:
 # generates the model table file and FK column extension before introspect.
 
 _MODEL_TABLE_TPL = '''"""Auto-generated model table for timeseries metric definitions."""
-from typing import Optional
+from enum import Enum
+from typing import Optional, Annotated
 from sqlmodel import Field, SQLModel, Column
 from sqlalchemy import JSON
+from pydantic.functional_validators import BeforeValidator
+
+
+def _coerce_empty(v):
+    """Convert empty string to None for optional fields."""
+    if v == "":
+        return None
+    return v
+
+
+CoercedStrList = Annotated[Optional[list[str]], BeforeValidator(_coerce_empty)]
+CoercedFloat = Annotated[Optional[float], BeforeValidator(_coerce_empty)]
+
+
+class {class_name}DataType(str, Enum):
+    float = "float"
+    int = "int"
+    string = "string"
+    bool = "bool"
+    enum = "enum"
+
+
+class {class_name}Property(SQLModel):
+    """Property definition for {class_name}."""
+    key: str = Field(..., description="属性标识符")
+    display_name: str = Field(..., description="显示名称")
+    unit: Optional[str] = Field(default=None, description="单位")
+    data_type: {class_name}DataType = Field(default={class_name}DataType.float, description="数据类型")
+    icon: Optional[str] = Field(default=None, description="图标")
+    enum_values: CoercedStrList = Field(default=None, description="枚举值列表")
+    min_value: CoercedFloat = Field(default=None, description="最小值")
+    max_value: CoercedFloat = Field(default=None, description="最大值")
 
 
 class {class_name}(SQLModel, table=True):
@@ -748,24 +782,115 @@ class {class_name}(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(..., description="Model name")
     description: str | None = Field(default=None, description="Description")
-    properties: list = Field(
+    properties: list[{class_name}Property] = Field(
         default=[],
         sa_column=Column(JSON),
-        description="Metric definitions: list of {{key, display_name, unit, icon, data_type, ...}}",
+        description="Metric definitions",
+    )
+'''
+
+def _generate_latest_model(
+    ts_cls: str, latest_cls: str, ts_file: str, entity_field: str, entity_stem: str,
+    metric_field: str | None, time_column: str = "reported_at",
+) -> str:
+    """Generate SQLModel source for a timeseries _latest table."""
+    entity_table = entity_field.replace("_id", "")
+    pk_cols = [f'        "{entity_field}"']
+    metric_lines = []
+    if metric_field:
+        metric_lines.append(f"    {metric_field}: str = Field(nullable=False)")
+        pk_cols.append(f'        "{metric_field}"')
+    pk_joined = ",\n".join(pk_cols)
+
+    return f'''"""Auto-generated latest table for {ts_cls} timeseries data."""
+from typing import Any
+from datetime import datetime, timezone
+from sqlmodel import SQLModel, Field, Column, DateTime, JSON, PrimaryKeyConstraint
+
+
+class {latest_cls}(SQLModel, table=True):
+    __tablename__ = "{ts_file}_latest"
+    __onesite__ = {{
+        "is_latest_table": True,
+        "permissions": {{"user": "", "admin": "", "developer": ""}},
+    }}
+
+    {entity_field}: int = Field(nullable=False, foreign_key="{entity_table}.id")
+{chr(10).join(metric_lines)}
+    value: Any = Field(sa_column=Column(JSON, nullable=False))
+    {time_column}: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+{pk_joined}
+        ),
     )
 '''
 
 
-def _scan_model_table_configs(models_dir: Path) -> list[dict]:
-    """Scan model source text files for timescaledb config before full introspect."""
+def _scan_model_table_configs(models_dir: Path) -> tuple[list[dict], list[dict]]:
+    """Scan model source text files for timescaledb config before full introspect.
+
+    Returns (configs, ts_imports) where:
+      configs: for model table generation + FK extensions (files with timescaledb_model_table)
+      ts_imports: for importing timeseries models at runtime (all files with is_timescaledb)
+    """
     import re
     configs: list[dict] = []
+    ts_imports: list[dict] = []
     for f in sorted(models_dir.glob("*.py")):
         if f.stem == "__init__":
             continue
         content = f.read_text(encoding="utf-8")
         if "is_timescaledb" not in content:
             continue
+
+        # Common: extract class name, entity_field, metric_field
+        source_class = None
+        class_match = re.search(r'class\s+(\w+)\s*\([^)]*\btable=True\b[^)]*\)', content)
+        if class_match:
+            source_class = class_match.group(1)
+
+        entity_field = None
+        m_ef = re.search(
+            r""""timescaledb_entity_field"\s*:\s*"([^"]+)"|'timescaledb_entity_field'\s*:\s*'([^']+)'""",
+            content,
+        )
+        if m_ef:
+            entity_field = m_ef.group(1) or m_ef.group(2)
+
+        metric_field = None
+        m_mf = re.search(
+            r""""timescaledb_metric_field"\s*:\s*"([^"]+)"|'timescaledb_metric_field'\s*:\s*'([^']+)'""",
+            content,
+        )
+        if m_mf:
+            metric_field = m_mf.group(1) or m_mf.group(2)
+
+        # Detect time column: prefer reported_at, then created_at, then first datetime field
+        time_column = "reported_at"
+        datetime_fields = re.findall(
+            r'^\s*(\w+)\s*:\s*(?:Optional\[)?datetime', content, re.MULTILINE | re.IGNORECASE
+        )
+        if datetime_fields:
+            for cand in ("reported_at", "created_at"):
+                if cand in datetime_fields:
+                    time_column = cand
+                    break
+            else:
+                time_column = datetime_fields[0]
+
+        # Add to ts_imports (every file with is_timescaledb needs runtime import)
+        ts_imports.append({
+            "source_file": f.stem,
+            "source_class": source_class,
+            "entity_field": entity_field,
+            "entity_stem": entity_field.replace("_id", "") if entity_field else None,
+            "metric_field": metric_field,
+            "time_column": time_column,
+        })
 
         # Extract timescaledb_model_table (also supports legacy key timescaledb_device_model)
         m = re.search(
@@ -777,52 +902,67 @@ def _scan_model_table_configs(models_dir: Path) -> list[dict]:
             continue
         model_table = m.group(1) or m.group(2) or m.group(3) or m.group(4)
 
-        # Extract timescaledb_entity_field
-        m = re.search(
-            r""""timescaledb_entity_field"\s*:\s*"([^"]+)"|'timescaledb_entity_field'\s*:\s*'([^']+)'""",
-            content,
-        )
-        entity_field = m.group(1) or m.group(2) if m else None
+        # Skip if no entity_field — can't determine FK target
         if not entity_field:
             continue
 
-        # Find the FK target from the model definition to get entity model name
         entity_stem = entity_field.replace("_id", "")
         configs.append({
             "model_table": model_table,
             "entity_field": entity_field,
             "entity_stem": entity_stem,
+            "metric_field": metric_field,
             "source_file": f.stem,
+            "source_class": source_class,
         })
-    return configs
+    return configs, ts_imports
 
 
-def phase_generate_model_tables(backend_path: Path) -> None:
-    """Generate model table files and FK extensions for timeseries configs.
+def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
+    """Generate model table files, _latest tables, and FK extensions for timeseries configs.
 
-    Must run after phase_sync_models and before phase_introspect.
+    Generates into cwd/models/ (source) so the files are synced to backend by phase_sync_models.
+    _model_extensions.py goes directly to backend/app/models/ (runtime helper).
+    Must run before phase_sync_models and phase_introspect.
     """
-    models_dir = backend_path / "app" / "models"
-    if not models_dir.exists():
+    models_src_dir = cwd / "models"
+    if not models_src_dir.exists():
         return
 
-    configs = _scan_model_table_configs(models_dir)
-    if not configs:
-        return
+    configs, ts_imports = _scan_model_table_configs(models_src_dir)
 
+    # ── Generate model table (e.g. device_model.py) into models/ ──
     for cfg in configs:
         class_name = _to_pascal(cfg["model_table"])
         table_name = cfg["model_table"]
-        filepath = models_dir / f"{table_name}.py"
-        if filepath.exists():
-            console.print(f"  Model table already exists: {table_name}.py")
-        else:
-            filepath.write_text(
-                _MODEL_TABLE_TPL.format(class_name=class_name, table_name=table_name)
-            )
-            console.print(f"[green]Generated model table: {table_name}.py[/green]")
+        filepath = models_src_dir / f"{table_name}.py"
+        filepath.write_text(
+            _MODEL_TABLE_TPL.format(class_name=class_name, table_name=table_name)
+        )
+        console.print(f"[green]Generated model table: {table_name}.py[/green]")
 
-    # Generate FK extension file for DB column injection
+    # ── Generate _latest SQLModel (e.g. device_property_history_latest.py) into models/ ──
+    for entry in ts_imports:
+        ts_cls = entry.get("source_class")
+        ts_file = entry.get("source_file")
+        ef = entry.get("entity_field")
+        es = entry.get("entity_stem")
+        mf = entry.get("metric_field")
+        if not all([ts_cls, ts_file, ef, es]):
+            continue
+
+        latest_cls = f"{ts_cls}Latest"
+        latest_file = models_src_dir / f"{ts_file}_latest.py"
+        tc = entry.get("time_column", "reported_at")
+        latest_content = _generate_latest_model(ts_cls, latest_cls, ts_file, ef, es, mf, time_column=tc)
+        latest_file.write_text(latest_content)
+        console.print(f"[green]Generated latest table: {latest_file.name}[/green]")
+
+    # ── Generate FK extension + ts model imports into backend/app/models/ ──
+    backend_models_dir = backend_path / "app" / "models"
+    if not backend_models_dir.exists():
+        return
+
     lines = [
         '"""Auto-generated model extensions \u2014 adds FK columns for timeseries model tables."""',
         "from sqlalchemy import Column, Integer, ForeignKey",
@@ -845,12 +985,29 @@ def phase_generate_model_tables(backend_path: Path) -> None:
         lines.append("    )")
         lines.append("")
 
-    ext_file = models_dir / "_model_extensions.py"
+    # Import ALL timeseries models so SQLModel.metadata knows about their tables
+    ts_import_lines: list[str] = []
+    seen: set[str] = set()
+    for entry in configs + ts_imports:
+        src = entry["source_file"]
+        cls = entry.get("source_class")
+        if src not in seen and cls:
+            ts_import_lines.append(f"from app.models.{src} import {cls}")
+            seen.add(src)
+
+    if ts_import_lines:
+        lines.append("# Import timeseries models for table registration at startup")
+        lines.extend(ts_import_lines)
+
+    if len(lines) <= 3 and not ts_import_lines:
+        return
+
+    ext_file = backend_models_dir / "_model_extensions.py"
     ext_file.write_text("\n".join(lines))
     console.print(f"[green]Generated model extensions: _model_extensions.py[/green]")
 
     # Append import to __init__.py
-    init_file = models_dir / "__init__.py"
+    init_file = backend_models_dir / "__init__.py"
     init_content = init_file.read_text() if init_file.exists() else ""
     if "import _model_extensions" not in init_content:
         init_content += "from . import _model_extensions  # noqa: F401\n"
@@ -1023,6 +1180,10 @@ def _generate_regular_model(model: dict, cwd: Path, backend_path: Path) -> None:
     tpl_crud = "user_crud.py.j2" if is_user_model else "crud.py.j2"
     tpl_service = "user_service.py.j2" if is_user_model else "service.py.j2"
 
+    # Latest tables are internal companions — no direct CRUD, API, or frontend
+    if model.get("is_latest_table"):
+        return
+
     generate_file(tpl_schema, context, _backend_path(tpl_schema, model, backend_path))
     generate_file(tpl_crud, context, _backend_path(tpl_crud, model, backend_path))
     generate_file(tpl_service, context, _backend_path(tpl_service, model, backend_path))
@@ -1034,7 +1195,7 @@ def _generate_regular_model(model: dict, cwd: Path, backend_path: Path) -> None:
     )
 
     # Timeseries models: no standalone pages/store — data is shown on parent entity detail
-    if model.get("is_timescaledb"):
+    if model.get("is_timescaledb") or model.get("is_latest_table"):
         return
 
     generate_file(
@@ -1099,7 +1260,7 @@ def phase_generate_per_model(
     api_models = [
         m for m in models
         if not m.get("frontend_only")
-        and not m.get("is_timescaledb")
+        and not m.get("is_latest_table")
         and (not m["is_link_table"] or (m.get("is_association_table") and m.get("show_in_menu")))
     ]
     return _sort_api_models(api_models, site_config)
@@ -1191,17 +1352,21 @@ def phase_generate_aggregated(
         )
 
     # ── Routes, Menu, Dashboard ──
+    frontend_models = [
+        m for m in api_models
+        if not m.get("is_timescaledb") and not m.get("is_latest_table")
+    ]
     generate_file(
-        "frontend_routes.tsx.j2", {"models": api_models},
+        "frontend_routes.tsx.j2", {"models": frontend_models},
         cwd / "frontend" / "src" / "Routes.tsx",
     )
     generate_file(
-        "frontend_menu.tsx.j2", {"models": api_models},
+        "frontend_menu.tsx.j2", {"models": frontend_models},
         cwd / "frontend" / "src" / "Menu.tsx",
     )
     generate_file(
         "dashboard_page.tsx.j2",
-        {"models": api_models, "scheduled_tasks": scheduled_tasks},
+        {"models": frontend_models, "scheduled_tasks": scheduled_tasks},
         cwd / "frontend" / "src" / "pages" / "Dashboard.tsx",
     )
 
@@ -1248,11 +1413,11 @@ def generate_code() -> None:
         backend_path.mkdir(parents=True, exist_ok=True)
     site_config, backend_path = phase_load_config(cwd)
 
-    # Phase 2 — Model files
-    phase_sync_models(cwd, backend_path)
+    # Phase 2 — Generate model tables (into models/, before sync so they are picked up)
+    phase_generate_model_tables(cwd, backend_path)
 
-    # Phase 2.5 — Generate model tables (before introspect, so auto-generated models are picked up)
-    phase_generate_model_tables(backend_path)
+    # Phase 2.5 — Sync model files (copies generated + user models to backend)
+    phase_sync_models(cwd, backend_path)
 
     # Phase 3 — Introspect
     models = phase_introspect(backend_path)

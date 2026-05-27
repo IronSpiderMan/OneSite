@@ -81,17 +81,7 @@ const DashboardPage: React.FC = () => {
     const { t } = useTranslation();
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
     const [loading, setLoading] = useState(true);
-    {% if models | selectattr('visualize') | selectattr('visualize.show') | list %}
-    {% set ns = namespace(has_time_field=false) %}
-    {% for model in models %}
-    {% if model.visualize and model.visualize.get('show') and model.visualize.get('time_field') %}
-    {% set ns.has_time_field = true %}
-    {% endif %}
-    {% endfor %}
-    {% if ns.has_time_field %}
     const [chartPeriods, setChartPeriods] = useState<Record<string, { period: string; startTime: string; endTime: string }>>({});
-    {% endif %}
-    {% endif %}
     {% if scheduled_tasks %}
     const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
 
@@ -136,7 +126,7 @@ const DashboardPage: React.FC = () => {
         };
 
         fetchAllStats();
-    }, [{% if models | selectattr('visualize') | selectattr('visualize.show') | list %}{% if ns.has_time_field %}chartPeriods{% endif %}{% endif %}]);
+    }, [chartPeriods]);
 
     {% if scheduled_tasks %}
     useEffect(() => {
@@ -195,7 +185,7 @@ const DashboardPage: React.FC = () => {
         );
     }
 
-    const chartModels = [
+    const chartModels: { moduleName: string; chartType: string; title: string; fullRow: boolean; hasTimeField?: boolean }[] = [
         {% for model in models %}
         {% if model.visualize and model.visualize.get('show') %}
         {
@@ -311,7 +301,7 @@ const DashboardPage: React.FC = () => {
                         <div key={chart.moduleName} className={`rounded-xl border bg-card text-card-foreground shadow-sm p-6${chart.fullRow ? ' md:col-span-2' : ''}`}>
                             <div className="flex items-center justify-between mb-4">
                                 <h3 className="text-lg font-semibold">
-                                    {t(`models.${chart.moduleName}.name`, chart.title)}
+                                    {t(`models.${chart.moduleName}.name`, chart.title) as string}
                                 </h3>
                                 {chart.hasTimeField && (
                                     <div className="flex items-center gap-2">
