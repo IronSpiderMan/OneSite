@@ -143,6 +143,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ ts.model_name }}CustomEndTime, set{{ ts.model_name }}CustomEndTime] = useState('');
     {% endfor %}
     const [tsAutoRefresh, setTsAutoRefresh] = useState(true);
+    const [tsLastRefreshed, setTsLastRefreshed] = useState<Date | null>(null);
     {% endif %}
 
     const calcStartTime = (range: string): string | undefined => {
@@ -347,6 +348,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             const result = await get{{ ts.model_name }}Realtime(itemId);
             set{{ ts.model_name }}Realtime(result.data || []);
             set{{ ts.model_name }}Properties(result.properties || {});
+            setTsLastRefreshed(new Date());
         } catch (error) {
             console.error(error);
         }
@@ -1073,10 +1075,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     <CardHeader>
                         <div className="flex items-center justify-between">
                             <CardTitle>{t('models.{{ ts.module_name }}.name')} &mdash; Realtime</CardTitle>
-                            <div className="flex items-center gap-2">
-                                {tsAutoRefresh && <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
-                                <span className="text-sm text-muted-foreground">Auto</span>
-                                <Switch checked={tsAutoRefresh} onCheckedChange={setTsAutoRefresh} />
+                            <div className="flex items-center gap-3">
+                                <div className="flex items-center gap-2">
+                                    {tsAutoRefresh && <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
+                                    <span className="text-sm text-muted-foreground">Auto</span>
+                                    <Switch checked={tsAutoRefresh} onCheckedChange={setTsAutoRefresh} />
+                                </div>
+                                {tsLastRefreshed && (
+                                    <span className="text-xs text-muted-foreground tabular-nums">
+                                        {tsLastRefreshed.toLocaleTimeString()}
+                                    </span>
+                                )}
                             </div>
                         </div>
                     </CardHeader>
@@ -1207,15 +1216,6 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         {tsHistoryLastRefreshed.toLocaleTimeString()}
                                     </span>
                                 )}
-                                <Button
-                                    variant="outline"
-                                    size="sm"
-                                    onClick={() => fetch{{ ts.model_name }}History(parseInt(id!))}
-                                    disabled={ {{ ts.model_name }}HistoryLoading }
-                                >
-                                    { {{ ts.model_name }}HistoryLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                                    Refresh
-                                </Button>
                             </div>
                         </div>
                     </CardHeader>

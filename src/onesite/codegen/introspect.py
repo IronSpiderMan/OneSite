@@ -243,6 +243,7 @@ def get_model_fields(
     bool,
     Optional[str],
     Optional[str],
+    Optional[str],
 ]:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
@@ -288,6 +289,7 @@ def get_model_fields(
     is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
     timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
     timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
+    timescaledb_model_table = model_site_props.get("timescaledb_model_table", None)
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -638,4 +640,5 @@ def get_model_fields(
         is_timescaledb,
         timescaledb_entity_field,
         timescaledb_metric_field,
+        timescaledb_model_table,
     )

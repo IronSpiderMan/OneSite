@@ -203,6 +203,7 @@ def _build_model_dict(
     is_timescaledb: bool = False,
     timescaledb_entity_field: str | None = None,
     timescaledb_metric_field: str | None = None,
+    timescaledb_model_table: str | None = None,
 ) -> dict:
     """Assemble the canonical model metadata dict from introspection results."""
     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
@@ -242,6 +243,7 @@ def _build_model_dict(
         "is_latest_table": model_site_props.get("is_latest_table", False),
         "timescaledb_entity_field": timescaledb_entity_field,
         "timescaledb_metric_field": timescaledb_metric_field,
+        "timescaledb_model_table": timescaledb_model_table,
     }
 
 
@@ -336,6 +338,7 @@ def _process_introspected_class(
         role_visible, owner_field,
         page_edit, is_timescaledb,
         timescaledb_entity_field, timescaledb_metric_field,
+        timescaledb_model_table,
     ) = get_model_fields(obj, model_module_name)
 
     if name == "User":
@@ -366,6 +369,7 @@ def _process_introspected_class(
         actions, is_notification_table, union_key, importable, exportable,
         import_key, owner_field, page_edit,
         is_timescaledb, timescaledb_entity_field, timescaledb_metric_field,
+        timescaledb_model_table,
     )
 
 
@@ -918,6 +922,39 @@ def _scan_model_table_configs(models_dir: Path) -> tuple[list[dict], list[dict]]
     return configs, ts_imports
 
 
+def _inject_fk_into_model_source(filepath: Path, fk_field: str, target_table: str) -> bool:
+    """Inject FK field (e.g. device_model_id) into model source file if not already present.
+
+    Returns True if injected, False if already present.
+    """
+    content = filepath.read_text()
+    field_decl = f"{fk_field}:"
+    if field_decl in content:
+        return False
+
+    lines = content.split('\n')
+    new_line = f"    {fk_field}: Optional[int] = Field(default=None, foreign_key=\"{target_table}.id\", nullable=True)"
+
+    # Find the last field definition line (indented, has ' = Field(')
+    insert_idx = None
+    for i, line in enumerate(lines):
+        if line[:4] == '    ' and ' = Field(' in line:
+            insert_idx = i
+
+    if insert_idx is not None:
+        # Ensure Optional is in the typing import
+        for i, line in enumerate(lines):
+            if line.startswith('from typing import'):
+                if 'Optional' not in line:
+                    lines[i] = line.replace('from typing import', 'from typing import Optional, ')
+                break
+
+        lines.insert(insert_idx, new_line)
+        filepath.write_text('\n'.join(lines))
+        return True
+    return False
+
+
 def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
     """Generate model table files, _latest tables, and FK extensions for timeseries configs.
 
@@ -941,6 +978,13 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
         )
         console.print(f"[green]Generated model table: {table_name}.py[/green]")
 
+        # Inject FK field (e.g. device_model_id) into the entity model source file
+        entity_file = models_src_dir / f"{cfg['entity_stem']}.py"
+        if entity_file.exists():
+            fk_field = f"{table_name}_id"
+            if _inject_fk_into_model_source(entity_file, fk_field, table_name):
+                console.print(f"[green]Injected {fk_field} into {entity_file.name}[/green]")
+
     # ── Generate _latest SQLModel (e.g. device_property_history_latest.py) into models/ ──
     for entry in ts_imports:
         ts_cls = entry.get("source_class")
@@ -958,34 +1002,12 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
         latest_file.write_text(latest_content)
         console.print(f"[green]Generated latest table: {latest_file.name}[/green]")
 
-    # ── Generate FK extension + ts model imports into backend/app/models/ ──
+    # ── Generate ts model imports into backend/app/models/_model_extensions.py ──
+    # This ensures SQLModel.metadata knows about timeseries tables at startup.
     backend_models_dir = backend_path / "app" / "models"
     if not backend_models_dir.exists():
         return
 
-    lines = [
-        '"""Auto-generated model extensions \u2014 adds FK columns for timeseries model tables."""',
-        "from sqlalchemy import Column, Integer, ForeignKey",
-        "",
-    ]
-    for cfg in configs:
-        entity_class = _to_pascal(cfg["entity_stem"])
-        fk_field = f"{cfg['model_table']}_id"
-        target_table = cfg["model_table"]
-        lines.append(f"from app.models.{cfg['entity_stem']} import {entity_class}")
-        lines.append(
-            f"if not any(c.name == '{fk_field}' for c in "
-            f"{entity_class}.__table__.columns):"
-        )
-        lines.append(f"    {entity_class}.__table__.append_column(")
-        lines.append(
-            f"        Column('{fk_field}', Integer, ForeignKey('{target_table}.id'),"
-            f" nullable=True)"
-        )
-        lines.append("    )")
-        lines.append("")
-
-    # Import ALL timeseries models so SQLModel.metadata knows about their tables
     ts_import_lines: list[str] = []
     seen: set[str] = set()
     for entry in configs + ts_imports:
@@ -996,86 +1018,20 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
             seen.add(src)
 
     if ts_import_lines:
-        lines.append("# Import timeseries models for table registration at startup")
+        lines = [
+            '"""Auto-generated model extensions \u2014 imports timeseries models for table registration."""',
+        ]
         lines.extend(ts_import_lines)
+        ext_file = backend_models_dir / "_model_extensions.py"
+        ext_file.write_text("\n".join(lines) + "\n")
+        console.print(f"[green]Generated model extensions: _model_extensions.py[/green]")
 
-    if len(lines) <= 3 and not ts_import_lines:
-        return
-
-    ext_file = backend_models_dir / "_model_extensions.py"
-    ext_file.write_text("\n".join(lines))
-    console.print(f"[green]Generated model extensions: _model_extensions.py[/green]")
-
-    # Append import to __init__.py
-    init_file = backend_models_dir / "__init__.py"
-    init_content = init_file.read_text() if init_file.exists() else ""
-    if "import _model_extensions" not in init_content:
-        init_content += "from . import _model_extensions  # noqa: F401\n"
-        init_file.write_text(init_content)
-
-
-def _inject_model_table_fks(models: list[dict]) -> None:
-    """After introspection, inject FK to model table into entity model metadata dicts.
-
-    This adds a synthetic FK field (e.g. device_model_id) to the entity model's
-    fields list so that all generated code (schemas, CRUD, API, frontend) includes it.
-    """
-    for ts_model in models:
-        if not ts_model.get("is_timescaledb"):
-            continue
-        model_table = ts_model.get("timescaledb_model_table")
-        if not model_table:
-            continue
-
-        entity_field_name = ts_model.get("timescaledb_entity_field", "")
-        # Find the target entity model via FK info
-        for fk in ts_model["foreign_keys"]:
-            if fk["name"] != entity_field_name:
-                continue
-            target = fk["target_model"]
-            for entity in models:
-                if entity["name"] != target:
-                    continue
-                fk_field = f"{model_table}_id"
-                if any(f["name"] == fk_field for f in entity["fields"]):
-                    break  # already present
-
-                # Extract FK field base table name from model_table
-                fk_service = model_table  # snake_case table name
-                fk_class = ts_model.get("timescaledb_model_class", _to_pascal(model_table))
-
-                entity["fields"].append({
-                    "name": fk_field,
-                    "type": "int",
-                    "ui_type": "int",
-                    "json_kind": None,
-                    "json_model_schema": None,
-                    "json_item_schema": None,
-                    "py_imports": [fk_service],
-                    "permissions": "r",
-                    "create_optional": False,
-                    "update_optional": True,
-                    "required": False,
-                    "default": None,
-                    "is_enum": False,
-                    "enum_values": [],
-                    "is_search_field": False,
-                    "fk_info": {
-                        "name": fk_field,
-                        "target_model": fk_class,
-                        "target_service": fk_service,
-                        "target_endpoint": f"{fk_service}s",
-                        "label_field": "name",
-                        "reverse_display": True,
-                    },
-                    "allow_download": True,
-                    "label_key": f"models.{entity['module_name']}.fields.{fk_field}",
-                    "translations": {},
-                    "is_unique": False,
-                })
-                entity["foreign_keys"].append(entity["fields"][-1]["fk_info"])
-                break
-            break
+        # Append import to __init__.py
+        init_file = backend_models_dir / "__init__.py"
+        init_content = init_file.read_text() if init_file.exists() else ""
+        if "import _model_extensions" not in init_content:
+            init_content += "from . import _model_extensions  # noqa: F401\n"
+            init_file.write_text(init_content)
 
 
 def phase_resolve_relationships(models: list[dict]) -> list[dict]:
@@ -1091,7 +1047,6 @@ def phase_resolve_relationships(models: list[dict]) -> list[dict]:
     _init_link_table_flags(models)
     _resolve_timescaledb_metadata(models)
     _resolve_timeseries_relations(models)
-    _inject_model_table_fks(models)
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_m2m(models, model_map, module_map)
 

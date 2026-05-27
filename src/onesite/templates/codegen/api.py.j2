@@ -18,6 +18,9 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.module_name }} import service
 from app.models.{{ model.source_module }} import {{ model.name }}
+{% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
+from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
+{% endif %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -85,7 +88,8 @@ async def read_{{ model.lower_name }}_realtime(
             dm = await session.get({{ model.timescaledb_model_class }}, dm_id)
             if dm and dm.properties:
                 for p in dm.properties:
-                    properties[p.key] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
+                    k = p.key if hasattr(p, "key") else p.get("key")
+                    properties[k] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
 
     # Filter out metrics not defined in properties
     if properties:
