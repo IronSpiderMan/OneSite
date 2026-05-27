@@ -356,6 +356,16 @@ const {{ model.name }}DetailPage: React.FC = () => {
             set{{ ts.model_name }}HistoryLoading(false);
         }
     };
+
+    const refresh{{ ts.model_name }}History = async (itemId: number) => {
+        try {
+            const result = await get{{ ts.model_name }}History(itemId);
+            set{{ ts.model_name }}History(result);
+            setTsHistoryLastRefreshed(new Date());
+        } catch (error) {
+            console.error(error);
+        }
+    };
     {% endfor %}
 
     // Auto-refresh realtime data
@@ -372,14 +382,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
         return () => clearInterval(interval);
     }, [tsAutoRefresh, id]);
 
-    // Auto-refresh history data
+    // Auto-refresh history data (no loading state to avoid flicker)
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
         if (tsHistoryAutoRefresh && id) {
             interval = setInterval(() => {
                 const itemId = parseInt(id);
                 {% for ts in model.reverse_timeseries %}
-                fetch{{ ts.model_name }}History(itemId);
+                refresh{{ ts.model_name }}History(itemId);
                 {% endfor %}
             }, 10000);
         }
@@ -1167,7 +1177,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     <CardContent>
                     {% if ts.metric_field %}
                         {# Chart-based history with metric selector #}
-                        { {{ ts.model_name }}HistoryLoading ? (
+                        { {{ ts.model_name }}HistoryLoading && {{ ts.model_name }}History.length === 0 ? (
                             <div className="flex h-48 items-center justify-center text-muted-foreground">
                                 <Loader2 className="h-6 w-6 animate-spin" />
                             </div>
@@ -1344,7 +1354,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         )}
                     {% else %}
                         {# Single value chart (no metric_field) #}
-                        { {{ ts.model_name }}HistoryLoading ? (
+                        { {{ ts.model_name }}HistoryLoading && {{ ts.model_name }}History.length === 0 ? (
                             <div className="flex h-48 items-center justify-center text-muted-foreground">
                                 <Loader2 className="h-6 w-6 animate-spin" />
                             </div>

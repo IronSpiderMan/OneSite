@@ -54,7 +54,7 @@ import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service
 const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { data, loading, fetchData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
+  const { data, loading, fetchData, refreshData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
   const timeZone = getUserTimeZone();
   {% if not model.page_edit %}
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -127,11 +127,11 @@ const {{ model.name }}Page: React.FC = () => {
     let interval: ReturnType<typeof setInterval>;
     if (autoRefresh) {
       interval = setInterval(() => {
-        fetchData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
+        refreshData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
       }, refreshInterval);
     }
     return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, fetchData]);
+  }, [autoRefresh, refreshInterval, refreshData]);
   {% endif %}
 
   useEffect(() => {
