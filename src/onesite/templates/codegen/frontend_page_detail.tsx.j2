@@ -826,6 +826,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 <span className="font-medium">
                                                     {% if target_field.ui_type == 'bool' %}
                                                     { {{ fk.target_service }}Data.{{ target_field.name }} ? 'Yes' : 'No' }
+                                                    {% elif target_field.ui_type == 'json' %}
+                                                    <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+                                                        {JSON.stringify({{ fk.target_service }}Data.{{ target_field.name }}, null, 2)}
+                                                    </pre>
                                                     {% else %}
                                                     {String({{ fk.target_service }}Data.{{ target_field.name }} ?? '-')}
                                                     {% endif %}
