@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Loader2, Save, Pencil, X } from 'lucide-react';
+import { ArrowLeft, Eye, Loader2, Save, Pencil, X } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
@@ -866,27 +866,47 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>ID</TableHead>
-                                        <TableHead>{{ m2m.label_field.title() }}</TableHead>
+                                        {% for field in m2m.target_readable_fields %}
+                                        <TableHead>{t('{{ field.label_key }}')}</TableHead>
+                                        {% endfor %}
+                                        <TableHead className="w-16">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     { {{ m2m.name }}Loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={2} className="h-24 text-center">
+                                            <TableCell colSpan={ {{ m2m.target_readable_fields | length + 1 }} } className="h-24 text-center">
                                                 <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                                             </TableCell>
                                         </TableRow>
                                     ) : {{ m2m.name }}Data.length > 0 ? (
                                         {{ m2m.name }}Data.map((item) => (
                                             <TableRow key={item.id}>
-                                                <TableCell>{item.id}</TableCell>
-                                                <TableCell>{item.{{ m2m.label_field }} }</TableCell>
+                                                {% for field in m2m.target_readable_fields %}
+                                                <TableCell>
+                                                    {% if field.fk_info %}
+                                                    {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
+                                                    {% elif field.ui_type == 'bool' %}
+                                                    {item.{{ field.name }} ? 'Yes' : 'No'}
+                                                    {% elif field.is_enum %}
+                                                    <Badge variant="outline">{item.{{ field.name }}}</Badge>
+                                                    {% elif field.ui_type == 'datetime' %}
+                                                    {formatDateTime(item.{{ field.name }}, timeZone)}
+                                                    {% else %}
+                                                    {typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }} ?? '-')}
+                                                    {% endif %}
+                                                </TableCell>
+                                                {% endfor %}
+                                                <TableCell>
+                                                    <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ m2m.target_service }}s/${item.id}`)}>
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </TableCell>
                                             </TableRow>
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={2} className="h-24 text-center">
+                                            <TableCell colSpan={ {{ m2m.target_readable_fields | length + 1 }} } className="h-24 text-center">
                                                 No {{ m2m.target_model.lower() }}s found.
                                             </TableCell>
                                         </TableRow>
@@ -932,27 +952,47 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             <Table>
                                 <TableHeader>
                                     <TableRow>
-                                        <TableHead>ID</TableHead>
-                                        <TableHead>{{ rel.label_field.title() }}</TableHead>
+                                        {% for field in rel.source_readable_fields %}
+                                        <TableHead>{t('{{ field.label_key }}')}</TableHead>
+                                        {% endfor %}
+                                        <TableHead className="w-16">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     { {{ rel.name }}Loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={2} className="h-24 text-center">
+                                            <TableCell colSpan={ {{ rel.source_readable_fields | length + 1 }} } className="h-24 text-center">
                                                 <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                                             </TableCell>
                                         </TableRow>
                                     ) : {{ rel.name }}Data.length > 0 ? (
                                         {{ rel.name }}Data.map((item) => (
                                             <TableRow key={item.id}>
-                                                <TableCell>{item.id}</TableCell>
-                                                <TableCell>{item.{{ rel.label_field }} }</TableCell>
+                                                {% for field in rel.source_readable_fields %}
+                                                <TableCell>
+                                                    {% if field.fk_info %}
+                                                    {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
+                                                    {% elif field.ui_type == 'bool' %}
+                                                    {item.{{ field.name }} ? 'Yes' : 'No'}
+                                                    {% elif field.is_enum %}
+                                                    <Badge variant="outline">{item.{{ field.name }}}</Badge>
+                                                    {% elif field.ui_type == 'datetime' %}
+                                                    {formatDateTime(item.{{ field.name }}, timeZone)}
+                                                    {% else %}
+                                                    {typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }} ?? '-')}
+                                                    {% endif %}
+                                                </TableCell>
+                                                {% endfor %}
+                                                <TableCell>
+                                                    <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ rel.source_service }}s/${item.id}`)}>
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </TableCell>
                                             </TableRow>
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={2} className="h-24 text-center">
+                                            <TableCell colSpan={ {{ rel.source_readable_fields | length + 1 }} } className="h-24 text-center">
                                                 No {{ rel.source_model.lower() }}s found.
                                             </TableCell>
                                         </TableRow>
@@ -1004,12 +1044,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <TableHead>{t('{{ field.label_key }}')}</TableHead>
                                         {% endif %}
                                         {% endfor %}
+                                        <TableHead className="w-16">Actions</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
                                     { {{ rfk.name }}Loading ? (
                                         <TableRow>
-                                            <TableCell colSpan={ {{ (rfk.source_readable_fields | length) - 1 }} } className="h-24 text-center">
+                                            <TableCell colSpan={ {{ (rfk.source_readable_fields | length) }} } className="h-24 text-center">
                                                 <Loader2 className="mx-auto h-6 w-6 animate-spin" />
                                             </TableCell>
                                         </TableRow>
@@ -1033,11 +1074,16 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 </TableCell>
                                                 {% endif %}
                                                 {% endfor %}
+                                                <TableCell>
+                                                    <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ rfk.source_service }}s/${item.id}`)}>
+                                                        <Eye className="h-4 w-4" />
+                                                    </Button>
+                                                </TableCell>
                                             </TableRow>
                                         ))
                                     ) : (
                                         <TableRow>
-                                            <TableCell colSpan={ {{ (rfk.source_readable_fields | length) - 1 }} } className="h-24 text-center">
+                                            <TableCell colSpan={ {{ (rfk.source_readable_fields | length) }} } className="h-24 text-center">
                                                 No {{ rfk.source_model.lower() }}s found.
                                             </TableCell>
                                         </TableRow>

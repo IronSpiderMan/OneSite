@@ -618,6 +618,21 @@ def _apply_m2m_direction(
                 "label_field": (
                     to_model.get("unique_search_field") or to_model["search_field"]
                 ),
+                "target_readable_fields": [
+                    f for f in to_model["fields"]
+                    if "r" in f["permissions"]
+                    and f["name"] != "password"
+                ],
+                "target_fk_fields": [
+                    {
+                        "name": fk["name"],
+                        "target_model": fk["target_model"],
+                        "target_source_module": fk["target_source_module"],
+                        "label_field": fk["label_field"],
+                    }
+                    for fk in to_model.get("foreign_keys", [])
+                    if fk.get("target_source_module")
+                ],
                 "link_model": link_model["name"],
                 "link_module": link_model["source_module"],
                 "target_source_module": to_model["source_module"],
@@ -648,6 +663,21 @@ def _apply_m2m_direction(
             "label_field": (
                 from_model.get("unique_search_field") or from_model["search_field"]
             ),
+            "source_readable_fields": [
+                f for f in from_model["fields"]
+                if "r" in f["permissions"]
+                and f["name"] != "password"
+            ],
+            "source_fk_fields": [
+                {
+                    "name": fk["name"],
+                    "target_model": fk["target_model"],
+                    "target_source_module": fk["target_source_module"],
+                    "label_field": fk["label_field"],
+                }
+                for fk in from_model.get("foreign_keys", [])
+                if fk.get("target_source_module")
+            ],
             "display": to_fk.get("reverse_display", True),
             "link_model": link_model["name"],
             "link_module": link_model["source_module"],

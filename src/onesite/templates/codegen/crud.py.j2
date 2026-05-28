@@ -614,8 +614,8 @@ async def get_{{ m2m.target_endpoint }}(
     {{ model.lower_name }}_id: int,
     page: int = 1,
     size: int = 20,
-) -> List[{{ m2m.target_model }}]:
-    """Get list of {{ m2m.target_model }} objects related to {{ model.name }}."""
+) -> List[Dict[str, Any]]:
+    """Get list of {{ m2m.target_model }} objects related to {{ model.name }}, enriched with FK labels."""
     # Get target IDs first
     statement = select({{ m2m.link_model }}.{{ m2m.target_fk_field }}).where(
         {{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id
@@ -635,7 +635,43 @@ async def get_{{ m2m.target_endpoint }}(
         col({{ m2m.target_model }}.id).in_(paginated_ids)
     )
     result = await session.exec(statement)
-    return list(result.all())
+    items = list(result.all())
+
+    {% if m2m.target_fk_fields %}
+    # Import FK target models for label resolution (avoid shadowing {{ m2m.target_model }})
+    {% for fk_field in m2m.target_fk_fields %}
+    {% if fk_field.target_model != m2m.target_model %}
+    from app.models.{{ fk_field.target_source_module }} import {{ fk_field.target_model }}
+    {% endif %}
+    {% endfor %}
+
+    # Enrich items with FK labels
+    {% for fk_field in m2m.target_fk_fields %}
+    {{ fk_field.name }}_ids = list(set(getattr(item, "{{ fk_field.name }}") for item in items if getattr(item, "{{ fk_field.name }}") is not None))
+    {% endfor %}
+
+    {% for fk_field in m2m.target_fk_fields %}
+    {{ fk_field.name }}_map = {}
+    if {{ fk_field.name }}_ids:
+        stmt = select({{ fk_field.target_model }}).where({{ fk_field.target_model }}.id.in_({{ fk_field.name }}_ids))
+        result = await session.exec(stmt)
+        for obj in result.all():
+            {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
+    {% endfor %}
+
+    enriched = []
+    for item in items:
+        item_dict = item.model_dump()
+        {% for fk_field in m2m.target_fk_fields %}
+        fk_id = getattr(item, "{{ fk_field.name }}", None)
+        item_dict["{{ fk_field.name }}_label"] = {{ fk_field.name }}_map.get(fk_id) if fk_id else None
+        {% endfor %}
+        enriched.append(item_dict)
+
+    return enriched
+    {% else %}
+    return [item.model_dump() for item in items]
+    {% endif %}
 
 
 async def count_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> int:
@@ -690,8 +726,8 @@ async def get_{{ rel.name }}(
     {{ model.lower_name }}_id: int,
     page: int = 1,
     size: int = 20,
-) -> List[{{ rel.source_model }}]:
-    """Get list of {{ rel.source_model }} objects related to {{ model.name }} (reverse M2M)."""
+) -> List[Dict[str, Any]]:
+    """Get list of {{ rel.source_model }} objects related to {{ model.name }} (reverse M2M), enriched with FK labels."""
     # Get source IDs first
     statement = select({{ rel.link_model }}.{{ rel.source_fk_field }}).where(
         {{ rel.link_model }}.{{ rel.target_fk_field }} == {{ model.lower_name }}_id
@@ -711,7 +747,43 @@ async def get_{{ rel.name }}(
         col({{ rel.source_model }}.id).in_(paginated_ids)
     )
     result = await session.exec(statement)
-    return list(result.all())
+    items = list(result.all())
+
+    {% if rel.source_fk_fields %}
+    # Import FK target models for label resolution (avoid shadowing {{ rel.source_model }})
+    {% for fk_field in rel.source_fk_fields %}
+    {% if fk_field.target_model != rel.source_model %}
+    from app.models.{{ fk_field.target_source_module }} import {{ fk_field.target_model }}
+    {% endif %}
+    {% endfor %}
+
+    # Enrich items with FK labels
+    {% for fk_field in rel.source_fk_fields %}
+    {{ fk_field.name }}_ids = list(set(getattr(item, "{{ fk_field.name }}") for item in items if getattr(item, "{{ fk_field.name }}") is not None))
+    {% endfor %}
+
+    {% for fk_field in rel.source_fk_fields %}
+    {{ fk_field.name }}_map = {}
+    if {{ fk_field.name }}_ids:
+        stmt = select({{ fk_field.target_model }}).where({{ fk_field.target_model }}.id.in_({{ fk_field.name }}_ids))
+        result = await session.exec(stmt)
+        for obj in result.all():
+            {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
+    {% endfor %}
+
+    enriched = []
+    for item in items:
+        item_dict = item.model_dump()
+        {% for fk_field in rel.source_fk_fields %}
+        fk_id = getattr(item, "{{ fk_field.name }}", None)
+        item_dict["{{ fk_field.name }}_label"] = {{ fk_field.name }}_map.get(fk_id) if fk_id else None
+        {% endfor %}
+        enriched.append(item_dict)
+
+    return enriched
+    {% else %}
+    return [item.model_dump() for item in items]
+    {% endif %}
 
 
 async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> int:
