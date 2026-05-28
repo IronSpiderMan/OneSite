@@ -1,0 +1,30 @@
+"""Auto-generated latest table for {{ ts_cls }} timeseries data."""
+from typing import Any
+from datetime import datetime, timezone
+from sqlmodel import SQLModel, Field, Column, DateTime, JSON, PrimaryKeyConstraint
+
+
+class {{ latest_cls }}(SQLModel, table=True):
+    __tablename__ = "{{ ts_file }}_latest"
+    __onesite__ = {
+        "is_latest_table": True,
+        "permissions": {"user": "", "admin": "", "developer": ""},
+    }
+
+    {{ entity_field }}: int = Field(nullable=False, foreign_key="{{ entity_table }}.id")
+{% if has_metric %}
+    {{ metric_field }}: str = Field(nullable=False)
+{% endif %}
+    value: Any = Field(sa_column=Column(JSON, nullable=False))
+    {{ time_column }}: datetime = Field(
+        sa_column=Column(DateTime(timezone=True), nullable=False)
+    )
+
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "{{ entity_field }}",
+{% if has_metric %}
+            "{{ metric_field }}",
+{% endif %}
+        ),
+    )

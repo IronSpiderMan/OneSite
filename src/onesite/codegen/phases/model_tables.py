@@ -10,105 +10,8 @@ import re
 from pathlib import Path
 from typing import Any
 
+from ..render import generate_file
 from .base import console, to_pascal
-
-# ── Inline template for model tables (e.g. device_model.py) ──────────────
-
-_MODEL_TABLE_TPL = '''"""Auto-generated model table for timeseries metric definitions."""
-from enum import Enum
-from typing import Optional, Annotated
-from sqlmodel import Field, SQLModel, Column
-from sqlalchemy import JSON
-from pydantic.functional_validators import BeforeValidator
-
-
-def _coerce_empty(v):
-    """Convert empty string to None for optional fields."""
-    if v == "":
-        return None
-    return v
-
-
-CoercedStrList = Annotated[Optional[list[str]], BeforeValidator(_coerce_empty)]
-CoercedFloat = Annotated[Optional[float], BeforeValidator(_coerce_empty)]
-
-
-class {class_name}DataType(str, Enum):
-    float = "float"
-    int = "int"
-    string = "string"
-    bool = "bool"
-    enum = "enum"
-
-
-class {class_name}Property(SQLModel):
-    """Property definition for {class_name}."""
-    key: str = Field(..., description="属性标识符")
-    display_name: str = Field(..., description="显示名称")
-    unit: Optional[str] = Field(default=None, description="单位")
-    data_type: {class_name}DataType = Field(default={class_name}DataType.float, description="数据类型")
-    icon: Optional[str] = Field(default=None, description="图标")
-    enum_values: CoercedStrList = Field(default=None, description="枚举值列表")
-    min_value: CoercedFloat = Field(default=None, description="最小值")
-    max_value: CoercedFloat = Field(default=None, description="最大值")
-
-
-class {class_name}(SQLModel, table=True):
-    __tablename__ = "{table_name}"
-    __onesite__ = {{
-        "permissions": {{"user": "r", "admin": "cru", "developer": "cru"}},
-    }}
-
-    id: Optional[int] = Field(default=None, primary_key=True)
-    name: str = Field(..., description="Model name")
-    description: str | None = Field(default=None, description="Description")
-    properties: list[{class_name}Property] = Field(
-        default=[],
-        sa_column=Column(JSON),
-        description="Metric definitions",
-    )
-'''
-
-
-def _generate_latest_model(
-    ts_cls: str, latest_cls: str, ts_file: str, entity_field: str, entity_stem: str,
-    metric_field: str | None, time_column: str = "reported_at",
-) -> str:
-    """Generate SQLModel source for a timeseries ``_latest`` table."""
-    entity_table = entity_field.replace("_id", "")
-    pk_cols = [f'        "{entity_field}"']
-    metric_lines = []
-    if metric_field:
-        metric_lines.append(f"    {metric_field}: str = Field(nullable=False)")
-        pk_cols.append(f'        "{metric_field}"')
-    pk_joined = ",\n".join(pk_cols)
-
-    return f'''"""Auto-generated latest table for {ts_cls} timeseries data."""
-from typing import Any
-from datetime import datetime, timezone
-from sqlmodel import SQLModel, Field, Column, DateTime, JSON, PrimaryKeyConstraint
-
-
-class {latest_cls}(SQLModel, table=True):
-    __tablename__ = "{ts_file}_latest"
-    __onesite__ = {{
-        "is_latest_table": True,
-        "permissions": {{"user": "", "admin": "", "developer": ""}},
-    }}
-
-    {entity_field}: int = Field(nullable=False, foreign_key="{entity_table}.id")
-{chr(10).join(metric_lines)}
-    value: Any = Field(sa_column=Column(JSON, nullable=False))
-    {time_column}: datetime = Field(
-        sa_column=Column(DateTime(timezone=True), nullable=False)
-    )
-
-    __table_args__ = (
-        PrimaryKeyConstraint(
-{pk_joined}
-        ),
-    )
-'''
 
 
 # ── Source file scanning ──────────────────────────────────────────────────
@@ -242,7 +145,6 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
 
     Generates into ``cwd/models/`` (source) so the files are synced to backend
     by :func:`~onesite.codegen.phases.sync_models.phase_sync_models`.
-    ``_model_extensions.py`` goes directly to ``backend/app/models/`` (runtime helper).
     Must run before ``phase_sync_models`` and ``phase_introspect``.
     """
     models_src_dir = cwd / "models"
@@ -255,11 +157,11 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
     for cfg in configs:
         class_name = to_pascal(cfg["model_table"])
         table_name = cfg["model_table"]
-        filepath = models_src_dir / f"{table_name}.py"
-        filepath.write_text(
-            _MODEL_TABLE_TPL.format(class_name=class_name, table_name=table_name)
+        generate_file(
+            "timescaledb_model_table.py.j2",
+            {"class_name": class_name, "table_name": table_name},
+            models_src_dir / f"{table_name}.py",
         )
-        console.print(f"[green]Generated model table: {table_name}.py[/green]")
 
         # Inject FK field (e.g. device_model_id) into the entity model source file
         entity_file = models_src_dir / f"{cfg['entity_stem']}.py"
@@ -279,9 +181,19 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
             continue
 
         latest_cls = f"{ts_cls}Latest"
-        latest_file = models_src_dir / f"{ts_file}_latest.py"
         tc = entry.get("time_column", "reported_at")
-        latest_content = _generate_latest_model(ts_cls, latest_cls, ts_file, ef, es, mf, time_column=tc)
-        latest_file.write_text(latest_content)
-        console.print(f"[green]Generated latest table: {latest_file.name}[/green]")
+        generate_file(
+            "timescaledb_latest_table.py.j2",
+            {
+                "ts_cls": ts_cls,
+                "latest_cls": latest_cls,
+                "ts_file": ts_file,
+                "entity_field": ef,
+                "entity_table": ef.replace("_id", ""),
+                "has_metric": bool(mf),
+                "metric_field": mf or "",
+                "time_column": tc,
+            },
+            models_src_dir / f"{ts_file}_latest.py",
+        )
 

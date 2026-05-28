@@ -1,0 +1,53 @@
+"""Auto-generated model table for timeseries metric definitions."""
+from enum import Enum
+from typing import Optional, Annotated
+from sqlmodel import Field, SQLModel, Column
+from sqlalchemy import JSON
+from pydantic.functional_validators import BeforeValidator
+
+
+def _coerce_empty(v):
+    """Convert empty string to None for optional fields."""
+    if v == "":
+        return None
+    return v
+
+
+CoercedStrList = Annotated[Optional[list[str]], BeforeValidator(_coerce_empty)]
+CoercedFloat = Annotated[Optional[float], BeforeValidator(_coerce_empty)]
+
+
+class {{ class_name }}DataType(str, Enum):
+    float = "float"
+    int = "int"
+    string = "string"
+    bool = "bool"
+    enum = "enum"
+
+
+class {{ class_name }}Property(SQLModel):
+    """Property definition for {{ class_name }}."""
+    key: str = Field(..., description="属性标识符")
+    display_name: str = Field(..., description="显示名称")
+    unit: Optional[str] = Field(default=None, description="单位")
+    data_type: {{ class_name }}DataType = Field(default={{ class_name }}DataType.float, description="数据类型")
+    icon: Optional[str] = Field(default=None, description="图标")
+    enum_values: CoercedStrList = Field(default=None, description="枚举值列表")
+    min_value: CoercedFloat = Field(default=None, description="最小值")
+    max_value: CoercedFloat = Field(default=None, description="最大值")
+
+
+class {{ class_name }}(SQLModel, table=True):
+    __tablename__ = "{{ table_name }}"
+    __onesite__ = {
+        "permissions": {"user": "r", "admin": "cru", "developer": "cru"},
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(..., description="Model name")
+    description: str | None = Field(default=None, description="Description")
+    properties: list[{{ class_name }}Property] = Field(
+        default=[],
+        sa_column=Column(JSON),
+        description="Metric definitions",
+    )
