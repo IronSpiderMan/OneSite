@@ -246,11 +246,14 @@ def _apply_filters(
     {% endif %}
     {% endfor %}
 
-    # Apply foreign key filters
+    # Apply foreign key filters (0 = sentinel for IS NULL)
     {% for fk in model.foreign_keys %}
     {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-    if {{ fk.name }}:
-        statement = statement.where({{ model.name }}.{{ fk.name }} == {{ fk.name }})
+    if {{ fk.name }} is not None:
+        if {{ fk.name }} == 0:
+            statement = statement.where({{ model.name }}.{{ fk.name }}.is_(None))
+        else:
+            statement = statement.where({{ model.name }}.{{ fk.name }} == {{ fk.name }})
     {% endif %}
     {% endfor %}
 

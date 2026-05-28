@@ -506,6 +506,8 @@ def get_model_fields(
                 target_endpoint = f"{target_service}s"
 
                 reverse_display = site_props.get("reverse_display", True)
+                model_table_name = getattr(model_cls, '__tablename__', None) or _to_snake(model_cls.__name__)
+                is_self_referencing = (target_model_class == model_cls.__name__) or (fk_table == model_table_name)
                 fk_info = {
                     "name": name,
                     "target_model": target_model_class,
@@ -513,6 +515,7 @@ def get_model_fields(
                     "target_endpoint": target_endpoint,
                     "label_field": "name",
                     "reverse_display": reverse_display,
+                    "is_self_referencing": is_self_referencing,
                 }
 
         origin = get_origin(resolved_annotation)

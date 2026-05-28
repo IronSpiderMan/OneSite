@@ -208,6 +208,20 @@ def _build_model_dict(
     """Assemble the canonical model metadata dict from introspection results."""
     schema_imports = sorted({imp for f in fields for imp in f.get("py_imports", [])})
     table_name = _to_snake(name)
+
+    # ── Tree view detection ──────────────────────────────────────────────
+    tree_view_config = model_site_props.get("tree_view", "auto")
+    is_tree = False
+    tree_parent_field = None
+
+    if tree_view_config is not False:
+        for fk in foreign_keys:
+            if fk.get("is_self_referencing"):
+                tree_parent_field = fk["name"]
+                if tree_view_config is True or tree_view_config == "auto":
+                    is_tree = True
+                break
+
     return {
         "name": name,
         "module_name": module_name,
@@ -244,6 +258,8 @@ def _build_model_dict(
         "timescaledb_entity_field": timescaledb_entity_field,
         "timescaledb_metric_field": timescaledb_metric_field,
         "timescaledb_model_table": timescaledb_model_table,
+        "is_tree": is_tree,
+        "tree_parent_field": tree_parent_field,
     }
 
 

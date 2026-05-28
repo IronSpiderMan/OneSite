@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -21,6 +21,9 @@ import {
     , download{{ model.name }}Template
     {% endif %}
 } from '../../services/{{ model.module_name }}';
+{% if model.is_tree %}
+import * as {{ model.module_name }}Service from '../../services/{{ model.module_name }}';
+{% endif %}
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -68,6 +71,18 @@ const {{ model.name }}Page: React.FC = () => {
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
   const [gotoPageInput, setGotoPageInput] = useState('');
+  {% if model.is_tree %}
+  // Lazy-loading tree state
+  const [rootItems, setRootItems] = useState<any[]>([]);
+  const [rootLoading, setRootLoading] = useState(false);
+  const [rootTotal, setRootTotal] = useState(0);
+  const [rootPage, setRootPage] = useState(1);
+  const [expandedIds, setExpandedIds] = useState<Set<number>>(new Set());
+  const [childrenMap, setChildrenMap] = useState<Record<number, any[]>>({});
+  const [childrenTotal, setChildrenTotal] = useState<Record<number, number>>({});
+  const [childrenPage, setChildrenPage] = useState<Record<number, number>>({});
+  const [loadingChildren, setLoadingChildren] = useState<Record<number, boolean>>({});
+  {% endif %}
   {% if model.importable %}
   const [importModalOpen, setImportModalOpen] = useState(false);
   const [importingFile, setImportingFile] = useState<File | null>(null);
@@ -94,6 +109,72 @@ const {{ model.name }}Page: React.FC = () => {
     if (!fp) return true; // no restrictions = allowed
     return (fp[userRole] || '').includes(perm);
   };
+
+  {% if model.is_tree %}
+  // ── Tree lazy-loading functions ──
+  const CHILD_PAGE_SIZE = 20;
+  const [rootSize, setRootSize] = useState(20);
+
+  const loadRoots = async (page: number = 1, pageSize?: number) => {
+    setRootLoading(true);
+    try {
+      const size = pageSize ?? rootSize;
+      const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, size, { {{ model.tree_parent_field }}: 0 });
+      if (page === 1) {
+        setRootItems(result.items);
+      } else {
+        setRootItems(prev => [...prev, ...result.items]);
+      }
+      setRootTotal(result.total);
+      setRootPage(page);
+    } catch (error) {
+      console.error('Failed to load root nodes:', error);
+    } finally {
+      setRootLoading(false);
+    }
+  };
+
+  const loadChildren = async (parentId: number, page: number = 1) => {
+    setLoadingChildren(prev => ({ ...prev, [parentId]: true }));
+    try {
+      const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, CHILD_PAGE_SIZE, { {{ model.tree_parent_field }}: parentId });
+      setChildrenMap(prev => {
+        const existing = prev[parentId] || [];
+        const merged = page === 1 ? result.items : [...existing, ...result.items];
+        return { ...prev, [parentId]: merged };
+      });
+      setChildrenTotal(prev => ({ ...prev, [parentId]: result.total }));
+      setChildrenPage(prev => ({ ...prev, [parentId]: page }));
+    } catch (error) {
+      console.error('Failed to load children:', error);
+    } finally {
+      setLoadingChildren(prev => ({ ...prev, [parentId]: false }));
+    }
+  };
+
+  const handleToggleExpand = async (nodeId: number) => {
+    if (expandedIds.has(nodeId)) {
+      const next = new Set(expandedIds);
+      next.delete(nodeId);
+      setExpandedIds(next);
+    } else {
+      const next = new Set(expandedIds);
+      next.add(nodeId);
+      setExpandedIds(next);
+      if (!childrenMap[nodeId] || childrenMap[nodeId].length === 0) {
+        await loadChildren(nodeId, 1);
+      }
+    }
+  };
+
+  const refreshTree = async () => {
+    setChildrenMap({});
+    setChildrenPage({});
+    setChildrenTotal({});
+    setExpandedIds(new Set());
+    await loadRoots(1);
+  };
+  {% endif %}
 
   // User model special handling: user role can only access /me
   {% if model.module_name == "user" and model.name == "User" %}
@@ -135,8 +216,13 @@ const {{ model.name }}Page: React.FC = () => {
   {% endif %}
 
   useEffect(() => {
+    {% if model.is_tree %}
+    loadRoots(1);
+    {% else %}
     fetchData();
-  }, [fetchData]);
+    {% endif %}
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Sync page input with current page from store
   const storePage = use{{ model.name }}Store(state => state.page);
@@ -164,6 +250,31 @@ const {{ model.name }}Page: React.FC = () => {
     setIsModalOpen(true);
     {% endif %}
   };
+
+  {% if model.is_tree %}
+  const handleCreateChild = (parentNode: any) => {
+    {% if model.page_edit %}
+    navigate(`/{{ model.module_name }}s/new?parent_id=${parentNode.id}`);
+    {% else %}
+    setEditingId(null);
+    reset();
+    {% for field in model.fields %}
+    {% if field.fk_info %}
+    set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({});
+    {% endif %}
+    {% endfor %}
+    {% if model.m2m_fields %}
+    {% for m2m in model.m2m_fields %}
+    setValue('{{ m2m.name }}', []);
+    set{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({});
+    {% endfor %}
+    {% endif %}
+    setValue('{{ model.tree_parent_field }}', parentNode.id);
+    set{{ model.tree_parent_field|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [parentNode.id]: parentNode.{{ model.search_field }} || `#${parentNode.id}` });
+    setIsModalOpen(true);
+    {% endif %}
+  };
+  {% endif %}
 
   {% if model.exportable %}
   const handleExport = async () => {
@@ -285,6 +396,9 @@ const {{ model.name }}Page: React.FC = () => {
     try {
       await deleteItem(deleteId);
       toast.success(t('toast.delete_success', 'Deleted'));
+      {% if model.is_tree %}
+      await refreshTree();
+      {% endif %}
     } catch (error: any) {
       const detail = error?.response?.data?.detail || t('toast.delete_failed', 'Delete failed');
       toast.error(detail);
@@ -317,6 +431,9 @@ const {{ model.name }}Page: React.FC = () => {
       await bulkDeleteItem(selectedIds);
       toast.success(t('toast.delete_success', 'Deleted'));
       setSelectedIds([]);
+      {% if model.is_tree %}
+      await refreshTree();
+      {% endif %}
     } catch (error: any) {
       const detail = error?.response?.data?.detail || t('toast.delete_failed', 'Delete failed');
       toast.error(detail);
@@ -330,6 +447,24 @@ const {{ model.name }}Page: React.FC = () => {
   {% if not model.page_edit %}
   const onSubmit = async (values: any) => {
     try {
+      {% if model.is_tree %}
+      if (editingId) {
+        await updateItem(editingId, values);
+        toast.success(t('toast.update_success', 'Updated'));
+        setIsModalOpen(false);
+        await refreshTree();
+      } else {
+        const parentId = values.{{ model.tree_parent_field }};
+        await createItem(values);
+        toast.success(t('toast.create_success', 'Created'));
+        setIsModalOpen(false);
+        if (parentId) {
+          await loadChildren(parentId, 1);
+        } else {
+          await loadRoots(1);
+        }
+      }
+      {% else %}
       if (editingId) {
         await updateItem(editingId, values);
         toast.success(t('toast.update_success', 'Updated'));
@@ -338,6 +473,7 @@ const {{ model.name }}Page: React.FC = () => {
         toast.success(t('toast.create_success', 'Created'));
       }
       setIsModalOpen(false);
+      {% endif %}
     } catch (error) {
       toast.error(t('toast.save_failed', 'Save failed'));
       console.error(error);
@@ -591,6 +727,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
       {% endif %}
 
+{% if not model.is_tree %}
       <div className="border rounded-md">
         <Table>
           <TableHeader>
@@ -863,6 +1000,204 @@ const {{ model.name }}Page: React.FC = () => {
           </Button>
         </div>
       </div>
+{% else %}
+      {/* Tree View — Lazy Loading */}
+      <div className="border rounded-md">
+        {rootLoading && rootItems.length === 0 ? (
+          <div className="h-24 text-center py-8">
+            <Loader2 className="h-6 w-6 animate-spin mx-auto" />
+          </div>
+        ) : !rootLoading && rootItems.length === 0 ? (
+          <div className="h-24 text-center py-8">
+            {t('common.no result')}
+          </div>
+        ) : (
+          <div className="py-2">
+            {(() => {
+              const renderNodes = (nodes: any[], depth: number): React.ReactNode[] => {
+                const elements: React.ReactNode[] = [];
+                for (const node of nodes) {
+                  const isExpanded = expandedIds.has(node.id);
+                  const children = childrenMap[node.id] || [];
+                  const childTotal = childrenTotal[node.id] || 0;
+                  const childPageNum = childrenPage[node.id] || 1;
+                  const isLoading = loadingChildren[node.id];
+                  const hasMore = children.length > 0 && children.length < childTotal;
+                  const isLeaf = !isLoading && !hasMore && children.length === 0 && childTotal === 0;
+
+                  elements.push(
+                    <div
+                      key={node.id}
+                      className="flex items-center gap-2 py-2 px-2 hover:bg-accent/50 rounded-md"
+                      style={% raw %}{{ paddingLeft: `${depth * 28 + 8}px` }}{% endraw %}
+                    >
+                      <button
+                        type="button"
+                        className="h-4 w-4 flex items-center justify-center shrink-0"
+                        onClick={() => handleToggleExpand(node.id)}
+                      >
+                        {isLoading ? (
+                          <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+                        ) : isExpanded ? (
+                          children.length > 0 ? (
+                            <ChevronDown className="h-4 w-4 text-muted-foreground" />
+                          ) : (
+                            <span className="h-4 w-4" />
+                          )
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-muted-foreground" />
+                        )}
+                      </button>
+                      <span className="flex-1 truncate text-sm">
+                        {node.{{ model.search_field }} || `#${node.id}`}
+                      </span>
+                      <div className="flex items-center gap-1 shrink-0">
+                        {hasPermission('c') && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleCreateChild(node)}>
+                            <Plus className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {hasPermission('r') && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/{{ model.module_name }}s/${node.id}`)}>
+                            <Eye className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {hasPermission('u') && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEdit(node)}>
+                            <Pencil className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        {hasPermission('d') && (
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => requestDelete(node.id)}>
+                            <Trash2 className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  );
+
+                  if (isExpanded && !isLoading) {
+                    if (children.length > 0) {
+                      elements.push(...renderNodes(children, depth + 1));
+                    }
+                    if (children.length === 0 && childTotal === 0) {
+                      // No children yet, show load more to fetch empty state? Actually just show nothing
+                    }
+                    if (hasMore) {
+                      elements.push(
+                        <div
+                          key={`${node.id}-more`}
+                          className="flex items-center justify-center py-1"
+                          style={% raw %}{{ paddingLeft: `${(depth + 1) * 28 + 8}px` }}{% endraw %}
+                        >
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="h-7 text-xs"
+                            onClick={() => loadChildren(node.id, childPageNum + 1)}
+                          >
+                            {t('common.load_more', 'Load more')}...
+                          </Button>
+                        </div>
+                      );
+                    }
+                  }
+                }
+                return elements;
+              };
+              return renderNodes(rootItems, 0);
+            })()}
+          </div>
+        )}
+      </div>
+      {/* Root-level pagination */}
+      {!rootLoading && rootItems.length > 0 && (
+        <div className="flex flex-wrap items-center justify-between gap-4 mt-2 pt-4 border-t">
+          <div className="flex items-center gap-4">
+            <div className="text-sm text-muted-foreground whitespace-nowrap">
+              {t('common.page_info')} {rootPage} {t('common.of_page')} {Math.ceil(rootTotal / rootSize) || 1}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-sm text-muted-foreground whitespace-nowrap">{t('common.page_size', 'Page size')}:</span>
+              <Select
+                value={String(rootSize)}
+                onValueChange={(v) => {
+                  const newSize = Number(v);
+                  setRootSize(newSize);
+                  loadRoots(1, newSize);
+                }}
+              >
+                <SelectTrigger className="w-[80px] h-8">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="20">20</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadRoots(1)}
+              disabled={rootPage <= 1 || rootLoading}
+            >
+              {t('common.first')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadRoots(rootPage - 1)}
+              disabled={rootPage <= 1 || rootLoading}
+            >
+              {t('common.previous')}
+            </Button>
+            <div className="flex items-center gap-1">
+              <Input
+                type="number"
+                min={1}
+                max={Math.ceil(rootTotal / rootSize) || 1}
+                className="w-16 h-8 text-center"
+                value={gotoPageInput}
+                onChange={(e) => setGotoPageInput(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    const page = Number(gotoPageInput);
+                    const totalPages = Math.ceil(rootTotal / rootSize) || 1;
+                    if (page >= 1 && page <= totalPages) {
+                      loadRoots(page);
+                    }
+                  }
+                }}
+              />
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => loadRoots(rootPage + 1)}
+              disabled={rootPage >= Math.ceil(rootTotal / rootSize) || rootLoading}
+            >
+              {t('common.next')}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                const totalPages = Math.ceil(rootTotal / rootSize) || 1;
+                loadRoots(totalPages);
+              }}
+              disabled={rootPage >= Math.ceil(rootTotal / rootSize) || rootLoading}
+            >
+              {t('common.last')}
+            </Button>
+          </div>
+        </div>
+      )}
+{% endif %}
 
 {% if not model.page_edit %}
       <Modal
