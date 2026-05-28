@@ -119,7 +119,7 @@ def _scan_model_table_configs(models_dir: Path) -> tuple[list[dict], list[dict]]
 
     Returns (configs, ts_imports) where:
       configs: for model table generation + FK extensions (files with timescaledb_model_table)
-      ts_imports: for importing timeseries models at runtime (all files with is_timescaledb)
+      ts_imports: for ``_latest`` table generation (all files with ``is_timescaledb``)
     """
     configs: list[dict] = []
     ts_imports: list[dict] = []
@@ -285,33 +285,3 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
         latest_file.write_text(latest_content)
         console.print(f"[green]Generated latest table: {latest_file.name}[/green]")
 
-    # ── Generate ts model imports into backend/app/models/_model_extensions.py ──
-    # This ensures SQLModel.metadata knows about timeseries tables at startup.
-    backend_models_dir = backend_path / "app" / "models"
-    if not backend_models_dir.exists():
-        return
-
-    ts_import_lines: list[str] = []
-    seen: set[str] = set()
-    for entry in configs + ts_imports:
-        src = entry["source_file"]
-        cls = entry.get("source_class")
-        if src not in seen and cls:
-            ts_import_lines.append(f"from app.models.{src} import {cls}")
-            seen.add(src)
-
-    if ts_import_lines:
-        lines = [
-            '"""Auto-generated model extensions \u2014 imports timeseries models for table registration."""',
-        ]
-        lines.extend(ts_import_lines)
-        ext_file = backend_models_dir / "_model_extensions.py"
-        ext_file.write_text("\n".join(lines) + "\n")
-        console.print(f"[green]Generated model extensions: _model_extensions.py[/green]")
-
-        # Append import to __init__.py
-        init_file = backend_models_dir / "__init__.py"
-        init_content = init_file.read_text() if init_file.exists() else ""
-        if "import _model_extensions" not in init_content:
-            init_content += "from . import _model_extensions  # noqa: F401\n"
-            init_file.write_text(init_content)
