@@ -259,11 +259,20 @@ def get_model_fields(
     page_edit = model_site_props.get("page_edit", False)  # Use full page for create/edit instead of modal
     owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
 
-    # ── TimescaleDB config ────────────────────────────────────────────────
-    is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
-    timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
-    timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
-    timescaledb_model_table = model_site_props.get("timescaledb_model_table", None)
+    # ── TimescaleDB / time-series config ──────────────────────────────────
+    # New nested format:  __onesite__ = {"time_series_table": {"entity_field": ..., "metric_field": ..., ...}}
+    # Legacy flat format: __onesite__ = {"is_timescaledb": True, "timescaledb_entity_field": ...}
+    ts_config = model_site_props.get("time_series_table")
+    if ts_config:
+        is_timescaledb = True
+        timescaledb_entity_field = ts_config.get("entity_field")
+        timescaledb_metric_field = ts_config.get("metric_field")
+        timescaledb_model_table = ts_config.get("model_table")
+    else:
+        is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
+        timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
+        timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
+        timescaledb_model_table = model_site_props.get("timescaledb_model_table", None)
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -568,14 +577,14 @@ def get_model_fields(
     search_field = next((f["name"] for f in fields if f.get("is_search_field")), "id")
     unique_search_field = next((f["name"] for f in fields if f.get("is_search_field") and f.get("is_unique")), None)
 
-    # Validate TimescaleDB config
+    # Validate TimescaleDB / time-series config
     if is_timescaledb:
         if not timescaledb_entity_field:
             console.print(
-                f"[red]Error: Model '{model_cls.__name__}' has is_timescaledb=True "
-                f"but no timescaledb_entity_field configured.[/red]"
+                f"[red]Error: Model '{model_cls.__name__}' has time_series_table "
+                f"but no entity_field configured.[/red]"
             )
-            raise ValueError(f"Model '{model_cls.__name__}' is_timescaledb requires timescaledb_entity_field")
+            raise ValueError(f"Model '{model_cls.__name__}': time_series_table requires entity_field")
         fk_field_names = {f["name"] for f in foreign_keys}
         if timescaledb_entity_field not in fk_field_names:
             console.print(

@@ -17,12 +17,84 @@ from .base import console, to_pascal
 # ── Source file scanning ──────────────────────────────────────────────────
 
 
+def _has_ts_config(content: str) -> bool:
+    """Check if content has time-series config in new or legacy format."""
+    return "time_series_table" in content or "is_timescaledb" in content
+
+
+def _extract_from_block(block: str, key: str) -> str | None:
+    """Extract a quoted string value for *key* from a config dict block."""
+    m = re.search(
+        rf"""["']{key}["']\s*:\s*["']([^"']+)["']""",
+        block,
+    )
+    return m.group(1) if m else None
+
+
+def _scan_ts_configs_old(content: str) -> dict | None:
+    """Extract time-series config from legacy flat keys."""
+    ef = re.search(
+        r""""timescaledb_entity_field"\s*:\s*"([^"]+)"|'timescaledb_entity_field'\s*:\s*'([^']+)'""",
+        content,
+    )
+    mf = re.search(
+        r""""timescaledb_metric_field"\s*:\s*"([^"]+)"|'timescaledb_metric_field'\s*:\s*'([^']+)'""",
+        content,
+    )
+    mt = re.search(
+        r""""timescaledb_model_table"\s*:\s*"([^"]+)"|'timescaledb_model_table'\s*:\s*'([^']+)'"""
+        r"""|"timescaledb_device_model"\s*:\s*"([^"]+)"|'timescaledb_device_model'\s*:\s*'([^']+)'""",
+        content,
+    )
+    if not ef and not mt:
+        return None
+    return {
+        "entity_field": ef.group(1) or ef.group(2) if ef else None,
+        "metric_field": mf.group(1) or mf.group(2) if mf else None,
+        "model_table": mt.group(1) or mt.group(2) or mt.group(3) or mt.group(4) if mt else None,
+    }
+
+
+def _scan_ts_configs_new(content: str) -> dict | None:
+    """Extract time-series config from new nested ``time_series_table`` dict."""
+    m = re.search(
+        r"""["']time_series_table["']\s*:\s*\{(.*?)\}""",
+        content, re.DOTALL,
+    )
+    if not m:
+        return None
+    block = m.group(1)
+    return {
+        "entity_field": _extract_from_block(block, "entity_field"),
+        "metric_field": _extract_from_block(block, "metric_field"),
+        "time_field": _extract_from_block(block, "time_field"),
+        "model_table": _extract_from_block(block, "model_table"),
+    }
+
+
+def _detect_time_column(content: str, ts_config: dict | None = None) -> str:
+    """Detect time column: explicit config > auto-detect > 'reported_at'."""
+    if ts_config and ts_config.get("time_field"):
+        return ts_config["time_field"]
+    datetime_fields = re.findall(
+        r'^\s*(\w+)\s*:\s*(?:Optional\[)?datetime', content, re.MULTILINE | re.IGNORECASE
+    )
+    if datetime_fields:
+        for cand in ("reported_at", "created_at"):
+            if cand in datetime_fields:
+                return cand
+        return datetime_fields[0]
+    return "reported_at"
+
+
 def _scan_model_table_configs(models_dir: Path) -> tuple[list[dict], list[dict]]:
-    """Scan model source text files for timescaledb config before full introspect.
+    """Scan model source text files for time-series config before full introspect.
+
+    Supports both new nested format (``time_series_table`` dict) and legacy flat keys.
 
     Returns (configs, ts_imports) where:
-      configs: for model table generation + FK extensions (files with timescaledb_model_table)
-      ts_imports: for ``_latest`` table generation (all files with ``is_timescaledb``)
+      configs: for model table generation + FK extensions (files with model_table)
+      ts_imports: for ``_latest`` table generation (all time-series files)
     """
     configs: list[dict] = []
     ts_imports: list[dict] = []
@@ -30,77 +102,49 @@ def _scan_model_table_configs(models_dir: Path) -> tuple[list[dict], list[dict]]
         if f.stem == "__init__":
             continue
         content = f.read_text(encoding="utf-8")
-        if "is_timescaledb" not in content:
+        if not _has_ts_config(content):
             continue
 
-        # Common: extract class name, entity_field, metric_field
+        # Extract class name
         source_class = None
         class_match = re.search(r'class\s+(\w+)\s*\([^)]*\btable=True\b[^)]*\)', content)
         if class_match:
             source_class = class_match.group(1)
 
-        entity_field = None
-        m_ef = re.search(
-            r""""timescaledb_entity_field"\s*:\s*"([^"]+)"|'timescaledb_entity_field'\s*:\s*'([^']+)'""",
-            content,
-        )
-        if m_ef:
-            entity_field = m_ef.group(1) or m_ef.group(2)
-
-        metric_field = None
-        m_mf = re.search(
-            r""""timescaledb_metric_field"\s*:\s*"([^"]+)"|'timescaledb_metric_field'\s*:\s*'([^']+)'""",
-            content,
-        )
-        if m_mf:
-            metric_field = m_mf.group(1) or m_mf.group(2)
-
-        # Detect time column: prefer reported_at, then created_at, then first datetime field
-        time_column = "reported_at"
-        datetime_fields = re.findall(
-            r'^\s*(\w+)\s*:\s*(?:Optional\[)?datetime', content, re.MULTILINE | re.IGNORECASE
-        )
-        if datetime_fields:
-            for cand in ("reported_at", "created_at"):
-                if cand in datetime_fields:
-                    time_column = cand
-                    break
-            else:
-                time_column = datetime_fields[0]
-
-        # Add to ts_imports (every file with is_timescaledb needs runtime import)
-        ts_imports.append({
-            "source_file": f.stem,
-            "source_class": source_class,
-            "entity_field": entity_field,
-            "entity_stem": entity_field.replace("_id", "") if entity_field else None,
-            "metric_field": metric_field,
-            "time_column": time_column,
-        })
-
-        # Extract timescaledb_model_table (also supports legacy key timescaledb_device_model)
-        m = re.search(
-            r""""timescaledb_model_table"\s*:\s*"([^"]+)"|'timescaledb_model_table'\s*:\s*'([^']+)'"""
-            r"""|"timescaledb_device_model"\s*:\s*"([^"]+)"|'timescaledb_device_model'\s*:\s*'([^']+)'""",
-            content,
-        )
-        if not m:
-            continue
-        model_table = m.group(1) or m.group(2) or m.group(3) or m.group(4)
-
-        # Skip if no entity_field — can't determine FK target
-        if not entity_field:
+        # Try new format first, fall back to legacy
+        ts_config = _scan_ts_configs_new(content)
+        if ts_config is None:
+            ts_config = _scan_ts_configs_old(content)
+        if ts_config is None:
             continue
 
-        entity_stem = entity_field.replace("_id", "")
-        configs.append({
-            "model_table": model_table,
-            "entity_field": entity_field,
-            "entity_stem": entity_stem,
-            "metric_field": metric_field,
-            "source_file": f.stem,
-            "source_class": source_class,
-        })
+        entity_field = ts_config["entity_field"]
+        metric_field = ts_config["metric_field"]
+        model_table = ts_config["model_table"]
+        time_column = _detect_time_column(content, ts_config)
+
+        # ts_imports: every time-series file (needed for _latest table generation)
+        if source_class and entity_field:
+            ts_imports.append({
+                "source_file": f.stem,
+                "source_class": source_class,
+                "entity_field": entity_field,
+                "entity_stem": entity_field.replace("_id", ""),
+                "metric_field": metric_field,
+                "time_column": time_column,
+            })
+
+        # configs: only files with model_table (needs FK injection + model table gen)
+        if model_table and entity_field:
+            configs.append({
+                "model_table": model_table,
+                "entity_field": entity_field,
+                "entity_stem": entity_field.replace("_id", ""),
+                "metric_field": metric_field,
+                "source_file": f.stem,
+                "source_class": source_class,
+            })
+
     return configs, ts_imports
 
 
