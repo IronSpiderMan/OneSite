@@ -1,11 +1,13 @@
 import inspect
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Tuple, Union, get_args, get_origin
+from typing import Any, Dict, List, Optional, Set, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 from rich.console import Console
 from sqlmodel import SQLModel
+
+from .types import FieldDefinition, ForeignKeyInfo, ModelIntrospectResult
 
 console = Console()
 
@@ -216,35 +218,7 @@ def _parse_field_permissions(
 
 def get_model_fields(
     model_cls: type[SQLModel], module_name: str | None = None
-) -> Tuple[
-    List[Dict[str, Any]],
-    List[Dict[str, Any]],
-    str,
-    Optional[str],
-    bool,
-    bool,
-    str,
-    bool,
-    Dict[str, Any],
-    bool,
-    int,
-    bool,
-    Dict[str, Any],
-    Dict[str, Any],
-    bool,
-    Optional[List[str]],
-    bool,
-    bool,
-    Optional[str],
-    bool,
-    bool,
-    Optional[str],
-    bool,
-    bool,
-    Optional[str],
-    Optional[str],
-    Optional[str],
-]:
+) -> ModelIntrospectResult:
     model_site_props: Dict[str, Any] = {}
     if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
         model_site_props.update(getattr(model_cls, "__onesite__"))
@@ -303,9 +277,6 @@ def get_model_fields(
     #   u = can call update API, has update button
     #   d = can call delete API, has delete button
     # ────────────────────────────────────────────────────────────────────────
-    ROLE_ORDER = ["user", "admin", "developer"]
-    ROLE_LEVELS = {"user": 0, "admin": 1, "developer": 2}
-
     role_permissions = _parse_model_permissions(raw_permissions, model_cls.__name__)
     model_permissions = _compute_flat_perms(role_permissions)
 
@@ -508,15 +479,15 @@ def get_model_fields(
                 reverse_display = site_props.get("reverse_display", True)
                 model_table_name = getattr(model_cls, '__tablename__', None) or _to_snake(model_cls.__name__)
                 is_self_referencing = (target_model_class == model_cls.__name__) or (fk_table == model_table_name)
-                fk_info = {
-                    "name": name,
-                    "target_model": target_model_class,
-                    "target_service": target_service,
-                    "target_endpoint": target_endpoint,
-                    "label_field": "name",
-                    "reverse_display": reverse_display,
-                    "is_self_referencing": is_self_referencing,
-                }
+                fk_info = ForeignKeyInfo(
+                    name=name,
+                    target_model=target_model_class,
+                    target_service=target_service,
+                    target_endpoint=target_endpoint,
+                    label_field="name",
+                    reverse_display=reverse_display,
+                    is_self_referencing=is_self_referencing,
+                )
 
         origin = get_origin(resolved_annotation)
         args = get_args(resolved_annotation)
@@ -545,38 +516,38 @@ def get_model_fields(
             default_value = default_value.value
 
         fields.append(
-            {
-                "name": name,
-                "type": type_str,
-                "ui_type": ui_type,
-                "json_kind": json_kind,
-                "json_model_schema": json_model_schema,
-                "json_item_schema": json_item_schema,
-                "py_imports": sorted(set(json_py_imports)),
-                "permissions": permissions,
-                "role_permissions": field_role_permissions,
-                "create_optional": create_optional,
-                "update_optional": update_optional,
-                "required": field.is_required(),
-                "default": default_value,
-                "default_factory": (
+            FieldDefinition(
+                name=name,
+                type=type_str,
+                ui_type=ui_type,
+                json_kind=json_kind,
+                json_model_schema=json_model_schema,
+                json_item_schema=json_item_schema,
+                py_imports=sorted(set(json_py_imports)),
+                permissions=permissions,
+                role_permissions=field_role_permissions,
+                create_optional=create_optional,
+                update_optional=update_optional,
+                required=field.is_required(),
+                default=default_value,
+                default_factory=(
                     "list"
                     if getattr(field, "default_factory", None) is list
                     else "dict"
                     if getattr(field, "default_factory", None) is dict
                     else None
                 ),
-                "is_enum": is_enum,
-                "enum_values": enum_values,
-                "is_search_field": is_search_field,
-                "fk_info": fk_info,
-                "allow_download": allow_download,
-                "label_key": label_key,
-                "translations": translations,
-                "is_unique": is_unique,
-                "is_local_storage": is_local_storage,
-                "group": field_group,
-            }
+                is_enum=is_enum,
+                enum_values=enum_values,
+                is_search_field=is_search_field,
+                fk_info=fk_info,
+                allow_download=allow_download,
+                label_key=label_key,
+                translations=translations,
+                is_unique=is_unique,
+                is_local_storage=is_local_storage,
+                group=field_group,
+            )
         )
 
     has_explicit_search = any(f.get("is_search_field") for f in fields)
@@ -617,31 +588,31 @@ def get_model_fields(
                 f"is not a foreign key"
             )
 
-    return (
-        fields,
-        foreign_keys,
-        search_field,
-        unique_search_field,
-        is_link_table,
-        is_singleton,
-        model_permissions,
-        frontend_only,
-        model_translations,
-        refresh_interval,
-        reverse_fk_display,
-        model_site_props,
-        actions,
-        is_notification_table,
-        union_key,
-        importable,
-        exportable,
-        import_key,
-        role_permissions,
-        role_visible,
-        owner_field,
-        page_edit,
-        is_timescaledb,
-        timescaledb_entity_field,
-        timescaledb_metric_field,
-        timescaledb_model_table,
+    return ModelIntrospectResult(
+        fields=fields,
+        foreign_keys=foreign_keys,
+        search_field=search_field,
+        unique_search_field=unique_search_field,
+        is_link_table=is_link_table,
+        is_singleton=is_singleton,
+        model_permissions=model_permissions,
+        frontend_only=frontend_only,
+        model_translations=model_translations,
+        refresh_interval=refresh_interval,
+        reverse_fk_display=reverse_fk_display,
+        model_site_props=model_site_props,
+        actions=actions,
+        is_notification_table=is_notification_table,
+        union_key=union_key,
+        importable=importable,
+        exportable=exportable,
+        import_key=import_key,
+        role_permissions=role_permissions,
+        role_visible=role_visible,
+        owner_field=owner_field,
+        page_edit=page_edit,
+        is_timescaledb=is_timescaledb,
+        timescaledb_entity_field=timescaledb_entity_field,
+        timescaledb_metric_field=timescaledb_metric_field,
+        timescaledb_model_table=timescaledb_model_table,
     )
