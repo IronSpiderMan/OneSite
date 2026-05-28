@@ -82,6 +82,7 @@ const {{ model.name }}Page: React.FC = () => {
   const [childrenTotal, setChildrenTotal] = useState<Record<number, number>>({});
   const [childrenPage, setChildrenPage] = useState<Record<number, number>>({});
   const [loadingChildren, setLoadingChildren] = useState<Record<number, boolean>>({});
+  const treeSearchFiltersRef = useRef<Record<string, any>>({});
   {% endif %}
   {% if model.importable %}
   const [importModalOpen, setImportModalOpen] = useState(false);
@@ -119,7 +120,8 @@ const {{ model.name }}Page: React.FC = () => {
     setRootLoading(true);
     try {
       const size = pageSize ?? rootSize;
-      const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, size, { {{ model.tree_parent_field }}: 0 });
+      const filters = { {{ model.tree_parent_field }}: 0, ...treeSearchFiltersRef.current };
+      const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, size, filters);
       if (page === 1) {
         setRootItems(result.items);
       } else {
@@ -137,7 +139,8 @@ const {{ model.name }}Page: React.FC = () => {
   const loadChildren = async (parentId: number, page: number = 1) => {
     setLoadingChildren(prev => ({ ...prev, [parentId]: true }));
     try {
-      const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, CHILD_PAGE_SIZE, { {{ model.tree_parent_field }}: parentId });
+      const filters = { {{ model.tree_parent_field }}: parentId, ...treeSearchFiltersRef.current };
+      const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, CHILD_PAGE_SIZE, filters);
       setChildrenMap(prev => {
         const existing = prev[parentId] || [];
         const merged = page === 1 ? result.items : [...existing, ...result.items];
@@ -505,7 +508,12 @@ const {{ model.name }}Page: React.FC = () => {
     if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = Number(searchValues['{{ field.name }}']);
     {% endif %}
     {% endfor %}
+    {% if model.is_tree %}
+    treeSearchFiltersRef.current = next;
+    loadRoots(1);
+    {% else %}
     fetchData(1, use{{ model.name }}Store.getState().size, next);
+    {% endif %}
   };
 
   const resetSearch = () => {
@@ -515,7 +523,12 @@ const {{ model.name }}Page: React.FC = () => {
     setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels({});
     {% endif %}
     {% endfor %}
+    {% if model.is_tree %}
+    treeSearchFiltersRef.current = {};
+    loadRoots(1);
+    {% else %}
     fetchData(1, use{{ model.name }}Store.getState().size, {});
+    {% endif %}
   };
 
   return (
