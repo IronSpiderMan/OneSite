@@ -79,6 +79,9 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         f_env_content = frontend_env.read_text()
 
     logo = config.get("logo", "")
+    # Ensure logo is an absolute path so it works from any route
+    if logo and not logo.startswith(("/", "http://", "https://", "data:")):
+        logo = f"/{logo}"
 
     f_new_keys = {
         "VITE_PROJECT_NAME": project_name,
