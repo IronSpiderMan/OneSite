@@ -1057,6 +1057,32 @@ def phase_resolve_relationships(models: list[dict]) -> list[dict]:
 # Phase 5 — Theme & Assets
 # ═══════════════════════════════════════════════════════════════════════════
 
+def _sync_models_assets(site_config: dict, cwd: Path) -> None:
+    """Copy assets from models/assets/ to frontend/public/.
+
+    Users can place static files (e.g. logo, images) in ``models/assets/``
+    and reference them in site_config.json (e.g. ``"logo": "logo.png"``).
+    During sync these files are copied into ``frontend/public/`` so they
+    are served by Vite's dev server and the production build.
+    """
+    assets_src = cwd / "models" / "assets"
+    public_dst = cwd / "frontend" / "public"
+
+    if not assets_src.exists():
+        return
+
+    public_dst.mkdir(parents=True, exist_ok=True)
+
+    copied = 0
+    for item in assets_src.iterdir():
+        if item.is_file():
+            shutil.copy2(item, public_dst / item.name)
+            copied += 1
+
+    if copied:
+        console.print(f"[green]Synced {copied} asset(s) from models/assets/ to frontend/public/[/green]")
+
+
 def phase_theme_and_assets(site_config: dict, cwd: Path, backend_path: Path) -> None:
     """Generate theme CSS and sync frontend / backend static assets.
 
@@ -1071,6 +1097,7 @@ def phase_theme_and_assets(site_config: dict, cwd: Path, backend_path: Path) -> 
     )
     sync_frontend_assets(cwd, site_config)
     sync_backend_assets(cwd, backend_path, site_config)
+    _sync_models_assets(site_config, cwd)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
