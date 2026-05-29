@@ -22,9 +22,9 @@ from .base import console
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _generate_singleton(model: ModelDefinition, cwd: Path, backend_path: Path) -> None:
+def _generate_singleton(model: ModelDefinition, cwd: Path, backend_path: Path, is_postgresql: bool = False) -> None:
     """Generate code for singleton / config models."""
-    context = {"model": model}
+    context = {"model": model, "is_postgresql": is_postgresql}
     is_config = (
         model["module_name"] == "system_config" and model["name"] == "SystemConfig"
     ) or (
@@ -71,9 +71,9 @@ def _backend_path(tpl: str, model: ModelDefinition, backend_path: Path) -> Path:
     return mapping[tpl]
 
 
-def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Path) -> None:
+def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Path, is_postgresql: bool = False) -> None:
     """Generate code for a regular (non-singleton, non-link) model."""
-    context = {"model": model}
+    context = {"model": model, "is_postgresql": is_postgresql}
     is_user_model = model["name"] == "User"
 
     tpl_schema = "user_schema.py.j2" if is_user_model else "schema.py.j2"
@@ -149,6 +149,8 @@ def phase_generate_per_model(
 
     Returns the sorted list of API-visible models for use in routing & navigation.
     """
+    is_postgresql = site_config.get("database_url", "").startswith("postgresql")
+
     for model in models:
         if model["is_link_table"] and not model.get("is_association_table"):
             continue
@@ -158,9 +160,9 @@ def phase_generate_per_model(
         ) or (
             model["module_name"] == "custom_config" and model["name"] == "CustomConfig"
         ):
-            _generate_singleton(model, cwd, backend_path)
+            _generate_singleton(model, cwd, backend_path, is_postgresql=is_postgresql)
         else:
-            _generate_regular_model(model, cwd, backend_path)
+            _generate_regular_model(model, cwd, backend_path, is_postgresql=is_postgresql)
 
     api_models = [
         m for m in models

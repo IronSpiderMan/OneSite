@@ -50,6 +50,42 @@ async def init_db():
                 """)
             )
         {% endfor %}
+
+        # ── TimescaleDB: create triggers to auto-sync _latest on insert ──
+        {% for ts_model in timescaledb_models %}
+        async with engine.begin() as conn:
+            await conn.execute(text("DROP TRIGGER IF EXISTS trg_sync_{{ ts_model.table_name }}_latest ON {{ ts_model.table_name }}"))
+            await conn.execute(text("""
+                CREATE OR REPLACE FUNCTION fn_sync_{{ ts_model.table_name }}_latest()
+                RETURNS TRIGGER AS $$
+                BEGIN
+                    INSERT INTO {{ ts_model.timescaledb_latest_table_name }} (
+                        {{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
+                        {{ ts_model.timescaledb_metric_field }}{% endif %},
+                        value,
+                        {{ ts_model.timescaledb_time_column }}
+                    )
+                    VALUES (
+                        NEW.{{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
+                        NEW.{{ ts_model.timescaledb_metric_field }}{% endif %},
+                        to_jsonb(NEW.*),
+                        NEW.{{ ts_model.timescaledb_time_column }}
+                    )
+                    ON CONFLICT ({{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %})
+                    DO UPDATE SET
+                        value = EXCLUDED.value,
+                        {{ ts_model.timescaledb_time_column }} = EXCLUDED.{{ ts_model.timescaledb_time_column }};
+                    RETURN NEW;
+                END;
+                $$ LANGUAGE plpgsql
+            """))
+            await conn.execute(text("""
+                CREATE TRIGGER trg_sync_{{ ts_model.table_name }}_latest
+                AFTER INSERT ON {{ ts_model.table_name }}
+                FOR EACH ROW
+                EXECUTE FUNCTION fn_sync_{{ ts_model.table_name }}_latest()
+            """))
+        {% endfor %}
     {% endif %}
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

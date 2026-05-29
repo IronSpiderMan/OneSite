@@ -50,7 +50,8 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> dict:
     await session.commit()
     await session.refresh(db_obj)
 
-    # Upsert latest table
+    {% if not is_postgresql %}
+    # Upsert latest table (PostgreSQL uses a DB trigger for this)
     from sqlalchemy import text
     entity_val = getattr(db_obj, "{{ model.timescaledb_entity_field }}")
     time_val = getattr(db_obj, "{{ model.timescaledb_time_column }}")
@@ -80,6 +81,7 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> dict:
     )
     {% endif %}
     await session.commit()
+    {% endif %}
 
     return db_obj.model_dump()
 
