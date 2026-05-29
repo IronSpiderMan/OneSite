@@ -124,6 +124,19 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
         )
 
 
+def _generate_event_listeners(model: ModelDefinition, backend_path: Path) -> None:
+    """Generate event listener file for a model that has on_before_*/on_after_* methods."""
+    listeners = model.get("event_listeners", [])
+    if not listeners:
+        return
+
+    generate_file(
+        "events.py.j2",
+        {"model": model},
+        backend_path / "app" / "events" / f"{model['module_name']}.py",
+    )
+
+
 def _sort_api_models(
     api_models: list[ModelDefinition], site_config: dict
 ) -> list[ModelDefinition]:
@@ -154,6 +167,9 @@ def phase_generate_per_model(
     for model in models:
         if model["is_link_table"] and not model.get("is_association_table"):
             continue
+
+        # Generate event listener file if the model has on_before_*/on_after_* methods
+        _generate_event_listeners(model, backend_path)
 
         if model.get("is_singleton") or (
             model["module_name"] == "system_config" and model["name"] == "SystemConfig"
@@ -314,3 +330,12 @@ def phase_generate_aggregated(
 
     # ── Locale files ──
     generate_locale_files(models, cwd / "frontend" / "src" / "locales")
+
+    # ── Event listeners __init__.py (imports all model event modules) ──
+    event_models = [m for m in models if m.get("event_listeners")]
+    if event_models:
+        generate_file(
+            "events_init.py.j2",
+            {"event_models": event_models},
+            backend_path / "app" / "events" / "__init__.py",
+        )

@@ -1,0 +1,15 @@
+"""Database event listeners for {{ model.name }}.
+
+Auto-generated from ``on_before_*`` / ``on_after_*`` methods on the model class.
+"""
+
+from sqlalchemy import event
+from app.models.{{ model.module_name }} import {{ model.name }}
+
+{% for listener in model.event_listeners %}
+
+@event.listens_for({{ model.name }}, "{{ listener.event_name }}")
+def {{ listener.event_name }}(mapper, connection, target):
+    self = target
+{{ listener.body | indent(4, first=True) }}
+{% endfor %}

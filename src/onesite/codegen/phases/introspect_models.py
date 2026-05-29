@@ -9,6 +9,7 @@ the downstream code generation phases.
 import importlib
 import inspect
 import sys
+import textwrap
 from pathlib import Path
 from typing import Any
 
@@ -18,6 +19,7 @@ from sqlmodel import SQLModel
 
 from ..introspect import get_model_fields
 from ..types import (
+    EventListener,
     FieldDefinition,
     ModelDefinition,
     ModelIntrospectResult,
@@ -144,6 +146,50 @@ def _build_model_dict(
     )
 
 
+# ── Event listener extraction ───────────────────────────────────────────
+
+
+def _extract_event_listeners(model_cls: type) -> list[EventListener]:
+    """Extract ``on_before_*`` / ``on_after_*`` methods as event listeners.
+
+    Scans the model class for methods whose names match the pattern
+    ``on_(before|after)_<event>``, extracts their source code bodies,
+    and returns ``EventListener`` objects for code generation.
+
+    The ``self`` parameter is stripped from the generated function —
+    the template adds ``self = target`` so existing ``self.`` references
+    in the body still work.
+    """
+    listeners: list[EventListener] = []
+    for name, method in inspect.getmembers(model_cls, predicate=inspect.isfunction):
+        if not (name.startswith("on_before_") or name.startswith("on_after_")):
+            continue
+
+        event_name = name[3:]  # strip "on_" prefix → "before_insert", etc.
+        try:
+            source = inspect.getsource(method)
+        except (OSError, TypeError):
+            continue
+
+        lines = source.splitlines()
+        # Skip decorator / def lines to reach the body
+        body_start = 0
+        for i, line in enumerate(lines):
+            if line.strip().startswith("def "):
+                body_start = i + 1
+                break
+        body_lines = lines[body_start:]
+        if not body_lines:
+            continue
+
+        body = textwrap.dedent("\n".join(body_lines))
+        # Remove surrounding blank lines
+        body = body.strip("\n")
+        listeners.append(EventListener(event_name=event_name, body=body))
+
+    return listeners
+
+
 # ── Module-level introspection ───────────────────────────────────────────
 
 
@@ -173,9 +219,14 @@ def _process_introspected_class(
             )
             return None
 
-    return _build_model_dict(
+    mdl = _build_model_dict(
         name, model_module_name, module_name, result,
     )
+
+    # Attach event listeners (extracted from on_before_* / on_after_* methods)
+    mdl["event_listeners"] = _extract_event_listeners(obj)
+
+    return mdl
 
 
 def _introspect_module(

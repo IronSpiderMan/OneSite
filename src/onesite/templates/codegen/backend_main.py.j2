@@ -29,6 +29,11 @@ except ImportError:
 {% if config.mqtt %}
 from app.core.mqtt import mqtt_manager
 {% endif %}
+# Import event listeners to register them with SQLAlchemy
+try:
+    import app.events
+except ImportError:
+    pass
 {% if config.scheduled_tasks %}
 # Import tasks to register them with the scheduler
 try:

@@ -173,6 +173,19 @@ class ModelIntrospectResult:
 
 
 @dataclass
+class EventListener:
+    """A database event listener method extracted from a model.
+
+    Generated from model methods named ``on_before_<event>`` or
+    ``on_after_<event>`` — the method body is extracted and wrapped
+    in a ``@event.listens_for`` decorated function.
+    """
+
+    event_name: str   # e.g. "before_insert", "after_update"
+    body: str          # dedented source code of the method body
+
+
+@dataclass
 class PipelineContext:
     """Accumulated state passed through the code generation pipeline phases."""
 
