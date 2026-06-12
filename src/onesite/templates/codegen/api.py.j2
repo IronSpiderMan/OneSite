@@ -18,6 +18,9 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.module_name }} import service
 from app.models.{{ model.source_module }} import {{ model.name }}
+{% if model.exportable %}
+from app.core.task_queue import task_queue
+{% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
 from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
 {% endif %}
@@ -749,36 +752,28 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
 @router.post("/export")
 async def export_{{ model.lower_name }}s(
     *,
-    session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     filters: Optional[dict] = Body(None),
 ) -> Any:
     """
-    Export {{ model.name }} records to CSV.
-    Returns the CSV file directly.
+    Export {{ model.name }} records to CSV (async).
+    Publishes a background task and returns immediately.
+    The user will be notified via WebSocket when the export is complete.
     """
-    import os
     import uuid
-    from fastapi.responses import FileResponse
 
     task_id = str(uuid.uuid4())
 
-    # Export synchronously and return file
-    filepath = await service.export_to_csv(
-        session,
-        task_id=task_id,
-        user_id=current_user.id,
-        filters=filters,
-        ws_manager=None,  # No WebSocket progress for synchronous export
+    task_queue.publish(
+        "export.{{ model.module_name }}",
+        {
+            "task_id": task_id,
+            "user_id": current_user.id,
+            "filters": filters,
+        },
     )
 
-    # Return file directly
-    filename = os.path.basename(filepath)
-    return FileResponse(
-        filepath,
-        media_type="text/csv",
-        filename=filename,
-    )
+    return {"task_id": task_id, "status": "queued"}
 {% endif %}
 
 {% if model.importable %}

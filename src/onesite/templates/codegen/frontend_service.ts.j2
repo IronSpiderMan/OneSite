@@ -135,19 +135,9 @@ export const get{{ model.name }}{{ rel.source_model }}s = async (id: number, pag
 {% if model.importable or model.exportable %}
 // Import/Export functions
 {% if model.exportable %}
-export const export{{ model.name }}s = async () => {
-    const response = await request.post<Blob>(`${API_URL}/export`, {}, {
-        responseType: 'blob'
-    });
-    // Create download link for the returned file
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', '{{ model.module_name }}s_export.csv');
-    document.body.appendChild(link);
-    link.click();
-    link.remove();
-    window.URL.revokeObjectURL(url);
+export const export{{ model.name }}s = async (): Promise<{ task_id: string; status: string }> => {
+    const response = await request.post<{ task_id: string; status: string }>(`${API_URL}/export`);
+    return response.data;
 };
 {% endif %}
 

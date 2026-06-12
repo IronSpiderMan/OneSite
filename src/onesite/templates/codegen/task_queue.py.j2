@@ -1,0 +1,78 @@
+"""Asynchronous task queue for background event processing.
+
+Publish from synchronous event listeners (non-blocking ``put_nowait``),
+consume in a background asyncio task that runs during the app lifecycle.
+"""
+
+import asyncio
+from dataclasses import dataclass, field
+from typing import Any, Awaitable, Callable
+
+
+@dataclass
+class TaskMessage:
+    """A single task message published by an event listener."""
+
+    task_type: str
+    payload: dict
+
+
+class TaskQueue:
+    """In-process async task queue.
+
+    Usage::
+
+        # Publish (from sync event listener)
+        task_queue.publish("article.after_update", {"id": 1})
+
+        # Register handler (at import time)
+        @task_queue.handler("article.after_update")
+        async def handle(data):
+            ...
+
+        # Start worker (in app lifespan)
+        worker = asyncio.create_task(task_queue.run())
+    """
+
+    def __init__(self):
+        self._queue: asyncio.Queue[TaskMessage] = asyncio.Queue()
+        self._handlers: dict[str, Callable[[dict], Awaitable[None]]] = {}
+
+    def publish(self, task_type: str, payload: dict) -> None:
+        """Enqueue a task message.
+
+        Safe to call from synchronous code — uses ``put_nowait``.
+        """
+        self._queue.put_nowait(TaskMessage(task_type=task_type, payload=payload))
+
+    def handler(self, task_type: str):
+        """Decorator that registers an async handler for *task_type*."""
+        def decorator(func: Callable[[dict], Awaitable[None]]) -> Callable[[dict], Awaitable[None]]:
+            self._handlers[task_type] = func
+            return func
+        return decorator
+
+    async def run(self):
+        """Process messages from the queue forever.
+
+        Intended to be launched as a background ``asyncio.Task``.
+        """
+        while True:
+            msg = await self._queue.get()
+            handler = self._handlers.get(msg.task_type)
+            if handler is not None:
+                try:
+                    await handler(msg.payload)
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception(
+                        "Task handler error for %s", msg.task_type,
+                    )
+            self._queue.task_done()
+
+    async def shutdown(self):
+        """Wait for remaining tasks to finish."""
+        await self._queue.join()
+
+
+task_queue = TaskQueue()

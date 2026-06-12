@@ -1,4 +1,5 @@
 import axios from 'axios';
+import { toast } from 'sonner';
 
 // Runtime API URL from window.__ENV__ (set at container startup via envsubst)
 // Falls back to VITE_API_URL (baked at build time) if not set
@@ -20,7 +21,7 @@ const baseURL = getBaseURL();
 
 export const request = axios.create({
   baseURL,
-  timeout: 10000,
+  timeout: 30000,
 });
 
 request.interceptors.request.use(
@@ -71,6 +72,10 @@ request.interceptors.response.use(
         }
       }
       console.error(error.response.data.detail || 'Request failed');
+    } else if (error.code === 'ECONNABORTED') {
+      // Request timed out — show toast, don't redirect
+      toast.error('Request timed out. Please try again.');
+      console.error('Request timeout');
     } else {
       if (!window.location.pathname.startsWith('/error/offline')) {
         window.location.href = '/error/offline';

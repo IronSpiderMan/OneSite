@@ -1,0 +1,34 @@
+"""Background task handlers for {{ model.name }}.
+
+Auto-generated from ``async def on_*`` methods on the model class.
+Edit the handler functions below to implement your async business logic.
+"""
+
+import logging
+from app.core.task_queue import task_queue
+from app.models.{{ model.module_name }} import {{ model.name }}
+
+logger = logging.getLogger(__name__)
+
+{% for listener in model.event_listeners %}
+{% if listener.is_async %}
+
+@task_queue.handler("{{ model.module_name }}.{{ listener.event_name }}")
+async def handle_{{ model.module_name }}_{{ listener.event_name }}(payload: dict):
+    target_id = payload.get("id")
+    if target_id is None:
+        logger.warning("No id in payload for {{ model.name }}.{{ listener.event_name }}")
+        return
+
+    from app.core.db import engine
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async with AsyncSession(engine) as session:
+        target = await session.get({{ model.name }}, target_id)
+        if target is None:
+            logger.warning("{{ model.name }} %s not found", target_id)
+            return
+        self = target
+{{ listener.body | indent(8, first=True) }}
+{% endif %}
+{% endfor %}

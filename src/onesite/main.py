@@ -103,6 +103,13 @@ def init():
     else:
         console.print(f"[blue]models directory already exists[/blue]")
 
+    # Copy icon reference page if not present
+    icon_ref_src = TEMPLATE_DIR / "icon-reference.html"
+    icon_ref_dst = base_dir / "icon-reference.html"
+    if icon_ref_src.exists() and not icon_ref_dst.exists():
+        shutil.copy2(icon_ref_src, icon_ref_dst)
+        console.print("[green]Created icon-reference.html[/green]")
+
     console.print("[bold green]Initialization complete![/bold green]")
     console.print("[green]Run 'site sync' to generate API code.[/green]")
 

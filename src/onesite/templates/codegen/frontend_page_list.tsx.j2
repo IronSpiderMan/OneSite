@@ -89,6 +89,9 @@ const {{ model.name }}Page: React.FC = () => {
   const [importingFile, setImportingFile] = useState<File | null>(null);
   const [isImporting, setIsImporting] = useState(false);
   {% endif %}
+  {% if model.exportable %}
+  const [isExporting, setIsExporting] = useState(false);
+  {% endif %}
 
   // Role-based permissions
   const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
@@ -282,10 +285,13 @@ const {{ model.name }}Page: React.FC = () => {
   {% if model.exportable %}
   const handleExport = async () => {
     try {
+      setIsExporting(true);
       await export{{ model.name }}s();
-      toast.success(t('export.success', 'Export completed'));
+      toast.success(t('common.export_started', 'Export started, you will be notified when complete'));
     } catch (error) {
-      toast.error(t('export.failed', 'Export failed'));
+      toast.error(t('common.export_failed', 'Export failed'));
+    } finally {
+      setIsExporting(false);
     }
   };
   {% endif %}
@@ -597,9 +603,13 @@ const {{ model.name }}Page: React.FC = () => {
             </Button>
             {% endif %}
             {% if model.exportable %}
-            <Button variant="outline" onClick={handleExport}>
-              <Download className="mr-2 h-4 w-4" />
-              {t('common.export', 'Export')}
+            <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+              {isExporting ? (
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+              ) : (
+                <Download className="mr-2 h-4 w-4" />
+              )}
+              {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
             </Button>
             {% endif %}
             {% if model.importable and not model.exportable %}

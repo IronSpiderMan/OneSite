@@ -1,0 +1,11 @@
+"""Task handler package.
+
+Auto-generated — imports all handler modules so that
+``@task_queue.handler`` decorators are registered on import.
+"""
+{% for model in handler_models %}
+from . import {{ model.module_name }}
+{% endfor %}
+{% for model in export_models %}
+from . import export_{{ model.module_name }}
+{% endfor %}

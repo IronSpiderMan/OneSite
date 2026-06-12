@@ -10,6 +10,7 @@ import importlib
 import inspect
 import sys
 import textwrap
+import asyncio
 from pathlib import Path
 from typing import Any
 
@@ -143,6 +144,7 @@ def _build_model_dict(
         timescaledb_model_table=result.timescaledb_model_table,
         is_tree=is_tree,
         tree_parent_field=tree_parent_field,
+        icon=result.model_site_props.get("icon", "LayoutDashboard"),
     )
 
 
@@ -172,20 +174,25 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
             continue
 
         lines = source.splitlines()
-        # Skip decorator / def lines to reach the body
+        # Skip decorator / def / async def lines to reach the body
         body_start = 0
         for i, line in enumerate(lines):
-            if line.strip().startswith("def "):
+            stripped = line.strip()
+            if stripped.startswith("def ") or stripped.startswith("async def "):
                 body_start = i + 1
                 break
         body_lines = lines[body_start:]
         if not body_lines:
             continue
 
+        is_async = asyncio.iscoroutinefunction(method)
+
         body = textwrap.dedent("\n".join(body_lines))
         # Remove surrounding blank lines
         body = body.strip("\n")
-        listeners.append(EventListener(event_name=event_name, body=body))
+        listeners.append(
+            EventListener(event_name=event_name, body=body, is_async=is_async)
+        )
 
     return listeners
 

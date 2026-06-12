@@ -137,6 +137,33 @@ def _generate_event_listeners(model: ModelDefinition, backend_path: Path) -> Non
     )
 
 
+def _generate_task_handlers(model: ModelDefinition, backend_path: Path) -> None:
+    """Generate background task handler file for async event methods."""
+    has_async = any(
+        listener.is_async for listener in model.get("event_listeners", [])
+    )
+    if not has_async:
+        return
+
+    generate_file(
+        "handler.py.j2",
+        {"model": model},
+        backend_path / "app" / "handlers" / f"{model['module_name']}.py",
+    )
+
+
+def _generate_export_handlers(model: ModelDefinition, backend_path: Path) -> None:
+    """Generate background export handler file for exportable models."""
+    if not model.get("exportable"):
+        return
+
+    generate_file(
+        "export_handler.py.j2",
+        {"model": model},
+        backend_path / "app" / "handlers" / f"export_{model['module_name']}.py",
+    )
+
+
 def _sort_api_models(
     api_models: list[ModelDefinition], site_config: dict
 ) -> list[ModelDefinition]:
@@ -170,6 +197,12 @@ def phase_generate_per_model(
 
         # Generate event listener file if the model has on_before_*/on_after_* methods
         _generate_event_listeners(model, backend_path)
+
+        # Generate background task handler file if model has async on_* methods
+        _generate_task_handlers(model, backend_path)
+
+        # Generate background export handler file if model is exportable
+        _generate_export_handlers(model, backend_path)
 
         if model.get("is_singleton") or (
             model["module_name"] == "system_config" and model["name"] == "SystemConfig"
@@ -247,6 +280,9 @@ def phase_generate_aggregated(
         "ws_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "ws.py"
     )
 
+    # ── Task queue (always generated, needed if any model has async events) ──
+    generate_file("task_queue.py.j2", {}, backend_path / "app" / "core" / "task_queue.py")
+
     # ── API router ──
     scheduled_tasks = site_config.get("scheduled_tasks", [])
     update_api_router(
@@ -296,9 +332,11 @@ def phase_generate_aggregated(
         {"models": frontend_models},
         cwd / "frontend" / "src" / "Routes.tsx",
     )
+    # Collect unique icon names used across models (for dynamic import)
+    used_icons = sorted({m.get("icon", "LayoutDashboard") for m in frontend_models})
     generate_file(
         "frontend_menu.tsx.j2",
-        {"models": frontend_models},
+        {"models": frontend_models, "used_icons": used_icons},
         cwd / "frontend" / "src" / "Menu.tsx",
     )
     generate_file(
@@ -339,3 +377,17 @@ def phase_generate_aggregated(
             {"event_models": event_models},
             backend_path / "app" / "events" / "__init__.py",
         )
+
+    # ── Background task handlers __init__.py ──
+    handler_models = [
+        m for m in models
+        if any(l.is_async for l in m.get("event_listeners", []))
+    ]
+    export_models = [m for m in models if m.get("exportable")]
+    if handler_models or export_models:
+        generate_file(
+            "handlers_init.py.j2",
+            {"handler_models": handler_models, "export_models": export_models},
+            backend_path / "app" / "handlers" / "__init__.py",
+        )
+

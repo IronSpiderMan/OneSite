@@ -130,10 +130,23 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
         };
 
         ws.onmessage = (ev) => {
-          // Only process notifications if enabled
-          if (!enabled) return;
           try {
             const payload = JSON.parse(ev.data || '{}');
+
+            // Handle export_complete — works regardless of notification model
+            if (payload?.type === 'export_complete') {
+              if (payload.download_url) {
+                window.open(payload.download_url, '_blank');
+                toast.success(payload.message || t('common.export_complete', 'Export completed'));
+              } else if (payload.error) {
+                toast.error(payload.error);
+              }
+              return;
+            }
+
+            // Only process notifications if enabled
+            if (!enabled) return;
+
             if (payload?.type === 'notification' && payload?.data) {
               const n = payload.data as NotificationPreview;
               setUnread((u) => u + 1);

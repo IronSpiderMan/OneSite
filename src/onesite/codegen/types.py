@@ -179,10 +179,14 @@ class EventListener:
     Generated from model methods named ``on_before_<event>`` or
     ``on_after_<event>`` — the method body is extracted and wrapped
     in a ``@event.listens_for`` decorated function.
+
+    If ``is_async`` is True the body is routed to a background task
+    handler instead of being inlined in the event listener.
     """
 
     event_name: str   # e.g. "before_insert", "after_update"
     body: str          # dedented source code of the method body
+    is_async: bool = False  # async def → background task handler
 
 
 @dataclass

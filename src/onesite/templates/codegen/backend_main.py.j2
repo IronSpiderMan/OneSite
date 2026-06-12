@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.cors import CORSMiddleware
@@ -32,6 +33,14 @@ from app.core.mqtt import mqtt_manager
 # Import event listeners to register them with SQLAlchemy
 try:
     import app.events
+except ImportError:
+    pass
+
+# Import background task queue and handlers
+from app.core.task_queue import task_queue
+
+try:
+    import app.handlers
 except ImportError:
     pass
 {% if config.scheduled_tasks %}
@@ -69,7 +78,15 @@ async def lifespan(app: FastAPI):
     logger.info("Scheduler started")
     {% endif %}
 
+    # Start background task worker
+    _task_queue_worker = asyncio.create_task(task_queue.run())
+    logger.info("Task queue worker started")
+
     yield
+
+    # Shutdown background task worker
+    _task_queue_worker.cancel()
+    logger.info("Task queue worker stopped")
 
     {% if config.scheduled_tasks %}
     # Stop scheduler
