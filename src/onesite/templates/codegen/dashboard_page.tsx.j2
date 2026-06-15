@@ -19,9 +19,15 @@ import { get{{ model.name }}Stats } from '../services/{{ model.module_name }}';
 import { useTaskStore } from '../stores/useTaskStore';
 {% endif %}
 
+interface ChartSeries {
+    name: string;
+    values: number[];
+}
+
 interface ChartData {
     labels: string[];
-    values: number[];
+    values?: number[];
+    series?: ChartSeries[];
     title: string;
 }
 
@@ -226,17 +232,31 @@ const DashboardPage: React.FC = () => {
             );
         }
 
-        const chartData = data.labels.map((label, index) => ({
-            name: label,
-            value: data.values[index],
-        }));
+        const isMultiSeries = data.series && data.series.length > 0;
 
         if (chartType === 'pie') {
+            // Pie chart: aggregate series into per-label totals
+            let pieData: { name: string; value: number }[];
+            if (isMultiSeries) {
+                const totals: Record<string, number> = {};
+                data.series!.forEach(s => {
+                    s.values.forEach((v, i) => {
+                        const label = data.labels[i];
+                        totals[label] = (totals[label] || 0) + v;
+                    });
+                });
+                pieData = data.labels.map(label => ({ name: label, value: totals[label] || 0 }));
+            } else {
+                pieData = data.labels.map((label, index) => ({
+                    name: label,
+                    value: (data.values || [])[index] || 0,
+                }));
+            }
             return (
                 <ResponsiveContainer width="100%" height={300}>
                     <PieChart>
                         <Pie
-                            data={chartData}
+                            data={pieData}
                             cx="50%"
                             cy="50%"
                             labelLine={false}
@@ -246,7 +266,7 @@ const DashboardPage: React.FC = () => {
                             dataKey="value"
                             name={title}
                         >
-                            {chartData.map((_, index) => (
+                            {pieData.map((_, index) => (
                                 <Cell key={`cell-${index}`} fill={CHART_COLORS[index % CHART_COLORS.length]} />
                             ))}
                         </Pie>
@@ -256,6 +276,66 @@ const DashboardPage: React.FC = () => {
                 </ResponsiveContainer>
             );
         }
+
+        if (isMultiSeries) {
+            // Multi-series: each series becomes a separate Bar/Line
+            const multiData = data.labels.map((label, index) => {
+                const point: Record<string, string | number> = { name: label };
+                data.series!.forEach(s => { point[s.name] = s.values[index] || 0; });
+                return point;
+            });
+
+            if (chartType === 'line') {
+                return (
+                    <ResponsiveContainer width="100%" height={300}>
+                        <LineChart data={multiData}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="name" />
+                            <YAxis />
+                            <Tooltip />
+                            <Legend />
+                            {data.series!.map((s, i) => (
+                                <Line
+                                    key={s.name}
+                                    type="monotone"
+                                    dataKey={s.name}
+                                    stroke={CHART_COLORS[i % CHART_COLORS.length]}
+                                    strokeWidth={2}
+                                    name={s.name}
+                                />
+                            ))}
+                        </LineChart>
+                    </ResponsiveContainer>
+                );
+            }
+
+            // Default: multi-series bar chart
+            return (
+                <ResponsiveContainer width="100%" height={300}>
+                    <BarChart data={multiData}>
+                        <CartesianGrid strokeDasharray="3 3" />
+                        <XAxis dataKey="name" />
+                        <YAxis />
+                        <Tooltip />
+                        <Legend />
+                        {data.series!.map((s, i) => (
+                            <Bar
+                                key={s.name}
+                                dataKey={s.name}
+                                fill={CHART_COLORS[i % CHART_COLORS.length]}
+                                name={s.name}
+                            />
+                        ))}
+                    </BarChart>
+                </ResponsiveContainer>
+            );
+        }
+
+        // Single-series fallback
+        const chartData = data.labels.map((label, index) => ({
+            name: label,
+            value: (data.values || [])[index] || 0,
+        }));
 
         if (chartType === 'line') {
             return (

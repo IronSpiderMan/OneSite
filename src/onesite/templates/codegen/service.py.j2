@@ -777,18 +777,26 @@ class {{ model.name }}Service:
                 else:
                     date_trunc = func.date(time_col)
 
+            # Check if label_field is meaningful for multi-series grouping
+            label_col = getattr(model, label_field, None) if label_field and label_field != value_field else None
+
             if aggregation == "count":
-                stmt = select(date_trunc, func.count(model.id))
+                agg_expr = func.count(model.id)
             elif aggregation == "sum":
-                stmt = select(date_trunc, func.coalesce(func.sum(value_col), 0))
+                agg_expr = func.coalesce(func.sum(value_col), 0)
             elif aggregation == "avg":
-                stmt = select(date_trunc, func.coalesce(func.avg(value_col), 0))
+                agg_expr = func.coalesce(func.avg(value_col), 0)
             elif aggregation == "min":
-                stmt = select(date_trunc, func.min(value_col))
+                agg_expr = func.min(value_col)
             elif aggregation == "max":
-                stmt = select(date_trunc, func.max(value_col))
+                agg_expr = func.max(value_col)
             else:
-                stmt = select(date_trunc, func.count(model.id))
+                agg_expr = func.count(model.id)
+
+            if label_col:
+                stmt = select(date_trunc, label_col, agg_expr)
+            else:
+                stmt = select(date_trunc, agg_expr)
 
             # Apply time range filter
             if st:
@@ -796,29 +804,65 @@ class {{ model.name }}Service:
             if et:
                 stmt = stmt.where(time_col <= et)
 
-            stmt = stmt.group_by(date_trunc).order_by(date_trunc)
+            if label_col:
+                stmt = stmt.group_by(date_trunc, label_col).order_by(date_trunc)
+            else:
+                stmt = stmt.group_by(date_trunc).order_by(date_trunc)
 
             result = await session.exec(stmt)
             rows = result.all()
 
-            labels = []
-            values = []
-            for row in rows:
-                date_val = row[0]
-                if isinstance(date_val, datetime):
-                    labels.append(date_val.strftime("%Y-%m-%d"))
-                elif hasattr(date_val, 'value'):
-                    # Handle Enum types
-                    labels.append(str(date_val.value))
-                else:
-                    labels.append(str(date_val))
-                values.append(float(row[1]))
+            def _fmt_date(val):
+                if isinstance(val, datetime):
+                    return val.strftime("%Y-%m-%d")
+                if hasattr(val, 'value'):
+                    return str(val.value)
+                return str(val)
 
-            return {
-                "labels": labels,
-                "values": values,
-                "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}",
-            }
+            def _fmt_label(val):
+                if val is None:
+                    return "None"
+                if hasattr(val, 'value'):
+                    return str(val.value)
+                return str(val)
+
+            if label_col:
+                # Multi-series: pivot (time, label, value) into {labels, series}
+                time_labels = []
+                series_map: dict[str, dict[str, float]] = {}
+                label_order: list[str] = []
+                for row in rows:
+                    t = _fmt_date(row[0])
+                    l = _fmt_label(row[1])
+                    v = float(row[2])
+                    if t not in series_map:
+                        series_map[t] = {}
+                        time_labels.append(t)
+                    series_map[t][l] = v
+                    if l not in label_order:
+                        label_order.append(l)
+                series = []
+                for l in label_order:
+                    series.append({
+                        "name": l,
+                        "values": [series_map.get(t, {}).get(l, 0) for t in time_labels],
+                    })
+                return {
+                    "labels": time_labels,
+                    "series": series,
+                    "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}",
+                }
+            else:
+                labels = []
+                values = []
+                for row in rows:
+                    labels.append(_fmt_date(row[0]))
+                    values.append(float(row[1]))
+                return {
+                    "labels": labels,
+                    "values": values,
+                    "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}",
+                }
         {% else %}
         # Group by label field (bar/pie chart)
         label_col = getattr(model, label_field, None)

@@ -63,9 +63,15 @@ export const bulkDelete{{ model.name }} = async (ids: number[]) => {
 };
 
 {% if model.visualize %}
+export interface {{ model.name }}StatsSeries {
+    name: string;
+    values: number[];
+}
+
 export interface {{ model.name }}Stats {
     labels: string[];
-    values: number[];
+    values?: number[];
+    series?: {{ model.name }}StatsSeries[];
     title: string;
 }
 
