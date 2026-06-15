@@ -101,21 +101,21 @@ export function LinkTableOrderedSelect({
       />
 
       {items.length > 0 ? (
-        <div className="flex flex-wrap gap-1">
+        <div className="flex flex-wrap gap-1.5">
           {items.map((it, index) => (
             <Badge
               key={String(it.id)}
-              variant="secondary"
-              className={cn("mr-1 cursor-move select-none")}
+              variant="default"
+              className={cn("mr-1 cursor-move select-none border-primary-foreground/20 px-3 py-1 text-sm shadow-sm")}
               draggable
               onDragStart={(e) => handleDragStart(e, index)}
               onDragOver={handleDragOver}
               onDrop={(e) => handleDrop(e, index)}
             >
-              <GripVertical className="mr-1 h-3 w-3 opacity-60" />
+              <GripVertical className="mr-1 h-3.5 w-3.5 opacity-60" />
               <span className="max-w-[18rem] truncate">{it.label}</span>
               <X
-                className="ml-1 h-3 w-3 cursor-pointer text-muted-foreground hover:text-foreground"
+                className="ml-1.5 h-3.5 w-3.5 cursor-pointer opacity-70 hover:opacity-100"
                 onClick={(e) => handleRemove(e, it.id)}
               />
             </Badge>

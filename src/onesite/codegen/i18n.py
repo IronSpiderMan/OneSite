@@ -347,6 +347,19 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
                 set_by_path(en_translations, label_key, label_en)
                 set_by_path(zh_translations, label_key, label_zh)
 
+            # Enum value translations — collected into model dict
+            if field.get("is_enum") and field.get("enum_values"):
+                enum_trans = field.get("enum_translations", {})
+                en_enums = en_model.setdefault("enums", {})
+                zh_enums = zh_model.setdefault("enums", {})
+                en_field_enum: dict[str, str] = {}
+                zh_field_enum: dict[str, str] = {}
+                for enum_val in field["enum_values"]:
+                    en_field_enum[enum_val] = enum_trans.get("en", {}).get(enum_val) or str(enum_val)
+                    zh_field_enum[enum_val] = enum_trans.get("zh", {}).get(enum_val) or str(enum_val)
+                en_enums[field_name] = en_field_enum
+                zh_enums[field_name] = zh_field_enum
+
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model
 

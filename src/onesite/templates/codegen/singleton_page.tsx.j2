@@ -158,7 +158,9 @@ const {{ model.name }}Page: React.FC = () => {
                   </SelectTrigger>
                   <SelectContent>
                     {% for enum_val in field.enum_values %}
-                    <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+                    <SelectItem value="{{ enum_val }}">{
+                      t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}')
+                    }</SelectItem>
                     {% endfor %}
                   </SelectContent>
                 </Select>

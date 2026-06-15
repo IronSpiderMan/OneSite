@@ -74,6 +74,7 @@ class FieldDefinition:
     default_factory: str | None = None
     is_enum: bool = False
     enum_values: list = field(default_factory=list)
+    enum_translations: dict = field(default_factory=dict)
     is_search_field: bool = False
     fk_info: ForeignKeyInfo | None = None
     allow_download: bool = True

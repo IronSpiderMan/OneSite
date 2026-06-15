@@ -151,7 +151,7 @@ const Create{{ model.name }}Page: React.FC = () => {
                       </SelectTrigger>
                       <SelectContent>
                         {filteredValues.map((enumVal: string) => (
-                          <SelectItem key={enumVal} value={enumVal}>{enumVal}</SelectItem>
+                          <SelectItem key={enumVal} value={enumVal}>{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${enumVal}`, enumVal)}</SelectItem>
                         ))}
                       </SelectContent>
                     </Select>

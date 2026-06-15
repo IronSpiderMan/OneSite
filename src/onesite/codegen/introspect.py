@@ -469,6 +469,15 @@ def get_model_fields(
         label_key = site_props.get("label", default_label_key)
         translations = site_props.get("translations", {})
 
+        # Extract enum value translations from model-level translations
+        enum_translations: dict[str, dict[str, str]] = {}
+        if is_enum:
+            for lang, lang_pack in model_translations.items():
+                if isinstance(lang_pack, dict):
+                    enums_section = lang_pack.get("enums", {})
+                    if isinstance(enums_section, dict) and name in enums_section:
+                        enum_translations[lang] = dict(enums_section[name])
+
         fk_info = None
         if name.endswith("_id") and name != "id":
             is_fk = False
@@ -548,6 +557,7 @@ def get_model_fields(
                 ),
                 is_enum=is_enum,
                 enum_values=enum_values,
+                enum_translations=enum_translations,
                 is_search_field=is_search_field,
                 fk_info=fk_info,
                 allow_download=allow_download,

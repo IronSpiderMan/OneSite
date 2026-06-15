@@ -172,7 +172,9 @@ export default function ProfilePage() {
                   </SelectTrigger>
                   <SelectContent>
       {% for enum_val in field.enum_values %}
-                    <SelectItem value="{{ enum_val }}">{{ enum_val }}</SelectItem>
+                    <SelectItem value="{{ enum_val }}">{
+                      t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}')
+                    }</SelectItem>
       {% endfor %}
                   </SelectContent>
                 </Select>
@@ -224,7 +226,7 @@ export default function ProfilePage() {
                   <span className="text-muted-foreground italic">No image</span>
                 )}
       {% elif field.is_enum %}
-                <div className="font-medium">{me.{{ field.name }} || '-'}</div>
+                <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}
                 <div className="text-muted-foreground">{me.{{ field.name }} || '-'}</div>
       {% elif field.ui_type == 'json' %}
@@ -251,7 +253,7 @@ export default function ProfilePage() {
                   <span className="text-muted-foreground italic">No image</span>
                 )}
       {% elif field.is_enum %}
-                <div className="font-medium">{me.{{ field.name }} || '-'}</div>
+                <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}
                 <div className="text-muted-foreground">{me.{{ field.name }} || '-'}</div>
       {% elif field.ui_type == 'json' %}

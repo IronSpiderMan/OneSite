@@ -147,12 +147,12 @@ export function SearchableSelect({
         >
             {multiple ? (
                 selectedItems.length > 0 ? (
-                    <div className="flex flex-wrap gap-1">
+                    <div className="flex flex-wrap gap-1.5">
                         {selectedItems.map(item => (
-                            <Badge key={item.value} variant="secondary" className="mr-1">
+                            <Badge key={item.value} variant="default" className="mr-1 border-primary-foreground/20 px-3 py-1 text-sm shadow-sm">
                                 {item.label}
                                 <X
-                                    className="ml-1 h-3 w-3 cursor-pointer text-muted-foreground hover:text-foreground"
+                                    className="ml-1.5 h-3.5 w-3.5 cursor-pointer opacity-70 hover:opacity-100"
                                     onClick={(e) => handleRemove(e, item.value)}
                                 />
                             </Badge>
