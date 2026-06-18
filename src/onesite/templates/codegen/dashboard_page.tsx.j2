@@ -1,6 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
@@ -89,6 +89,33 @@ const formatInterval = (seconds: number): string => {
 };
 
 const dotStyle = (color: string): React.CSSProperties => ({ backgroundColor: color });
+
+const todayStr = (): string => new Date().toISOString().split('T')[0];
+
+const shiftDateRange = (startTime: string, endTime: string, direction: 'left' | 'right'): { startTime: string; endTime: string } => {
+    const end = endTime ? new Date(endTime) : new Date();
+    const start = new Date(startTime);
+    const spanMs = end.getTime() - start.getTime();
+    const spanDays = Math.max(Math.ceil(spanMs / (1000 * 60 * 60 * 24)), 1);
+    const offset = direction === 'left' ? -spanDays : spanDays;
+
+    const newStart = new Date(start);
+    newStart.setDate(newStart.getDate() + offset);
+    const newEnd = new Date(end);
+    newEnd.setDate(newEnd.getDate() + offset);
+
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (newEnd > today) {
+        newEnd.setTime(today.getTime());
+        newStart.setTime(today.getTime() - spanMs);
+    }
+
+    return {
+        startTime: newStart.toISOString().split('T')[0],
+        endTime: newEnd.toISOString().split('T')[0],
+    };
+};
 
 const DashboardPage: React.FC = () => {
     const { t } = useTranslation();
@@ -600,42 +627,86 @@ const DashboardPage: React.FC = () => {
                                         </h3>
                                     </div>
                                     {chart.hasTimeField && (
-                                        <div className="flex items-center gap-1.5 bg-muted/50 rounded-lg px-2 py-1">
-                                            <input
-                                                type="date"
-                                                className="bg-transparent border-0 text-xs focus:outline-none focus:ring-0 p-0.5"
-                                                value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).startTime}
-                                                onChange={(e) => {
-                                                    const newStart = e.target.value;
-                                                    setChartPeriods(prev => {
-                                                        const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
-                                                        if (newStart && cur.endTime) {
-                                                            const err = validateDateSpan(newStart, cur.endTime, cur.period);
+                                        <div className="flex items-center gap-1">
+                                            <div className="flex items-center gap-1 bg-muted/50 rounded-lg px-1.5 py-1">
+                                                <button
+                                                    className="p-0.5 rounded hover:bg-background/60 text-muted-foreground hover:text-foreground transition-colors"
+                                                    onClick={() => {
+                                                        setChartPeriods(prev => {
+                                                            const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
+                                                            const shifted = shiftDateRange(cur.startTime || getDefaultStartTime(), cur.endTime || todayStr(), 'left');
+                                                            const err = validateDateSpan(shifted.startTime, shifted.endTime, cur.period);
                                                             if (err) { toast.error(err); return prev; }
-                                                        }
-                                                        return { ...prev, [chart.moduleName]: { ...cur, startTime: newStart } };
-                                                    });
-                                                }}
-                                            />
-                                            <span className="text-xs text-muted-foreground/60">&mdash;</span>
-                                            <input
-                                                type="date"
-                                                className="bg-transparent border-0 text-xs focus:outline-none focus:ring-0 p-0.5"
-                                                value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).endTime}
-                                                onChange={(e) => {
-                                                    const newEnd = e.target.value;
-                                                    setChartPeriods(prev => {
-                                                        const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
-                                                        if (cur.startTime && newEnd) {
-                                                            const err = validateDateSpan(cur.startTime, newEnd, cur.period);
+                                                            return { ...prev, [chart.moduleName]: { ...cur, ...shifted } };
+                                                        });
+                                                    }}
+                                                    title={t('dashboard.shift_left', 'Previous period')}
+                                                >
+                                                    <ChevronLeft className="w-3.5 h-3.5" />
+                                                </button>
+                                                <input
+                                                    type="date"
+                                                    className="bg-transparent border-0 text-xs focus:outline-none focus:ring-0 p-0.5"
+                                                    value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).startTime}
+                                                    onChange={(e) => {
+                                                        const newStart = e.target.value;
+                                                        setChartPeriods(prev => {
+                                                            const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
+                                                            if (newStart && cur.endTime) {
+                                                                const err = validateDateSpan(newStart, cur.endTime, cur.period);
+                                                                if (err) { toast.error(err); return prev; }
+                                                            }
+                                                            return { ...prev, [chart.moduleName]: { ...cur, startTime: newStart } };
+                                                        });
+                                                    }}
+                                                />
+                                                <span className="text-xs text-muted-foreground/60">&mdash;</span>
+                                                <input
+                                                    type="date"
+                                                    className="bg-transparent border-0 text-xs focus:outline-none focus:ring-0 p-0.5"
+                                                    value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).endTime}
+                                                    onChange={(e) => {
+                                                        const newEnd = e.target.value;
+                                                        setChartPeriods(prev => {
+                                                            const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
+                                                            if (cur.startTime && newEnd) {
+                                                                const err = validateDateSpan(cur.startTime, newEnd, cur.period);
+                                                                if (err) { toast.error(err); return prev; }
+                                                            }
+                                                            return { ...prev, [chart.moduleName]: { ...cur, endTime: newEnd } };
+                                                        });
+                                                    }}
+                                                />
+                                                <button
+                                                    className="p-0.5 rounded hover:bg-background/60 text-muted-foreground hover:text-foreground transition-colors"
+                                                    onClick={() => {
+                                                        setChartPeriods(prev => {
+                                                            const cur = prev[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' };
+                                                            const shifted = shiftDateRange(cur.startTime || getDefaultStartTime(), cur.endTime || todayStr(), 'right');
+                                                            const err = validateDateSpan(shifted.startTime, shifted.endTime, cur.period);
                                                             if (err) { toast.error(err); return prev; }
-                                                        }
-                                                        return { ...prev, [chart.moduleName]: { ...cur, endTime: newEnd } };
-                                                    });
-                                                }}
-                                            />
+                                                            return { ...prev, [chart.moduleName]: { ...cur, ...shifted } };
+                                                        });
+                                                    }}
+                                                    title={t('dashboard.shift_right', 'Next period')}
+                                                >
+                                                    <ChevronRight className="w-3.5 h-3.5" />
+                                                </button>
+                                                <button
+                                                    className="p-0.5 rounded hover:bg-background/60 text-muted-foreground hover:text-foreground transition-colors"
+                                                    onClick={() => {
+                                                        setChartPeriods(prev => ({
+                                                            ...prev,
+                                                            [chart.moduleName]: { period: (prev[chart.moduleName] || { period: 'day' }).period, startTime: getDefaultStartTime(), endTime: '' },
+                                                        }));
+                                                    }}
+                                                    title={t('dashboard.reset_today', 'Reset to today')}
+                                                >
+                                                    <CalendarDays className="w-3.5 h-3.5" />
+                                                </button>
+                                            </div>
                                             <select
-                                                className="bg-transparent border-0 text-xs focus:outline-none focus:ring-0 font-medium cursor-pointer"
+                                                className="bg-muted/50 border-0 text-xs rounded-lg px-2 py-1.5 focus:outline-none focus:ring-0 font-medium cursor-pointer"
                                                 value={(chartPeriods[chart.moduleName] || { period: 'day', startTime: getDefaultStartTime(), endTime: '' }).period}
                                                 onChange={(e) => {
                                                     const newPeriod = e.target.value;
