@@ -9,7 +9,7 @@ from pathlib import Path
 
 from ..assets import sync_backend_assets, sync_frontend_assets
 from ..render import generate_file
-from ..theme import resolve_theme
+from ..theme import THEMES, resolve_theme
 from .base import console
 
 
@@ -50,7 +50,7 @@ def phase_theme_and_assets(site_config: dict, cwd: Path, backend_path: Path) -> 
     theme_config, radius = resolve_theme(site_config)
     generate_file(
         "index.css.j2",
-        {"theme": theme_config, "radius": radius},
+        {"theme": theme_config, "themes": THEMES, "radius": radius},
         cwd / "frontend" / "src" / "index.css",
     )
     sync_frontend_assets(cwd, site_config)

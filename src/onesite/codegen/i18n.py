@@ -14,6 +14,8 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         "language": "语言",
         "timezone": "时区",
         "theme": "主题",
+        "theme_style": "主题样式",
+        "theme_mode": "主题模式",
         "site_name": "站点名称",
         "allow_registration": "允许注册",
     }
@@ -67,6 +69,10 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "export_started": "Export started, you will be notified when complete",
             "export_complete": "Export completed",
             "export_failed": "Export failed",
+            "navigation": "Navigation",
+            "system": "System",
+            "expand": "Expand",
+            "collapse": "Collapse",
         },
         "menu": {
             "dashboard": "Dashboard",
@@ -107,6 +113,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "signingIn": "Signing in...",
             "error": "Login failed. Please check your credentials.",
             "demo": "Demo: admin@example.com / admin",
+            "system_access": "System Access",
         },
         "settings": {
             "system_title": "System Settings",
@@ -187,6 +194,10 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "export_started": "导出已开始，完成后将通知您",
             "export_complete": "导出完成",
             "export_failed": "导出失败",
+            "navigation": "导航",
+            "system": "系统",
+            "expand": "展开",
+            "collapse": "收起",
         },
         "menu": {
             "dashboard": "仪表盘",
@@ -223,6 +234,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "signingIn": "登录中...",
             "error": "登录失败，请检查您的凭据。",
             "demo": "演示账号：admin@example.com / admin",
+            "system_access": "系统访问",
         },
         "settings": {
             "system_title": "系统配置",

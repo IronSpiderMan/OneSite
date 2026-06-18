@@ -2,7 +2,58 @@
 @tailwind components;
 @tailwind utilities;
 
+{# ── Generate CSS variables for ALL themes ── #}
 @layer base {
+{% for tid, t in themes.items() %}
+  {# Light mode variables #}
+  [data-theme="{{ tid }}"] {
+    --background: {{ t.background }};
+    --foreground: {{ t.foreground }};
+    --card: {{ t.card }};
+    --card-foreground: {{ t.card_foreground }};
+    --popover: {{ t.popover }};
+    --popover-foreground: {{ t.popover_foreground }};
+    --primary: {{ t.primary }};
+    --primary-foreground: {{ t.primary_foreground }};
+    --secondary: {{ t.secondary }};
+    --secondary-foreground: {{ t.secondary_foreground }};
+    --muted: {{ t.muted }};
+    --muted-foreground: {{ t.muted_foreground }};
+    --accent: {{ t.accent }};
+    --accent-foreground: {{ t.accent_foreground }};
+    --destructive: {{ t.destructive }};
+    --destructive-foreground: {{ t.destructive_foreground }};
+    --border: {{ t.border }};
+    --input: {{ t.input }};
+    --ring: {{ t.ring }};
+    --shadow-sm-style: {{ t.shadow_sm }};
+    --shadow-md-style: {{ t.shadow_md }};
+  }
+  {# Dark mode variables #}
+  [data-theme="{{ tid }}"].dark {
+    --background: {{ t.dark_background }};
+    --foreground: {{ t.dark_foreground }};
+    --card: {{ t.dark_card }};
+    --card-foreground: {{ t.dark_card_foreground }};
+    --popover: {{ t.dark_popover }};
+    --popover-foreground: {{ t.dark_popover_foreground }};
+    --primary: {{ t.dark_primary }};
+    --primary-foreground: {{ t.dark_primary_foreground }};
+    --secondary: {{ t.dark_secondary }};
+    --secondary-foreground: {{ t.dark_secondary_foreground }};
+    --muted: {{ t.dark_muted }};
+    --muted-foreground: {{ t.dark_muted_foreground }};
+    --accent: {{ t.dark_accent }};
+    --accent-foreground: {{ t.dark_accent_foreground }};
+    --destructive: {{ t.dark_destructive }};
+    --destructive-foreground: {{ t.dark_destructive_foreground }};
+    --border: {{ t.dark_border }};
+    --input: {{ t.dark_input }};
+    --ring: {{ t.dark_ring }};
+  }
+
+{% endfor %}
+  {# Backward-compatible :root fallback (uses build-time default) #}
   :root {
     --background: {{ theme.background }};
     --foreground: {{ theme.foreground }};
@@ -27,7 +78,6 @@
     --shadow-sm-style: {{ theme.shadow_sm }};
     --shadow-md-style: {{ theme.shadow_md }};
   }
- 
   .dark {
     --background: {{ theme.dark_background }};
     --foreground: {{ theme.dark_foreground }};
@@ -49,65 +99,17 @@
     --input: {{ theme.dark_input }};
     --ring: {{ theme.dark_ring }};
   }
-
-  html.theme-iothub {
-    --background: 222 50% 6%;
-    --foreground: 210 40% 98%;
-    --card: 220 34% 12%;
-    --card-foreground: 210 40% 98%;
-    --popover: 220 34% 12%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 160 84% 39%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 217 22% 16%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217 22% 16%;
-    --muted-foreground: 215 20.2% 72%;
-    --accent: 210 24% 18%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 72% 44%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 215 18% 22%;
-    --input: 215 18% 22%;
-    --ring: 160 84% 39%;
-  }
 }
- 
+
 @layer base {
   * {
     @apply border-border;
   }
   body {
     @apply bg-background text-foreground;
-    font-family: {{ theme.font_family }};
-    {% if theme.body_pattern != "none" %}
-    background-image: {{ theme.body_pattern }};
-    background-size: 28px 28px;
-    {% endif %}
   }
   h1, h2, h3, h4, h5, h6 {
-    font-weight: {{ theme.heading_weight }};
-  }
-}
-
-@layer base {
-  html.theme-iothub body {
-    background-image:
-      radial-gradient(1200px 800px at 65% 12%, rgba(16, 185, 129, 0.35), rgba(16, 185, 129, 0) 60%),
-      radial-gradient(900px 700px at 25% 78%, rgba(37, 99, 235, 0.25), rgba(37, 99, 235, 0) 65%),
-      radial-gradient(700px 500px at 90% 85%, rgba(14, 165, 233, 0.18), rgba(14, 165, 233, 0) 60%),
-      linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.15) 55%, rgba(0, 0, 0, 0.45) 100%);
-    background-attachment: fixed;
-  }
-
-  html.theme-iothub .bg-card {
-    background-color: hsl(var(--card) / 0.72);
-    backdrop-filter: blur(14px);
-  }
-
-  html.theme-iothub .bg-popover {
-    background-color: hsl(var(--popover) / 0.72);
-    backdrop-filter: blur(14px);
+    font-weight: 600;
   }
 }
 
@@ -124,4 +126,212 @@
   button:hover {
     filter: saturate(1.06);
   }
+}
+
+{# ── Industrial theme-specific rules ── #}
+[data-theme="industrial"] body {
+  font-family: "IBM Plex Sans", Inter, "Segoe UI", system-ui, sans-serif;
+  background-image: linear-gradient(0deg, rgb(148 163 184 / 0.07) 1px, transparent 1px), linear-gradient(90deg, rgb(148 163 184 / 0.07) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+[data-theme="industrial"] h1, [data-theme="industrial"] h2, [data-theme="industrial"] h3,
+[data-theme="industrial"] h4, [data-theme="industrial"] h5, [data-theme="industrial"] h6 {
+  font-weight: 800;
+}
+[data-theme="industrial"] thead tr {
+  border-bottom: 2px solid hsl(var(--accent) / 0.35);
+}
+[data-theme="industrial"] thead th {
+  text-transform: uppercase;
+  font-size: 0.7rem;
+  letter-spacing: 0.08em;
+  font-weight: 700;
+  color: hsl(var(--muted-foreground));
+}
+[data-theme="industrial"] button.bg-primary:hover,
+[data-theme="industrial"] button[class*="bg-primary"]:hover {
+  box-shadow: 0 0 0 1px hsl(var(--accent) / 0.4), 0 2px 8px -2px hsl(var(--accent) / 0.3);
+}
+[data-theme="industrial"] button[class*="border"][class*="bg-background"]:hover {
+  border-color: hsl(var(--accent));
+  color: hsl(var(--accent));
+}
+[data-theme="industrial"] code, [data-theme="industrial"] pre, [data-theme="industrial"] .font-mono {
+  font-family: "IBM Plex Mono", "JetBrains Mono", "Fira Code", monospace;
+}
+[data-theme="industrial"] ::-webkit-scrollbar {
+  width: 8px; height: 8px;
+}
+[data-theme="industrial"] ::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+[data-theme="industrial"] ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border: 1px solid hsl(var(--muted));
+}
+{# Industrial: corner brackets on bg-card elements (only in main content, not sidebar) #}
+[data-theme="industrial"] main .bg-card {
+  position: relative;
+}
+[data-theme="industrial"] main .bg-card::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0;
+  border-top: 2px solid hsl(var(--accent) / 0.5);
+  border-left: 2px solid hsl(var(--accent) / 0.5);
+  width: 14px; height: 14px;
+  pointer-events: none;
+  z-index: 1;
+}
+[data-theme="industrial"] main .bg-card::after {
+  content: '';
+  position: absolute;
+  bottom: 0; right: 0;
+  border-bottom: 2px solid hsl(var(--accent) / 0.5);
+  border-right: 2px solid hsl(var(--accent) / 0.5);
+  width: 14px; height: 14px;
+  pointer-events: none;
+  z-index: 1;
+}
+[data-theme="industrial"] header {
+  border-bottom-style: dashed !important;
+}
+
+{# ── EMQX theme-specific rules ── #}
+[data-theme="emqx"] body {
+  font-family: Inter, system-ui, -apple-system, sans-serif;
+}
+[data-theme="emqx"] body::after {
+  content: '';
+  position: fixed;
+  top: -300px; right: -300px;
+  width: 800px; height: 800px;
+  border-radius: 50%;
+  background: radial-gradient(circle, hsl(var(--primary) / 0.04), transparent 70%);
+  pointer-events: none;
+  z-index: -1;
+}
+[data-theme="emqx"] *, [data-theme="emqx"] *::before, [data-theme="emqx"] *::after {
+  transition-property: color, background-color, border-color, box-shadow;
+  transition-duration: 0.15s;
+  transition-timing-function: ease;
+}
+[data-theme="emqx"] [class*="rounded-lg"][class*="bg-card"]:hover {
+  box-shadow: 0 8px 24px -8px rgb(0 0 0 / 0.1), 0 0 0 1px rgb(0 0 0 / 0.04);
+}
+[data-theme="emqx"] tbody tr:hover {
+  background-color: hsl(var(--muted) / 0.5);
+}
+[data-theme="emqx"] button {
+  transition: all 0.15s ease;
+}
+[data-theme="emqx"] button:hover {
+  filter: none;
+}
+[data-theme="emqx"] button.bg-primary:hover {
+  opacity: 0.9;
+  box-shadow: 0 2px 8px -2px hsl(var(--primary) / 0.4);
+}
+[data-theme="emqx"] button[class*="border"][class*="bg-background"]:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.04);
+}
+[data-theme="emqx"] aside nav a[class*="bg-primary"] {
+  background-color: hsl(var(--primary) / 0.1) !important;
+  color: hsl(var(--primary)) !important;
+  font-weight: 600;
+  border-left-color: transparent !important;
+}
+[data-theme="emqx"] aside nav a:not([class*="bg-primary"]):hover {
+  background-color: hsl(var(--muted) / 0.7);
+}
+[data-theme="emqx"] header {
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+[data-theme="emqx"] aside > div:first-child {
+  border-bottom: 1px solid hsl(var(--border)) !important;
+}
+[data-theme="emqx"] ::-webkit-scrollbar {
+  width: 6px; height: 6px;
+}
+[data-theme="emqx"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-theme="emqx"] ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+{# ── Anime theme-specific rules ── #}
+[data-theme="anime"] body {
+  font-family: Nunito, Quicksand, Inter, system-ui, sans-serif;
+  background-image: radial-gradient(circle at 12% 18%, rgb(253 224 71 / 0.22), transparent 24%), radial-gradient(circle at 88% 14%, rgb(125 211 252 / 0.18), transparent 20%), radial-gradient(circle at 80% 85%, rgb(244 114 182 / 0.2), transparent 24%);
+}
+{# Anime: sparkle dot grid #}
+[data-theme="anime"] body::after {
+  content: '';
+  position: fixed;
+  bottom: 8%; left: 3%;
+  width: 240px; height: 240px;
+  background: radial-gradient(circle, rgb(253 224 71 / 0.18) 1px, transparent 1px);
+  background-size: 22px 22px;
+  pointer-events: none;
+  z-index: -1;
+  opacity: 0.7;
+}
+{# Anime: sidebar gradient overlay #}
+[data-theme="anime"] aside {
+  background: linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--card)) 70%, hsl(var(--primary) / 0.03) 100%) !important;
+}
+[data-theme="anime"] h1, [data-theme="anime"] h2, [data-theme="anime"] h3,
+[data-theme="anime"] h4, [data-theme="anime"] h5, [data-theme="anime"] h6 {
+  font-weight: 800;
+}
+{# Anime: colorful card shadows #}
+[data-theme="anime"] .bg-card {
+  box-shadow: 0 4px 20px -4px hsl(var(--primary) / 0.08);
+}
+[data-theme="anime"] header {
+  border-bottom-color: hsl(var(--primary) / 0.15) !important;
+}
+
+{# ── Cute theme-specific rules ── #}
+[data-theme="cute"] body {
+  font-family: "M PLUS Rounded 1c", Nunito, Quicksand, Inter, system-ui, sans-serif;
+  background-image: radial-gradient(circle at 18% 14%, rgb(253 186 116 / 0.18), transparent 22%), radial-gradient(circle at 86% 20%, rgb(165 243 252 / 0.18), transparent 20%), radial-gradient(circle at 78% 82%, rgb(251 207 232 / 0.26), transparent 26%);
+}
+{# Cute: cloud-like soft blob #}
+[data-theme="cute"] body::after {
+  content: '';
+  position: fixed;
+  bottom: 5%; right: 5%;
+  width: 320px; height: 200px;
+  border-radius: 50% 50% 50% 50% / 60% 60% 40% 40%;
+  background: rgb(251 207 232 / 0.12);
+  pointer-events: none;
+  z-index: -1;
+}
+{# Cute: sidebar pastel gradient #}
+[data-theme="cute"] aside {
+  background: linear-gradient(180deg, hsl(var(--card)) 0%, hsl(var(--card)) 80%, hsl(340 82% 63% / 0.03) 100%) !important;
+}
+[data-theme="cute"] h1, [data-theme="cute"] h2, [data-theme="cute"] h3,
+[data-theme="cute"] h4, [data-theme="cute"] h5, [data-theme="cute"] h6 {
+  font-weight: 800;
+}
+{# Cute: soft card glow #}
+[data-theme="cute"] .bg-card {
+  box-shadow: 0 4px 20px -4px hsl(340 82% 63% / 0.06);
+}
+[data-theme="cute"] header {
+  border-bottom-color: hsl(340 82% 63% / 0.1) !important;
+}
+
+{# ── Normal theme-specific rules ── #}
+[data-theme="normal"] body {
+  font-family: Inter, "Segoe UI", system-ui, sans-serif;
+}
+[data-theme="normal"] header {
+  border-bottom: 1px solid hsl(var(--border));
 }

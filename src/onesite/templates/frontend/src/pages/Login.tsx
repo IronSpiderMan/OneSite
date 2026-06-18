@@ -59,8 +59,15 @@ export default function LoginPage() {
 
   return (
     <div className="flex items-center justify-center min-h-screen bg-transparent">
-      <Card className="w-full max-w-md">
+      <Card className="w-full max-w-md border-t-2 border-t-accent">
         <CardHeader className="space-y-1">
+          <div className="flex items-center justify-center gap-2 mb-2">
+            <div className="h-[1px] flex-1 bg-accent/30"></div>
+            <span className="text-[0.6rem] font-semibold uppercase tracking-[0.15em] text-muted-foreground">
+              {t('login.system_access', 'System Access')}
+            </span>
+            <div className="h-[1px] flex-1 bg-accent/30"></div>
+          </div>
           <CardTitle className="text-2xl font-bold text-center">{t('login.title')}</CardTitle>
           <CardDescription className="text-center">
             {t('login.description')}
@@ -95,8 +102,11 @@ export default function LoginPage() {
             </Button>
           </form>
         </CardContent>
-        <CardFooter className="text-sm text-center text-gray-500">
-          {t('login.demo')}
+        <CardFooter className="flex-col gap-2">
+          <div className="h-[1px] w-full bg-border"></div>
+          <p className="text-xs text-center text-muted-foreground">
+            {t('login.demo')}
+          </p>
         </CardFooter>
       </Card>
     </div>

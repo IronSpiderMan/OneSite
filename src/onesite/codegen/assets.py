@@ -270,6 +270,14 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
             shutil.copy2(src, dst)
             console.print(f"Synced backend {name}")
 
+    if "ttl_set" in site_config.get("plugins", []):
+        ttl_src = template_backend_root / "app" / "core" / "ttl_set.py"
+        ttl_dst = backend_path / "app" / "core" / "ttl_set.py"
+        if ttl_src.exists():
+            ttl_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(ttl_src, ttl_dst)
+            console.print("Synced backend ttl_set.py")
+
     initial_data_src = template_backend_root / "app" / "initial_data.py"
     initial_data_dst = backend_path / "app" / "initial_data.py"
     if initial_data_src.exists():

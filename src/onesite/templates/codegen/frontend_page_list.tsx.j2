@@ -641,9 +641,9 @@ const {{ model.name }}Page: React.FC = () => {
       {% endif %}
       {% endfor %}
       {% if ns.has_search_fields %}
-      <div className="rounded-md border bg-card p-4">
+      <div className="rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="text-sm font-medium">{t('common.filters', 'Filters')}</div>
+          <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button>
             <Button size="sm" type="button" onClick={applySearch}>{t('common.search')}</Button>
@@ -753,7 +753,7 @@ const {{ model.name }}Page: React.FC = () => {
       {% endif %}
 
 {% if not model.is_tree %}
-      <div className="border rounded-md">
+      <div className="border rounded-md border-t-2 border-t-accent/30">
         <Table>
           <TableHeader>
             <TableRow>
@@ -1027,7 +1027,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 {% else %}
       {/* Tree View — Lazy Loading */}
-      <div className="border rounded-md">
+      <div className="border rounded-md border-t-2 border-t-accent/30">
         {rootLoading && rootItems.length === 0 ? (
           <div className="h-24 text-center py-8">
             <Loader2 className="h-6 w-6 animate-spin mx-auto" />
