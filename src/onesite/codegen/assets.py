@@ -278,6 +278,14 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
             shutil.copy2(ttl_src, ttl_dst)
             console.print("Synced backend ttl_set.py")
 
+    if "site_logger" in site_config.get("plugins", []):
+        sl_src = template_backend_root / "app" / "core" / "site_logger.py"
+        sl_dst = backend_path / "app" / "core" / "site_logger.py"
+        if sl_src.exists():
+            sl_dst.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copy2(sl_src, sl_dst)
+            console.print("Synced backend site_logger.py")
+
     initial_data_src = template_backend_root / "app" / "initial_data.py"
     initial_data_dst = backend_path / "app" / "initial_data.py"
     if initial_data_src.exists():

@@ -1,10 +1,13 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useState } from 'react';
-import { Loader2, RefreshCw{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %} } from 'lucide-react';
+import { Loader2, RefreshCw{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
+{% if site_logger %}
+import { getAppLogs } from '../services/app_log';
+{% endif %}
 {% if scheduled_tasks %}
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
@@ -88,6 +91,10 @@ const DashboardPage: React.FC = () => {
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
     const [loading, setLoading] = useState(true);
     const [chartPeriods, setChartPeriods] = useState<Record<string, { period: string; startTime: string; endTime: string }>>({});
+    {% if site_logger %}
+    const [logEntries, setLogEntries] = useState<any[]>([]);
+    const [logLevel, setLogLevel] = useState<string>('');
+    {% endif %}
     {% if scheduled_tasks %}
     const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
 
@@ -133,6 +140,35 @@ const DashboardPage: React.FC = () => {
 
         fetchAllStats();
     }, [chartPeriods]);
+
+    {% if site_logger %}
+    useEffect(() => {
+        const fetchLogs = async () => {
+            try {
+                const filters: Record<string, any> = {};
+                if (logLevel) filters.level = logLevel;
+                const data = await getAppLogs(1, 50, filters);
+                const items = Array.isArray(data) ? data : (data.items || data.data || []);
+                setLogEntries(items.reverse());
+            } catch (error) {
+                console.error('Failed to fetch logs:', error);
+            }
+        };
+        fetchLogs();
+
+        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+        const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/v1/ws`);
+        ws.onmessage = (event) => {
+            try {
+                const msg = JSON.parse(event.data);
+                if (msg.type === 'site_log') {
+                    setLogEntries(prev => [...prev.slice(-199), msg.data]);
+                }
+            } catch {}
+        };
+        return () => ws.close();
+    }, [logLevel]);
+    {% endif %}
 
     {% if scheduled_tasks %}
     useEffect(() => {
@@ -207,7 +243,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0 {% if scheduled_tasks %}&& tasks.length === 0{% endif %}) {
+    if (chartModels.length === 0 {% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -441,6 +477,84 @@ const DashboardPage: React.FC = () => {
                     ))}
                 </div>
             )}
+
+            {% if site_logger %}
+            {/* Log Panel */}
+            <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
+                <div className="flex items-center justify-between mb-4">
+                    <div className="flex items-center gap-2">
+                        <Terminal className="w-5 h-5" />
+                        <h3 className="text-lg font-semibold">
+                            {t('dashboard.app_logs', 'Application Logs')}
+                        </h3>
+                    </div>
+                    <div className="flex items-center gap-2">
+                        <select
+                            className="border rounded-md px-2 py-1.5 text-xs"
+                            value={logLevel}
+                            onChange={(e) => setLogLevel(e.target.value)}
+                        >
+                            <option value="">{t('dashboard.all_levels', 'All Levels')}</option>
+                            <option value="DEBUG">DEBUG</option>
+                            <option value="INFO">INFO</option>
+                            <option value="WARNING">WARNING</option>
+                            <option value="ERROR">ERROR</option>
+                        </select>
+                        <Button variant="outline" size="sm" onClick={() => {
+                            const filters: Record<string, any> = {};
+                            if (logLevel) filters.level = logLevel;
+                            getAppLogs(1, 50, filters).then(data => {
+                                const items = Array.isArray(data) ? data : (data.items || data.data || []);
+                                setLogEntries(items.reverse());
+                            });
+                        }}>
+                            <RefreshCw className="w-4 h-4" />
+                        </Button>
+                    </div>
+                </div>
+                <div className="rounded-md border bg-muted/30 overflow-hidden">
+                    <div className="max-h-80 overflow-y-auto font-mono text-xs">
+                        {logEntries.length === 0 ? (
+                            <div className="p-4 text-center text-muted-foreground">
+                                {t('dashboard.no_logs', 'No log entries')}
+                            </div>
+                        ) : (
+                            <table className="w-full">
+                                <thead className="sticky top-0 bg-muted/50">
+                                    <tr className="text-left">
+                                        <th className="px-3 py-2 font-medium">Time</th>
+                                        <th className="px-3 py-2 font-medium">Level</th>
+                                        <th className="px-3 py-2 font-medium">Source</th>
+                                        <th className="px-3 py-2 font-medium">Message</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {logEntries.map((entry, idx) => (
+                                        <tr key={entry.id || idx} className="border-t border-border/50 hover:bg-muted/20">
+                                            <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
+                                                {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : ''}
+                                            </td>
+                                            <td className="px-3 py-1.5">
+                                                <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
+                                                    entry.level === 'ERROR' ? 'bg-red-100 text-red-700' :
+                                                    entry.level === 'WARNING' ? 'bg-yellow-100 text-yellow-700' :
+                                                    entry.level === 'INFO' ? 'bg-blue-100 text-blue-700' :
+                                                    'bg-gray-100 text-gray-500'
+                                                }`}>
+                                                    {entry.level}
+                                                </span>
+                                            </td>
+                                            <td className="px-3 py-1.5 text-muted-foreground">{entry.source}</td>
+                                            <td className="px-3 py-1.5 break-all">{entry.message}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        )}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
 
             {% if scheduled_tasks %}
             {/* Scheduled Tasks Section */}

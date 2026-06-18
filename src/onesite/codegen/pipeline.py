@@ -37,6 +37,11 @@ def generate_code() -> None:
     # Phase 2 — Generate model tables (into models/, before sync so they are picked up)
     phase_model_tables.phase_generate_model_tables(cwd, backend_path)
 
+    # Phase 2.1 — Generate plugin models (into models/, before sync)
+    if "site_logger" in site_config.get("plugins", []):
+        from .render import generate_file as _gf
+        _gf("app_log.py.j2", {}, cwd / "models" / "app_log.py")
+
     # Phase 2.5 — Sync model files (copies generated + user models to backend)
     phase_sync_models.phase_sync_models(cwd, backend_path)
 

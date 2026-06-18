@@ -339,9 +339,10 @@ def phase_generate_aggregated(
         {"models": frontend_models, "used_icons": used_icons},
         cwd / "frontend" / "src" / "Menu.tsx",
     )
+    site_logger_enabled = "site_logger" in site_config.get("plugins", [])
     generate_file(
         "dashboard_page.tsx.j2",
-        {"models": frontend_models, "scheduled_tasks": scheduled_tasks},
+        {"models": frontend_models, "scheduled_tasks": scheduled_tasks, "site_logger": site_logger_enabled},
         cwd / "frontend" / "src" / "pages" / "Dashboard.tsx",
     )
 
