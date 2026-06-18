@@ -7,6 +7,7 @@ export interface Task {
   interval: number;  // 0 means cron task, >0 means interval in seconds
   description: string;
   enabled: boolean;
+  params: Record<string, { type: string; default: string | number | boolean | string[]; label: string; value: string | number | boolean | string[] }>;
   next_run: string | null;
 }
 
@@ -15,6 +16,7 @@ export interface TaskUpdate {
   interval?: number;
   description?: string;
   enabled?: boolean;
+  params?: Record<string, string | number | boolean | string[]>;
 }
 
 export async function getTasks(): Promise<Task[]> {

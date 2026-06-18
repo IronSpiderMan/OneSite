@@ -2,8 +2,11 @@
 # Description: {{ task.description }}
 from app.core.scheduler import task_registry
 
+{% set params = task.params | default({}) %}
+{% macro py_type(pdef) %}{% if pdef.type == 'string' %}str{% elif pdef.type == 'number' %}int{% elif pdef.type == 'boolean' %}bool{% elif pdef.type == 'list' %}list{% else %}str{% endif %}{% endmacro %}
+{% macro default_val(pdef) %}{% if pdef.type == 'string' %}"{{ pdef.default }}"{% elif pdef.type == 'number' %}{{ pdef.default }}{% elif pdef.type == 'boolean' %}{{ pdef.default }}{% elif pdef.type == 'list' %}{{ pdef.default }}{% else %}"{{ pdef.default }}"{% endif %}{% endmacro %}
 
-async def {{ task.name }}():
+async def {{ task.name }}({% for pname, pdef in params.items() %}{{ pname }}: {{ py_type(pdef) }} = {{ default_val(pdef) }}{% if not loop.last %}, {% endif %}{% endfor %}):
     """
     {{ task.description }}
     """
@@ -19,4 +22,9 @@ task_registry.register({
     "interval": {{ task.interval | default(0) }},
     "description": "{{ task.description }}",
     "enabled": {{ True if task.enabled else False }},
+    "params": {
+{%- for pname, pdef in params.items() %}
+        "{{ pname }}": {"type": "{{ pdef.type }}", "default": {{ default_val(pdef) }}, "label": "{{ pdef.label | default(pname) }}", "value": {{ default_val(pdef) }}}{% if not loop.last %},{% endif %}
+{%- endfor %}
+    },
 })

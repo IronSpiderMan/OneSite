@@ -1,5 +1,8 @@
 import asyncio
+import json
+import os
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Callable, Dict, List, Optional
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -8,11 +11,50 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 
 class TaskRegistry:
-    """Memory-only task registry - state is lost on restart"""
+    """Task registry with JSON persistence"""
 
     def __init__(self):
         self._tasks: Dict[str, dict] = {}
         self._scheduler = AsyncIOScheduler()
+        default_path = Path(__file__).resolve().parent.parent.parent / "tasks_state.json"
+        self._state_file = Path(os.environ.get("TASKS_STATE_FILE", str(default_path)))
+
+    def load_state(self):
+        """Load persisted task state and merge into registered tasks."""
+        if not self._state_file.exists():
+            return
+        try:
+            with open(self._state_file, "r", encoding="utf-8") as f:
+                saved = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+        for name, state in saved.items():
+            if name in self._tasks:
+                self._tasks[name].update({
+                    "cron": state.get("cron", self._tasks[name]["cron"]),
+                    "interval": state.get("interval", self._tasks[name]["interval"]),
+                    "description": state.get("description", self._tasks[name]["description"]),
+                    "enabled": state.get("enabled", self._tasks[name]["enabled"]),
+                    "params": state.get("params", self._tasks[name].get("params", {})),
+                })
+
+    def save_state(self):
+        """Persist current task state to JSON file."""
+        data = {}
+        for name, t in self._tasks.items():
+            data[name] = {
+                "cron": t["cron"],
+                "interval": t["interval"],
+                "description": t.get("description", ""),
+                "enabled": t["enabled"],
+                "params": t.get("params", {}),
+            }
+        try:
+            self._state_file.parent.mkdir(parents=True, exist_ok=True)
+            with open(self._state_file, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+        except OSError as e:
+            print(f"Failed to save task state: {e}")
 
     def _resolve_func(self, func_path: str) -> Callable:
         """Resolve function path like 'app.tasks.alarm:daily_summary'"""
@@ -21,14 +63,19 @@ class TaskRegistry:
         module = importlib.import_module(module_path)
         return getattr(module, func_name)
 
-    def _make_wrapper(self, func_path: str):
+    def _get_param_values(self, params: Dict[str, dict]) -> Dict[str, Any]:
+        """Extract current param values from params dict."""
+        return {k: v["value"] for k, v in params.items()}
+
+    def _make_wrapper(self, func_path: str, params: Dict[str, dict]):
         """Create a wrapper function that resolves the target function at call time."""
         async def wrapper():
             func = self._resolve_func(func_path)
+            kwargs = self._get_param_values(params)
             if asyncio.iscoroutinefunction(func):
-                await func()
+                await func(**kwargs)
             else:
-                func()
+                func(**kwargs)
         return wrapper
 
     def register(self, config: dict) -> bool:
@@ -43,6 +90,7 @@ class TaskRegistry:
             "interval": config.get("interval", 0),  # 0 means cron task, >0 means interval in seconds
             "description": config.get("description", ""),
             "enabled": config.get("enabled", True),
+            "params": config.get("params", {}),
             "_job": None,
         }
 
@@ -61,7 +109,7 @@ class TaskRegistry:
                 pass
 
         try:
-            wrapper = self._make_wrapper(task["func_path"])
+            wrapper = self._make_wrapper(task["func_path"], task.get("params", {}))
             if task["interval"] > 0:
                 # Interval task
                 job = self._scheduler.add_job(
@@ -87,6 +135,7 @@ class TaskRegistry:
         if name not in self._tasks:
             return False
         self._tasks[name]["enabled"] = True
+        self.save_state()
         if self._scheduler.running:
             self._add_to_scheduler(name)
         return True
@@ -102,6 +151,7 @@ class TaskRegistry:
             except Exception:
                 pass
             self._tasks[name]["_job"] = None
+        self.save_state()
         return True
 
     def update_cron(self, name: str, cron: str) -> bool:
@@ -110,6 +160,7 @@ class TaskRegistry:
             return False
         self._tasks[name]["cron"] = cron
         self._tasks[name]["interval"] = 0  # Switch to cron mode
+        self.save_state()
         if self._tasks[name]["enabled"] and self._scheduler.running:
             self._add_to_scheduler(name)
         return True
@@ -121,6 +172,7 @@ class TaskRegistry:
         self._tasks[name]["interval"] = interval
         if interval > 0:
             self._tasks[name]["cron"] = ""  # Clear cron when using interval
+        self.save_state()
         if self._tasks[name]["enabled"] and self._scheduler.running:
             self._add_to_scheduler(name)
         return True
@@ -130,6 +182,18 @@ class TaskRegistry:
         if name not in self._tasks:
             return False
         self._tasks[name]["description"] = description
+        self.save_state()
+        return True
+
+    def update_params(self, name: str, new_values: Dict[str, Any]) -> bool:
+        """Update task param runtime values. Only updates 'value' key, preserves type/label/default."""
+        if name not in self._tasks:
+            return False
+        params = self._tasks[name].get("params", {})
+        for key, val in new_values.items():
+            if key in params:
+                params[key]["value"] = val
+        self.save_state()
         return True
 
     def _format_next_run(self, job) -> Optional[str]:
@@ -151,6 +215,7 @@ class TaskRegistry:
                 "interval": t["interval"],
                 "description": t.get("description", ""),
                 "enabled": t["enabled"],
+                "params": t.get("params", {}),
                 "next_run": self._format_next_run(t["_job"]) if t["_job"] else None,
             }
             for t in self._tasks.values()
@@ -168,6 +233,7 @@ class TaskRegistry:
             "interval": t["interval"],
             "description": t.get("description", ""),
             "enabled": t["enabled"],
+            "params": t.get("params", {}),
             "next_run": self._format_next_run(t["_job"]) if t["_job"] else None,
         }
 
@@ -176,14 +242,16 @@ class TaskRegistry:
         if name not in self._tasks:
             return False
         func = self._resolve_func(self._tasks[name]["func_path"])
+        kwargs = self._get_param_values(self._tasks[name].get("params", {}))
         if asyncio.iscoroutinefunction(func):
-            await func()
+            await func(**kwargs)
         else:
-            func()
+            func(**kwargs)
         return True
 
     def start(self):
         """Start the scheduler and add all enabled tasks"""
+        self.load_state()
         if not self._scheduler.running:
             self._scheduler.start()
         for name in self._tasks:

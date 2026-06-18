@@ -179,12 +179,10 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     generate_file("backend_config.py.j2", {"config": site_config}, backend_path / "app" / "core" / "config.py")
     generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
 
-    # Sync scheduler if not exists (tasks depend on it)
-    scheduler_src = template_backend_root / "app" / "core" / "scheduler.py.j2"
+    # Always sync scheduler (no user-edited code, purely infra)
     scheduler_dst = backend_path / "app" / "core" / "scheduler.py"
-    if not scheduler_dst.exists():
-        generate_file("scheduler.py.j2", {}, scheduler_dst)
-        console.print("Generated scheduler.py")
+    generate_file("scheduler.py.j2", {}, scheduler_dst)
+    console.print("Synced scheduler.py")
 
     # Generate tasks API endpoint
     if site_config.get("scheduled_tasks"):

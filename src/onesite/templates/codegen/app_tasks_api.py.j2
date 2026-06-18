@@ -13,6 +13,7 @@ class TaskUpdate(BaseModel):
     interval: int | None = None  # 0 means cron task, >0 means interval in seconds
     description: str | None = None
     enabled: bool | None = None
+    params: dict[str, Any] | None = None
 
 
 @router.get("/tasks/")
@@ -74,5 +75,8 @@ def update_task(name: str, config: TaskUpdate) -> dict[str, str]:
             task_registry.enable(name)
         else:
             task_registry.disable(name)
+
+    if config.params is not None:
+        task_registry.update_params(name, config.params)
 
     return {"status": "ok", "message": f"Task '{name}' updated"}
