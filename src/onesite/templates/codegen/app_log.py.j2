@@ -18,11 +18,11 @@ class AppLog(SQLModel, table=True):
         "translations": {
             "zh": {"name": "应用日志", "fields": {
                 "level": "级别", "message": "消息", "source": "来源",
-                "timestamp": "时间", "user_id": "用户",
+                "created_at": "时间", "user_id": "用户",
             }},
             "en": {"name": "App Log", "fields": {
                 "level": "Level", "message": "Message", "source": "Source",
-                "timestamp": "Time", "user_id": "User",
+                "created_at": "Time", "user_id": "User",
             }},
         },
     }
@@ -36,7 +36,7 @@ class AppLog(SQLModel, table=True):
         default="",
         sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}}
     )
-    timestamp: datetime = Field(
+    created_at: datetime = Field(
         default_factory=lambda: datetime.now(timezone.utc)
     )
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")

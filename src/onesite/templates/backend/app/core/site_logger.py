@@ -29,7 +29,7 @@ class SiteLogger:
                         "level": entry.level,
                         "message": entry.message,
                         "source": entry.source,
-                        "timestamp": entry.timestamp.isoformat(),
+                        "created_at": entry.created_at.isoformat(),
                     },
                 }
             )

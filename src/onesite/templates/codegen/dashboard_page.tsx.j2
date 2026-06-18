@@ -1,5 +1,5 @@
 // frontend/src/pages/Dashboard.tsx
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -7,6 +7,8 @@ import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 {% if site_logger %}
 import { getAppLogs } from '../services/app_log';
+import { buildNotificationWsUrl } from '../services/notification-center';
+import { formatDateTime, getUserTimeZone } from '../lib/datetime';
 {% endif %}
 {% if scheduled_tasks %}
 import { Input } from '../components/ui/input';
@@ -94,6 +96,13 @@ const DashboardPage: React.FC = () => {
     {% if site_logger %}
     const [logEntries, setLogEntries] = useState<any[]>([]);
     const [logLevel, setLogLevel] = useState<string>('');
+    const [newEntryIds, setNewEntryIds] = useState<Set<number>>(new Set());
+    const [logPage, setLogPage] = useState(1);
+    const [hasMoreLogs, setHasMoreLogs] = useState(true);
+    const [logLoading, setLogLoading] = useState(false);
+    const logScrollRef = useRef<HTMLDivElement>(null);
+    const timeZone = getUserTimeZone();
+    const logInitialized = useRef(false);
     {% endif %}
     {% if scheduled_tasks %}
     const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
@@ -142,32 +151,104 @@ const DashboardPage: React.FC = () => {
     }, [chartPeriods]);
 
     {% if site_logger %}
-    useEffect(() => {
-        const fetchLogs = async () => {
-            try {
-                const filters: Record<string, any> = {};
-                if (logLevel) filters.level = logLevel;
-                const data = await getAppLogs(1, 50, filters);
-                const items = Array.isArray(data) ? data : (data.items || data.data || []);
-                setLogEntries(items.reverse());
-            } catch (error) {
-                console.error('Failed to fetch logs:', error);
+    const loadLogs = async (page: number, append = false) => {
+        if (logLoading) return;
+        setLogLoading(true);
+        try {
+            const filters: Record<string, any> = {};
+            if (logLevel) filters.level = logLevel;
+            const data = await getAppLogs(page, 50, filters);
+            const items: any[] = Array.isArray(data) ? data : (data.items || data.data || []);
+            const total = data.total_pages || 1;
+            // Backend returns desc (newest first), reverse for chronological display
+            const sorted = items.slice().reverse();
+            if (append) {
+                setLogEntries(prev => [...sorted, ...prev]);
+            } else {
+                setLogEntries(sorted);
             }
-        };
-        fetchLogs();
+            setLogPage(page);
+            setHasMoreLogs(page < total);
+        } catch (error) {
+            console.error('Failed to fetch logs:', error);
+        } finally {
+            setLogLoading(false);
+        }
+    };
 
-        const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-        const ws = new WebSocket(`${wsProtocol}//${window.location.host}/api/v1/ws`);
-        ws.onmessage = (event) => {
-            try {
-                const msg = JSON.parse(event.data);
-                if (msg.type === 'site_log') {
-                    setLogEntries(prev => [...prev.slice(-199), msg.data]);
-                }
-            } catch {}
-        };
-        return () => ws.close();
+    useEffect(() => {
+        setLogEntries([]);
+        setLogPage(1);
+        setHasMoreLogs(true);
+        logInitialized.current = false;
+        loadLogs(1).then(() => {
+            setTimeout(() => {
+                logScrollRef.current?.scrollTo({ top: logScrollRef.current.scrollHeight });
+                logInitialized.current = true;
+            }, 50);
+        });
     }, [logLevel]);
+
+    const handleLogScroll = () => {
+        const el = logScrollRef.current;
+        if (!el || logLoading || !hasMoreLogs || !logInitialized.current) return;
+        if (el.scrollTop < 24) {
+            const prevHeight = el.scrollHeight;
+            loadLogs(logPage + 1, true).then(() => {
+                setTimeout(() => {
+                    const newHeight = el.scrollHeight;
+                    el.scrollTop = newHeight - prevHeight;
+                }, 50);
+            });
+        }
+    };
+
+    useEffect(() => {
+        let ws: WebSocket | null = null;
+        let retryCount = 0;
+        let timeoutId: ReturnType<typeof setTimeout>;
+
+        const connect = () => {
+            const url = buildNotificationWsUrl();
+            if (!url) return;
+
+            ws = new WebSocket(url);
+            ws.onopen = () => { retryCount = 0; };
+            ws.onmessage = (event) => {
+                try {
+                    const msg = JSON.parse(event.data);
+                    if (msg.type === 'site_log' && msg.data?.id) {
+                        setLogEntries(prev => [...prev.slice(-199), msg.data]);
+                        setNewEntryIds(prev => new Set(prev).add(msg.data.id));
+                        setTimeout(() => {
+                            setNewEntryIds(prev => {
+                                const next = new Set(prev);
+                                next.delete(msg.data.id);
+                                return next;
+                            });
+                        }, 2000);
+                        setTimeout(() => {
+                            const el = logScrollRef.current;
+                            if (el && el.scrollHeight - el.scrollTop - el.clientHeight < 100) {
+                                el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+                            }
+                        }, 50);
+                    }
+                } catch {}
+            };
+            ws.onclose = () => {
+                const delay = Math.min(1000 * Math.pow(2, retryCount), 30000);
+                timeoutId = setTimeout(() => { retryCount++; connect(); }, delay);
+            };
+            ws.onerror = () => ws?.close();
+        };
+
+        connect();
+        return () => {
+            if (timeoutId) clearTimeout(timeoutId);
+            if (ws) { ws.onclose = null; ws.close(); }
+        };
+    }, []);
     {% endif %}
 
     {% if scheduled_tasks %}
@@ -405,6 +486,16 @@ const DashboardPage: React.FC = () => {
 
     return (
         <div className="space-y-6">
+            {% if site_logger %}
+            <style>{`
+                @keyframes log-highlight {
+                    0% { background-color: rgb(59 130 246 / 0.3); box-shadow: inset 4px 0 0 0 rgb(59 130 246); }
+                    50% { background-color: rgb(59 130 246 / 0.15); }
+                    100% { background-color: transparent; box-shadow: inset 0 0 0 0 transparent; }
+                }
+                .log-new { animation: log-highlight 2s ease-out forwards; }
+            `}</style>
+            {% endif %}
             <div className="flex items-center justify-between">
                 <h1 className="text-3xl font-bold tracking-tight">
                     {t('menu.dashboard', 'Dashboard')}
@@ -501,11 +592,15 @@ const DashboardPage: React.FC = () => {
                             <option value="ERROR">ERROR</option>
                         </select>
                         <Button variant="outline" size="sm" onClick={() => {
-                            const filters: Record<string, any> = {};
-                            if (logLevel) filters.level = logLevel;
-                            getAppLogs(1, 50, filters).then(data => {
-                                const items = Array.isArray(data) ? data : (data.items || data.data || []);
-                                setLogEntries(items.reverse());
+                            setLogEntries([]);
+                            setLogPage(1);
+                            setHasMoreLogs(true);
+                            logInitialized.current = false;
+                            loadLogs(1).then(() => {
+                                setTimeout(() => {
+                                    logScrollRef.current?.scrollTo({ top: logScrollRef.current.scrollHeight });
+                                    logInitialized.current = true;
+                                }, 50);
                             });
                         }}>
                             <RefreshCw className="w-4 h-4" />
@@ -513,14 +608,14 @@ const DashboardPage: React.FC = () => {
                     </div>
                 </div>
                 <div className="rounded-md border bg-muted/30 overflow-hidden">
-                    <div className="max-h-80 overflow-y-auto font-mono text-xs">
+                    <div ref={logScrollRef} onScroll={handleLogScroll} className="max-h-80 overflow-y-auto font-mono text-xs">
                         {logEntries.length === 0 ? (
                             <div className="p-4 text-center text-muted-foreground">
                                 {t('dashboard.no_logs', 'No log entries')}
                             </div>
                         ) : (
                             <table className="w-full">
-                                <thead className="sticky top-0 bg-muted/50">
+                                <thead className="sticky top-0 bg-muted z-10">
                                     <tr className="text-left">
                                         <th className="px-3 py-2 font-medium">Time</th>
                                         <th className="px-3 py-2 font-medium">Level</th>
@@ -529,10 +624,17 @@ const DashboardPage: React.FC = () => {
                                     </tr>
                                 </thead>
                                 <tbody>
+                                    {logLoading && hasMoreLogs && (
+                                        <tr>
+                                            <td colSpan={4} className="p-2 text-center">
+                                                <Loader2 className="w-4 h-4 animate-spin inline-block text-muted-foreground" />
+                                            </td>
+                                        </tr>
+                                    )}
                                     {logEntries.map((entry, idx) => (
-                                        <tr key={entry.id || idx} className="border-t border-border/50 hover:bg-muted/20">
+                                        <tr key={entry.id || idx} className={`border-t border-border/50 hover:bg-muted/20${entry.id && newEntryIds.has(entry.id) ? ' log-new' : ''}`}>
                                             <td className="px-3 py-1.5 whitespace-nowrap text-muted-foreground">
-                                                {entry.timestamp ? new Date(entry.timestamp).toLocaleTimeString() : ''}
+                                                {entry.created_at ? formatDateTime(entry.created_at, timeZone) : ''}
                                             </td>
                                             <td className="px-3 py-1.5">
                                                 <span className={`px-1.5 py-0.5 rounded text-xs font-medium ${
