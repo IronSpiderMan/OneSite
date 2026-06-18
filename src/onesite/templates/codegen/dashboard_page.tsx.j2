@@ -569,8 +569,7 @@ const DashboardPage: React.FC = () => {
                         onClick={handleRefresh}
                         disabled={taskLoading}
                     >
-                        <RefreshCw className={`w-4 h-4 mr-1 ${taskLoading ? 'animate-spin' : ''}`} />
-                        {t('common.refresh', 'Refresh')}
+                        <RefreshCw className={`w-4 h-4 ${taskLoading ? 'animate-spin' : ''}`} />
                     </Button>
                 </div>
 
