@@ -1,5 +1,7 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+import json
+from pydantic import model_validator
 from sqlmodel import SQLModel, Field
 from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
 
@@ -15,14 +17,41 @@ from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in m
 # Shared properties
 class {{ model.name }}Base(SQLModel):
 {% set ns = namespace(has_field=false) %}
+{% set ns_json_fields = namespace(fields=[]) %}
 {% for field in model.fields %}
     {% if 'r' in field.permissions and field.name != 'id' %}
     {{ field.name }}: {{ field.type }}
     {% set ns.has_field = true %}
+    {% if field.ui_type == 'json' and field.type not in ('Dict[str, Any]', 'Any', 'dict') %}
+    {% set ns_json_fields.fields = ns_json_fields.fields + [field.name] %}
+    {% endif %}
     {% endif %}
 {% endfor %}
 {% if not ns.has_field %}
     pass
+{% endif %}
+{% if ns_json_fields.fields %}
+    @model_validator(mode='before')
+    @classmethod
+    def _parse_json_fields(cls, data: Any) -> Any:
+        _fields = {{ ns_json_fields.fields }}
+        if isinstance(data, dict):
+            for f in _fields:
+                val = data.get(f)
+                if isinstance(val, str):
+                    try:
+                        data[f] = json.loads(val)
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+        elif hasattr(data, '__dict__'):
+            for f in _fields:
+                val = getattr(data, f, None)
+                if isinstance(val, str):
+                    try:
+                        setattr(data, f, json.loads(val))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+        return data
 {% endif %}
 
 

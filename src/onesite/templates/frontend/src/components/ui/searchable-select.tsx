@@ -19,6 +19,7 @@ import {
 export interface SearchableSelectProps {
   value?: string | number | (string | number)[]
   onValueChange: (value: string | number | (string | number)[]) => void
+  onLabelChange?: (label: string) => void
   placeholder?: string
   searchPlaceholder?: string
   emptyText?: string
@@ -31,6 +32,7 @@ export interface SearchableSelectProps {
 export function SearchableSelect({
   value,
   onValueChange,
+  onLabelChange,
   placeholder = "Select item...",
   searchPlaceholder = "Search...",
   emptyText = "No item found.",
@@ -121,6 +123,7 @@ export function SearchableSelect({
     } else {
         onValueChange(optionValue)
         setSelectedLabel(optionLabel)
+        onLabelChange?.(optionLabel)
         setOpen(false)
     }
   }

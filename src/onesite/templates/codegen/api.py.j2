@@ -242,10 +242,22 @@ async def get_{{ model.lower_name }}_stats(
     start_time: Optional[str] = Query(None, description="Start time (ISO format, e.g. 2024-01-01)"),
     end_time: Optional[str] = Query(None, description="End time (ISO format, e.g. 2024-12-31)"),
     {% endif %}
+    {% if model.visualize.get('resolved_filters') %}
+    {% for rf in model.visualize.resolved_filters %}
+    {{ rf.filter_key }}: Optional[str] = Query(None, description="Filter by {{ rf.name }}"),
+    {% endfor %}
+    {% endif %}
 ) -> Any:
     """
     Get statistics for {{ model.name }} visualization.
     """
+    {% if model.visualize.get('resolved_filters') %}
+    filters = {}
+    {% for rf in model.visualize.resolved_filters %}
+    if {{ rf.filter_key }}:
+        filters["{{ rf.filter_key }}"] = {{ rf.filter_key }}
+    {% endfor %}
+    {% endif %}
     return await service.get_stats(
         session,
         label_field="{{ model.visualize.get('label_field', 'id') }}",
@@ -257,7 +269,23 @@ async def get_{{ model.lower_name }}_stats(
         start_time=start_time,
         end_time=end_time,
         {% endif %}
+        {% if model.visualize.get('resolved_filters') %}
+        filters=filters if filters else None,
+        {% endif %}
     )
+
+{% if model.visualize.get('resolved_filters') %}
+@router.get("/stats/filters")
+async def get_{{ model.lower_name }}_stats_filters(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    filter_name: str = Query(..., description="Filter name"),
+) -> Any:
+    """
+    Get available filter options for {{ model.name }} visualization.
+    """
+    return await service.get_filter_options(session, filter_name=filter_name)
+{% endif %}
 {% endif %}
 
 {% if not model.is_timescaledb %}

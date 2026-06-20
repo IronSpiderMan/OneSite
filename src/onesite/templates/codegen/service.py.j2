@@ -700,11 +700,12 @@ class {{ model.name }}Service:
         start_time: Optional[str] = None,
         end_time: Optional[str] = None,
         {% endif %}
+        filters: dict[str, Any] | None = None,
     ) -> dict:
         """
         Get statistics for {{ model.name }} visualization.
         """
-        from sqlalchemy import func, extract, case, cast, String
+        from sqlalchemy import func, extract, case, cast, String, text
         from datetime import datetime, timedelta, timezone
 
         model = {{ model.name }}
@@ -809,6 +810,52 @@ class {{ model.name }}Service:
             else:
                 stmt = stmt.group_by(date_trunc).order_by(date_trunc)
 
+            {% if model.visualize.get('resolved_filters') %}
+            # Apply visualize filters
+            if filters:
+                # Import all models needed for filter joins
+                {% set _imported = namespace(models=[]) %}
+                {% for join in model.visualize.global_joins %}
+                {% if join.model_name not in _imported.models %}
+                from app.models.{{ join.source_module }} import {{ join.model_name }}
+                {% set _imported.models = _imported.models + [join.model_name] %}
+                {% endif %}
+                {% endfor %}
+                {% for rf in model.visualize.resolved_filters %}
+                {% for join in rf.new_joins %}
+                {% if join.model_name not in _imported.models %}
+                from app.models.{{ join.source_module }} import {{ join.model_name }}
+                {% set _imported.models = _imported.models + [join.model_name] %}
+                {% endif %}
+                {% endfor %}
+                {% if rf.filter_model_class not in _imported.models %}
+                from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }}
+                {% set _imported.models = _imported.models + [rf.filter_model_class] %}
+                {% endif %}
+                {% endfor %}
+
+                # Apply shared path joins once
+                _any_filter = False
+                {% for rf in model.visualize.resolved_filters %}
+                if filters.get("{{ rf.filter_key }}") and filters["{{ rf.filter_key }}"]:
+                    _any_filter = True
+                {% endfor %}
+                if _any_filter:
+                    {% for join in model.visualize.global_joins %}
+                    stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
+                    {% endfor %}
+
+                # Per-filter additional joins and WHERE conditions
+                {% for rf in model.visualize.resolved_filters %}
+                if filters.get("{{ rf.filter_key }}") and filters["{{ rf.filter_key }}"]:
+                    _filter_val = filters["{{ rf.filter_key }}"]
+                    {% for join in rf.new_joins %}
+                    stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
+                    {% endfor %}
+                    stmt = stmt.where(text('{{ rf.fk_col }} = :_fv{{ loop.index }}').bindparams(**{"_fv{{ loop.index }}": _filter_val}))
+                {% endfor %}
+            {% endif %}
+
             result = await session.exec(stmt)
             rows = result.all()
 
@@ -883,6 +930,52 @@ class {{ model.name }}Service:
         else:
             stmt = select(label_col, func.count(model.id)).group_by(label_col)
 
+        {% if model.visualize.get('resolved_filters') %}
+        # Apply visualize filters
+        if filters:
+            # Import all models needed for filter joins
+            {% set _imported = namespace(models=[]) %}
+            {% for join in model.visualize.global_joins %}
+            {% if join.model_name not in _imported.models %}
+            from app.models.{{ join.source_module }} import {{ join.model_name }}
+            {% set _imported.models = _imported.models + [join.model_name] %}
+            {% endif %}
+            {% endfor %}
+            {% for rf in model.visualize.resolved_filters %}
+            {% for join in rf.new_joins %}
+            {% if join.model_name not in _imported.models %}
+            from app.models.{{ join.source_module }} import {{ join.model_name }}
+            {% set _imported.models = _imported.models + [join.model_name] %}
+            {% endif %}
+            {% endfor %}
+            {% if rf.filter_model_class not in _imported.models %}
+            from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }}
+            {% set _imported.models = _imported.models + [rf.filter_model_class] %}
+            {% endif %}
+            {% endfor %}
+
+            # Apply shared path joins once
+            _any_filter = False
+            {% for rf in model.visualize.resolved_filters %}
+            if filters.get("{{ rf.filter_key }}") and filters["{{ rf.filter_key }}"]:
+                _any_filter = True
+            {% endfor %}
+            if _any_filter:
+                {% for join in model.visualize.global_joins %}
+                stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
+                {% endfor %}
+
+            # Per-filter additional joins and WHERE conditions
+            {% for rf in model.visualize.resolved_filters %}
+            if filters.get("{{ rf.filter_key }}") and filters["{{ rf.filter_key }}"]:
+                _filter_val = filters["{{ rf.filter_key }}"]
+                {% for join in rf.new_joins %}
+                stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
+                {% endfor %}
+                stmt = stmt.where(text('{{ rf.fk_col }} = :_fv{{ loop.index }}').bindparams(**{"_fv{{ loop.index }}": _filter_val}))
+            {% endfor %}
+        {% endif %}
+
         result = await session.exec(stmt)
         rows = result.all()
 
@@ -903,6 +996,53 @@ class {{ model.name }}Service:
             "title": "{{ model.visualize.get('title', model.name + ' Statistics') }}",
         }
         {% endif %}
+
+    {% if model.visualize.get('resolved_filters') %}
+    async def get_filter_options(
+        self,
+        session: AsyncSession,
+        *,
+        filter_name: str,
+    ) -> list[dict]:
+        """Get available filter options for visualize filters."""
+        from sqlalchemy import text
+
+        resolved_filters = {{ model.visualize.resolved_filters }}
+        flt = next((f for f in resolved_filters if f["name"] == filter_name), None)
+        if not flt:
+            return []
+
+        # Import the filter model
+        {% for rf in model.visualize.resolved_filters %}
+        if filter_name == "{{ rf.name }}":
+            from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }} as FilterModel
+            {% for join in rf.joins %}
+            from app.models.{{ join.source_module }} import {{ join.model_name }}
+            {% endfor %}
+
+            stmt = select(
+                FilterModel.id,
+                getattr(FilterModel, "{{ rf.filter_label_field }}")
+            )
+
+            {% if rf.joins %}
+            # Join through path tables to ensure only reachable options
+            from app.models.{{ model.source_module }} import {{ model.name }}
+            stmt = stmt.select_from({{ model.name }})
+            {% for join in rf.joins %}
+            stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
+            {% endfor %}
+            # Final join to filter model
+            stmt = stmt.join(FilterModel, text('{{ rf.fk_col }} = {{ rf.filter_id_col }}'))
+            {% endif %}
+
+            stmt = stmt.distinct().order_by(getattr(FilterModel, "{{ rf.filter_label_field }}"))
+            result = await session.exec(stmt)
+            return [{"id": row[0], "label": str(row[1])} for row in result.all()]
+        {% endfor %}
+
+        return []
+    {% endif %}
     {% endif %}
 {% endif %}
 

@@ -75,19 +75,40 @@ export interface {{ model.name }}Stats {
     title: string;
 }
 
-export const get{{ model.name }}Stats = async ({% if model.visualize.get('time_field') %}period?: string, startTime?: string, endTime?: string{% endif %}) => {
+export const get{{ model.name }}Stats = async (
+    {% if model.visualize.get('time_field') %}period?: string, startTime?: string, endTime?: string{% endif %}{% if model.visualize.get('resolved_filters') %}{% if model.visualize.get('time_field') %}, {% endif %}filters?: Record<string, string>{% endif %}
+) => {
     let url = `${API_URL}/stats`;
-    {% if model.visualize.get('time_field') %}
     const params = new URLSearchParams();
+    {% if model.visualize.get('time_field') %}
     if (period) params.append('period', period);
     if (startTime) params.append('start_time', startTime);
     if (endTime) params.append('end_time', endTime);
+    {% endif %}
+    {% if model.visualize.get('resolved_filters') %}
+    if (filters) {
+        Object.entries(filters).forEach(([key, val]) => {
+            if (val) params.append(key, val);
+        });
+    }
+    {% endif %}
     const query = params.toString();
     if (query) url += `?${query}`;
-    {% endif %}
     const response = await request.get<{{ model.name }}Stats>(url);
     return response.data;
 };
+
+{% if model.visualize.get('resolved_filters') %}
+export interface {{ model.name }}FilterOption {
+    id: number;
+    label: string;
+}
+
+export const get{{ model.name }}StatsFilters = async (filterName: string): Promise<{{ model.name }}FilterOption[]> => {
+    const response = await request.get<{{ model.name }}FilterOption[]>(`${API_URL}/stats/filters?filter_name=${encodeURIComponent(filterName)}`);
+    return response.data;
+};
+{% endif %}
 {% endif %}
 
 {% if model.actions %}

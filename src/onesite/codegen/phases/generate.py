@@ -9,12 +9,175 @@ Phase 7 — Aggregated / cross-cutting generation: API router, route tables,
 """
 
 from pathlib import Path
+from typing import Any
 
 from ..i18n import generate_locale_files
 from ..render import generate_file
 from ..router import update_api_router
 from ..types import ModelDefinition
 from .base import console
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Visualize Filter Path Resolution
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+def _quote_col(ref: str) -> str:
+    """Quote the table name in a 'table.column' reference for use in text().
+
+    e.g. 'group.id' -> '"group".id', 'alarm_record.rule_id' -> 'alarm_record.rule_id'
+    """
+    parts = ref.split(".", 1)
+    if len(parts) == 2:
+        return f'"{parts[0]}".{parts[1]}'
+    return ref
+
+
+def _build_model_lookup(models: list[ModelDefinition]) -> dict[str, ModelDefinition]:
+    """Build a dict mapping model names and table names to ModelDefinitions."""
+    lookup: dict[str, ModelDefinition] = {}
+    for m in models:
+        lookup[m["name"]] = m
+        lookup[m["table_name"]] = m
+    return lookup
+
+
+def _resolve_visualize_filters(
+    model: ModelDefinition,
+    model_lookup: dict[str, ModelDefinition],
+) -> None:
+    """Resolve filter paths into concrete join info for code generation.
+
+    For each filter in model.visualize["filters"], traverses the FK chain
+    defined by "path" and builds:
+      - resolved_joins: list of (from_table, from_col, to_table, to_col)
+      - resolved_options: join info for the filter options query
+
+    Writes back to model.visualize["resolved_filters"].
+    """
+    viz = model.get("visualize")
+    if not viz or not viz.get("filters"):
+        return
+
+    source_table = model["table_name"]
+    resolved_filters = []
+
+    for flt in viz["filters"]:
+        path = flt.get("path", "")
+        filter_field = flt["filter_field"]
+        filter_model_name = flt["model"]
+        filter_label_field = flt.get("label_field", "title")
+
+        filter_model = model_lookup.get(filter_model_name)
+        if not filter_model:
+            console.print(f"[yellow]Warning: Filter model '{filter_model_name}' not found, skipping filter[/yellow]")
+            continue
+
+        filter_table = filter_model["table_name"]
+        segments = [s for s in path.split(".") if s] if path else []
+
+        # Walk the FK chain and resolve each join step
+        joins = []
+        prev_table = source_table
+        current_model = model
+
+        for seg in segments:
+            target_model = model_lookup.get(seg)
+            if not target_model:
+                console.print(f"[yellow]Warning: Model '{seg}' in filter path not found, skipping filter[/yellow]")
+                break
+
+            target_table = target_model["table_name"]
+
+            # Find the FK on current_model that points to target_table
+            fk = _find_fk_to_table(current_model, target_table)
+            if not fk:
+                # Try reverse: find FK on target_model that points back to prev_table
+                fk = _find_fk_to_table(target_model, prev_table)
+                if fk:
+                    # Reverse join: target_model has FK pointing to prev_table
+                    joins.append({
+                        "from_table": prev_table,
+                        "from_col": _quote_col(f"{target_table}.{fk['name']}"),
+                        "to_table": target_table,
+                        "to_col": _quote_col(f"{prev_table}.id"),
+                        "model_name": target_model["name"],
+                        "source_module": target_model["source_module"],
+                    })
+                else:
+                    console.print(
+                        f"[yellow]Warning: No FK found between '{current_model['name']}' "
+                        f"and '{target_model['name']}', skipping filter[/yellow]"
+                    )
+                    break
+            else:
+                # Forward join: current_model has FK pointing to target_table
+                joins.append({
+                    "from_table": prev_table,
+                    "from_col": _quote_col(f"{prev_table}.{fk['name']}"),
+                    "to_table": target_table,
+                    "to_col": _quote_col(f"{target_table}.id"),
+                    "model_name": target_model["name"],
+                    "source_module": target_model["source_module"],
+                })
+
+            prev_table = target_table
+            current_model = target_model
+        else:
+            # All segments resolved successfully
+            # fk_table is the table containing the filter_field FK column
+            fk_table = joins[-1]["to_table"] if joins else source_table
+            resolved = {
+                "name": flt.get("i18n_key", filter_model_name),
+                "filter_key": filter_model_name,
+                "filter_field": filter_field,
+                "filter_table": filter_table,
+                "fk_table": fk_table,
+                "fk_col": _quote_col(f"{fk_table}.{filter_field}"),
+                "filter_id_col": _quote_col(f"{filter_table}.id"),
+                "filter_model": filter_model_name,
+                "filter_model_class": filter_model["name"],
+                "filter_source_module": filter_model["source_module"],
+                "filter_label_field": filter_label_field,
+                "joins": joins,
+            }
+            resolved_filters.append(resolved)
+
+    if resolved_filters:
+        viz["resolved_filters"] = resolved_filters
+        # Compute global joins: join the shortest common prefix across all filters
+        first_tables = {j["to_table"] for j in resolved_filters[0]["joins"]}
+        common_tables = set(first_tables)
+        for rf in resolved_filters[1:]:
+            common_tables &= {j["to_table"] for j in rf["joins"]}
+        global_joins = [j for j in resolved_filters[0]["joins"] if j["to_table"] in common_tables]
+        # Per-filter: only joins whose tables are NOT in global_joins
+        for rf in resolved_filters:
+            rf["new_joins"] = [j for j in rf["joins"] if j["to_table"] not in common_tables]
+        viz["global_joins"] = global_joins
+
+
+def _find_fk_to_table(model: ModelDefinition, target_table: str) -> dict | None:
+    """Find a foreign key on model that points to target_table."""
+    for fk in model.get("foreign_keys", []):
+        fk_target = fk.get("target_model", "")
+        # Try model name lookup -> table name
+        target_model = model_lookup_global.get(fk_target)
+        if target_model and target_model["table_name"] == target_table:
+            return {"name": fk["name"], "target_model": fk_target}
+        # Try case-insensitive model name -> table name
+        for key, m in model_lookup_global.items():
+            if key.lower() == fk_target.lower() and m["table_name"] == target_table:
+                return {"name": fk["name"], "target_model": fk_target}
+        # Direct table name match (FK target_model might be a table name)
+        if fk_target.lower().replace(" ", "_") == target_table.lower().replace(" ", "_"):
+            return {"name": fk["name"], "target_model": fk_target}
+    return None
+
+
+# Module-level lookup, populated before code generation
+model_lookup_global: dict[str, ModelDefinition] = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -189,7 +352,13 @@ def phase_generate_per_model(
 
     Returns the sorted list of API-visible models for use in routing & navigation.
     """
+    global model_lookup_global
+    model_lookup_global = _build_model_lookup(models)
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
+
+    # Resolve visualize filter paths for all models
+    for model in models:
+        _resolve_visualize_filters(model, model_lookup_global)
 
     for model in models:
         if model["is_link_table"] and not model.get("is_association_table"):
