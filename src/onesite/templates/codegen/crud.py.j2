@@ -202,6 +202,8 @@ def _apply_filters(
     {{ field.name }}_to: Optional[datetime] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
+    {% elif field.is_enum and field.is_multi_select %}
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}
@@ -238,6 +240,17 @@ def _apply_filters(
     {% elif field.ui_type == 'time' %}
     if {{ field.name }} is not None:
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
+    {% elif field.is_enum and field.is_multi_select %}
+    if {{ field.name }}:
+        for _v in {{ field.name }}:
+            _sub = (
+                select(1)
+                .select_from(func.json_each({{ model.name }}.{{ field.name }}).table_valued("value"))
+                .where(func.json_each.table_valued("value").valued_column("value") == _v)
+                .correlate({{ model.name }})
+                .exists()
+            )
+            statement = statement.where(_sub)
     {% elif field.is_enum %}
     if {{ field.name }}:
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
@@ -282,6 +295,8 @@ async def get_multi(
     {{ field.name }}_to: Optional[datetime] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
+    {% elif field.is_enum and field.is_multi_select %}
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}
@@ -357,6 +372,8 @@ async def get_multi_with_fk_labels(
     {{ field.name }}_to: Optional[datetime] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
+    {% elif field.is_enum and field.is_multi_select %}
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}
@@ -455,6 +472,8 @@ async def count(
     {{ field.name }}_to: Optional[datetime] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
+    {% elif field.is_enum and field.is_multi_select %}
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.ui_type == 'str' %}

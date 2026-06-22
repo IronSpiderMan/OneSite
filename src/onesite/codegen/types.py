@@ -73,6 +73,7 @@ class FieldDefinition:
     default: Any = None
     default_factory: str | None = None
     is_enum: bool = False
+    is_multi_select: bool = False
     enum_values: list = field(default_factory=list)
     enum_translations: dict = field(default_factory=dict)
     is_search_field: bool = False

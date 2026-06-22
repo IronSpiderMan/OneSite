@@ -64,6 +64,32 @@ def _resolve_visualize_filters(
     resolved_filters = []
 
     for flt in viz["filters"]:
+        # ── Enum (non-FK) filter: field directly on source model ──
+        if flt.get("type") == "enum":
+            field_name = flt["field"]
+            field_def = next((f for f in model["fields"] if f["name"] == field_name), None)
+            if not field_def:
+                console.print(f"[yellow]Warning: Field '{field_name}' not found on model '{model['name']}', skipping filter[/yellow]")
+                continue
+            if not field_def.get("is_enum"):
+                console.print(f"[yellow]Warning: Field '{field_name}' is not an enum field, skipping filter[/yellow]")
+                continue
+            resolved = {
+                "name": flt.get("i18n_key", field_name),
+                "filter_key": field_name,
+                "filter_field": field_name,
+                "filter_type": "enum",
+                "enum_values": field_def["enum_values"],
+                "filter_table": source_table,
+                "fk_table": source_table,
+                "fk_col": _quote_col(f"{source_table}.{field_name}"),
+                "joins": [],
+                "new_joins": [],
+            }
+            resolved_filters.append(resolved)
+            continue
+
+        # ── FK-based filter (existing logic) ──
         path = flt.get("path", "")
         filter_field = flt["filter_field"]
         filter_model_name = flt["model"]
@@ -132,6 +158,7 @@ def _resolve_visualize_filters(
                 "name": flt.get("i18n_key", filter_model_name),
                 "filter_key": filter_model_name,
                 "filter_field": filter_field,
+                "filter_type": "fk",
                 "filter_table": filter_table,
                 "fk_table": fk_table,
                 "fk_col": _quote_col(f"{fk_table}.{filter_field}"),

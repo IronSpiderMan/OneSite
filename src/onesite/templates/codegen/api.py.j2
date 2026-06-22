@@ -302,6 +302,8 @@ async def read_{{ model.lower_name }}s(
     {{ field.name }}_to: Optional[datetime] = Query(None, description="Filter by {{ field.name }} to"),
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = Query(None, description="Filter by {{ field.name }}"),
+    {% elif field.is_enum and field.is_multi_select %}
+    {{ field.name }}: Optional[List[str]] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.ui_type == 'str' %}

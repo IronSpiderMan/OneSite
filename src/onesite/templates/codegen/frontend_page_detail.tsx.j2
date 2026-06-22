@@ -692,6 +692,24 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         />
                                     )}
                                 />
+                                {% elif field.is_enum and field.is_multi_select %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <SearchableSelect
+                                            value={value || []}
+                                            onValueChange={onChange}
+                                            multiple={true}
+                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                                            searchPlaceholder={`${t('common.search')}...`}
+                                            loadOptions={async () => {{ field.enum_values | tojson }}.map((v: string) => ({
+                                                label: t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v),
+                                                value: v,
+                                            }))}
+                                        />
+                                    )}
+                                />
                                 {% elif field.is_enum %}
                                 <Controller
                                     control={editControl}
@@ -861,6 +879,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
                                     {currentItem.{{ field.name }} ? 'Yes' : 'No'}
                                 </Badge>
+                                {% elif field.is_enum and field.is_multi_select %}
+                                <div className="flex flex-wrap gap-1">
+                                {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.map((v: string) => (
+                                    <Badge key={v} variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v)}</Badge>
+                                ))}
+                                </div>
                                 {% elif field.is_enum %}
                                 <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${currentItem.{{ field.name }}}`, currentItem.{{ field.name }})}</Badge>
                                 {% elif field.ui_type == 'image' %}

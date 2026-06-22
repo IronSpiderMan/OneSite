@@ -502,6 +502,8 @@ const {{ model.name }}Page: React.FC = () => {
     if (searchValues['{{ field.name }}_to']) next['{{ field.name }}_to'] = `${searchValues['{{ field.name }}_to']}T23:59:59`;
     {% elif field.ui_type == 'time' %}
     if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
+    {% elif field.is_enum and field.is_multi_select %}
+    if (Array.isArray(searchValues['{{ field.name }}']) && searchValues['{{ field.name }}'].length > 0) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
     {% elif field.is_enum %}
     if (searchValues['{{ field.name }}'] && searchValues['{{ field.name }}'] !== '__all__') next['{{ field.name }}'] = searchValues['{{ field.name }}'];
     {% elif field.ui_type == 'str' %}
@@ -691,6 +693,19 @@ const {{ model.name }}Page: React.FC = () => {
               onChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
               placeholder={t('common.select_time', 'Select time')}
             />
+            {% elif field.is_enum and field.is_multi_select %}
+            <SearchableSelect
+              value={searchValues['{{ field.name }}'] || []}
+              onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
+              multiple={true}
+              placeholder={t('common.all', 'All')}
+              searchPlaceholder={`${t('common.search')}...`}
+              loadOptions={async () => [
+                {% for enum_val in field.enum_values %}
+                { label: t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}'), value: '{{ enum_val }}' },
+                {% endfor %}
+              ]}
+            />
             {% elif field.is_enum %}
             <Select
               value={searchValues['{{ field.name }}'] || '__all__'}
@@ -847,6 +862,12 @@ const {{ model.name }}Page: React.FC = () => {
                         ) : (
                             <span className="text-muted-foreground">-</span>
                         )}
+                        {% elif field.is_enum and field.is_multi_select %}
+                        <div className="flex flex-wrap gap-1">
+                        {Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.map((v: string) => (
+                            <Badge key={v} variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v)}</Badge>
+                        ))}
+                        </div>
                         {% elif field.is_enum %}
                         <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }})}</Badge>
                         {% elif field.ui_type == 'datetime' %}
@@ -1273,6 +1294,24 @@ const {{ model.name }}Page: React.FC = () => {
                                 />
                             )}
                         />
+                        {% elif field.is_enum and field.is_multi_select %}
+            <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                    <SearchableSelect
+                        value={value || []}
+                        onValueChange={onChange}
+                        multiple={true}
+                        placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                        searchPlaceholder={`${t('common.search')}...`}
+                        loadOptions={async () => {{ field.enum_values | tojson }}.map((v: string) => ({
+                            label: t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v),
+                            value: v,
+                        }))}
+                    />
+                )}
+            />
                         {% elif field.is_enum %}
             <Controller
                 control={control}

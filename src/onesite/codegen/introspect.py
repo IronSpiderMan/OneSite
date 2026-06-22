@@ -183,12 +183,12 @@ def _parse_field_permissions(
     Returns (field_role_permissions, flat_permission_string).
 
     Inherits from model-level when not set, strips 'd' (delete is model-level).
-    Special defaults for id (r), created_at (r), updated_at (ru).
+    Special defaults for id (hidden), created_at (r), updated_at (ru).
     """
     # Special field defaults
     if raw is None:
         if field_name == "id":
-            return {role: "r" for role in ROLE_ORDER}, "r"
+            return {role: "" for role in ROLE_ORDER}, ""
         if field_name == "created_at":
             return {role: "r" for role in ROLE_ORDER}, "r"
         if field_name == "updated_at":
@@ -364,16 +364,24 @@ def get_model_fields(
         type_annotation = field.annotation
         type_str = str(type_annotation)
 
+        # Unwrap Optional[X] → X for enum detection
+        _inner = type_annotation
+        if get_origin(type_annotation) is Union:
+            _union_args = [a for a in get_args(type_annotation) if a is not type(None)]
+            if len(_union_args) == 1:
+                _inner = _union_args[0]
+
         is_enum = False
+        is_multi_select = False
         enum_values: List[Any] = []
         json_kind = None
         json_py_imports: List[str] = []
         json_model_schema = None
         json_item_schema = None
 
-        if inspect.isclass(type_annotation) and issubclass(type_annotation, (str, int)) and hasattr(type_annotation, "__members__"):
+        if inspect.isclass(_inner) and issubclass(_inner, (str, int)) and hasattr(_inner, "__members__"):
             is_enum = True
-            enum_values = [e.value for e in type_annotation]
+            enum_values = [e.value for e in _inner]
             type_str = "str"
 
         resolved_annotation = type_annotation
@@ -392,7 +400,13 @@ def get_model_fields(
                 item_type = args[0] if args else Any
                 item_origin = get_origin(item_type)
                 item_args = get_args(item_type)
-                if inspect.isclass(item_type) and _is_pydantic_model(item_type):
+                if inspect.isclass(item_type) and issubclass(item_type, (str, int)) and hasattr(item_type, "__members__"):
+                    # List[Enum] → multi-select enum
+                    is_enum = True
+                    is_multi_select = True
+                    enum_values = [e.value for e in item_type]
+                    type_str = "List[str]"
+                elif inspect.isclass(item_type) and _is_pydantic_model(item_type):
                     type_str = f"List[{item_type.__name__}]"
                     json_py_imports.append(item_type.__name__)
                     json_item_schema = _build_json_model_schema(item_type)
@@ -439,7 +453,9 @@ def get_model_fields(
 
         ui_type = "json" if json_kind else type_str
 
-        if site_props.get("component") == "image":
+        if is_multi_select:
+            ui_type = "multi_select"
+        elif site_props.get("component") == "image":
             ui_type = "image"
         elif site_props.get("component") == "file":
             ui_type = "file"
@@ -556,6 +572,7 @@ def get_model_fields(
                     else None
                 ),
                 is_enum=is_enum,
+                is_multi_select=is_multi_select,
                 enum_values=enum_values,
                 enum_translations=enum_translations,
                 is_search_field=is_search_field,

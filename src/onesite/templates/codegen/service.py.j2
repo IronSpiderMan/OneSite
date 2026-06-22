@@ -1,5 +1,5 @@
 import logging
-from typing import Optional, Any
+from typing import Optional, List, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, col
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -79,6 +79,8 @@ class {{ model.name }}Service:
         {{ field.name }}_to: Optional[datetime] = None,
         {% elif field.ui_type == 'time' %}
         {{ field.name }}: Optional[time] = None,
+        {% elif field.is_enum and field.is_multi_select %}
+        {{ field.name }}: Optional[List[str]] = None,
         {% elif field.is_enum %}
         {{ field.name }}: Optional[str] = None,
         {% elif field.ui_type == 'str' %}
@@ -537,6 +539,11 @@ class {{ model.name }}Service:
                     # Convert to string, handle Enum/datetime specially
                     if val is None:
                         row.append("")
+                    {% if field.is_multi_select %}
+                    elif isinstance(val, list):
+                        # Multi-select enum - export as comma-separated
+                        row.append(",".join(str(v) for v in val))
+                    {% endif %}
                     elif hasattr(val, 'value'):
                         # Enum type - get the value
                         row.append(str(val.value))
@@ -655,6 +662,8 @@ class {{ model.name }}Service:
                     obj_data["{{ field.name }}"] = value.lower() in ('true', '1', 'yes', 'on') if value else False
                     {% elif field.ui_type == 'json' %}
                     obj_data["{{ field.name }}"] = ast.literal_eval(value) if value else []
+                    {% elif field.is_enum and field.is_multi_select %}
+                    obj_data["{{ field.name }}"] = [v.strip() for v in value.split(",") if v.strip()] if value else []
                     {% elif field.is_enum %}
                     obj_data["{{ field.name }}"] = value
                     {% else %}
@@ -828,7 +837,7 @@ class {{ model.name }}Service:
                 {% set _imported.models = _imported.models + [join.model_name] %}
                 {% endif %}
                 {% endfor %}
-                {% if rf.filter_model_class not in _imported.models %}
+                {% if rf.filter_type != "enum" and rf.filter_model_class not in _imported.models %}
                 from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }}
                 {% set _imported.models = _imported.models + [rf.filter_model_class] %}
                 {% endif %}
@@ -841,9 +850,13 @@ class {{ model.name }}Service:
                     _any_filter = True
                 {% endfor %}
                 if _any_filter:
+                    {% if model.visualize.global_joins %}
                     {% for join in model.visualize.global_joins %}
                     stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
                     {% endfor %}
+                    {% else %}
+                    pass
+                    {% endif %}
 
                 # Per-filter additional joins and WHERE conditions
                 {% for rf in model.visualize.resolved_filters %}
@@ -948,7 +961,7 @@ class {{ model.name }}Service:
             {% set _imported.models = _imported.models + [join.model_name] %}
             {% endif %}
             {% endfor %}
-            {% if rf.filter_model_class not in _imported.models %}
+            {% if rf.filter_type != "enum" and rf.filter_model_class not in _imported.models %}
             from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }}
             {% set _imported.models = _imported.models + [rf.filter_model_class] %}
             {% endif %}
@@ -961,9 +974,13 @@ class {{ model.name }}Service:
                 _any_filter = True
             {% endfor %}
             if _any_filter:
+                {% if model.visualize.global_joins %}
                 {% for join in model.visualize.global_joins %}
                 stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
                 {% endfor %}
+                {% else %}
+                pass
+                {% endif %}
 
             # Per-filter additional joins and WHERE conditions
             {% for rf in model.visualize.resolved_filters %}
@@ -1012,9 +1029,13 @@ class {{ model.name }}Service:
         if not flt:
             return []
 
-        # Import the filter model
         {% for rf in model.visualize.resolved_filters %}
         if filter_name == "{{ rf.name }}":
+            {% if rf.filter_type == "enum" %}
+            # Enum filter: return static values from field definition
+            return [{"id": v, "label": v} for v in {{ rf.enum_values }}]
+            {% else %}
+            # FK-based filter: query target model through join path
             from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }} as FilterModel
             {% for join in rf.joins %}
             from app.models.{{ join.source_module }} import {{ join.model_name }}
@@ -1039,6 +1060,7 @@ class {{ model.name }}Service:
             stmt = stmt.distinct().order_by(getattr(FilterModel, "{{ rf.filter_label_field }}"))
             result = await session.exec(stmt)
             return [{"id": row[0], "label": str(row[1])} for row in result.all()]
+            {% endif %}
         {% endfor %}
 
         return []

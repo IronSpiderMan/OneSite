@@ -132,6 +132,24 @@ const Create{{ model.name }}Page: React.FC = () => {
                   />
                 )}
               />
+              {% elif field.is_enum and field.is_multi_select %}
+              <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                  <SearchableSelect
+                    value={value || []}
+                    onValueChange={onChange}
+                    multiple={true}
+                    placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                    searchPlaceholder={`${t('common.search')}...`}
+                    loadOptions={async () => {{ field.enum_values | tojson }}.map((v: string) => ({
+                      label: t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v),
+                      value: v,
+                    }))}
+                  />
+                )}
+              />
               {% elif field.is_enum %}
               <Controller
                 control={control}

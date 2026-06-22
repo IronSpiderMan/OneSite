@@ -22,7 +22,7 @@ class {{ model.name }}Base(SQLModel):
     {% if 'r' in field.permissions and field.name != 'id' %}
     {{ field.name }}: {{ field.type }}
     {% set ns.has_field = true %}
-    {% if field.ui_type == 'json' and field.type not in ('Dict[str, Any]', 'Any', 'dict') %}
+    {% if (field.ui_type == 'json' and field.type not in ('Dict[str, Any]', 'Any', 'dict')) or field.ui_type == 'multi_select' %}
     {% set ns_json_fields.fields = ns_json_fields.fields + [field.name] %}
     {% endif %}
     {% endif %}

@@ -8,7 +8,7 @@ export interface {{ model.name }} {
     id: number;
 {% for field in model.fields %}
     {% if field.name != 'id' and 'r' in field.permissions %}
-    {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+    {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'string[]' if field.is_multi_select else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
     {% if field.fk_info %}
     {{ field.name }}_label?: string;
     {% endif %}
@@ -29,7 +29,13 @@ export const get{{ model.name }}s = async (page = 1, size = 20, filters?: Record
     if (filters) {
         Object.entries(filters).forEach(([key, value]) => {
             if (value !== undefined && value !== null) {
-                url += `&${key}=${encodeURIComponent(String(value))}`;
+                if (Array.isArray(value)) {
+                    value.forEach((v) => {
+                        url += `&${key}=${encodeURIComponent(String(v))}`;
+                    });
+                } else {
+                    url += `&${key}=${encodeURIComponent(String(value))}`;
+                }
             }
         });
     }
@@ -100,7 +106,7 @@ export const get{{ model.name }}Stats = async (
 
 {% if model.visualize.get('resolved_filters') %}
 export interface {{ model.name }}FilterOption {
-    id: number;
+    id: string | number;
     label: string;
 }
 
@@ -207,7 +213,7 @@ export const download{{ model.name }}Template = async () => {
 export interface {{ model.name }} {
     {% for field in model.fields %}
     {% if 'r' in field.permissions %}
-    {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+    {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'string[]' if field.is_multi_select else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
     {% endif %}
     {% endfor %}
 }

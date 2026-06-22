@@ -136,7 +136,18 @@ export function SearchableSelect({
       }
   }
 
+  const handleClear = (e: React.MouseEvent | React.PointerEvent) => {
+    e.stopPropagation()
+    e.preventDefault()
+    onValueChange('')
+    setSelectedLabel('')
+    onLabelChange?.('')
+  }
+
+  const hasValue = !multiple && selectedLabel && value
+
   return (
+    <div className="relative">
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
@@ -144,7 +155,8 @@ export function SearchableSelect({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "w-full justify-between font-normal",
+            "w-full justify-between font-normal hover:bg-background hover:text-foreground",
+            hasValue ? "pr-8" : "",
             multiple && selectedItems.length > 0 ? "h-auto py-2" : ""
           )}
         >
@@ -167,7 +179,7 @@ export function SearchableSelect({
             ) : (
                 selectedLabel || placeholder
             )}
-          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
+          {!hasValue && <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
         </Button>
       </PopoverTrigger>
       <PopoverContent className="w-full p-0" align="start">
@@ -210,5 +222,13 @@ export function SearchableSelect({
         </Command>
       </PopoverContent>
     </Popover>
+    {hasValue && (
+        <X
+            className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground z-10"
+            onClick={handleClear}
+            onPointerDown={handleClear}
+        />
+    )}
+    </div>
   )
 }

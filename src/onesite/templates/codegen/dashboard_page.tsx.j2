@@ -82,11 +82,47 @@ const formatLocalDateTime = (dateStr: string | null): string => {
     }
 };
 
-const formatInterval = (seconds: number): string => {
+const formatInterval = (seconds: number, t: (key: string, fallback: string) => string): string => {
     if (seconds <= 0) return '';
-    if (seconds < 60) return `Every ${seconds}s`;
-    if (seconds < 3600) return `Every ${Math.floor(seconds / 60)}m`;
-    return `Every ${Math.floor(seconds / 3600)}h`;
+    const every = t('dashboard.every', 'Every');
+    if (seconds < 60) return `${every} ${seconds}${t('dashboard.seconds_short', 's')}`;
+    if (seconds < 3600) return `${every} ${Math.floor(seconds / 60)}${t('dashboard.minutes_short', 'm')}`;
+    if (seconds < 86400) return `${every} ${Math.floor(seconds / 3600)}${t('dashboard.hours_short', 'h')}`;
+    return `${every} ${Math.floor(seconds / 86400)}${t('dashboard.days_short', 'd')}`;
+};
+
+const parseCronToTimes = (cron: string): string[] => {
+    if (!cron || cron === '* * * * *') return [];
+    const parts = cron.trim().split(/\s+/);
+    if (parts.length < 2) return [];
+    const minutePart = parts[0];
+    const hourPart = parts[1];
+    if (minutePart === '*' || hourPart === '*') return [];
+    const hours = hourPart.split(',').filter(h => h !== '*');
+    const minutes = minutePart.split(',').filter(m => m !== '*');
+    const times: string[] = [];
+    for (const h of hours) {
+        for (const m of minutes) {
+            times.push(`${h.padStart(2, '0')}:${m.padStart(2, '0')}`);
+        }
+    }
+    return times.length > 0 ? times : [];
+};
+
+const timesToCron = (times: string[]): string => {
+    if (times.length === 0) return '* * * * *';
+    const hours = [...new Set(times.map(t => t.split(':')[0]))].sort();
+    const minutes = [...new Set(times.map(t => t.split(':')[1]))].sort();
+    return `${minutes.join(',')} ${hours.join(',')} * * *`;
+};
+
+const formatCron = (cron: string, t: (key: string, fallback: string) => string): string => {
+    if (!cron) return '';
+    const times = parseCronToTimes(cron);
+    if (times.length === 0) return cron;
+    const prefix = t('dashboard.every_day_at', 'Every day at');
+    if (times.length === 1) return `${prefix} ${times[0]}`;
+    return `${prefix} ${times.join(', ')}`;
 };
 
 const dotStyle = (color: string): React.CSSProperties => ({ backgroundColor: color });
@@ -161,6 +197,11 @@ const DashboardPage: React.FC = () => {
         setEditingTask,
         setEditModalOpen,
     } = useTaskStore();
+
+    const [scheduleMode, setScheduleMode] = useState<'cron' | 'interval'>('cron');
+    const [intervalValue, setIntervalValue] = useState(5);
+    const [intervalUnit, setIntervalUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
+    const [cronTimes, setCronTimes] = useState<string[]>([]);
     {% endif %}
 
     useEffect(() => {
@@ -299,9 +340,9 @@ const DashboardPage: React.FC = () => {
         setRunningTasks(prev => new Set(prev).add(name));
         try {
             await runTask(name);
-            toast.success(t('dashboard.task_run_success', `Task "${name}" executed successfully`));
+            toast.success(t('dashboard.task_run_success', { name }));
         } catch (error: any) {
-            toast.error(t('dashboard.task_run_error', `Task "${name}" failed: ${error.message}`));
+            toast.error(t('dashboard.task_run_error', { name, message: error.message }));
         } finally {
             setRunningTasks(prev => {
                 const next = new Set(prev);
@@ -314,7 +355,7 @@ const DashboardPage: React.FC = () => {
     const handleEnableTask = async (name: string) => {
         try {
             await enableTask(name);
-            toast.success(t('dashboard.task_enabled', `Task "${name}" enabled`));
+            toast.success(t('dashboard.task_enabled', { name }));
         } catch (error: any) {
             toast.error(error.message);
         }
@@ -323,7 +364,7 @@ const DashboardPage: React.FC = () => {
     const handleDisableTask = async (name: string) => {
         try {
             await disableTask(name);
-            toast.success(t('dashboard.task_disabled', `Task "${name}" disabled`));
+            toast.success(t('dashboard.task_disabled', { name }));
         } catch (error: any) {
             toast.error(error.message);
         }
@@ -939,8 +980,8 @@ const DashboardPage: React.FC = () => {
                                         </span>
                                     </div>
                                     <div className="text-sm text-muted-foreground mt-1">
-                                        <span className="font-mono">
-                                            {task.interval > 0 ? formatInterval(task.interval) : task.cron}
+                                        <span>
+                                            {task.interval > 0 ? formatInterval(task.interval, t) : formatCron(task.cron, t)}
                                         </span>
                                         {task.description && (
                                             <span className="ml-2">- {task.description}</span>
@@ -976,6 +1017,25 @@ const DashboardPage: React.FC = () => {
                                         size="sm"
                                         onClick={() => {
                                             setEditingTask(task);
+                                            if (task.interval > 0) {
+                                                setScheduleMode('interval');
+                                                if (task.interval % 86400 === 0) {
+                                                    setIntervalValue(task.interval / 86400);
+                                                    setIntervalUnit('days');
+                                                } else if (task.interval % 3600 === 0) {
+                                                    setIntervalValue(task.interval / 3600);
+                                                    setIntervalUnit('hours');
+                                                } else {
+                                                    setIntervalValue(Math.max(1, Math.floor(task.interval / 60)));
+                                                    setIntervalUnit('minutes');
+                                                }
+                                                setCronTimes([]);
+                                            } else {
+                                                setScheduleMode('cron');
+                                                setCronTimes(parseCronToTimes(task.cron));
+                                                setIntervalValue(5);
+                                                setIntervalUnit('minutes');
+                                            }
                                             setEditModalOpen(true);
                                         }}
                                         title={t('dashboard.edit', 'Edit')}
@@ -1021,63 +1081,93 @@ const DashboardPage: React.FC = () => {
                             <div className="font-medium">{editingTask.name}</div>
                         </div>
                         <div>
-                            <Label>{t('dashboard.task_type', 'Task Type')}</Label>
+                            <Label>{t('dashboard.schedule_type', 'Schedule Type')}</Label>
                             <div className="flex gap-4 mt-1">
                                 <label className="flex items-center gap-2">
                                     <input
                                         type="radio"
                                         name="taskType"
                                         value="cron"
-                                        defaultChecked={editingTask.interval === 0}
-                                        onChange={() => {
-                                            const intervalInput = document.getElementById('interval') as HTMLInputElement;
-                                            if (intervalInput) intervalInput.value = '0';
-                                        }}
+                                        checked={scheduleMode === 'cron'}
+                                        onChange={() => setScheduleMode('cron')}
                                     />
-                                    {t('dashboard.type_cron', 'Cron')}
+                                    {t('dashboard.type_cron', 'Scheduled Time')}
                                 </label>
                                 <label className="flex items-center gap-2">
                                     <input
                                         type="radio"
                                         name="taskType"
                                         value="interval"
-                                        defaultChecked={editingTask.interval > 0}
-                                        onChange={() => {
-                                            const cronInput = document.getElementById('cron') as HTMLInputElement;
-                                            if (cronInput) cronInput.value = '';
-                                        }}
+                                        checked={scheduleMode === 'interval'}
+                                        onChange={() => setScheduleMode('interval')}
                                     />
                                     {t('dashboard.type_interval', 'Interval')}
                                 </label>
                             </div>
                         </div>
-                        <div id="cron-section">
-                            <Label>{t('dashboard.cron_expression', 'Cron Expression')}</Label>
-                            <Input
-                                id="cron"
-                                defaultValue={editingTask.cron}
-                                placeholder="0 8 * * *"
-                                className="font-mono"
-                                disabled={editingTask.interval > 0}
-                            />
-                            <p className="text-xs text-muted-foreground mt-1">
-                                {t('dashboard.cron_help', 'e.g. 0 8 * * * = daily at 8:00')}
-                            </p>
-                        </div>
-                        <div id="interval-section">
-                            <Label>{t('dashboard.interval_seconds', 'Interval (seconds)')}</Label>
-                            <Input
-                                id="interval"
-                                type="number"
-                                min="1"
-                                defaultValue={editingTask.interval > 0 ? editingTask.interval : 60}
-                                placeholder="60"
-                                disabled={editingTask.interval === 0}
-                            />
-                            <p className="text-xs text-muted-foreground mt-1">
-                                {t('dashboard.interval_help', 'e.g. 60 = every 60 seconds')}
-                            </p>
-                        </div>
+                        {scheduleMode === 'cron' ? (
+                            <div>
+                                <Label>{t('dashboard.scheduled_times', 'Scheduled Times')}</Label>
+                                <div className="space-y-2 mt-1">
+                                    {cronTimes.map((time, idx) => (
+                                        <div key={idx} className="flex items-center gap-2">
+                                            <Input
+                                                type="time"
+                                                value={time}
+                                                className="w-32"
+                                                onChange={(e) => {
+                                                    const newTimes = [...cronTimes];
+                                                    newTimes[idx] = e.target.value;
+                                                    setCronTimes(newTimes);
+                                                }}
+                                            />
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                onClick={() => {
+                                                    const newTimes = cronTimes.filter((_, i) => i !== idx);
+                                                    setCronTimes(newTimes);
+                                                }}
+                                            >
+                                                {t('common.remove', 'Remove')}
+                                            </Button>
+                                        </div>
+                                    ))}
+                                    <Button
+                                        variant="outline"
+                                        size="sm"
+                                        onClick={() => setCronTimes([...cronTimes, '08:00'])}
+                                    >
+                                        + {t('dashboard.add_time', 'Add Time')}
+                                    </Button>
+                                </div>
+                                <p className="text-xs text-muted-foreground mt-1">
+                                    {t('dashboard.cron_help', 'Select the times to run each day')}
+                                </p>
+                            </div>
+                        ) : (
+                            <div>
+                                <Label>{t('dashboard.interval_value', 'Run Every')}</Label>
+                                <div className="flex items-center gap-2 mt-1">
+                                    <Input
+                                        type="number"
+                                        min="1"
+                                        className="w-24"
+                                        value={intervalValue}
+                                        onChange={(e) => setIntervalValue(Math.max(1, parseInt(e.target.value) || 1))}
+                                    />
+                                    <select
+                                        className="border rounded px-3 py-2 bg-background text-sm"
+                                        value={intervalUnit}
+                                        onChange={(e) => setIntervalUnit(e.target.value as 'minutes' | 'hours' | 'days')}
+                                    >
+                                        <option value="minutes">{t('dashboard.minutes', 'minutes')}</option>
+                                        <option value="hours">{t('dashboard.hours', 'hours')}</option>
+                                        <option value="days">{t('dashboard.days', 'days')}</option>
+                                    </select>
+                                </div>
+                            </div>
+                        )}
                         <div>
                             <Label>{t('dashboard.description', 'Description')}</Label>
                             <Input
@@ -1128,11 +1218,7 @@ const DashboardPage: React.FC = () => {
                             </Button>
                             <Button
                                 onClick={() => {
-                                    const cronInput = document.getElementById('cron') as HTMLInputElement;
-                                    const intervalInput = document.getElementById('interval') as HTMLInputElement;
                                     const descInput = document.getElementById('description') as HTMLInputElement;
-                                    const taskTypeRadio = document.querySelector('input[name="taskType"]:checked') as HTMLInputElement;
-                                    const isInterval = taskTypeRadio?.value === 'interval';
                                     const params: Record<string, string | number | boolean | string[]> = {};
                                     for (const [key, param] of Object.entries(editingTask.params || {})) {
                                         const el = document.getElementById(`param-${key}`) as HTMLInputElement;
@@ -1148,13 +1234,21 @@ const DashboardPage: React.FC = () => {
                                             }
                                         }
                                     }
+                                    let interval = 0;
+                                    let cron = '';
+                                    if (scheduleMode === 'interval') {
+                                        const multipliers: Record<string, number> = { minutes: 60, hours: 3600, days: 86400 };
+                                        interval = intervalValue * (multipliers[intervalUnit] || 60);
+                                    } else {
+                                        cron = cronTimes.length > 0 ? timesToCron(cronTimes) : '* * * * *';
+                                    }
                                     updateTask(editingTask.name, {
-                                        cron: isInterval ? '' : cronInput.value,
-                                        interval: isInterval ? parseInt(intervalInput.value) || 0 : 0,
+                                        cron,
+                                        interval,
                                         description: descInput.value,
                                         params,
                                     });
-                                    toast.success(t('dashboard.task_updated', `Task "${editingTask.name}" updated`));
+                                    toast.success(t('dashboard.task_updated', { name: editingTask.name }));
                                 }}
                             >
                                 {t('common.save', 'Save')}
