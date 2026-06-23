@@ -455,6 +455,8 @@ def get_model_fields(
 
         if is_multi_select:
             ui_type = "multi_select"
+        elif site_props.get("component") == "textarea":
+            ui_type = "textarea"
         elif site_props.get("component") == "image":
             ui_type = "image"
         elif site_props.get("component") == "file":

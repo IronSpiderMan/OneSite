@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ImageUpload } from '../components/ui/image-upload';
 import { FileUpload } from '../components/ui/file-upload';
 import { TimePicker } from '../components/ui/time-picker';
+import { MarkdownEditor } from '../components/ui/markdown-editor';
 import { applyTheme, saveTheme } from '../lib/theme';
 {% if system_model %}
 import { use{{ system_model.name }}Store } from '../stores/use{{ system_model.name }}Store';
@@ -330,6 +331,18 @@ const SettingsPage: React.FC = () => {
                               {% endfor %}
                             </SelectContent>
                           </Select>
+                        )}
+                      />
+                      {% elif field.ui_type == 'textarea' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <MarkdownEditor
+                            value={value || ''}
+                            onChange={onChange}
+                            disabled={!hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'u')}
+                          />
                         )}
                       />
                       {% else %}

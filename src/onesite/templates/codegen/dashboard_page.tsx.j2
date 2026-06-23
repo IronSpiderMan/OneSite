@@ -6,6 +6,8 @@ import { BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { SearchableSelect } from '../components/ui/searchable-select';
+import { useSystemConfigStore } from '../stores/useSystemConfigStore';
+import Markdown from 'react-markdown';
 {% if site_logger %}
 import { getAppLogs } from '../services/app_log';
 import { buildNotificationWsUrl } from '../services/notification-center';
@@ -156,6 +158,7 @@ const shiftDateRange = (startTime: string, endTime: string, direction: 'left' | 
 
 const DashboardPage: React.FC = () => {
     const { t } = useTranslation();
+    const { data: systemConfig, fetchData: fetchSystemConfig } = useSystemConfigStore();
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
     const [loading, setLoading] = useState(true);
     const [chartPeriods, setChartPeriods] = useState<Record<string, { period: string; startTime: string; endTime: string }>>({});
@@ -203,6 +206,8 @@ const DashboardPage: React.FC = () => {
     const [intervalUnit, setIntervalUnit] = useState<'minutes' | 'hours' | 'days'>('minutes');
     const [cronTimes, setCronTimes] = useState<string[]>([]);
     {% endif %}
+
+    useEffect(() => { fetchSystemConfig(); }, []);
 
     useEffect(() => {
         const fetchAllStats = async () => {
@@ -661,6 +666,14 @@ const DashboardPage: React.FC = () => {
                     {t('menu.dashboard', 'Dashboard')}
                 </h1>
             </div>
+
+            {systemConfig?.announcement_content && (
+                <div className="rounded-xl border bg-card p-6 shadow-sm">
+                    <div className="prose prose-sm max-w-none dark:prose-invert">
+                        <Markdown>{systemConfig.announcement_content}</Markdown>
+                    </div>
+                </div>
+            )}
 
             {chartModels.length > 0 && (
                 <div className="grid gap-6 md:grid-cols-2">

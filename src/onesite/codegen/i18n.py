@@ -18,6 +18,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         "theme_mode": "主题模式",
         "site_name": "站点名称",
         "allow_registration": "允许注册",
+        "announcement_content": "公告内容",
     }
 
     en_translations: Dict[str, Any] = {
