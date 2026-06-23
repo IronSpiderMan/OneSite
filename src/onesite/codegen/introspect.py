@@ -487,14 +487,20 @@ def get_model_fields(
         label_key = site_props.get("label", default_label_key)
         translations = site_props.get("translations", {})
 
-        # Extract enum value translations from model-level translations
+        # Extract enum value translations
         enum_translations: dict[str, dict[str, str]] = {}
         if is_enum:
+            # 1. Model-level translations (per-field, takes priority)
             for lang, lang_pack in model_translations.items():
                 if isinstance(lang_pack, dict):
                     enums_section = lang_pack.get("enums", {})
                     if isinstance(enums_section, dict) and name in enums_section:
                         enum_translations[lang] = dict(enums_section[name])
+            # 2. Enum-level __i18n__ (fallback, shared across models)
+            if hasattr(_inner, "__i18n__") and isinstance(getattr(_inner, "__i18n__"), dict):
+                for lang, trans in _inner.__i18n__.items():
+                    if isinstance(trans, dict) and lang not in enum_translations:
+                        enum_translations[lang] = dict(trans)
 
         fk_info = None
         if name.endswith("_id") and name != "id":
