@@ -1,6 +1,7 @@
 from datetime import datetime, timezone
 from typing import Optional
 
+from sqlalchemy import Column, DateTime
 from sqlmodel import Field, SQLModel
 
 
@@ -37,6 +38,7 @@ class AppLog(SQLModel, table=True):
         sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}}
     )
     created_at: datetime = Field(
-        default_factory=lambda: datetime.now(timezone.utc)
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True)),
     )
     user_id: Optional[int] = Field(default=None, foreign_key="user.id")

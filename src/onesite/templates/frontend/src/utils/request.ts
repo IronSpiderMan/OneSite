@@ -5,7 +5,7 @@ import { toast } from 'sonner';
 // Falls back to VITE_API_URL (baked at build time) if not set
 declare global {
   interface Window {
-    __ENV__?: { API_URL?: string; DOMAIN?: string; NODE_ENV?: string; BUILD_VERSION?: string };
+    __ENV__?: { API_URL?: string; DOMAIN?: string; NODE_ENV?: string; BUILD_VERSION?: string; LOGO_LINK?: string; PROJECT_NAME?: string; PROJECT_LOGO?: string };
   }
 }
 

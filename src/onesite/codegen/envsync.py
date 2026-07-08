@@ -83,10 +83,13 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     if logo and not logo.startswith(("/", "http://", "https://", "data:")):
         logo = f"/{logo}"
 
+    logo_link = config.get("logo_link", "/dashboard")
+
     f_new_keys = {
         "VITE_PROJECT_NAME": project_name,
         "VITE_API_URL": api_url,
         "VITE_PROJECT_LOGO": logo,
+        "VITE_LOGO_LINK": logo_link,
     }
 
     f_lines = f_env_content.splitlines()

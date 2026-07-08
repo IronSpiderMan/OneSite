@@ -20,6 +20,19 @@ async def handle_{{ model.module_name }}_{{ listener.event_name }}(payload: dict
         logger.warning("No id in payload for {{ model.name }}.{{ listener.event_name }}")
         return
 
+{% if listener.event_name == 'after_delete' %}
+    from types import SimpleNamespace
+    self = SimpleNamespace(**payload.get("data", {}))
+{% if listener.has_session_param %}
+    from app.core.db import engine
+    from sqlmodel.ext.asyncio.session import AsyncSession
+
+    async with AsyncSession(engine) as session:
+{{ listener.body | indent(8, first=True) }}
+{% else %}
+{{ listener.body | indent(4, first=True) }}
+{% endif %}
+{% else %}
     from app.core.db import engine
     from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -30,5 +43,6 @@ async def handle_{{ model.module_name }}_{{ listener.event_name }}(payload: dict
             return
         self = target
 {{ listener.body | indent(8, first=True) }}
+{% endif %}
 {% endif %}
 {% endfor %}

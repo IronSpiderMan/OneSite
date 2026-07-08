@@ -13,7 +13,12 @@ from app.models.{{ model.module_name }} import {{ model.name }}
 @event.listens_for({{ model.name }}, "{{ listener.event_name }}")
 def {{ listener.event_name }}(mapper, connection, target):
     from app.core.task_queue import task_queue
+{% if listener.event_name == 'after_delete' %}
+    data = {c.name: getattr(target, c.name) for c in target.__table__.columns}
+    task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id, "data": data})
+{% else %}
     task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id})
+{% endif %}
 {% else %}
 {# Sync → inline the user's logic (current behavior) #}
 

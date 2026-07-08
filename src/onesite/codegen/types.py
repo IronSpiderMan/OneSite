@@ -189,6 +189,7 @@ class EventListener:
     event_name: str   # e.g. "before_insert", "after_update"
     body: str          # dedented source code of the method body
     is_async: bool = False  # async def → background task handler
+    has_session_param: bool = False  # method signature has "session" param
 
 
 @dataclass

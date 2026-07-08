@@ -187,11 +187,24 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
 
         is_async = asyncio.iscoroutinefunction(method)
 
+        has_session_param = False
+        if is_async:
+            try:
+                sig = inspect.signature(method)
+                has_session_param = "session" in sig.parameters
+            except (ValueError, TypeError):
+                pass
+
         body = textwrap.dedent("\n".join(body_lines))
         # Remove surrounding blank lines
         body = body.strip("\n")
         listeners.append(
-            EventListener(event_name=event_name, body=body, is_async=is_async)
+            EventListener(
+                event_name=event_name,
+                body=body,
+                is_async=is_async,
+                has_session_param=has_session_param,
+            )
         )
 
     return listeners
@@ -227,7 +240,7 @@ def _process_introspected_class(
             return None
 
     mdl = _build_model_dict(
-        name, model_module_name, module_name, result,
+        name, module_name, module_name, result,
     )
 
     # Attach event listeners (extracted from on_before_* / on_after_* methods)

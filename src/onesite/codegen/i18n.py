@@ -75,6 +75,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "expand": "Expand",
             "collapse": "Collapse",
             "remove": "Remove",
+            "details": "Details",
         },
         "menu": {
             "dashboard": "Dashboard",
@@ -240,6 +241,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "expand": "展开",
             "collapse": "收起",
             "remove": "移除",
+            "details": "详情",
         },
         "menu": {
             "dashboard": "仪表盘",
@@ -380,6 +382,29 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             return v
         return None
 
+    def resolve_field_label(field_name: str, field: dict, en_pack, zh_pack) -> tuple[str, str]:
+        """Resolve en/zh label for a field, checking translations, defaults, and auto-generating."""
+        label_en = field_name.replace("_", " ").title()
+        label_zh = label_en
+
+        translations = field.get("translations", {})
+        if "en" in translations:
+            label_en = translations["en"]
+        else:
+            v = pick_model_field_label(en_pack, field_name)
+            if v is not None:
+                label_en = v
+        if "zh" in translations:
+            label_zh = translations["zh"]
+        else:
+            v = pick_model_field_label(zh_pack, field_name)
+            if v is not None:
+                label_zh = v
+            elif field_name in zh_field_defaults:
+                label_zh = zh_field_defaults[field_name]
+
+        return label_en, label_zh
+
     for model in models:
         model_name = model["module_name"]
         model_name_en = model["name"]
@@ -391,8 +416,8 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         model_name_en = pick_model_name(en_pack, model_name_en)
         model_name_zh = pick_model_name(zh_pack, model_name_zh)
 
-        en_model = {"name": model_name_en, "fields": {}}
-        zh_model = {"name": model_name_zh, "fields": {}}
+        en_model = {"name": model_name_en, "plural": f"{model_name_en}s", "fields": {}}
+        zh_model = {"name": model_name_zh, "plural": model_name_zh, "fields": {}}
 
         # Add "my_name" translation for owner-scoped models (e.g., "My Items")
         if model.get("owner_field"):
@@ -410,27 +435,14 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
                 set_by_path(en_translations, f"settings.groups.{group_key}", label_en)
                 set_by_path(zh_translations, f"settings.groups.{group_key}", label_zh)
 
+        # Build field label lookup for filter i18n
+        field_label_lookup: dict[str, tuple[str, str]] = {}
+        for field in model["fields"]:
+            field_label_lookup[field["name"]] = resolve_field_label(field["name"], field, en_pack, zh_pack)
+
         for field in model["fields"]:
             field_name = field["name"]
-            label_en = field_name.replace("_", " ").title()
-            label_zh = label_en
-
-            translations = field.get("translations", {})
-            if "en" in translations:
-                label_en = translations["en"]
-            else:
-                v = pick_model_field_label(en_pack, field_name)
-                if v is not None:
-                    label_en = v
-            if "zh" in translations:
-                label_zh = translations["zh"]
-            else:
-                v = pick_model_field_label(zh_pack, field_name)
-                if v is not None:
-                    label_zh = v
-                else:
-                    if field_name in zh_field_defaults:
-                        label_zh = zh_field_defaults[field_name]
+            label_en, label_zh = resolve_field_label(field_name, field, en_pack, zh_pack)
 
             en_model["fields"][field_name] = label_en
             zh_model["fields"][field_name] = label_zh
@@ -452,6 +464,32 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
                     zh_field_enum[enum_val] = enum_trans.get("zh", {}).get(enum_val) or str(enum_val)
                 en_enums[field_name] = en_field_enum
                 zh_enums[field_name] = zh_field_enum
+
+        # Visualize filter i18n (dashboard.filter_{name})
+        viz = model.get("visualize")
+        if viz and viz.get("resolved_filters"):
+            for rf in viz["resolved_filters"]:
+                filter_name = rf.get("name", "")
+                if not filter_name:
+                    continue
+                i18n_key = f"dashboard.filter_{filter_name}"
+                # Skip if already set
+                if i18n_key in en_translations.get("dashboard", {}):
+                    continue
+                # Try to resolve label from field translations
+                filter_field = rf.get("filter_field", filter_name)
+                # Enum filters: filter_field == field name, direct lookup
+                # FK filters: filter_field="category_id", name="category"
+                labels = field_label_lookup.get(filter_field) or field_label_lookup.get(filter_name)
+                if labels:
+                    en_label, zh_label = labels
+                else:
+                    en_label = filter_name.replace("_", " ").title()
+                    # Try zh from model field translations or field defaults
+                    zh_label = (pick_model_field_label(zh_pack, filter_name)
+                                or zh_field_defaults.get(filter_name, en_label))
+                set_by_path(en_translations, i18n_key, en_label)
+                set_by_path(zh_translations, i18n_key, zh_label)
 
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model

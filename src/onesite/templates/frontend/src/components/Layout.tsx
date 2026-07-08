@@ -134,6 +134,7 @@ const AppLayout: React.FC = () => {
 
   const logoUrl = import.meta.env.VITE_PROJECT_LOGO;
   const projectName = import.meta.env.VITE_PROJECT_NAME || 'OneSite';
+  const logoLink = window.__ENV__?.LOGO_LINK || import.meta.env.VITE_LOGO_LINK || '/dashboard';
 
   const menuItems = filterMenuByRole(GeneratedMenu, userRole);
 
@@ -158,28 +159,30 @@ const AppLayout: React.FC = () => {
       >
         {/* Logo area */}
         <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isCollapsed ? "justify-center" : "justify-between")}>
-          {isCollapsed ? (
-            <div className="flex-shrink-0">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
-              ) : (
-                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                  {projectName.charAt(0).toUpperCase()}
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="flex items-center gap-3 min-w-0">
-              {logoUrl ? (
-                <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
-              ) : (
-                <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-                  {projectName.charAt(0).toUpperCase()}
-                </div>
-              )}
-              <span className="text-xl font-bold truncate">{projectName}</span>
-            </div>
-          )}
+          <Link to={logoLink} className="flex items-center gap-3 min-w-0 no-underline">
+            {isCollapsed ? (
+              <div className="flex-shrink-0">
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
+                ) : (
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                    {projectName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex items-center gap-3 min-w-0">
+                {logoUrl ? (
+                  <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
+                ) : (
+                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+                    {projectName.charAt(0).toUpperCase()}
+                  </div>
+                )}
+                <span className="text-xl font-bold truncate">{projectName}</span>
+              </div>
+            )}
+          </Link>
           {!isCollapsed && (
             <Button variant="ghost" size="icon" className="md:hidden flex-shrink-0" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
