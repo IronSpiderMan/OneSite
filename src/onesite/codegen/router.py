@@ -1,9 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict, List
 
-from rich.console import Console
-
-console = Console()
+from .file_utils import write_file_with_status
 
 
 def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, scheduled_tasks: List[Dict[str, Any]] = None):
@@ -39,6 +37,5 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, schedul
         + "\n\napi_router = APIRouter()\n\n"
         + "\n".join(routers)
     )
-    api_file_path.write_text(content)
-    console.print(f"Updated {api_file_path}")
+    write_file_with_status(api_file_path, content)
 

@@ -21,6 +21,10 @@ elif database_url.startswith("postgresql://"):
 engine = create_async_engine(database_url, future=True)
 
 async def init_db():
+    # Ensure _latest table models are imported so SQLModel.metadata knows about them
+    {% for module in latest_table_imports %}
+    import {{ module }}  # noqa: F401
+    {% endfor %}
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
     {% if has_timescaledb %}

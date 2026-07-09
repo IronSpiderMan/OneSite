@@ -2,13 +2,10 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from rich.console import Console
-
-console = Console()
+from .file_utils import write_file_with_status
 
 
 def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
-    locale_dir.mkdir(parents=True, exist_ok=True)
 
     zh_field_defaults: Dict[str, str] = {
         "language": "语言",
@@ -494,6 +491,5 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model
 
-    (locale_dir / "en.json").write_text(json.dumps(en_translations, indent=2))
-    (locale_dir / "zh.json").write_text(json.dumps(zh_translations, indent=2, ensure_ascii=False))
-    console.print(f"Generated locale files in {locale_dir}")
+    write_file_with_status(locale_dir / "en.json", json.dumps(en_translations, indent=2))
+    write_file_with_status(locale_dir / "zh.json", json.dumps(zh_translations, indent=2, ensure_ascii=False))

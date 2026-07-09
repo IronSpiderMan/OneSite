@@ -4,10 +4,10 @@ Must run *before* per-model code generation (Phase 6) so that generated
 files such as Settings.tsx are not overwritten by the asset sync.
 """
 
-import shutil
 from pathlib import Path
 
 from ..assets import sync_backend_assets, sync_frontend_assets
+from ..file_utils import copy_file_with_status
 from ..render import generate_file
 from ..theme import THEMES, resolve_theme
 from .base import console
@@ -27,17 +27,16 @@ def _sync_models_assets(site_config: dict, cwd: Path) -> None:
     if not assets_src.exists():
         return
 
-    public_dst.mkdir(parents=True, exist_ok=True)
-
-    copied = 0
+    counts = {"created": 0, "updated": 0, "skipped": 0}
     for item in assets_src.iterdir():
         if item.is_file():
-            shutil.copy2(item, public_dst / item.name)
-            copied += 1
+            status = copy_file_with_status(item, public_dst / item.name)
+            counts[status] += 1
 
-    if copied:
+    total = counts["created"] + counts["updated"]
+    if total:
         console.print(
-            f"[green]Synced {copied} asset(s) from models/assets/ to frontend/public/[/green]"
+            f"[green]Synced {total} asset(s) from models/assets/ to frontend/public/[/green]"
         )
 
 

@@ -249,7 +249,9 @@ export const JsonModelArrayEditor: React.FC<{
   value: any
   onChange: (v: any) => void
   className?: string
-}> = ({ itemSchema, value, onChange, className }) => {
+  canAdd?: boolean
+  canRemove?: boolean
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true }) => {
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
   const arrValue = Array.isArray(value) ? value : []
 
@@ -270,6 +272,7 @@ export const JsonModelArrayEditor: React.FC<{
       </div>
       {mode === "ui" ? (
         <div className="space-y-3">
+          {canAdd && (
           <div className="flex items-center justify-end">
             <Button
               type="button"
@@ -280,10 +283,12 @@ export const JsonModelArrayEditor: React.FC<{
               Add
             </Button>
           </div>
+          )}
           {arrValue.map((item, idx) => (
             <div key={idx} className="rounded-md border p-3">
               <div className="mb-2 flex items-center justify-between">
                 <div className="text-sm font-medium">Item {idx + 1}</div>
+                {canRemove && (
                 <Button
                   type="button"
                   variant="ghost"
@@ -297,6 +302,7 @@ export const JsonModelArrayEditor: React.FC<{
                 >
                   Remove
                 </Button>
+                )}
               </div>
               <JsonModelForm
                 schema={itemSchema}

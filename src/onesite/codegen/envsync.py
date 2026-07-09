@@ -1,9 +1,7 @@
 from pathlib import Path
 from typing import Any, Dict
 
-from rich.console import Console
-
-console = Console()
+from .file_utils import write_file_with_status
 
 
 def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Path):
@@ -66,9 +64,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     for key, val in new_keys.items():
         updated_lines.append(f"{key}={val}")
 
-    backend_path.mkdir(parents=True, exist_ok=True)
-    backend_env.write_text("\n".join(updated_lines))
-    console.print("Synced backend .env")
+    write_file_with_status(backend_env, "\n".join(updated_lines))
 
     frontend_env = frontend_path / ".env"
     project_name = config.get("project_name", "OneSite")
@@ -109,7 +105,5 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     for key, val in f_new_keys.items():
         f_updated_lines.append(f"{key}={val}")
 
-    frontend_path.mkdir(parents=True, exist_ok=True)
-    frontend_env.write_text("\n".join(f_updated_lines))
-    console.print("Synced frontend .env")
+    write_file_with_status(frontend_env, "\n".join(f_updated_lines))
 

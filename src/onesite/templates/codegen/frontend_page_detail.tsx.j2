@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Eye, Loader2, Save, Pencil, X } from 'lucide-react';
+import { ArrowLeft, Eye, Loader2{% if model.page_edit %}, Save, Pencil, X{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
@@ -36,7 +36,7 @@ import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service
 import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
 {% if model.actions %}
-import { 
+import {
     {% for action_name, action_config in model.actions.items() %}
     perform{{ model.name }}{{ action_name.capitalize() }}{% if not loop.last %}, {% endif %}
     {% endfor %}
@@ -765,6 +765,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             itemSchema={ {{ field.json_item_schema | tojson }} }
                                             value={value}
                                             onChange={onChange}
+                                            {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
+                                            canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
+                                            canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                                            {% endif %}
                                         />
                                         {% else %}
                                         <JsonInput

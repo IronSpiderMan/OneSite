@@ -68,6 +68,13 @@ export const bulkDelete{{ model.name }} = async (ids: number[]) => {
     return response.data;
 };
 
+{% if model.property_config_meta %}
+export const update{{ model.name }}PropertiesConfig = async (id: number, configs: Record<string, any>[]) => {
+    const response = await request.put(`${API_URL}/${id}/properties-config`, configs);
+    return response.data;
+};
+{% endif %}
+
 {% if model.visualize %}
 export interface {{ model.name }}StatsSeries {
     name: string;

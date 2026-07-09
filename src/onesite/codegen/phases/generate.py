@@ -459,11 +459,17 @@ def phase_generate_aggregated(
     # ── TimescaleDB: collect models and generate db.py ──
     timescaledb_models = [m for m in models if m.get("is_timescaledb")]
     has_timescaledb = bool(timescaledb_models)
+    # Collect _latest table module import paths so create_all registers them
+    latest_table_imports = sorted({
+        f"app.models.{m['source_module']}_latest"
+        for m in timescaledb_models
+    })
     generate_file(
         "db.py.j2",
         {
             "has_timescaledb": has_timescaledb,
             "timescaledb_models": timescaledb_models,
+            "latest_table_imports": latest_table_imports,
         },
         backend_path / "app" / "core" / "db.py",
     )

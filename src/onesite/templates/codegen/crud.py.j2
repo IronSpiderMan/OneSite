@@ -2,9 +2,12 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
-from app.models.{{ model.source_module }} import {{ model.name }}
+from app.models.{{ model.source_module }} import {{ model.name }}{% if model.property_config_meta %}, {{ model.property_config_meta.config_class }}{% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
 from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
+{% endif %}
+{% if model.property_config_meta %}
+from app.models.{{ model.property_config_meta.blueprint_module }} import {{ model.property_config_meta.blueprint_model }}
 {% endif %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not model.is_timescaledb %}, {{ model.name }}Update{% endif %}
 {% if model.m2m_fields %}
@@ -561,7 +564,39 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     await session.commit()
     await session.refresh(db_obj)
     {% endif %}
-    
+
+    {% if model.property_config_meta %}
+    # Initialize properties_config from blueprint model's properties
+    blueprint_id = getattr(db_obj, "{{ model.property_config_meta.blueprint_fk }}", None)
+    if blueprint_id is not None:
+        blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, blueprint_id)
+        if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
+            props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
+            config_entries = []
+            for p in props:
+                key = p.get("key") if isinstance(p, dict) else (p.key if hasattr(p, "key") else None)
+                if key is not None:
+                    cfg = {{ model.property_config_meta.config_class }}(
+                        property_key=key,
+                        {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
+                        {% set ft = field_type.lower() %}
+                        {% if '= true' in ft %}
+                        {{ field_name }}=True,
+                        {% elif '= false' in ft %}
+                        {{ field_name }}=False,
+                        {% elif 'optional' in ft %}
+                        {{ field_name }}=None,
+                        {% else %}
+                        {% endif %}
+                        {% endfor %}
+                    )
+                    config_entries.append(cfg.model_dump())
+            setattr(db_obj, "{{ model.property_config_meta.field_name }}", config_entries)
+            session.add(db_obj)
+            await session.commit()
+            await session.refresh(db_obj)
+    {% endif %}
+
     return db_obj
 
 async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
@@ -596,10 +631,64 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% endif %}
     
     for key, value in obj_data.items():
+        {% if model.property_config_meta %}
+        if key == "{{ model.property_config_meta.field_name }}" and value is not None:
+            # Validate add/delete permissions
+            field_perms = "{{ model.property_config_meta.field_permissions }}"
+            old_configs = getattr(db_obj, "{{ model.property_config_meta.field_name }}", None) or []
+            old_keys = {c.get("property_key") if isinstance(c, dict) else getattr(c, "property_key", None) for c in old_configs}
+            old_keys.discard(None)
+            new_keys = {c.get("property_key") if isinstance(c, dict) else getattr(c, "property_key", None) for c in value}
+            new_keys.discard(None)
+            added = new_keys - old_keys
+            if added and "a" not in field_perms:
+                raise ValueError("Adding items is not allowed: " + ", ".join(sorted(added)))
+            removed = old_keys - new_keys
+            if removed and "l" not in field_perms:
+                raise ValueError("Deleting items is not allowed: " + ", ".join(sorted(removed)))
+            # Convert Pydantic objects to dicts for JSON storage
+            value = [item if isinstance(item, dict) else item.model_dump() for item in value]
+        {% endif %}
         setattr(db_obj, key, value)
     session.add(db_obj)
     await session.commit()
     await session.refresh(db_obj)
+
+    {% if model.property_config_meta %}
+    # Re-initialize properties_config only if blueprint FK actually changed
+    if "{{ model.property_config_meta.blueprint_fk }}" in obj_data:
+        old_bp = getattr(db_obj, "{{ model.property_config_meta.blueprint_fk }}", None)
+        new_bp = obj_data.get("{{ model.property_config_meta.blueprint_fk }}")
+        if new_bp is not None and new_bp != old_bp:
+            from app.models.{{ model.property_config_meta.blueprint_module }} import {{ model.property_config_meta.blueprint_model }}
+            blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, new_bp)
+            if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
+                props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
+                config_entries = []
+                for p in props:
+                    key = p.get("key") if isinstance(p, dict) else (p.key if hasattr(p, "key") else None)
+                    if key is not None:
+                        cfg = {{ model.property_config_meta.config_class }}(
+                            property_key=key,
+                            {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
+                            {% set ft = field_type.lower() %}
+                            {% if '= true' in ft %}
+                            {{ field_name }}=True,
+                            {% elif '= false' in ft %}
+                            {{ field_name }}=False,
+                            {% elif 'optional' in ft %}
+                            {{ field_name }}=None,
+                            {% else %}
+                            {% endif %}
+                            {% endfor %}
+                        )
+                        config_entries.append(cfg.model_dump())
+                setattr(db_obj, "{{ model.property_config_meta.field_name }}", config_entries)
+                session.add(db_obj)
+                await session.commit()
+                await session.refresh(db_obj)
+    {% endif %}
+
     return db_obj
 
 async def delete(session: AsyncSession, id: int) -> int:
@@ -815,6 +904,53 @@ async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id:
     result = await session.exec(statement)
     return result.one()
 {% endfor %}
+{% endif %}
+
+{% if model.property_config_meta %}
+async def update_properties_config(
+    session: AsyncSession,
+    entity_id: int,
+    configs: list[dict],
+) -> dict:
+    """Update properties_config on entity, with add/delete permission checks."""
+    entity = await session.get({{ model.name }}, entity_id)
+    if not entity:
+        raise ValueError("{{ model.name }} not found")
+
+    field_perms = "{{ model.property_config_meta.field_permissions }}"
+    old_configs = getattr(entity, "{{ model.property_config_meta.field_name }}", None) or []
+    old_keys = {c.get("property_key") if isinstance(c, dict) else getattr(c, "property_key", None) for c in old_configs}
+    old_keys.discard(None)
+    new_keys = {c.get("property_key") for c in configs}
+
+    # Check add permission
+    added = new_keys - old_keys
+    if added and "a" not in field_perms:
+        raise ValueError(
+            "Adding items is not allowed: " + ", ".join(sorted(added))
+        )
+    # Check delete permission
+    removed = old_keys - new_keys
+    if removed and "l" not in field_perms:
+        raise ValueError(
+            "Deleting items is not allowed: " + ", ".join(sorted(removed))
+        )
+
+    # Validate config entries with model class
+    validated = []
+    for c in configs:
+        if isinstance(c, dict):
+            validated.append({{ model.property_config_meta.config_class }}(**c).model_dump())
+        elif hasattr(c, "model_dump"):
+            validated.append(c.model_dump())
+        else:
+            validated.append(c)
+
+    setattr(entity, "{{ model.property_config_meta.field_name }}", validated)
+    session.add(entity)
+    await session.commit()
+    await session.refresh(entity)
+    return entity.model_dump()
 {% endif %}
 
 {% if model.union_key %}

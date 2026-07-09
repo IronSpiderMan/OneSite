@@ -1,7 +1,7 @@
 from typing import List, Any, Optional, Annotated
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -522,6 +522,22 @@ async def update_{{ model.lower_name }}(
         if getattr({{ model.lower_name }}, "{{ model.owner_field }}", None) != current_user.id:
             raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% endif %}
+    {% if model.reverse_property_config %}
+    # Lock properties field if entities reference this blueprint
+    if hasattr({{ model.lower_name }}_in, "properties") and getattr({{ model.lower_name }}_in, "properties") is not None:
+        from app.models.{{ model.reverse_property_config.entity_module }} import {{ model.reverse_property_config.entity_model }}
+        from sqlmodel import select, func
+        entity_fk = "{{ model.reverse_property_config.entity_fk_field }}"
+        check_stmt = select(func.count()).select_from({{ model.reverse_property_config.entity_model }}).where(
+            getattr({{ model.reverse_property_config.entity_model }}, entity_fk) == id
+        )
+        check_result = await session.exec(check_stmt)
+        if check_result.one() > 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Cannot modify properties: {{ model.reverse_property_config.entity_model }} records reference this {{ model.name }}. Remove or reassign them first."
+            )
+    {% endif %}
     try:
         {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in)
         return {{ model.lower_name }}
@@ -596,6 +612,35 @@ async def bulk_delete_{{ model.lower_name }}(
                 await session.rollback()
                 raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
     return {"deleted": deleted_count}
+
+{% if model.property_config_meta %}
+@router.put("/{id}/properties-config")
+async def update_{{ model.lower_name }}_properties_config(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    id: int,
+    configs: list[dict] = Body(..., description="Properties configuration list"),
+) -> Any:
+    """
+    Update the properties_config of a {{ model.name }}.
+    Only values can be modified — the set of property keys must match the blueprint.
+    """
+    {{ model.lower_name }} = await service.get(session, id)
+    if not {{ model.lower_name }}:
+        raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% if model.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        if getattr({{ model.lower_name }}, "{{ model.owner_field }}", None) != current_user.id:
+            raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% endif %}
+    try:
+        result = await service.update_properties_config(session, id, configs)
+        return result
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+{% endif %}
 
 {% if model.actions %}
 {% for action_name, action_config in model.actions.items() %}

@@ -309,6 +309,13 @@ class {{ model.name }}Service:
     async def delete(self, session: AsyncSession, id: int) -> int:
         return await crud.delete(session, id)
 
+    {% if model.property_config_meta %}
+    async def update_properties_config(
+        self, session: AsyncSession, entity_id: int, configs: list[dict],
+    ) -> dict:
+        return await crud.update_properties_config(session, entity_id, configs)
+    {% endif %}
+
     {% if model.is_notification_table %}
     async def mark_all_read(self, session: AsyncSession, user_id: int) -> int:
         """

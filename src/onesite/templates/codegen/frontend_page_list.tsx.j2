@@ -1390,6 +1390,10 @@ const {{ model.name }}Page: React.FC = () => {
                         itemSchema={ {{ field.json_item_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                        {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
+                        canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
+                        canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                        {% endif %}
                     />
                     {% else %}
                     <JsonInput

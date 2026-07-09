@@ -268,11 +268,13 @@ def get_model_fields(
         timescaledb_entity_field = ts_config.get("entity_field")
         timescaledb_metric_field = ts_config.get("metric_field")
         timescaledb_model_table = ts_config.get("model_table")
+        property_config = ts_config.get("property_config")
     else:
         is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
         timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
         timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
         timescaledb_model_table = model_site_props.get("timescaledb_model_table", None)
+        property_config = None
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -659,4 +661,5 @@ def get_model_fields(
         timescaledb_entity_field=timescaledb_entity_field,
         timescaledb_metric_field=timescaledb_metric_field,
         timescaledb_model_table=timescaledb_model_table,
+        property_config=property_config,
     )
