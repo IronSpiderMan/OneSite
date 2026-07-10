@@ -654,7 +654,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             <div className="grid gap-6 md:grid-cols-2">
                 <Card>
                     <CardHeader>
-                        <CardTitle>{% if model.page_edit %}{isEditing ? t('common.edit') + ' ' : ''}{% endif %}Basic Information</CardTitle>
+                        <CardTitle>{% if model.page_edit %}{isEditing ? t('common.edit') + ' ' : ''}{% endif %}{t('common.basic_information')}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-4">
                         {% if model.page_edit %}{isEditing ? (
@@ -937,7 +937,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 {% elif field.ui_type == 'time' %}
                                 <span className="text-muted-foreground">{formatTime(currentItem.{{ field.name }})}</span>
                                 {% else %}
+                                <span className="block max-w-[250px] truncate" title={String(currentItem.{{ field.name }} ?? '-')}>
                                 {String(currentItem.{{ field.name }} ?? '-')}
+                                </span>
                                 {% endif %}
                             </div>
                         </div>
@@ -950,7 +952,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% if model.foreign_keys %}
                 <Card>
                     <CardHeader>
-                        <CardTitle>Related Information</CardTitle>
+                        <CardTitle>{t('common.related_information')}</CardTitle>
                     </CardHeader>
                     <CardContent className="space-y-6">
                         {% for fk in model.foreign_keys %}
@@ -963,13 +965,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 { {{ fk.target_service }}Data ? (
                                     <div className="space-y-2">
                                         <div className="grid grid-cols-2 gap-2 text-sm">
-                                            <span className="text-muted-foreground">Display Name:</span>
-                                            <span className="font-medium">{ {{ fk.target_service }}Data.{{ fk.label_field }} }</span>
-                                            
                                             {/* Show all readable fields for the target model */}
                                             {% if fk.target_readable_fields %}
                                             {% for target_field in fk.target_readable_fields %}
-                                            {% if target_field.name != fk.label_field %}
                                             { {{ fk.target_service }}Data.{{ target_field.name }} !== undefined && (
                                                 <>
                                                 <span className="text-muted-foreground">{t('{{ target_field.label_key }}')}:</span>
@@ -986,7 +984,6 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 </span>
                                                 </>
                                             )}
-                                            {% endif %}
                                             {% endfor %}
                                             {% endif %}
                                         </div>
@@ -1057,7 +1054,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     ) : (
                                         <TableRow>
                                             <TableCell colSpan={ {{ m2m.target_readable_fields | length + 1 }} } className="h-24 text-center">
-                                                No {{ m2m.target_model.lower() }}s found.
+                                                {t('common.no_result')}
                                             </TableCell>
                                         </TableRow>
                                     )}
@@ -1143,7 +1140,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     ) : (
                                         <TableRow>
                                             <TableCell colSpan={ {{ rel.source_readable_fields | length + 1 }} } className="h-24 text-center">
-                                                No {{ rel.source_model.lower() }}s found.
+                                                {t('common.no_result')}
                                             </TableCell>
                                         </TableRow>
                                     )}
@@ -1234,7 +1231,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     ) : (
                                         <TableRow>
                                             <TableCell colSpan={ {{ (rfk.source_readable_fields | length) }} } className="h-24 text-center">
-                                                No {{ rfk.source_model.lower() }}s found.
+                                                {t('common.no_result')}
                                             </TableCell>
                                         </TableRow>
                                     )}

@@ -73,6 +73,8 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "collapse": "Collapse",
             "remove": "Remove",
             "details": "Details",
+            "basic_information": "Basic Information",
+            "related_information": "Related Information",
         },
         "menu": {
             "dashboard": "Dashboard",
@@ -239,6 +241,8 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "collapse": "收起",
             "remove": "移除",
             "details": "详情",
+            "basic_information": "基础信息",
+            "related_information": "关联信息",
         },
         "menu": {
             "dashboard": "仪表盘",
