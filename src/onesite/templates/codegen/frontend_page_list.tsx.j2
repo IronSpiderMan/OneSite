@@ -785,7 +785,7 @@ const {{ model.name }}Page: React.FC = () => {
               <TableHead>{t('{{ field.label_key }}')}</TableHead>
               )}{% endif %}
               {% endfor %}
-              <TableHead className="w-[100px]">{t('common.actions')}</TableHead>
+              <TableHead className="w-[100px] sticky right-0 bg-card z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]">{t('common.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -888,7 +888,8 @@ const {{ model.name }}Page: React.FC = () => {
                     </TableCell>
                     )}{% endif %}
                     {% endfor %}
-                    <TableCell className="flex items-center gap-2">
+                    <TableCell className="sticky right-0 bg-card z-10">
+                        <div className="flex items-center gap-2">
                         <>
                         {% if model.actions %}
                         {% for action_name, action_config in model.actions.items() %}
@@ -954,6 +955,7 @@ const {{ model.name }}Page: React.FC = () => {
                             <Trash2 className="h-4 w-4" />
                         </Button>
                         )}
+                        </div>
                     </TableCell>
                 </TableRow>
                 ))

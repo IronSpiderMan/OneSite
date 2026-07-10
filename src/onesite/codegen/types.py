@@ -191,6 +191,7 @@ class EventListener:
     body: str          # dedented source code of the method body
     is_async: bool = False  # async def → background task handler
     has_session_param: bool = False  # method signature has "session" param
+    has_old_param: bool = False  # method signature has "old" param (after_update only)
 
 
 @dataclass

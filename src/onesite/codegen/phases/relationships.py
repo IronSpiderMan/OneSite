@@ -382,7 +382,45 @@ def _resolve_property_config_relations(models: list[ModelDefinition]) -> None:
 
         field_name = property_config.get("field_name", "properties_config")
         config_fields = property_config.get("config_fields", {})
+        config_model_name = property_config.get("config_model")
         blueprint_fk = f"{model_table}_id"
+
+        # Resolve config_class and config_fields (config_model takes priority)
+        if config_model_name:
+            config_class = config_model_name
+            if not config_fields:
+                # Introspect the user-defined class at runtime
+                try:
+                    import sys
+                    from pydantic_core import PydanticUndefined
+                    # Search both entity and timeseries modules
+                    candidate_modules = [
+                        f"app.models.{entity_model['source_module']}",
+                        f"app.models.{ts_model['source_module']}",
+                    ]
+                    config_cls = None
+                    for module_name in candidate_modules:
+                        if module_name in sys.modules:
+                            module = sys.modules[module_name]
+                            config_cls = getattr(module, config_model_name, None)
+                            if config_cls is not None:
+                                break
+                    if config_cls:
+                        for fn, fi in config_cls.model_fields.items():
+                            if fn == "property_key" or fn.startswith("_"):
+                                continue
+                            anno = fi.annotation
+                            anno_str = anno.__name__ if hasattr(anno, '__name__') else str(anno)
+                            if fi.default is not PydanticUndefined and fi.default is not None:
+                                config_fields[fn] = f"{anno_str} = {repr(fi.default)}"
+                            elif fi.default is not PydanticUndefined:
+                                config_fields[fn] = f"Optional[{anno_str}]"
+                            else:
+                                config_fields[fn] = anno_str
+                except Exception:
+                    pass
+        else:
+            config_class = f"{entity_model['name']}PropertyConfig"
 
         # Find blueprint model
         blueprint_model_name = None
@@ -408,7 +446,7 @@ def _resolve_property_config_relations(models: list[ModelDefinition]) -> None:
         entity_model["property_config_meta"] = {
             "field_name": field_name,
             "config_fields": config_fields,
-            "config_class": f"{entity_model['name']}PropertyConfig",
+            "config_class": config_class,
             "field_permissions": field_permissions,
             "blueprint_fk": blueprint_fk,
             "blueprint_model": blueprint_model_name,

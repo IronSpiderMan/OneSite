@@ -189,10 +189,18 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
         is_async = asyncio.iscoroutinefunction(method)
 
         has_session_param = False
+        has_old_param = False
         if is_async:
             try:
                 sig = inspect.signature(method)
                 has_session_param = "session" in sig.parameters
+                has_old_param = "old" in sig.parameters
+            except (ValueError, TypeError):
+                pass
+        else:
+            try:
+                sig = inspect.signature(method)
+                has_old_param = "old" in sig.parameters
             except (ValueError, TypeError):
                 pass
 
@@ -205,6 +213,7 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
                 body=body,
                 is_async=is_async,
                 has_session_param=has_session_param,
+                has_old_param=has_old_param,
             )
         )
 

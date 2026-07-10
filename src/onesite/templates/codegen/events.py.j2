@@ -4,6 +4,9 @@ Auto-generated from ``on_*`` methods on the model class.
 """
 
 from sqlalchemy import event
+{% if model.event_listeners | selectattr('event_name', 'equalto', 'after_update') | list | length > 0 %}
+from sqlalchemy.orm.attributes import get_history as _get_history
+{% endif %}
 from app.models.{{ model.module_name }} import {{ model.name }}
 
 {% for listener in model.event_listeners %}
@@ -13,7 +16,10 @@ from app.models.{{ model.module_name }} import {{ model.name }}
 @event.listens_for({{ model.name }}, "{{ listener.event_name }}")
 def {{ listener.event_name }}(mapper, connection, target):
     from app.core.task_queue import task_queue
-{% if listener.event_name == 'after_delete' %}
+{% if listener.event_name == 'after_update' %}
+    _old = {_col.key: _get_history(target, _col.key).deleted[0] for _col in mapper.column_attrs if _get_history(target, _col.key).deleted}
+    task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id, "old": _old})
+{% elif listener.event_name == 'after_delete' %}
     data = {c.name: getattr(target, c.name) for c in target.__table__.columns}
     task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id, "data": data})
 {% else %}
@@ -25,6 +31,12 @@ def {{ listener.event_name }}(mapper, connection, target):
 @event.listens_for({{ model.name }}, "{{ listener.event_name }}")
 def {{ listener.event_name }}(mapper, connection, target):
     self = target
+{% if listener.event_name == 'after_update' %}
+    _old = {_col.key: _get_history(target, _col.key).deleted[0] for _col in mapper.column_attrs if _get_history(target, _col.key).deleted}
+{% if listener.has_old_param %}
+    old = _old
+{% endif %}
+{% endif %}
 {{ listener.body | indent(4, first=True) }}
 {% endif %}
 {% endfor %}

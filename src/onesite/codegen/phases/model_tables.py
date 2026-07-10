@@ -109,7 +109,10 @@ def _scan_ts_configs_new(content: str) -> dict | None:
             field_name = _extract_from_block(pc_block, "field_name") or "properties_config"
             config["property_config"] = True
             config["property_config_field_name"] = field_name
-            # Extract config_fields as a dict
+            # Check for config_model (new format: references a user-defined SQLModel class)
+            config_model = _extract_from_block(pc_block, "config_model")
+            config["property_config_config_model"] = config_model
+            # Extract config_fields as a dict (legacy format)
             cf_match = re.search(
                 r"""["']config_fields["']\s*:\s*\{""",
                 pc_block,
@@ -132,10 +135,12 @@ def _scan_ts_configs_new(content: str) -> dict | None:
         else:
             config["property_config"] = False
             config["property_config_field_name"] = None
+            config["property_config_config_model"] = None
             config["property_config_config_fields"] = {}
     else:
         config["property_config"] = False
         config["property_config_field_name"] = None
+        config["property_config_config_model"] = None
         config["property_config_config_fields"] = {}
     return config
 
@@ -213,6 +218,7 @@ def _scan_model_table_configs(models_dir: Path) -> tuple[list[dict], list[dict]]
                 "source_class": source_class,
                 "property_config": ts_config.get("property_config", False),
                 "property_config_field_name": ts_config.get("property_config_field_name"),
+                "property_config_config_model": ts_config.get("property_config_config_model"),
                 "property_config_config_fields": ts_config.get("property_config_config_fields", {}),
             })
 
@@ -252,7 +258,52 @@ def _inject_fk_into_model_source(filepath: Path, fk_field: str, target_table: st
     return False
 
 
-def _config_type_to_python(type_str: str) -> tuple[str, str | None]:
+def _parse_config_class_fields(filepath: Path, class_name: str) -> dict[str, str]:
+    """Parse a SQLModel class definition in *filepath* and extract field metadata.
+
+    Returns ``{field_name: type_with_default}`` in the same format as the
+    legacy ``config_fields`` dict (e.g. ``{"enabled": "bool = True"}``).
+    """
+    import ast as _ast
+
+    content = filepath.read_text()
+    try:
+        tree = _ast.parse(content)
+    except SyntaxError:
+        return {}
+
+    for node in _ast.walk(tree):
+        if not isinstance(node, _ast.ClassDef) or node.name != class_name:
+            continue
+
+        fields: dict[str, str] = {}
+        for item in node.body:
+            if not isinstance(item, _ast.AnnAssign) or not isinstance(item.target, _ast.Name):
+                continue
+
+            field_name = item.target.id
+            if field_name.startswith("_") or field_name == "property_key":
+                continue
+
+            # Resolve type annotation
+            anno = _ast.unparse(item.annotation) if hasattr(_ast, "unparse") else _ast.dump(item.annotation)
+
+            # Resolve default value
+            default = None
+            if item.value is not None:
+                try:
+                    default = _ast.literal_eval(item.value)
+                except (ValueError, TypeError):
+                    default = _ast.unparse(item.value) if hasattr(_ast, "unparse") else repr(item.value)
+
+            if default is not None:
+                fields[field_name] = f"{anno} = {repr(default)}"
+            else:
+                fields[field_name] = anno
+
+        return fields
+
+    return {}
     """Convert a config_fields type string to (python_annotation, default_value).
 
     Examples:
@@ -280,33 +331,55 @@ def _inject_property_config_into_entity(
     field_name: str,
     config_fields: dict[str, str],
     description: str,
+    config_model: str | None = None,
 ) -> bool:
     """Inject a config model class and typed JSON field into an entity model file.
 
-    Generates a ``{Entity}PropertyConfig`` SQLModel class and a typed
-    ``list[{Entity}PropertyConfig]`` field.  Returns True if injected.
+    When *config_model* is provided (new format), the user has already defined
+    the class — only the typed ``list[config_model]`` field is injected.
+
+    When *config_model* is None (legacy format), a ``{Entity}PropertyConfig``
+    SQLModel class is generated from *config_fields* and injected alongside
+    the typed field.
     """
     content = filepath.read_text()
     if f"{field_name}:" in content:
         return False
 
-    config_class = f"{entity_class}PropertyConfig"
+    if config_model:
+        config_class = config_model
+    else:
+        config_class = f"{entity_class}PropertyConfig"
+
     lines = content.split("\n")
 
-    # ── Build the config model class source ──
-    class_lines = [
-        "",
-        f"class {config_class}(SQLModel):",
-        f'    """Property binding configuration for {entity_class}."""',
-        "    property_key: str",
-    ]
-    for cf_name, cf_type in config_fields.items():
-        anno, default = _config_type_to_python(cf_type)
-        if default is not None:
-            class_lines.append(f"    {cf_name}: {anno} = {default}")
-        else:
-            class_lines.append(f"    {cf_name}: {anno}")
-    class_lines.append("")
+    if not config_model:
+        # ── Legacy: generate the config model class from config_fields ──
+        class_lines = [
+            "",
+            f"class {config_class}(SQLModel):",
+            f'    """Property binding configuration for {entity_class}."""',
+            "    property_key: str",
+        ]
+        for cf_name, cf_type in config_fields.items():
+            anno, default = _config_type_to_python(cf_type)
+            if default is not None:
+                class_lines.append(f"    {cf_name}: {anno} = {default}")
+            else:
+                class_lines.append(f"    {cf_name}: {anno}")
+        class_lines.append("")
+
+        # Find where to insert the model class (before the entity class definition)
+        class_def_idx = None
+        for i, line in enumerate(lines):
+            if f"class {entity_class}(" in line and "table=True" in line:
+                class_def_idx = i
+                break
+
+        if class_def_idx is None:
+            return False
+
+        lines[class_def_idx:class_def_idx] = class_lines
 
     # ── The field line ──
     field_line = (
@@ -315,7 +388,7 @@ def _inject_property_config_into_entity(
         f'description="{description}")'
     )
 
-    # Find where to insert the model class (before the entity class definition)
+    # Find the entity class definition (may have shifted if legacy class was inserted)
     class_def_idx = None
     for i, line in enumerate(lines):
         if f"class {entity_class}(" in line and "table=True" in line:
@@ -324,16 +397,6 @@ def _inject_property_config_into_entity(
 
     if class_def_idx is None:
         return False
-
-    # Insert the config model class before the entity class
-    lines[class_def_idx:class_def_idx] = class_lines
-
-    # Re-find the entity class (shifted down)
-    class_def_idx = None
-    for i, line in enumerate(lines):
-        if f"class {entity_class}(" in line and "table=True" in line:
-            class_def_idx = i
-            break
 
     # Find the last Field line inside the entity class to insert the field
     insert_idx = None
@@ -402,17 +465,29 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
             # Inject properties_config typed JSON field + config model if property_config is configured
             if cfg.get("property_config"):
                 field_name = cfg.get("property_config_field_name", "properties_config")
-                config_fields = cfg.get("property_config_config_fields", {})
                 entity_class = to_pascal(cfg["entity_stem"])
+                config_model = cfg.get("property_config_config_model")
+                if config_model:
+                    # New format: user-defined class, parse fields from source
+                    config_fields = _parse_config_class_fields(entity_file, config_model)
+                    if not config_fields:
+                        # Try the timeseries source file as well
+                        ts_file = models_src_dir / f"{cfg['source_file']}.py"
+                        config_fields = _parse_config_class_fields(ts_file, config_model)
+                else:
+                    # Legacy format: config_fields defined in property_config
+                    config_fields = cfg.get("property_config_config_fields", {})
                 if _inject_property_config_into_entity(
                     entity_file,
                     entity_class,
                     field_name,
                     config_fields,
                     "Per-property binding configuration",
+                    config_model=config_model,
                 ):
+                    config_cls = config_model or f"{entity_class}PropertyConfig"
                     console.print(
-                        f"[green]Injected {entity_class}PropertyConfig + {field_name} "
+                        f"[green]Injected {config_cls} + {field_name} "
                         f"into {entity_file.name}[/green]"
                     )
 

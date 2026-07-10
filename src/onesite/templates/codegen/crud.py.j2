@@ -541,8 +541,40 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
 
     # Convert to dict to handle nested Pydantic models in JSON fields
     obj_dict = obj_in.dict()
+
+    {% if model.property_config_meta %}
+    # Initialize properties_config from blueprint model if not explicitly provided
+    if not obj_dict.get("{{ model.property_config_meta.field_name }}"):
+        blueprint_id = obj_dict.get("{{ model.property_config_meta.blueprint_fk }}")
+        if blueprint_id is not None:
+            blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, blueprint_id)
+            if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
+                props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
+                config_entries = []
+                for p in props:
+                    key = p.get("key") if isinstance(p, dict) else (p.key if hasattr(p, "key") else None)
+                    if key is not None:
+                        cfg = {{ model.property_config_meta.config_class }}(
+                            property_key=key,
+                            {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
+                            {% set ft = field_type.lower() %}
+                            {% if '= true' in ft %}
+                            {{ field_name }}=True,
+                            {% elif '= false' in ft %}
+                            {{ field_name }}=False,
+                            {% elif '= ' in ft %}
+                            {{ field_name }}={{ field_type.split('=', 1)[1].strip() }},
+                            {% elif 'optional' in ft %}
+                            {{ field_name }}=None,
+                            {% else %}
+                            {% endif %}
+                            {% endfor %}
+                        )
+                        config_entries.append(cfg.model_dump())
+                obj_dict["{{ model.property_config_meta.field_name }}"] = config_entries
+    {% endif %}
+
     db_obj = {{ model.name }}(**obj_dict)
-    
     session.add(db_obj)
     await session.commit()
     await session.refresh(db_obj)
@@ -563,38 +595,6 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     {% endfor %}
     await session.commit()
     await session.refresh(db_obj)
-    {% endif %}
-
-    {% if model.property_config_meta %}
-    # Initialize properties_config from blueprint model's properties
-    blueprint_id = getattr(db_obj, "{{ model.property_config_meta.blueprint_fk }}", None)
-    if blueprint_id is not None:
-        blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, blueprint_id)
-        if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
-            props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
-            config_entries = []
-            for p in props:
-                key = p.get("key") if isinstance(p, dict) else (p.key if hasattr(p, "key") else None)
-                if key is not None:
-                    cfg = {{ model.property_config_meta.config_class }}(
-                        property_key=key,
-                        {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
-                        {% set ft = field_type.lower() %}
-                        {% if '= true' in ft %}
-                        {{ field_name }}=True,
-                        {% elif '= false' in ft %}
-                        {{ field_name }}=False,
-                        {% elif 'optional' in ft %}
-                        {{ field_name }}=None,
-                        {% else %}
-                        {% endif %}
-                        {% endfor %}
-                    )
-                    config_entries.append(cfg.model_dump())
-            setattr(db_obj, "{{ model.property_config_meta.field_name }}", config_entries)
-            session.add(db_obj)
-            await session.commit()
-            await session.refresh(db_obj)
     {% endif %}
 
     return db_obj
@@ -630,6 +630,11 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% endfor %}
     {% endif %}
     
+    {% if model.property_config_meta %}
+    # Capture old blueprint FK before setattr overwrites it
+    _old_blueprint_id = getattr(db_obj, "{{ model.property_config_meta.blueprint_fk }}", None)
+    {% endif %}
+
     for key, value in obj_data.items():
         {% if model.property_config_meta %}
         if key == "{{ model.property_config_meta.field_name }}" and value is not None:
@@ -650,45 +655,41 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
             value = [item if isinstance(item, dict) else item.model_dump() for item in value]
         {% endif %}
         setattr(db_obj, key, value)
+
+    {% if model.property_config_meta %}
+    # Re-initialize properties_config if blueprint FK changed
+    new_bp = obj_data.get("{{ model.property_config_meta.blueprint_fk }}")
+    if new_bp is not None and new_bp != _old_blueprint_id:
+        blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, new_bp)
+        if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
+            props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
+            config_entries = []
+            for p in props:
+                key = p.get("key") if isinstance(p, dict) else (p.key if hasattr(p, "key") else None)
+                if key is not None:
+                    cfg = {{ model.property_config_meta.config_class }}(
+                        property_key=key,
+                        {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
+                        {% set ft = field_type.lower() %}
+                        {% if '= true' in ft %}
+                        {{ field_name }}=True,
+                        {% elif '= false' in ft %}
+                        {{ field_name }}=False,
+                        {% elif '= ' in ft %}
+                        {{ field_name }}={{ field_type.split('=', 1)[1].strip() }},
+                        {% elif 'optional' in ft %}
+                        {{ field_name }}=None,
+                        {% else %}
+                        {% endif %}
+                        {% endfor %}
+                    )
+                    config_entries.append(cfg.model_dump())
+            setattr(db_obj, "{{ model.property_config_meta.field_name }}", config_entries)
+    {% endif %}
+
     session.add(db_obj)
     await session.commit()
     await session.refresh(db_obj)
-
-    {% if model.property_config_meta %}
-    # Re-initialize properties_config only if blueprint FK actually changed
-    if "{{ model.property_config_meta.blueprint_fk }}" in obj_data:
-        old_bp = getattr(db_obj, "{{ model.property_config_meta.blueprint_fk }}", None)
-        new_bp = obj_data.get("{{ model.property_config_meta.blueprint_fk }}")
-        if new_bp is not None and new_bp != old_bp:
-            from app.models.{{ model.property_config_meta.blueprint_module }} import {{ model.property_config_meta.blueprint_model }}
-            blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, new_bp)
-            if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
-                props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
-                config_entries = []
-                for p in props:
-                    key = p.get("key") if isinstance(p, dict) else (p.key if hasattr(p, "key") else None)
-                    if key is not None:
-                        cfg = {{ model.property_config_meta.config_class }}(
-                            property_key=key,
-                            {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
-                            {% set ft = field_type.lower() %}
-                            {% if '= true' in ft %}
-                            {{ field_name }}=True,
-                            {% elif '= false' in ft %}
-                            {{ field_name }}=False,
-                            {% elif 'optional' in ft %}
-                            {{ field_name }}=None,
-                            {% else %}
-                            {% endif %}
-                            {% endfor %}
-                        )
-                        config_entries.append(cfg.model_dump())
-                setattr(db_obj, "{{ model.property_config_meta.field_name }}", config_entries)
-                session.add(db_obj)
-                await session.commit()
-                await session.refresh(db_obj)
-    {% endif %}
-
     return db_obj
 
 async def delete(session: AsyncSession, id: int) -> int:
