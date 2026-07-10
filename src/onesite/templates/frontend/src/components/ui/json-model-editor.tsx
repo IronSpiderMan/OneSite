@@ -244,6 +244,163 @@ export const JsonModelEditor: React.FC<{
   )
 }
 
+export const JsonModelDictEditor: React.FC<{
+  itemSchema: JsonModelSchema
+  value: any
+  onChange: (v: any) => void
+  className?: string
+  canAdd?: boolean
+  canRemove?: boolean
+  fixedKeys?: string[]
+  lockKeys?: boolean
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, fixedKeys, lockKeys }) => {
+  const [mode, setMode] = React.useState<"ui" | "json">("ui")
+
+  // Lazy-initialize locked keys from current dict value (captured once on first meaningful value)
+  const lockedRef = React.useRef<string[] | null>(null)
+  const rawValue = value && typeof value === "object" && !Array.isArray(value) ? value : ({} as Record<string, any>)
+  if (lockKeys && lockedRef.current === null) {
+    const keys = Object.keys(rawValue)
+    if (keys.length > 0) lockedRef.current = keys
+  }
+
+  const effectiveKeys: string[] | undefined = fixedKeys ?? lockedRef.current ?? undefined
+  const isFixed = (effectiveKeys && effectiveKeys.length > 0) || false
+
+  // Ensure value has all keys initialized with defaults when fixed
+  const dictValue = React.useMemo(() => {
+    const v = rawValue
+    if (isFixed && effectiveKeys) {
+      const result = { ...v }
+      for (const k of effectiveKeys) {
+        if (!(k in result)) result[k] = buildDefaultValue(itemSchema)
+      }
+      return result
+    }
+    return v
+  }, [rawValue, isFixed, effectiveKeys, itemSchema])
+
+  // Convert dict to array for editing
+  const toArray = (d: Record<string, any>) =>
+    Object.entries(d).map(([key, val]) => ({ __key: key, ...val }))
+
+  // Convert array back to dict (preserves all keys including empty)
+  const toDict = (arr: any[]) => {
+    const d: Record<string, any> = {}
+    for (const item of arr) {
+      const { __key, ...rest } = item
+      d[__key] = rest
+    }
+    return d
+  }
+
+  const arrValue = toArray(dictValue)
+
+  // Generate a unique temporary key for new entries
+  const nextIdRef = React.useRef(0)
+  const makeNewKey = () => {
+    nextIdRef.current += 1
+    return `__new_${nextIdRef.current}`
+  }
+
+  return (
+    <div className={cn("space-y-3", className)}>
+      <div className="flex items-center gap-2">
+        <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
+          UI
+        </Button>
+        <Button
+          type="button"
+          variant={mode === "json" ? "default" : "outline"}
+          size="sm"
+          onClick={() => setMode("json")}
+        >
+          JSON
+        </Button>
+      </div>
+      {mode === "ui" ? (
+        <div className="space-y-3">
+          {!isFixed && canAdd && (
+          <div className="flex items-center justify-end">
+            <Button
+              type="button"
+              size="sm"
+              onClick={() => onChange(toDict([...arrValue, { __key: makeNewKey(), ...buildDefaultValue(itemSchema) }]))}
+            >
+              Add
+            </Button>
+          </div>
+          )}
+          {isFixed
+            ? effectiveKeys!.map((key) => {
+                const item = dictValue[key] ?? buildDefaultValue(itemSchema)
+                return (
+                  <div key={key} className="rounded-md border p-3">
+                    <div className="mb-2 flex items-center justify-between">
+                      <div className="text-sm font-medium">{key}</div>
+                    </div>
+                    <JsonModelForm
+                      schema={itemSchema}
+                      value={item}
+                      onChange={(nv: any) => {
+                        const next = { ...dictValue, [key]: nv }
+                        onChange(next)
+                      }}
+                    />
+                  </div>
+                )
+              })
+            : arrValue.map((item, idx) => (
+            <div key={idx} className="rounded-md border p-3">
+              <div className="mb-2 flex items-center justify-between">
+                <div className="text-sm font-medium">Entry {idx + 1}</div>
+                {canRemove && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="text-destructive"
+                  onClick={() => {
+                    const next = [...arrValue]
+                    next.splice(idx, 1)
+                    onChange(toDict(next))
+                  }}
+                >
+                  Remove
+                </Button>
+                )}
+              </div>
+              <div className="mb-3 space-y-2">
+                <Label>Key</Label>
+                <Input
+                  value={item.__key ?? ""}
+                  onChange={(e) => {
+                    const next = [...arrValue]
+                    next[idx] = { ...next[idx], __key: e.target.value }
+                    onChange(toDict(next))
+                  }}
+                  placeholder="Entry key"
+                />
+              </div>
+              <JsonModelForm
+                schema={itemSchema}
+                value={item}
+                onChange={(nv: any) => {
+                  const next = [...arrValue]
+                  next[idx] = { ...nv, __key: next[idx].__key }
+                  onChange(toDict(next))
+                }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <JsonInput value={dictValue} onChange={onChange} jsonKind="object" />
+      )}
+    </div>
+  )
+}
+
 export const JsonModelArrayEditor: React.FC<{
   itemSchema: JsonModelSchema
   value: any

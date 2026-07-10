@@ -28,7 +28,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 {% if not model.page_edit or model.importable %}
 import { Modal } from '../../components/ui/modal';
@@ -1386,6 +1386,18 @@ const {{ model.name }}Page: React.FC = () => {
                         schema={ {{ field.json_model_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                    />
+                    {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
+                    <JsonModelDictEditor
+                        itemSchema={ {{ field.json_item_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                        {% if field.json_fixed_keys %}
+                        fixedKeys={ {{ field.json_fixed_keys | tojson }} }
+                        {% endif %}
+                        {% if field.json_lock_keys %}
+                        lockKeys
+                        {% endif %}
                     />
                     {% elif field.json_item_schema %}
                     <JsonModelArrayEditor

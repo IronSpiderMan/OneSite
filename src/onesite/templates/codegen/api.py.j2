@@ -90,8 +90,7 @@ async def read_{{ model.lower_name }}_realtime(
             from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
             dm = await session.get({{ model.timescaledb_model_class }}, dm_id)
             if dm and dm.properties:
-                for p in dm.properties:
-                    k = p.key if hasattr(p, "key") else p.get("key")
+                for k, p in dm.properties.items():
                     properties[k] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
 
     # Filter out metrics not defined in properties
@@ -620,7 +619,7 @@ async def update_{{ model.lower_name }}_properties_config(
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     id: int,
-    configs: list[dict] = Body(..., description="Properties configuration list"),
+    configs: dict[str, Any] = Body(..., description="Properties configuration"),
 ) -> Any:
     """
     Update the properties_config of a {{ model.name }}.

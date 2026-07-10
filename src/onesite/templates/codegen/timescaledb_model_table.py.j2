@@ -27,7 +27,6 @@ class {{ class_name }}DataType(str, Enum):
 
 class {{ class_name }}Property(SQLModel):
     """Property definition for {{ class_name }}."""
-    key: str = Field(..., description="属性标识符")
     display_name: str = Field(..., description="显示名称")
     unit: Optional[str] = Field(default=None, description="单位")
     data_type: {{ class_name }}DataType = Field(default={{ class_name }}DataType.float, description="数据类型")
@@ -46,8 +45,8 @@ class {{ class_name }}(SQLModel, table=True):
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(..., description="Model name")
     description: str | None = Field(default=None, description="Description")
-    properties: list[{{ class_name }}Property] = Field(
-        default=[],
+    properties: dict[str, {{ class_name }}Property] = Field(
+        default_factory=dict,
         sa_column=Column(JSON),
         description="Metric definitions",
     )

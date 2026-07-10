@@ -62,6 +62,8 @@ def _build_json_model_schema(
     visited.add(model)
     fields: List[Dict[str, Any]] = []
     for fname, f in model.model_fields.items():
+        if fname == "property_key" or fname.startswith("_"):
+            continue
         ann = f.annotation
         kind = _json_field_kind_from_annotation(ann)
         field_schema: Dict[str, Any] = {"name": fname, "kind": kind}
@@ -417,6 +419,7 @@ def get_model_fields(
                     if inspect.isclass(value_type) and _is_pydantic_model(value_type):
                         type_str = f"List[Dict[str, {value_type.__name__}]]"
                         json_py_imports.append(value_type.__name__)
+                        json_item_schema = _build_json_model_schema(value_type)
                     else:
                         type_str = "List[Dict[str, Any]]"
                 else:
@@ -427,6 +430,7 @@ def get_model_fields(
                 if inspect.isclass(value_type) and _is_pydantic_model(value_type):
                     type_str = f"Dict[str, {value_type.__name__}]"
                     json_py_imports.append(value_type.__name__)
+                    json_item_schema = _build_json_model_schema(value_type)
                 else:
                     type_str = "Dict[str, Any]"
         elif inspect.isclass(resolved_annotation) and _is_pydantic_model(resolved_annotation):
@@ -555,6 +559,10 @@ def get_model_fields(
         # Get field group for UI grouping
         field_group = site_props.get("group")
 
+        # Get fixed keys for Dict[str, Model] fields
+        json_fixed_keys = site_props.get("fixed_keys")
+        json_lock_keys = bool(site_props.get("lock_keys", False))
+
         default_value = None if field.default is PydanticUndefined else field.default
         if is_enum and default_value is not None and hasattr(default_value, "value"):
             default_value = default_value.value
@@ -567,6 +575,8 @@ def get_model_fields(
                 json_kind=json_kind,
                 json_model_schema=json_model_schema,
                 json_item_schema=json_item_schema,
+                json_fixed_keys=json_fixed_keys,
+                json_lock_keys=json_lock_keys,
                 py_imports=sorted(set(json_py_imports)),
                 permissions=permissions,
                 role_permissions=field_role_permissions,

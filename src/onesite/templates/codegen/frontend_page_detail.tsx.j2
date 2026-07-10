@@ -18,7 +18,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { useForm, Controller } from 'react-hook-form';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor } from '../../components/ui/json-model-editor';
 import { ImageUpload } from '../../components/ui/image-upload';
 import { TimePicker } from '../../components/ui/time-picker';
 import { SearchableSelect } from '../../components/ui/searchable-select';
@@ -759,6 +759,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             schema={ {{ field.json_model_schema | tojson }} }
                                             value={value}
                                             onChange={onChange}
+                                        />
+                                        {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
+                                        <JsonModelDictEditor
+                                            itemSchema={ {{ field.json_item_schema | tojson }} }
+                                            value={value}
+                                            onChange={onChange}
+                                            {% if field.json_fixed_keys %}
+                                            fixedKeys={ {{ field.json_fixed_keys | tojson }} }
+                                            {% endif %}
+                                            {% if field.json_lock_keys %}
+                                            lockKeys
+                                            {% endif %}
                                         />
                                         {% elif field.json_item_schema %}
                                         <JsonModelArrayEditor
