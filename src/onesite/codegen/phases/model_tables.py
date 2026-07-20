@@ -230,7 +230,7 @@ def _inject_fk_into_model_source(filepath: Path, fk_field: str, target_table: st
 
     Returns True if injected, False if already present.
     """
-    content = filepath.read_text()
+    content = filepath.read_text(encoding="utf-8")
     field_decl = f"{fk_field}:"
     if field_decl in content:
         return False
@@ -266,7 +266,7 @@ def _parse_config_class_fields(filepath: Path, class_name: str) -> dict[str, str
     """
     import ast as _ast
 
-    content = filepath.read_text()
+    content = filepath.read_text(encoding="utf-8")
     try:
         tree = _ast.parse(content)
     except SyntaxError:
@@ -342,7 +342,7 @@ def _inject_property_config_into_entity(
     SQLModel class is generated from *config_fields* and injected alongside
     the typed field.
     """
-    content = filepath.read_text()
+    content = filepath.read_text(encoding="utf-8")
     if f"{field_name}:" in content:
         return False
 
@@ -521,4 +521,3 @@ def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
             },
             latest_path,
         )
-

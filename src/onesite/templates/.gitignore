@@ -22,6 +22,10 @@ share/python-wheels/
 *.egg
 MANIFEST
 
+# The generated frontend runtime is source, not a Python virtual-environment lib.
+!frontend/src/lib/
+!frontend/src/lib/theme.ts
+
 # Virtual Environment
 venv/
 env/

@@ -61,12 +61,12 @@ const {{ model.name }}Page: React.FC = () => {
   const timeZone = getUserTimeZone();
   {% if not model.page_edit %}
   const [isModalOpen, setIsModalOpen] = useState(false);
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<{{ 'string' if 'str' in model.id_type else 'number' }} | null>(null);
   {% endif %}
   const [deleteOpen, setDeleteOpen] = useState(false);
-  const [deleteId, setDeleteId] = useState<number | null>(null);
+  const [deleteId, setDeleteId] = useState<{{ 'string' if 'str' in model.id_type else 'number' }} | null>(null);
   const [isDeleting, setIsDeleting] = useState(false);
-  const [selectedIds, setSelectedIds] = useState<number[]>([]);
+  const [selectedIds, setSelectedIds] = useState<{{ 'string[]' if 'str' in model.id_type else 'number[]' }}>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
@@ -394,7 +394,7 @@ const {{ model.name }}Page: React.FC = () => {
     {% endif %}
   };
 
-  const requestDelete = (id: number) => {
+  const requestDelete = (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     setDeleteId(id);
     setDeleteOpen(true);
   };
@@ -427,7 +427,7 @@ const {{ model.name }}Page: React.FC = () => {
     }
   };
 
-  const toggleSelect = (id: number) => {
+  const toggleSelect = (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     setSelectedIds((prev) =>
       prev.includes(id) ? prev.filter((i) => i !== id) : [...prev, id]
     );

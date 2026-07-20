@@ -20,16 +20,16 @@ def write_file_with_status(path: Path, content: str) -> str:
     path.parent.mkdir(parents=True, exist_ok=True)
 
     if not path.exists():
-        path.write_text(content)
+        path.write_text(content, encoding="utf-8")
         console.print(f"[green]Created {path}[/green]")
         return "created"
 
-    existing = path.read_text()
+    existing = path.read_text(encoding="utf-8")
     if existing == content:
         console.print(f"[dim]Skipped {path} (unchanged)[/dim]")
         return "skipped"
 
-    path.write_text(content)
+    path.write_text(content, encoding="utf-8")
     console.print(f"[yellow]Updated {path}[/yellow]")
     return "updated"
 

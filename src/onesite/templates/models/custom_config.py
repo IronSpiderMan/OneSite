@@ -15,6 +15,7 @@ class ThemeStyleEnum(str, Enum):
     ANIME = "anime"
     CUTE = "cute"
     EMQX = "emqx"
+    NEURON = "neuron"
 
 class ThemeModeEnum(str, Enum):
     SYSTEM = "system"

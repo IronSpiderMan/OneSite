@@ -171,7 +171,7 @@ async def mark_read(
     *,
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
-    id: int,
+    id: {{ model.id_type }},
 ) -> Any:
     n = await service.get(session, id)
     if not n:
@@ -457,7 +457,7 @@ async def read_{{ model.lower_name }}(
     {% if model.is_notification_table or (model.module_name == "user" and model.name == "User") or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
-    id: int,
+    id: {{ model.id_type }},
 ) -> Any:
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
@@ -491,7 +491,7 @@ async def update_{{ model.lower_name }}(
     {% elif model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
-    id: int,
+    id: {{ model.id_type }},
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
     {% if model.is_notification_table %}
@@ -545,14 +545,14 @@ async def update_{{ model.lower_name }}(
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
 
-@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, int], dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
     {% if model.is_notification_table or model.module_name == "user" or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
-    id: int,
+    id: {{ model.id_type }},
 ) -> Any:
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
@@ -586,7 +586,7 @@ async def bulk_delete_{{ model.lower_name }}(
     {% if model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
-    ids: Annotated[List[int], Body(embed=True)],
+    ids: Annotated[List[{{ model.id_type }}], Body(embed=True)],
 ) -> Any:
     """
     Delete multiple {{ model.name }} records by their IDs.
@@ -618,7 +618,7 @@ async def update_{{ model.lower_name }}_properties_config(
     *,
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
-    id: int,
+    id: {{ model.id_type }},
     configs: dict[str, Any] = Body(..., description="Properties configuration"),
 ) -> Any:
     """
@@ -648,7 +648,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
-    id: int,
+    id: {{ model.id_type }},
 ) -> Any:
     obj = await service.get(session, id)
     if not obj:
@@ -775,7 +775,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
 async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    id: int,
+    id: {{ model.id_type }},
     page: int = 1,
     size: int = 20,
 ) -> Any:
@@ -793,7 +793,7 @@ async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}(
 async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}_with_meta(
     *,
     session: AsyncSession = Depends(db.get_session),
-    id: int,
+    id: {{ model.id_type }},
     page: int = 1,
     size: int = 50,
 ) -> Any:
@@ -811,7 +811,7 @@ async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}_with_meta(
 async def read_{{ model.lower_name }}_{{ rel.name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    id: int,
+    id: {{ model.id_type }},
     page: int = 1,
     size: int = 20,
 ) -> Any:

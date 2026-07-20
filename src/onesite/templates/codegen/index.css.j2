@@ -263,6 +263,406 @@
   border-radius: 3px;
 }
 
+{# ── Neuron theme-specific rules ── #}
+{# A dark-native telemetry-console treatment inspired by the bundled neuron reference. #}
+[data-theme="neuron"] {
+  color-scheme: dark;
+}
+[data-theme="neuron"] body {
+  font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
+  background-image: linear-gradient(rgb(255 255 255 / 0.012) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.012) 1px, transparent 1px);
+  background-size: 32px 32px;
+}
+[data-theme="neuron"] h1, [data-theme="neuron"] h2, [data-theme="neuron"] h3,
+[data-theme="neuron"] h4, [data-theme="neuron"] h5, [data-theme="neuron"] h6 {
+  font-weight: 600;
+  letter-spacing: -0.025em;
+}
+[data-theme="neuron"] code, [data-theme="neuron"] pre, [data-theme="neuron"] .font-mono,
+[data-theme="neuron"] thead th {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+}
+[data-theme="neuron"] aside {
+  background-color: hsl(210 13% 6%) !important;
+  border-right-color: hsl(var(--border)) !important;
+}
+[data-theme="neuron"] header {
+  background-color: hsl(var(--background) / 0.88) !important;
+  border-bottom-color: hsl(var(--border)) !important;
+  backdrop-filter: blur(18px);
+}
+[data-theme="neuron"] aside > div:first-child {
+  border-bottom-color: hsl(var(--border)) !important;
+}
+[data-theme="neuron"] main [class*="rounded-"],
+[data-theme="neuron"] button,
+[data-theme="neuron"] input,
+[data-theme="neuron"] textarea,
+[data-theme="neuron"] select {
+  border-radius: 2px;
+}
+[data-theme="neuron"] main .bg-card {
+  box-shadow: none;
+}
+[data-theme="neuron"] button {
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+[data-theme="neuron"] button:hover {
+  filter: none;
+}
+[data-theme="neuron"] button[class*="bg-primary"]:hover {
+  box-shadow: 0 0 22px hsl(var(--primary) / 0.16);
+}
+[data-theme="neuron"] button[class*="border"][class*="bg-background"]:hover {
+  border-color: hsl(var(--primary));
+  color: hsl(var(--primary));
+  background-color: hsl(var(--primary) / 0.06);
+}
+[data-theme="neuron"] thead th {
+  font-size: 0.7rem;
+  font-weight: 700;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: hsl(var(--muted-foreground));
+}
+[data-theme="neuron"] tbody tr {
+  transition: background-color 0.12s ease;
+}
+[data-theme="neuron"] tbody tr:hover {
+  background-color: hsl(var(--secondary));
+}
+[data-theme="neuron"] ::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+[data-theme="neuron"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+[data-theme="neuron"] ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+  border: 1px solid hsl(var(--muted));
+}
+
+{# Neuron layout and component system: deliberately distinct from the standard admin shell. #}
+[data-theme="neuron"] {
+  --neuron-sidebar: 210 13% 6%;
+  --neuron-panel-soft: 210 12% 9%;
+  --neuron-panel-raised: 210 11% 14%;
+  --neuron-line-strong: 206 10% 25%;
+  --neuron-ink-soft: 200 9% 64%;
+  --neuron-ink-faint: 205 8% 38%;
+}
+[data-theme="neuron"] aside {
+  background-color: hsl(var(--neuron-sidebar)) !important;
+}
+[data-theme="neuron"] .neuron-brand-area {
+  border-bottom-color: hsl(var(--border)) !important;
+}
+[data-theme="neuron"] .neuron-brand {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  align-items: center;
+  gap: 12px;
+  color: hsl(var(--foreground));
+}
+[data-theme="neuron"] .neuron-mark {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 auto;
+  display: flex;
+  align-items: end;
+  gap: 3px;
+  padding: 8px;
+  border: 1px solid hsl(var(--primary) / 0.35);
+  background: hsl(var(--primary) / 0.06);
+}
+[data-theme="neuron"] .neuron-mark i {
+  width: 4px;
+  border-radius: 1px 1px 0 0;
+  background: hsl(var(--primary));
+  box-shadow: 0 0 12px hsl(var(--primary) / 0.3);
+}
+[data-theme="neuron"] .neuron-mark i:nth-child(1) { height: 8px; opacity: 0.45; }
+[data-theme="neuron"] .neuron-mark i:nth-child(2) { height: 18px; }
+[data-theme="neuron"] .neuron-mark i:nth-child(3) { height: 13px; opacity: 0.7; }
+[data-theme="neuron"] .neuron-project-logo {
+  width: auto;
+  max-width: 118px;
+  height: 38px;
+  flex: 0 1 auto;
+  object-fit: contain;
+  object-position: left center;
+}
+[data-theme="neuron"] .neuron-project-logo--collapsed {
+  width: 34px;
+  max-width: 34px;
+  object-position: center;
+}
+[data-theme="neuron"] .neuron-brand-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+[data-theme="neuron"] .neuron-brand-copy strong {
+  overflow: hidden;
+  color: hsl(var(--foreground));
+  font-size: 0.9rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+[data-theme="neuron"] .neuron-brand-copy small {
+  color: hsl(var(--neuron-ink-faint));
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.45rem;
+  font-weight: 700;
+  letter-spacing: 0.14em;
+}
+[data-theme="neuron"] .neuron-nav {
+  padding-top: 15px;
+}
+[data-theme="neuron"] .neuron-nav-heading {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin: 0 3px 8px;
+  padding: 0 7px;
+  color: hsl(var(--neuron-ink-faint));
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
+[data-theme="neuron"] .neuron-nav-heading span {
+  color: hsl(var(--primary) / 0.72);
+  font-size: 0.55rem;
+}
+[data-theme="neuron"] .neuron-nav-item {
+  min-height: 40px;
+  color: hsl(var(--muted-foreground));
+  font-size: 0.78rem;
+}
+[data-theme="neuron"] .neuron-nav-item svg {
+  width: 15px;
+  height: 15px;
+  color: hsl(var(--neuron-ink-faint));
+}
+[data-theme="neuron"] .neuron-nav-item:hover svg,
+[data-theme="neuron"] .neuron-nav-item.text-primary svg {
+  color: hsl(var(--primary));
+}
+[data-theme="neuron"] .neuron-nav > div:last-of-type {
+  margin-top: 22px;
+  padding-top: 16px;
+  border-top-color: hsl(var(--border));
+}
+[data-theme="neuron"] .neuron-header {
+  box-shadow: 0 10px 30px -24px rgb(0 0 0 / 0.9);
+}
+[data-theme="neuron"] .neuron-breadcrumbs {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 8px;
+  color: hsl(var(--neuron-ink-faint));
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.6rem;
+  letter-spacing: 0.08em;
+}
+[data-theme="neuron"] .neuron-breadcrumbs i {
+  color: hsl(var(--border));
+  font-style: normal;
+}
+[data-theme="neuron"] .neuron-breadcrumbs b {
+  color: hsl(var(--neuron-ink-soft));
+  font-weight: 500;
+}
+[data-theme="neuron"] .neuron-user-control {
+  border-left: 1px solid hsl(var(--border));
+  border-radius: 0;
+}
+[data-theme="neuron"] .neuron-workspace {
+  width: 100%;
+  max-width: 1540px;
+  margin: 0 auto;
+}
+[data-theme="neuron"] [data-ui="card"] {
+  position: relative;
+  overflow: hidden;
+  border-color: hsl(var(--border));
+  border-radius: 2px;
+  background: hsl(var(--card));
+  box-shadow: inset 2px 0 hsl(var(--primary) / 0.36), 0 18px 35px -30px rgb(0 0 0 / 0.95);
+}
+[data-theme="neuron"] [data-ui="card"]:hover {
+  border-color: hsl(var(--neuron-line-strong));
+}
+[data-theme="neuron"] [data-ui="card"] > div:first-child {
+  padding: 16px 18px;
+  border-bottom: 1px solid hsl(var(--border) / 0.8);
+}
+[data-theme="neuron"] [data-ui="card"] h3 {
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+[data-theme="neuron"] [data-ui="card"] p {
+  font-size: 0.72rem;
+}
+[data-theme="neuron"] [data-ui="button"] {
+  min-height: 34px;
+  border-radius: 2px;
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+[data-theme="neuron"] [data-ui="button"].bg-primary {
+  box-shadow: 0 0 20px hsl(var(--primary) / 0.1);
+}
+[data-theme="neuron"] [data-ui="input"],
+[data-theme="neuron"] [data-ui="select-trigger"],
+[data-theme="neuron"] textarea {
+  min-height: 34px;
+  border-color: hsl(var(--border));
+  border-radius: 2px;
+  background: hsl(var(--neuron-panel-soft));
+  font-size: 0.78rem;
+}
+[data-theme="neuron"] [data-ui="input"]:focus,
+[data-theme="neuron"] [data-ui="select-trigger"]:focus,
+[data-theme="neuron"] textarea:focus {
+  border-color: hsl(var(--primary) / 0.7);
+  box-shadow: 0 0 0 2px hsl(var(--primary) / 0.12);
+}
+[data-theme="neuron"] [data-ui="table-container"] {
+  border: 0;
+}
+[data-theme="neuron"] [data-ui="table-container"] table {
+  font-size: 0.78rem;
+}
+[data-theme="neuron"] thead th {
+  height: 40px;
+  padding: 0 16px;
+  border-bottom-color: hsl(var(--border));
+  background: hsl(var(--neuron-panel-raised));
+  font-size: 0.6rem;
+}
+[data-theme="neuron"] tbody td {
+  padding: 13px 16px;
+  border-bottom-color: hsl(var(--border) / 0.78);
+}
+[data-theme="neuron"] tbody tr:hover {
+  background-color: hsl(var(--neuron-panel-raised));
+}
+[data-theme="neuron"] [data-ui="badge"] {
+  border-radius: 1px;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.62rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+[data-theme="neuron"] [role="dialog"],
+[data-theme="neuron"] [role="listbox"] {
+  border: 1px solid hsl(var(--neuron-line-strong));
+  border-radius: 2px;
+  background: hsl(var(--card));
+  box-shadow: 0 22px 60px rgb(0 0 0 / 0.42);
+}
+[data-theme="neuron"] .settings-page {
+  max-width: 980px;
+}
+[data-theme="neuron"] .settings-page-title {
+  color: hsl(var(--foreground)) !important;
+  font-size: 1.15rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+[data-theme="neuron"] .settings-panel {
+  padding: 20px;
+  border: 1px solid hsl(var(--border));
+  border-radius: 2px;
+  background: hsl(var(--card)) !important;
+  box-shadow: inset 2px 0 hsl(var(--primary) / 0.36), 0 18px 35px -30px rgb(0 0 0 / 0.95);
+}
+[data-theme="neuron"] .settings-panel > form > .space-y-6 {
+  padding: 18px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--neuron-panel-soft));
+}
+[data-theme="neuron"] .settings-panel > form > .space-y-6 h2 {
+  color: hsl(var(--foreground));
+  font-size: 0.78rem;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+[data-theme="neuron"] .settings-group {
+  border-color: hsl(var(--border));
+  border-radius: 2px;
+  background: hsl(var(--card));
+}
+[data-theme="neuron"] .settings-group-trigger {
+  min-height: 48px;
+  padding: 0 14px;
+  border-radius: 0;
+  background: hsl(var(--neuron-panel-raised)) !important;
+  color: hsl(var(--neuron-ink-soft));
+  font-size: 0.76rem;
+}
+[data-theme="neuron"] .settings-group-trigger:hover {
+  background: hsl(var(--secondary)) !important;
+}
+[data-theme="neuron"] .settings-group-trigger svg {
+  width: 15px;
+  height: 15px;
+  color: hsl(var(--primary));
+}
+[data-theme="neuron"] .settings-group-content {
+  background: hsl(var(--card));
+}
+[data-theme="neuron"] .settings-panel label {
+  color: hsl(var(--neuron-ink-soft));
+  font-size: 0.72rem;
+}
+[data-theme="neuron"] .settings-panel label span {
+  color: hsl(var(--neuron-ink-faint)) !important;
+}
+[data-theme="neuron"] .login-shell {
+  position: relative;
+  isolation: isolate;
+  background: hsl(var(--background));
+}
+[data-theme="neuron"] .login-shell::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  background-image: radial-gradient(circle at 72% 32%, hsl(var(--primary) / 0.07), transparent 22%), linear-gradient(hsl(0 0% 100% / 0.012) 1px, transparent 1px), linear-gradient(90deg, hsl(0 0% 100% / 0.012) 1px, transparent 1px);
+  background-size: auto, 32px 32px, 32px 32px;
+}
+[data-theme="neuron"] .login-brand-panel {
+  border-right: 1px solid hsl(var(--border));
+  background: hsl(var(--neuron-sidebar)) !important;
+}
+[data-theme="neuron"] .login-brand-panel > div:first-child {
+  background: linear-gradient(155deg, hsl(var(--neuron-sidebar)), hsl(var(--neuron-panel-soft))) !important;
+}
+[data-theme="neuron"] .login-form-panel > div {
+  padding: 28px;
+  border: 1px solid hsl(var(--border));
+  background: hsl(var(--card) / 0.94);
+  box-shadow: 0 24px 60px -36px rgb(0 0 0 / 0.9);
+}
+[data-theme="neuron"] .login-form-panel h1::before {
+  content: 'SECURE ACCESS / 01';
+  display: block;
+  margin-bottom: 10px;
+  color: hsl(var(--primary));
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0.13em;
+}
 {# ── Anime theme-specific rules ── #}
 [data-theme="anime"] body {
   font-family: Nunito, Quicksand, Inter, system-ui, sans-serif;

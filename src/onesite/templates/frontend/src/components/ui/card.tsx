@@ -10,6 +10,7 @@ const Card = React.forwardRef<HTMLDivElement, CardProps>(
   ({ className, accent, ...props }, ref) => (
     <div
       ref={ref}
+      data-ui="card"
       className={cn(
         "rounded-lg border bg-card text-card-foreground shadow-sm transition-all duration-200",
         accent && "border-t-2 border-t-accent",

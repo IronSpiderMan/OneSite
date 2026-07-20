@@ -12,8 +12,7 @@ def load_site_config(cwd: Path) -> Dict[str, Any]:
         import json
 
         try:
-            return json.loads(config_path.read_text())
+            return json.loads(config_path.read_text(encoding="utf-8"))
         except Exception as e:
             console.print(f"[red]Error loading site_config.json: {e}[/red]")
     return {}
-

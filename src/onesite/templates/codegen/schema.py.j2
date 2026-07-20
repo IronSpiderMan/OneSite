@@ -59,7 +59,7 @@ class {{ model.name }}Base(SQLModel):
 class {{ model.name }}Create(SQLModel):
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
-    {% if 'c' in field.permissions and field.name != 'id' %}
+    {% if 'c' in field.permissions %}
     {% if field.required and not field.create_optional %}
     {% if model.is_notification_table and field.name == 'user_id' %}
     # user_id is optional in create - None means broadcast to all users
@@ -116,7 +116,7 @@ class {{ model.name }}Update(SQLModel):
 {% endif %}
 
 class {{ model.name }}Read({{ model.name }}Base):
-    {% if not model.is_timescaledb %}id: int{% endif %}
+    {% if not model.is_timescaledb %}id: {{ model.id_type }}{% endif %}
 {% for fk in model.foreign_keys %}
     {{ fk.name }}_label: Optional[str] = None
 {% endfor %}

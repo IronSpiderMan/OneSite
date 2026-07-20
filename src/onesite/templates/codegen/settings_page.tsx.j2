@@ -199,10 +199,10 @@ const SettingsPage: React.FC = () => {
   {% endif %}
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
-      <h1 className="text-2xl font-bold text-gray-900 dark:text-white">{t('common.settings')}</h1>
+    <div className="settings-page max-w-4xl mx-auto space-y-6">
+      <h1 className="settings-page-title text-2xl font-bold text-gray-900 dark:text-white">{t('common.settings')}</h1>
 
-      <div className="bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-8">
+      <div className="settings-panel bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-8">
         <form className="space-y-8" onSubmit={(e) => e.preventDefault()}>
           {showSystemSection ? (
             <div className="space-y-6">
@@ -226,11 +226,11 @@ const SettingsPage: React.FC = () => {
               {% endif %}
               {% endfor %}
               {% if group_fields %}
-              <div className="border rounded-lg overflow-hidden">
+              <div className="settings-group border rounded-lg overflow-hidden">
                 <button
                   type="button"
                   onClick={() => toggleGroup('{{ group_key }}')}
-                  className="w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  className="settings-group-trigger w-full flex items-center justify-between p-4 bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                 >
                   <span className="font-medium">{t('settings.groups.{{ group_key }}', '{{ group_key }}')}</span>
                   {expandedGroups.has('{{ group_key }}') ? (
@@ -240,7 +240,7 @@ const SettingsPage: React.FC = () => {
                   )}
                 </button>
                 {expandedGroups.has('{{ group_key }}') && (
-                  <div className="p-4 space-y-4">
+                  <div className="settings-group-content p-4 space-y-4">
                     {% for field in group_fields %}
                     {hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'r') && (
                     <div className="space-y-2">

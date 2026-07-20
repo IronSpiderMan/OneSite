@@ -8,7 +8,7 @@ import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
 import { NotificationBell } from './notification-bell';
 
-type ThemeStyle = 'normal' | 'industrial' | 'anime' | 'cute' | 'emqx';
+type ThemeStyle = 'normal' | 'industrial' | 'anime' | 'cute' | 'emqx' | 'neuron';
 
 function useThemeStyle(): ThemeStyle {
   const [style, setStyle] = useState<ThemeStyle>(
@@ -35,6 +35,7 @@ const SIDEBAR_EXTRA: Record<ThemeStyle, string> = {
   normal: '',
   industrial: 'rounded-none',
   emqx: '',
+  neuron: 'rounded-none',
   anime: 'rounded-r-2xl',
   cute: 'rounded-r-3xl',
 };
@@ -44,6 +45,7 @@ const NAV_ACTIVE: Record<ThemeStyle, string> = {
   normal: 'bg-primary text-primary-foreground border-l-[3px] border-accent pl-[calc(1rem-3px)]',
   industrial: 'bg-primary text-primary-foreground border-l-[3px] border-accent pl-[calc(1rem-3px)]',
   emqx: 'bg-primary/10 text-primary font-semibold',
+  neuron: 'bg-primary/10 text-primary font-semibold border-l-2 border-primary pl-[calc(1rem-2px)]',
   anime: 'bg-primary text-primary-foreground rounded-xl',
   cute: 'bg-primary/15 text-primary rounded-full',
 };
@@ -51,6 +53,7 @@ const NAV_INACTIVE: Record<ThemeStyle, string> = {
   normal: 'hover:bg-accent hover:text-accent-foreground border-l-[3px] border-transparent',
   industrial: 'hover:bg-accent hover:text-accent-foreground border-l-[3px] border-transparent',
   emqx: 'hover:bg-muted/70',
+  neuron: 'hover:bg-muted hover:text-foreground border-l-2 border-transparent',
   anime: 'hover:bg-accent hover:text-accent-foreground rounded-xl',
   cute: 'hover:bg-accent/50 hover:text-accent-foreground rounded-full',
 };
@@ -58,6 +61,7 @@ const NAV_ITEM_BASE: Record<ThemeStyle, string> = {
   normal: 'rounded-md',
   industrial: 'rounded-none',
   emqx: 'rounded-md',
+  neuron: 'rounded-none',
   anime: 'rounded-xl',
   cute: 'rounded-full',
 };
@@ -67,6 +71,7 @@ const HEADER_EXTRA: Record<ThemeStyle, string> = {
   normal: 'border-b-2 border-b-accent/20',
   industrial: 'border-b-2 border-b-accent/30',
   emqx: 'border-b border-b-border',
+  neuron: 'border-b border-b-border',
   anime: 'border-b-2 border-b-primary/15 rounded-bl-2xl',
   cute: 'border-b-2 border-b-primary/10 rounded-bl-3xl',
 };
@@ -76,6 +81,7 @@ const LOGO_AREA_EXTRA: Record<ThemeStyle, string> = {
   normal: 'border-b-2 border-b-accent/30',
   industrial: 'border-b-2 border-b-accent/40',
   emqx: 'border-b border-b-border',
+  neuron: 'border-b border-b-border',
   anime: 'border-b-2 border-b-primary/15',
   cute: 'border-b-2 border-b-primary/10',
 };
@@ -137,6 +143,13 @@ const AppLayout: React.FC = () => {
   const logoLink = window.__ENV__?.LOGO_LINK || import.meta.env.VITE_LOGO_LINK || '/dashboard';
 
   const menuItems = filterMenuByRole(GeneratedMenu, userRole);
+  const isNeuron = theme === 'neuron';
+  const activeMenuItem = menuItems.find((item: any) => location.pathname === item.key);
+  const activePageName = activeMenuItem
+    ? t(activeMenuItem.label)
+    : location.pathname === '/settings'
+      ? t('common.settings')
+      : t('common.dashboard', 'Dashboard');
 
   return (
     <div className="min-h-screen flex">
@@ -158,31 +171,49 @@ const AppLayout: React.FC = () => {
         )}
       >
         {/* Logo area */}
-        <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isCollapsed ? "justify-center" : "justify-between")}>
-          <Link to={logoLink} className="flex items-center gap-3 min-w-0 no-underline">
-            {isCollapsed ? (
-              <div className="flex-shrink-0">
-                {logoUrl ? (
-                  <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
-                ) : (
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
-                    {projectName.charAt(0).toUpperCase()}
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="flex items-center gap-3 min-w-0">
-                {logoUrl ? (
-                  <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
-                ) : (
-                  <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
-                    {projectName.charAt(0).toUpperCase()}
-                  </div>
-                )}
-                <span className="text-xl font-bold truncate">{projectName}</span>
-              </div>
-            )}
-          </Link>
+        <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isNeuron && "neuron-brand-area h-[72px] px-5", isCollapsed ? "justify-center" : "justify-between")}>
+          {isNeuron ? (
+            <Link to={logoLink} className="neuron-brand min-w-0 no-underline">
+              {logoUrl ? (
+                <img src={logoUrl} alt={projectName} className={cn("neuron-project-logo", isCollapsed && "neuron-project-logo--collapsed")} />
+              ) : (
+                <span className="neuron-mark" aria-hidden="true">
+                  <><i /><i /><i /></>
+                </span>
+              )}
+              {!isCollapsed && (
+                <span className="neuron-brand-copy">
+                  <strong className="truncate">{projectName}</strong>
+                  <small>NEURAL OPERATIONS</small>
+                </span>
+              )}
+            </Link>
+          ) : (
+            <Link to={logoLink} className="flex items-center gap-3 min-w-0 no-underline">
+              {isCollapsed ? (
+                <div className="flex-shrink-0">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
+                  ) : (
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                      {projectName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-3 min-w-0">
+                  {logoUrl ? (
+                    <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
+                  ) : (
+                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+                      {projectName.charAt(0).toUpperCase()}
+                    </div>
+                  )}
+                  <span className="text-xl font-bold truncate">{projectName}</span>
+                </div>
+              )}
+            </Link>
+          )}
           {!isCollapsed && (
             <Button variant="ghost" size="icon" className="md:hidden flex-shrink-0" onClick={() => setSidebarOpen(false)}>
               <X className="h-5 w-5" />
@@ -191,10 +222,10 @@ const AppLayout: React.FC = () => {
         </div>
 
         {/* Navigation */}
-        <nav className={cn("flex-1 overflow-y-auto py-4", isCollapsed ? "px-2" : "px-4")}>
+        <nav className={cn("flex-1 overflow-y-auto py-4", isNeuron && "neuron-nav", isCollapsed ? "px-2" : "px-4")}>
           {!isCollapsed && (
-            <div className="px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-              {t('common.navigation', 'Navigation')}
+            <div className={cn("px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground", isNeuron && "neuron-nav-heading")}>
+              {isNeuron ? <><span>01</span> OPERATIONS</> : t('common.navigation', 'Navigation')}
             </div>
           )}
 
@@ -206,6 +237,7 @@ const AppLayout: React.FC = () => {
                 title={isCollapsed ? t(item.label) : undefined}
                 className={cn(
                   "flex items-center transition-all duration-150",
+                  isNeuron && "neuron-nav-item",
                   NAV_ITEM_BASE[theme],
                   isCollapsed
                     ? "justify-center py-2.5 px-0"
@@ -224,8 +256,8 @@ const AppLayout: React.FC = () => {
           {/* System section */}
           <div className={cn("mt-4 pt-4 border-t", isCollapsed && "border-t-border/30")}>
             {!isCollapsed && (
-              <div className="px-4 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                {t('common.system', 'System')}
+              <div className={cn("px-4 py-1 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground", isNeuron && "neuron-nav-heading")}>
+                {isNeuron ? <><span>02</span> SYSTEM</> : t('common.system', 'System')}
               </div>
             )}
             <Link
@@ -233,6 +265,7 @@ const AppLayout: React.FC = () => {
               title={isCollapsed ? t('common.settings') : undefined}
               className={cn(
                 "flex items-center transition-all duration-150",
+                isNeuron && "neuron-nav-item",
                 NAV_ITEM_BASE[theme],
                 isCollapsed
                   ? "justify-center py-2.5 px-0"
@@ -264,7 +297,7 @@ const AppLayout: React.FC = () => {
 
       {/* Main Content */}
       <div className={cn("flex-1 flex flex-col min-w-0", mainMargin)}>
-        <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme])}>
+        <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme], isNeuron && "neuron-header h-[72px] px-5 md:px-7")}>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
                   <MenuIcon className="h-5 w-5" />
@@ -274,10 +307,17 @@ const AppLayout: React.FC = () => {
                   <MenuIcon className="h-5 w-5" />
                 </Button>
               )}
+              {isNeuron && (
+                <div className="neuron-breadcrumbs hidden sm:flex">
+                  <span>{projectName.toUpperCase()}</span>
+                  <i>/</i>
+                  <b>{activePageName}</b>
+                </div>
+              )}
             </div>
             <div className="flex items-center space-x-2">
                 <NotificationBell onStatusChange={setIsOnline} />
-                <Button variant="ghost" type="button" onClick={() => navigate('/profile')} className="h-10 px-2">
+                <Button variant="ghost" type="button" onClick={() => navigate('/profile')} className={cn("h-10 px-2", isNeuron && "neuron-user-control")}>
                     <AvatarFallback name={userName} src={userAvatar} size={32} isOnline={isOnline} />
                     <span className="ml-2 text-sm text-muted-foreground hidden sm:inline">{userName}</span>
                 </Button>
@@ -286,7 +326,7 @@ const AppLayout: React.FC = () => {
                 </Button>
             </div>
         </header>
-        <main className="flex-1 p-6 overflow-auto">
+        <main className={cn("flex-1 p-6 overflow-auto", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7")}>
             <Outlet />
         </main>
       </div>

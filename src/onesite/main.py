@@ -2,6 +2,8 @@ import typer
 import shutil
 import os
 import sys
+import importlib.util
+import subprocess
 from typing import Optional
 from pathlib import Path
 from rich.console import Console
@@ -22,6 +24,64 @@ app = typer.Typer(
 )
 console = Console()
 
+
+def _npm_executable() -> str | None:
+    """Return the npm executable, accounting for npm.cmd on Windows."""
+    return shutil.which("npm.cmd") if os.name == "nt" else shutil.which("npm")
+
+
+def _backend_install_command() -> list[str] | None:
+    """Return an installer command that works for the active environment.
+
+    ``uv venv`` environments are not guaranteed to contain pip, so prefer uv
+    when it is available. Fall back to ``python -m pip`` for regular virtual
+    environments.
+    """
+    uv = shutil.which("uv")
+    if uv:
+        return [uv, "pip", "install", "--python", sys.executable, "-r", "requirements.txt"]
+    if importlib.util.find_spec("pip") is not None:
+        return [sys.executable, "-m", "pip", "install", "-r", "requirements.txt"]
+    return None
+
+
+def _install_project_dependencies(backend_dir: Path, frontend_dir: Path) -> None:
+    """Install generated backend and frontend dependencies with clear errors."""
+    failures: list[str] = []
+
+    if (backend_dir / "requirements.txt").exists():
+        console.print("[blue]Installing backend dependencies...[/blue]")
+        command = _backend_install_command()
+        if command is None:
+            failures.append(
+                "Backend dependencies were not installed because neither uv nor pip is available. "
+                "Install uv, or recreate the virtual environment with pip enabled."
+            )
+        else:
+            try:
+                subprocess.run(command, cwd=str(backend_dir), check=True)
+            except (OSError, subprocess.CalledProcessError) as exc:
+                failures.append(f"Backend dependency installation failed: {exc}")
+
+    if (frontend_dir / "package.json").exists():
+        console.print("[blue]Installing frontend dependencies...[/blue]")
+        npm = _npm_executable()
+        if npm is None:
+            failures.append(
+                "Frontend dependencies were not installed because npm was not found. "
+                "Install Node.js and ensure npm is available on PATH."
+            )
+        else:
+            try:
+                subprocess.run([npm, "install"], cwd=str(frontend_dir), check=True)
+            except (OSError, subprocess.CalledProcessError) as exc:
+                failures.append(f"Frontend dependency installation failed: {exc}")
+
+    if failures:
+        for failure in failures:
+            console.print(f"[bold red]Error:[/bold red] {failure}")
+        raise typer.Exit(code=1)
+
 def get_cwd_safely() -> Path:
     try:
         return Path(os.getcwd())
@@ -37,7 +97,7 @@ def render_template(template_path: Path, context: dict, output_path: Path):
     env = Environment(loader=FileSystemLoader(str(template_path.parent)))
     template = env.get_template(template_path.name)
     content = template.render(context)
-    output_path.write_text(content)
+    output_path.write_text(content, encoding="utf-8")
 
 @app.command()
 def init():
@@ -81,7 +141,7 @@ def init():
             ],
             "logo": "",
         }
-        site_config_file.write_text(json.dumps(site_config, indent=4))
+        site_config_file.write_text(json.dumps(site_config, indent=4), encoding="utf-8")
         console.print(f"[green]Created site_config.json[/green]")
     else:
         console.print(f"[blue]site_config.json already exists[/blue]")
@@ -145,16 +205,16 @@ def create(
 
     config_file = target_dir / "backend/app/core/config.py"
     if config_file.exists():
-        content = config_file.read_text()
+        content = config_file.read_text(encoding="utf-8")
         content = content.replace("{{ project_name }}", project_name)
         content = content.replace("{{ access_token_expire_minutes }}", "11520")
-        config_file.write_text(content)
+        config_file.write_text(content, encoding="utf-8")
 
     index_html = target_dir / "frontend/index.html"
     if index_html.exists():
-        content = index_html.read_text()
+        content = index_html.read_text(encoding="utf-8")
         content = content.replace("{{ project_name }}", project_name)
-        index_html.write_text(content)
+        index_html.write_text(content, encoding="utf-8")
 
     # Generate site_config.json
     import json
@@ -166,7 +226,9 @@ def create(
         "access_token_expire_minutes": 11520,
         "allowed_origins": ["http://localhost:5173", "http://localhost:3000"]
     }
-    (target_dir / "site_config.json").write_text(json.dumps(site_config, indent=4))
+    (target_dir / "site_config.json").write_text(
+        json.dumps(site_config, indent=4), encoding="utf-8"
+    )
 
     console.print(f"[bold green]Project {project_name} created successfully![/bold green]")
     console.print(f"cd {project_name} && site sync")
@@ -188,20 +250,10 @@ def sync(
 
     if install:
         console.print("[green]Installing dependencies...[/green]")
-        import subprocess
         base_dir = get_cwd_safely()
         backend_dir = base_dir / "backend"
         frontend_dir = base_dir / "frontend"
-
-        # Install Backend Dependencies
-        if (backend_dir / "requirements.txt").exists():
-            console.print("[blue]Installing backend dependencies...[/blue]")
-            subprocess.run([sys.executable, "-m", "pip", "install", "-r", "requirements.txt"], cwd=str(backend_dir))
-
-        # Install Frontend Dependencies
-        if (frontend_dir / "package.json").exists():
-             console.print("[blue]Installing frontend dependencies...[/blue]")
-             subprocess.run(["npm", "install"], cwd=str(frontend_dir))
+        _install_project_dependencies(backend_dir, frontend_dir)
 
 @app.command()
 def run(
@@ -213,7 +265,6 @@ def run(
     """
     console.print(f"[green]Running {component}...[/green]")
 
-    import subprocess
     import concurrent.futures
 
     base_dir = project_path.resolve()
@@ -236,12 +287,27 @@ def run(
         package_json = frontend_dir / "package.json"
         if package_json.exists():
             console.print("[blue]Starting Frontend (npm run dev)...[/blue]")
+            npm = _npm_executable()
+            if npm is None:
+                console.print(
+                    "[bold red]Error:[/bold red] npm was not found. "
+                    "Install Node.js and ensure npm is available on PATH."
+                )
+                return
+
             # Check if node_modules exists, if not maybe suggest install?
             if not (frontend_dir / "node_modules").exists():
                 console.print("[yellow]node_modules not found. Installing dependencies...[/yellow]")
-                subprocess.run(["npm", "install"], cwd=str(frontend_dir))
+                try:
+                    subprocess.run([npm, "install"], cwd=str(frontend_dir), check=True)
+                except (OSError, subprocess.CalledProcessError) as exc:
+                    console.print(f"[bold red]Error:[/bold red] npm install failed: {exc}")
+                    return
 
-            subprocess.run(["npm", "run", "dev"], cwd=str(frontend_dir))
+            try:
+                subprocess.run([npm, "run", "dev"], cwd=str(frontend_dir), check=True)
+            except (OSError, subprocess.CalledProcessError) as exc:
+                console.print(f"[bold red]Error:[/bold red] Frontend failed to start: {exc}")
         else:
             console.print("[blue]Starting Frontend...[/blue]")
             console.print("[yellow]Frontend runner not fully implemented without package.json, skipping...[/yellow]")
@@ -351,7 +417,7 @@ def build(
     if site_config_file.exists():
         import json
         try:
-            site_config = json.loads(site_config_file.read_text())
+            site_config = json.loads(site_config_file.read_text(encoding="utf-8"))
             db_url = site_config.get("database_url", "")
             if db_url.startswith("postgresql"):
                 use_pg = True

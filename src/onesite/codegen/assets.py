@@ -22,7 +22,7 @@ def _function_exists(file_path: Path, func_name: str) -> bool:
     if not file_path.exists():
         return False
     try:
-        tree = ast.parse(file_path.read_text())
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
         for node in ast.walk(tree):
             if isinstance(node, ast.AsyncFunctionDef) and node.name == func_name:
                 return True
@@ -196,7 +196,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
                       backend_path / "app" / "core" / "rabbitmq.py")
         # Generate an example consumer
         consumer_init = backend_path / "app" / "consumers" / "__init__.py"
-        if not consumer_init.exists() or consumer_init.read_text().strip() == "":
+        if not consumer_init.exists() or consumer_init.read_text(encoding="utf-8").strip() == "":
             write_file_with_status(consumer_init, "from . import example\n")
 
         example_consumer = backend_path / "app" / "consumers" / "example.py"

@@ -156,7 +156,7 @@ async def get_history_by_entity(
 
 {% else %}
 
-async def get(session: AsyncSession, id: int) -> Optional[{{ model.name }}]:
+async def get(session: AsyncSession, id: {{ model.id_type }}) -> Optional[{{ model.name }}]:
     return await session.get({{ model.name }}, id)
 
 
@@ -165,7 +165,7 @@ async def check_unique_field(
     session: AsyncSession,
     field_name: str,
     value: Any,
-    exclude_id: Optional[int] = None,
+    exclude_id: Optional[{{ model.id_type }}] = None,
 ) -> bool:
     """
     Check if a field value is unique.
@@ -684,7 +684,7 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     await session.refresh(db_obj)
     return db_obj
 
-async def delete(session: AsyncSession, id: int) -> int:
+async def delete(session: AsyncSession, id: {{ model.id_type }}) -> {{ model.id_type }}:
     db_obj = await session.get({{ model.name }}, id)
     await session.delete(db_obj)
     await session.commit()
@@ -714,7 +714,7 @@ async def mark_all_read_by_user(session: AsyncSession, user_id: int) -> int:
 {% for m2m in model.m2m_fields %}
 async def get_{{ m2m.target_endpoint }}(
     session: AsyncSession,
-    {{ model.lower_name }}_id: int,
+    {{ model.lower_name }}_id: {{ model.id_type }},
     page: int = 1,
     size: int = 20,
 ) -> List[Dict[str, Any]]:
@@ -777,7 +777,7 @@ async def get_{{ m2m.target_endpoint }}(
     {% endif %}
 
 
-async def count_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> int:
+async def count_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_name }}_id: {{ model.id_type }}) -> int:
     """Count {{ m2m.target_model }}s related to {{ model.name }}."""
     statement = select(func.count()).select_from({{ m2m.link_model }}).where(
         {{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id
@@ -788,7 +788,7 @@ async def count_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_
 {% if m2m.order_field %}
 async def get_{{ m2m.target_endpoint }}_with_order(
     session: AsyncSession,
-    {{ model.lower_name }}_id: int,
+    {{ model.lower_name }}_id: {{ model.id_type }},
     page: int = 1,
     size: int = 50,
 ) -> tuple[List[tuple], int]:
@@ -826,7 +826,7 @@ from app.models.{{ rel.link_module }} import {{ rel.link_model }}
 
 async def get_{{ rel.name }}(
     session: AsyncSession,
-    {{ model.lower_name }}_id: int,
+    {{ model.lower_name }}_id: {{ model.id_type }},
     page: int = 1,
     size: int = 20,
 ) -> List[Dict[str, Any]]:
@@ -889,7 +889,7 @@ async def get_{{ rel.name }}(
     {% endif %}
 
 
-async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: int) -> int:
+async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: {{ model.id_type }}) -> int:
     """Count {{ rel.source_model }}s related to {{ model.name }} (reverse M2M)."""
     statement = select(func.count()).select_from({{ rel.link_model }}).where(
         {{ rel.link_model }}.{{ rel.target_fk_field }} == {{ model.lower_name }}_id
@@ -902,7 +902,7 @@ async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id:
 {% if model.property_config_meta %}
 async def update_properties_config(
     session: AsyncSession,
-    entity_id: int,
+    entity_id: {{ model.id_type }},
     configs: list[dict],
 ) -> dict:
     """Update properties_config on entity, with add/delete permission checks."""

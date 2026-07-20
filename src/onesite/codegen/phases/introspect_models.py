@@ -92,6 +92,15 @@ def _build_model_dict(
     """
     schema_imports = sorted({imp for f in result.fields for imp in f.py_imports})
     table_name = to_snake(name)
+    # ``id`` is conventionally the primary key.  Keep its resolved type in
+    # model metadata so generated schemas, routes and frontend clients also
+    # work for business keys such as ``id: str``.
+    id_field = next((field for field in result.fields if field.name == "id"), None)
+    id_type = id_field.type if id_field is not None else "int"
+    # SQLModel models commonly declare generated IDs as ``Optional[int]``.
+    # The database response and path parameter are still concrete values.
+    if id_type.startswith("Optional[") and id_type.endswith("]"):
+        id_type = id_type[len("Optional["):-1]
 
     # ── Tree view detection ──────────────────────────────────────────────
     tree_view_config = result.model_site_props.get("tree_view", "auto")
@@ -113,6 +122,7 @@ def _build_model_dict(
         lower_name=name.lower(),
         table_name=table_name,
         fields=result.fields,
+        id_type=id_type,
         schema_imports=schema_imports,
         foreign_keys=result.foreign_keys,
         search_field=result.search_field,

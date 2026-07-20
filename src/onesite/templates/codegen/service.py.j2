@@ -60,7 +60,7 @@ class {{ model.name }}Service:
 
     {% else %}
 
-    async def get(self, session: AsyncSession, id: int) -> Optional[{{ model.name }}Read]:
+    async def get(self, session: AsyncSession, id: {{ model.id_type }}) -> Optional[{{ model.name }}Read]:
         obj = await crud.get(session, id)
         return {{ model.name }}Read.model_validate(obj) if obj else None
 
@@ -265,7 +265,7 @@ class {{ model.name }}Service:
         {% endif %}
         return {{ model.name }}Read.model_validate(obj)
 
-    async def update(self, session: AsyncSession, id: int, obj_in: {{ model.name }}Update) -> {{ model.name }}Read:
+    async def update(self, session: AsyncSession, id: {{ model.id_type }}, obj_in: {{ model.name }}Update) -> {{ model.name }}Read:
         """
         Update {{ model.name }} by ID with validation.
         Raises ValueError if unique constraint is violated.
@@ -306,12 +306,12 @@ class {{ model.name }}Service:
         {% endif %}
         return {{ model.name }}Read.model_validate(obj)
 
-    async def delete(self, session: AsyncSession, id: int) -> int:
+    async def delete(self, session: AsyncSession, id: {{ model.id_type }}) -> {{ model.id_type }}:
         return await crud.delete(session, id)
 
     {% if model.property_config_meta %}
     async def update_properties_config(
-        self, session: AsyncSession, entity_id: int, configs: list[dict],
+        self, session: AsyncSession, entity_id: {{ model.id_type }}, configs: list[dict],
     ) -> dict:
         return await crud.update_properties_config(session, entity_id, configs)
     {% endif %}
@@ -340,7 +340,7 @@ class {{ model.name }}Service:
     async def get_{{ m2m.target_endpoint }}(
         self,
         session: AsyncSession,
-        {{ model.lower_name }}_id: int,
+        {{ model.lower_name }}_id: {{ model.id_type }},
         page: int = 1,
         size: int = 20,
     ) -> PaginatedResponse[{{ m2m.target_model }}Read]:
@@ -366,7 +366,7 @@ class {{ model.name }}Service:
     async def get_{{ m2m.target_endpoint }}_with_meta(
         self,
         session: AsyncSession,
-        {{ model.lower_name }}_id: int,
+        {{ model.lower_name }}_id: {{ model.id_type }},
         page: int = 1,
         size: int = 50,
     ) -> PaginatedResponse[{{ model.name }}{{ m2m.target_model }}Meta]:
@@ -406,7 +406,7 @@ class {{ model.name }}Service:
     async def get_{{ rel.name }}(
         self,
         session: AsyncSession,
-        {{ model.lower_name }}_id: int,
+        {{ model.lower_name }}_id: {{ model.id_type }},
         page: int = 1,
         size: int = 20,
     ) -> PaginatedResponse[{{ rel.source_model }}Read]:

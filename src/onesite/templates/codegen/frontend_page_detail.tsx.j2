@@ -249,7 +249,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         let interval: ReturnType<typeof setInterval>;
         if (autoRefresh && id) {
             interval = setInterval(() => {
-                const itemId = parseInt(id);
+                const itemId = {% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %};
                 fetchItem(itemId);
             }, refreshInterval);
         }
@@ -259,7 +259,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     useEffect(() => {
         if (id) {
-            const itemId = parseInt(id);
+            const itemId = {% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %};
             fetchItem(itemId).then((item) => {
                 if (item) {
                     // Fetch FK data
@@ -440,7 +440,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         let interval: ReturnType<typeof setInterval>;
         if (tsAutoRefresh && id) {
             interval = setInterval(() => {
-                const itemId = parseInt(id);
+                const itemId = {% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %};
                 {% for ts in model.reverse_timeseries %}
                 fetch{{ ts.model_name }}Realtime(itemId);
                 {% endfor %}
@@ -454,14 +454,24 @@ const {{ model.name }}DetailPage: React.FC = () => {
         let interval: ReturnType<typeof setInterval>;
         if (tsHistoryAutoRefresh && id) {
             interval = setInterval(() => {
-                const itemId = parseInt(id);
+                const itemId = {% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %};
                 {% for ts in model.reverse_timeseries %}
                 refresh{{ ts.model_name }}History(itemId);
                 {% endfor %}
             }, 10000);
         }
         return () => clearInterval(interval);
-    }, [tsHistoryAutoRefresh, id]);
+    // Recreate the interval when the selected range changes so it does not
+    // retain the initial `latest100` closure after the user selects 1h/6h/24h.
+    }, [
+        tsHistoryAutoRefresh,
+        id,
+        {% for ts in model.reverse_timeseries %}
+        {{ ts.model_name }}TimeRange,
+        {{ ts.model_name }}CustomStartTime,
+        {{ ts.model_name }}CustomEndTime,
+        {% endfor %}
+    ]);
 
     {% for ts in model.reverse_timeseries %}
     const toggle{{ ts.model_name }}Metric = (metric: string) => {
@@ -529,7 +539,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     // Re-fetch history when time range changes
     useEffect(() => {
         if (!id) return;
-        fetch{{ ts.model_name }}History(parseInt(id));
+        fetch{{ ts.model_name }}History({% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %});
     }, [{{ ts.model_name }}TimeRange, {{ ts.model_name }}CustomStartTime, {{ ts.model_name }}CustomEndTime]);
     {% endfor %}
     {% endif %}
@@ -1065,7 +1075,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                              <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => fetch{{ m2m.target_model }}s(parseInt(id!), {{ m2m.name }}Page - 1)}
+                                onClick={() => fetch{{ m2m.target_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ m2m.name }}Page - 1)}
                                 disabled={ {{ m2m.name }}Page <= 1 || {{ m2m.name }}Loading}
                             >
                                 Previous
@@ -1076,7 +1086,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => fetch{{ m2m.target_model }}s(parseInt(id!), {{ m2m.name }}Page + 1)}
+                                onClick={() => fetch{{ m2m.target_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ m2m.name }}Page + 1)}
                                 disabled={ {{ m2m.name }}Page >= Math.ceil({{ m2m.name }}Total / 5) || {{ m2m.name }}Loading}
                             >
                                 Next
@@ -1151,7 +1161,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                              <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => fetch{{ model.name }}{{ rel.source_model }}s(parseInt(id!), {{ rel.name }}Page - 1)}
+                                onClick={() => fetch{{ model.name }}{{ rel.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rel.name }}Page - 1)}
                                 disabled={ {{ rel.name }}Page <= 1 || {{ rel.name }}Loading}
                             >
                                 Previous
@@ -1162,7 +1172,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => fetch{{ model.name }}{{ rel.source_model }}s(parseInt(id!), {{ rel.name }}Page + 1)}
+                                onClick={() => fetch{{ model.name }}{{ rel.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rel.name }}Page + 1)}
                                 disabled={ {{ rel.name }}Page >= Math.ceil({{ rel.name }}Total / 5) || {{ rel.name }}Loading}
                             >
                                 Next

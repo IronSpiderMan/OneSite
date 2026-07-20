@@ -8,7 +8,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     backend_env = backend_path / ".env"
     env_content = ""
     if backend_env.exists():
-        env_content = backend_env.read_text()
+        env_content = backend_env.read_text(encoding="utf-8")
 
     new_keys = {
         "PROJECT_NAME": config.get("project_name"),
@@ -72,7 +72,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
 
     f_env_content = ""
     if frontend_env.exists():
-        f_env_content = frontend_env.read_text()
+        f_env_content = frontend_env.read_text(encoding="utf-8")
 
     logo = config.get("logo", "")
     # Ensure logo is an absolute path so it works from any route
@@ -106,4 +106,3 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         f_updated_lines.append(f"{key}={val}")
 
     write_file_with_status(frontend_env, "\n".join(f_updated_lines))
-

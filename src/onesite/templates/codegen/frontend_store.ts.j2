@@ -11,11 +11,11 @@ interface {{ model.name }}State {
     filters: Record<string, any>;
     fetchData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
     refreshData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
-    fetchItem: (id: number) => Promise<{{ model.name }} | null>;
+    fetchItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => Promise<{{ model.name }} | null>;
     createItem: (item: any) => Promise<void>;
-    updateItem: (id: number, item: any) => Promise<void>;
-    deleteItem: (id: number) => Promise<void>;
-    bulkDeleteItem: (ids: number[]) => Promise<void>;
+    updateItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}, item: any) => Promise<void>;
+    deleteItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => Promise<void>;
+    bulkDeleteItem: (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => Promise<void>;
 }
 
 export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get) => ({
@@ -71,7 +71,7 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
             console.error(error);
         }
     },
-    fetchItem: async (id: number) => {
+    fetchItem: async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         set({ loading: true });
         try {
             const result = await get{{ model.name }}(id);
@@ -95,7 +95,7 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
             throw error;
         }
     },
-    updateItem: async (id: number, item: any) => {
+    updateItem: async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, item: any) => {
         try {
             await update{{ model.name }}(id, item);
             const { page, size, filters } = get();
@@ -105,7 +105,7 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
             throw error;
         }
     },
-    deleteItem: async (id: number) => {
+    deleteItem: async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         try {
             await delete{{ model.name }}(id);
             const { page, size, filters } = get();
@@ -115,7 +115,7 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
             throw error;
         }
     },
-    bulkDeleteItem: async (ids: number[]) => {
+    bulkDeleteItem: async (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => {
         try {
             await bulkDelete{{ model.name }}(ids);
             const { page, size, filters } = get();
