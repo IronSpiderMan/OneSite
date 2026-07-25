@@ -22,13 +22,32 @@ from app.models.{{ rel.source_source_module }} import {{ rel.source_model }}
 {% endfor %}
 {% endif %}
 
+{% set scalar_json_arrays = model.fields | selectattr('json_item_kind') | list %}
+{% if scalar_json_arrays %}
+def _serialize_json_scalar_arrays(data: dict) -> dict:
+    """Convert date/time objects to JSON-safe ISO strings before persistence."""
+    {% for field in scalar_json_arrays %}
+    if isinstance(data.get("{{ field.name }}"), list):
+        data["{{ field.name }}"] = [
+            value.isoformat() if hasattr(value, "isoformat") else value
+            for value in data["{{ field.name }}"]
+        ]
+    {% endfor %}
+    return data
+
+{% endif %}
+
 {% if model.is_timescaledb %}
 
 # ── TimescaleDB CRUD ──────────────────────────────────────────────────────────
 
 async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> dict:
     """Insert a timeseries record into hypertable and upsert latest table."""
-    obj_dict = obj_in.dict()
+    {% if scalar_json_arrays %}
+    obj_dict = _serialize_json_scalar_arrays(obj_in.dict(exclude_none=True))
+    {% else %}
+    obj_dict = obj_in.dict(exclude_none=True)
+    {% endif %}
     {% if model.timescaledb_model_table and model.timescaledb_metric_field and model.timescaledb_model_class and model.timescaledb_entity_model %}
     # Validate metric_key against {{ model.timescaledb_model_class }}.properties
     entity_id_val = obj_dict.get("{{ model.timescaledb_entity_field }}")
@@ -195,7 +214,6 @@ async def get_by_{{ model.import_key }}(
 
 def _apply_filters(
     statement,
-    *,
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
     {% if field.ui_type == 'bool' %}
@@ -465,7 +483,6 @@ async def get_multi_with_fk_labels(
 
 async def count(
     session: AsyncSession,
-    *,
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
     {% if field.ui_type == 'bool' %}
@@ -540,7 +557,11 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     {% endif %}
 
     # Convert to dict to handle nested Pydantic models in JSON fields
-    obj_dict = obj_in.dict()
+    {% if scalar_json_arrays %}
+    obj_dict = _serialize_json_scalar_arrays(obj_in.dict(exclude_none=True))
+    {% else %}
+    obj_dict = obj_in.dict(exclude_none=True)
+    {% endif %}
 
     {% if model.property_config_meta %}
     # Initialize properties_config from blueprint model if not explicitly provided
@@ -597,7 +618,11 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     return db_obj
 
 async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ model.name }}Update) -> {{ model.name }}:
+    {% if scalar_json_arrays %}
+    obj_data = _serialize_json_scalar_arrays(obj_in.dict(exclude_unset=True))
+    {% else %}
     obj_data = obj_in.dict(exclude_unset=True)
+    {% endif %}
     
     {% if model.m2m_fields %}
     # Handle M2M updates

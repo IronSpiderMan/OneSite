@@ -6,11 +6,12 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ImageUpload } from '../../components/ui/image-upload';
+import { ImagesUpload } from '../../components/ui/images-upload';
 import { FileUpload } from '../../components/ui/file-upload';
 import { TimePicker } from '../../components/ui/time-picker';
 
@@ -96,6 +97,15 @@ const {{ model.name }}Page: React.FC = () => {
               )}
             />
 
+            {% elif field.ui_type == 'images' %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <ImagesUpload id="{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
+              )}
+            />
+
             {% elif field.ui_type == 'file' %}
             <Controller
               name="{{ field.name }}"
@@ -106,7 +116,15 @@ const {{ model.name }}Page: React.FC = () => {
             />
 
             {% elif field.ui_type == 'json' %}
-              {% if field.json_model_schema %}
+              {% if field.json_item_kind %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              render={({ field: { onChange, value } }) => (
+                <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
+              )}
+            />
+              {% elif field.json_model_schema %}
                 {% if field.json_kind == 'array' %}
             <Controller
               name="{{ field.name }}"
@@ -170,7 +188,7 @@ const {{ model.name }}Page: React.FC = () => {
             {% else %}
             <Input
               id="{{ field.name }}"
-              type="{{ 'number' if field.ui_type in ['int', 'float'] else 'text' }}"
+              type="{{ 'number' if field.ui_type in ['int', 'float'] else 'date' if field.ui_type == 'date' else 'datetime-local' if field.ui_type == 'datetime' else 'text' }}"
               {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
             />
             {% endif %}

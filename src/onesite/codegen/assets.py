@@ -79,6 +79,7 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         "src/components/ui/card.tsx",
         "src/components/ui/separator.tsx",
         "src/components/ui/image-upload.tsx",
+        "src/components/ui/images-upload.tsx",
         "src/components/ui/file-upload.tsx",
         "src/components/ui/file-preview.tsx",
         "src/components/Layout.tsx",

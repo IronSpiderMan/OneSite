@@ -112,7 +112,11 @@ class UserService:
         {% endfor %}
         {% endif %}
         from app.core.security import get_password_hash
-        user_data = obj_in.dict()
+        user_data = obj_in.dict(exclude_none=True)
+        {% for field in model.fields | selectattr('json_item_kind') | list %}
+        if isinstance(user_data.get("{{ field.name }}"), list):
+            user_data["{{ field.name }}"] = [value.isoformat() if hasattr(value, "isoformat") else value for value in user_data["{{ field.name }}"]]
+        {% endfor %}
         if 'password' in user_data:
             password = user_data.pop('password')
             user_data['hashed_password'] = get_password_hash(password)

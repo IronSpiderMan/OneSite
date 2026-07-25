@@ -5,6 +5,7 @@ import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { ImageUpload } from '../components/ui/image-upload';
+import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -15,7 +16,7 @@ type Me = {
   id: number;
 {% for field in model.fields %}
   {% if 'r' in field.permissions and field.name != 'hashed_password' and field.name != 'id' %}
-  {{ field.name }}{% if not field.required %}?{% endif %}: {% if field.ui_type == 'int' or field.ui_type == 'float' %}number{% elif field.ui_type == 'bool' %}boolean{% elif field.is_enum %}string{% elif field.ui_type == 'json' %}any{% else %}string{% endif %} | null;
+  {{ field.name }}{% if not field.required %}?{% endif %}: {% if field.ui_type == 'int' or field.ui_type == 'float' %}number{% elif field.ui_type == 'bool' %}boolean{% elif field.ui_type == 'images' %}string[]{% elif field.is_enum %}string{% elif field.ui_type == 'json' %}any{% else %}string{% endif %} | null;
   {% endif %}
 {% endfor %}
 };
@@ -146,6 +147,12 @@ export default function ProfilePage() {
                   value={me.{{ field.name }} || ''}
                   onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
                 />
+      {% elif field.ui_type == 'images' %}
+                <ImagesUpload
+                  id="{{ field.name }}"
+                  value={Array.isArray(me.{{ field.name }}) ? me.{{ field.name }} : []}
+                  onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                />
       {% elif field.ui_type == 'file' %}
                 <FileUpload
                   value={me.{{ field.name }} || ''}
@@ -182,6 +189,12 @@ export default function ProfilePage() {
                 <Input
                   type="datetime-local"
                   value={me.{{ field.name }} ? me.{{ field.name }}.slice(0, 16) : ''}
+                  onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: e.target.value } : prev))}
+                />
+      {% elif field.ui_type == 'date' %}
+                <Input
+                  type="date"
+                  value={me.{{ field.name }} || ''}
                   onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: e.target.value } : prev))}
                 />
       {% elif field.ui_type == 'int' or field.ui_type == 'float' %}
@@ -225,6 +238,16 @@ export default function ProfilePage() {
                 ) : (
                   <span className="text-muted-foreground italic">No image</span>
                 )}
+      {% elif field.ui_type == 'images' %}
+                {Array.isArray(me.{{ field.name }}) && me.{{ field.name }}.length ? (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {me.{{ field.name }}.map((url: string, index: number) => (
+                      <div key={`${url}-${index}`} className="aspect-video overflow-hidden rounded-lg border bg-muted">
+                        <img src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                ) : <span className="text-muted-foreground italic">No images</span>}
       {% elif field.is_enum %}
                 <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}
@@ -252,6 +275,16 @@ export default function ProfilePage() {
                 ) : (
                   <span className="text-muted-foreground italic">No image</span>
                 )}
+      {% elif field.ui_type == 'images' %}
+                {Array.isArray(me.{{ field.name }}) && me.{{ field.name }}.length ? (
+                  <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    {me.{{ field.name }}.map((url: string, index: number) => (
+                      <div key={`${url}-${index}`} className="aspect-video overflow-hidden rounded-lg border bg-muted">
+                        <img src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
+                      </div>
+                    ))}
+                  </div>
+                ) : <span className="text-muted-foreground italic">No images</span>}
       {% elif field.is_enum %}
                 <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}

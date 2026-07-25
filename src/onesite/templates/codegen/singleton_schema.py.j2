@@ -1,5 +1,6 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'date') | list or model.fields | selectattr('json_item_kind', 'equalto', 'date') | list %}, date{% endif %}{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list or model.fields | selectattr('json_item_kind', 'equalto', 'time') | list %}, time{% endif %}
+from pydantic import model_validator
 from sqlmodel import SQLModel
 from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
 
@@ -28,6 +29,23 @@ class {{ model.name }}Update(SQLModel):
 {% endfor %}
 {% if not ns.has_field %}
     pass
+{% endif %}
+{% set update_empty_scalar_fields = namespace(names=[]) %}
+{% for field in model.fields %}
+{% if not field.is_local_storage and 'u' in field.permissions and field.name != 'id' and field.ui_type in ['int', 'float', 'date', 'datetime', 'time'] %}
+{% set update_empty_scalar_fields.names = update_empty_scalar_fields.names + [field.name] %}
+{% endif %}
+{% endfor %}
+{% if update_empty_scalar_fields.names %}
+
+    @model_validator(mode='before')
+    @classmethod
+    def _empty_optional_scalar_strings_to_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field_name in {{ update_empty_scalar_fields.names }}:
+                if data.get(field_name) == "":
+                    data[field_name] = None
+        return data
 {% endif %}
 
 class {{ model.name }}Read({{ model.name }}Base):

@@ -28,7 +28,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 {% if not model.page_edit or model.importable %}
 import { Modal } from '../../components/ui/modal';
@@ -38,6 +38,7 @@ import { Badge } from '../../components/ui/badge';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ImageUpload } from '../../components/ui/image-upload';
+import { ImagesUpload } from '../../components/ui/images-upload';
 import { FileUpload } from '../../components/ui/file-upload';
 import { FileInput } from '../../components/ui/file-input';
 import { SearchableSelect } from '../../components/ui/searchable-select';
@@ -834,6 +835,15 @@ const {{ model.name }}Page: React.FC = () => {
                                 }}
                             />
                         </div>
+                        {% elif field.ui_type == 'images' %}
+                        {Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length ? (
+                            <div className="flex items-center gap-2">
+                                <div className="h-10 w-10 overflow-hidden rounded-md border bg-muted">
+                                    <img src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-full w-full object-cover" />
+                                </div>
+                                {item.{{ field.name }}.length > 1 && <span className="text-sm text-muted-foreground">+{item.{{ field.name }}.length - 1}</span>}
+                            </div>
+                        ) : '-'}
                         {% elif field.ui_type == 'file' %}
                         {item.{{ field.name }} ? (
                             <div className="flex items-center gap-2">
@@ -1284,6 +1294,14 @@ const {{ model.name }}Page: React.FC = () => {
                     />
                 )}
             />
+            {% elif field.ui_type == 'images' %}
+            <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                    <ImagesUpload id="{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
+                )}
+            />
             {% elif field.ui_type == 'file' %}
                         <Controller
                             control={control}
@@ -1399,6 +1417,8 @@ const {{ model.name }}Page: React.FC = () => {
                         lockKeys
                         {% endif %}
                     />
+                    {% elif field.json_item_kind %}
+                    <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
                     {% elif field.json_item_schema %}
                     <JsonModelArrayEditor
                         itemSchema={ {{ field.json_item_schema | tojson }} }
@@ -1426,6 +1446,11 @@ const {{ model.name }}Page: React.FC = () => {
                 type="number"
                 {% elif field.ui_type == 'datetime' %}
                 type="datetime-local"
+                {% elif field.ui_type == 'date' %}
+                type="date"
+                {% if field.default_factory == 'date' %}
+                defaultValue={new Date().toLocaleDateString('en-CA')}
+                {% endif %}
                 {% else %}
                 type="text"
                 {% endif %}

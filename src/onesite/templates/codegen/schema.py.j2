@@ -1,5 +1,5 @@
 from typing import Optional, List, Dict, Any
-from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'date') | list or model.fields | selectattr('json_item_kind', 'equalto', 'date') | list %}, date{% endif %}{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list or model.fields | selectattr('json_item_kind', 'equalto', 'time') | list %}, time{% endif %}
 import json
 from pydantic import model_validator
 from sqlmodel import SQLModel, Field
@@ -61,7 +61,10 @@ class {{ model.name }}Create(SQLModel):
 {% for field in model.fields %}
     {% if 'c' in field.permissions %}
     {% if field.required and not field.create_optional %}
-    {% if model.is_notification_table and field.name == 'user_id' %}
+    {% if field.default_factory == 'date' %}
+    # Omit the value to let the SQLModel date default factory run.
+    {{ field.name }}: Optional[{{ field.type }}] = None
+    {% elif model.is_notification_table and field.name == 'user_id' %}
     # user_id is optional in create - None means broadcast to all users
     user_id: Optional[int] = None
     {% else %}
@@ -72,6 +75,10 @@ class {{ model.name }}Create(SQLModel):
     {{ field.name }}: {{ field.type }} = Field(default_factory=list)
     {% elif field.default_factory == 'dict' %}
     {{ field.name }}: {{ field.type }} = Field(default_factory=dict)
+    {% elif field.default_factory == 'date' %}
+    {{ field.name }}: Optional[{{ field.type }}] = None
+    {% elif field.ui_type == 'time' and field.default is not none %}
+    {{ field.name }}: {{ field.type }} = time.fromisoformat('{{ field.default }}')
     {% else %}
     {{ field.name }}: {{ field.type }} = {{ py_default(field.default) }}
     {% endif %}
@@ -87,6 +94,23 @@ class {{ model.name }}Create(SQLModel):
 {% endif %}
 {% if not ns.has_field %}
     pass
+{% endif %}
+{% set create_empty_scalar_fields = namespace(names=[]) %}
+{% for field in model.fields %}
+{% if 'c' in field.permissions and field.ui_type in ['int', 'float', 'date', 'datetime', 'time'] and (field.type.startswith('Optional[') or field.create_optional or field.default_factory == 'date') %}
+{% set create_empty_scalar_fields.names = create_empty_scalar_fields.names + [field.name] %}
+{% endif %}
+{% endfor %}
+{% if create_empty_scalar_fields.names %}
+
+    @model_validator(mode='before')
+    @classmethod
+    def _empty_optional_scalar_strings_to_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field_name in {{ create_empty_scalar_fields.names }}:
+                if data.get(field_name) == "":
+                    data[field_name] = None
+        return data
 {% endif %}
 
 {% if not model.is_timescaledb %}
@@ -112,6 +136,23 @@ class {{ model.name }}Update(SQLModel):
 
 {% if not ns.has_field %}
     pass
+{% endif %}
+{% set update_empty_scalar_fields = namespace(names=[]) %}
+{% for field in model.fields %}
+{% if 'u' in field.permissions and field.name != 'id' and field.ui_type in ['int', 'float', 'date', 'datetime', 'time'] %}
+{% set update_empty_scalar_fields.names = update_empty_scalar_fields.names + [field.name] %}
+{% endif %}
+{% endfor %}
+{% if update_empty_scalar_fields.names %}
+
+    @model_validator(mode='before')
+    @classmethod
+    def _empty_optional_scalar_strings_to_none(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            for field_name in {{ update_empty_scalar_fields.names }}:
+                if data.get(field_name) == "":
+                    data[field_name] = None
+        return data
 {% endif %}
 {% endif %}
 

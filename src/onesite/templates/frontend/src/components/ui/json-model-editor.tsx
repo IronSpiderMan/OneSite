@@ -479,3 +479,73 @@ export const JsonModelArrayEditor: React.FC<{
     </div>
   )
 }
+
+type ScalarArrayKind = "date" | "datetime" | "time"
+
+const inputTypeForScalarArray = (kind: ScalarArrayKind) =>
+  kind === "datetime" ? "datetime-local" : kind
+
+const inputValueForScalarArray = (value: unknown, kind: ScalarArrayKind) => {
+  if (value === undefined || value === null) return ""
+  const stringValue = String(value)
+  // ``datetime-local`` accepts neither a timezone suffix nor seconds by
+  // default.  Keep the local wall-clock portion of ISO API values.
+  return kind === "datetime" ? stringValue.replace(/Z$/, "").slice(0, 16) : stringValue
+}
+
+/** A JSON-array editor for date, datetime, and time scalar values. */
+export const JsonScalarArrayEditor: React.FC<{
+  itemKind: ScalarArrayKind
+  value: any
+  onChange: (v: string[]) => void
+  className?: string
+}> = ({ itemKind, value, onChange, className }) => {
+  const [mode, setMode] = React.useState<"ui" | "json">("ui")
+  const arrayValue: string[] = Array.isArray(value) ? value.map((item) => String(item ?? "")) : []
+
+  return (
+    <div className={cn("space-y-3", className)}>
+      <div className="flex items-center gap-2">
+        <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
+          UI
+        </Button>
+        <Button type="button" variant={mode === "json" ? "default" : "outline"} size="sm" onClick={() => setMode("json")}>
+          JSON
+        </Button>
+      </div>
+      {mode === "ui" ? (
+        <div className="space-y-3">
+          <div className="flex justify-end">
+            <Button type="button" variant="outline" size="sm" onClick={() => onChange([...arrayValue, ""])}>
+              Add
+            </Button>
+          </div>
+          {arrayValue.map((item, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <Input
+                type={inputTypeForScalarArray(itemKind)}
+                value={inputValueForScalarArray(item, itemKind)}
+                onChange={(event) => {
+                  const next = [...arrayValue]
+                  next[index] = event.target.value
+                  onChange(next)
+                }}
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="text-destructive"
+                onClick={() => onChange(arrayValue.filter((_, itemIndex) => itemIndex !== index))}
+              >
+                Remove
+              </Button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <JsonInput value={arrayValue} onChange={onChange} jsonKind="array" />
+      )}
+    </div>
+  )
+}

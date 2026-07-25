@@ -11,6 +11,7 @@ import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { ImageUpload } from '../components/ui/image-upload';
+import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
 import { TimePicker } from '../components/ui/time-picker';
 import { MarkdownEditor } from '../components/ui/markdown-editor';
@@ -263,7 +264,15 @@ const SettingsPage: React.FC = () => {
                         name="{{ field.name }}"
                         control={control}
                         render={({ field: { onChange, value } }) => (
-                          <ImageUpload value={value} onChange={onChange} />
+                        <ImageUpload value={value} onChange={onChange} />
+                      )}
+                      />
+                      {% elif field.ui_type == 'images' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <ImagesUpload id="{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
                         )}
                       />
                       {% elif field.ui_type == 'file' %}
@@ -401,6 +410,14 @@ const SettingsPage: React.FC = () => {
                 control={control}
                 render={({ field: { onChange, value } }) => (
                   <ImageUpload value={value} onChange={onChange} />
+                )}
+              />
+              {% elif field.ui_type == 'images' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <ImagesUpload id="{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
                 )}
               />
               {% elif field.ui_type == 'file' %}

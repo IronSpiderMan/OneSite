@@ -8,12 +8,13 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ImageUpload } from '../../components/ui/image-upload';
+import { ImagesUpload } from '../../components/ui/images-upload';
 import { FileUpload } from '../../components/ui/file-upload';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
@@ -118,6 +119,14 @@ const Create{{ model.name }}Page: React.FC = () => {
                 name="{{ field.name }}"
                 render={({ field: { onChange, value } }) => (
                   <ImageUpload value={value} onChange={onChange} />
+                )}
+              />
+              {% elif field.ui_type == 'images' %}
+              <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                  <ImagesUpload id="{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
                 )}
               />
               {% elif field.ui_type == 'file' %}
@@ -234,6 +243,8 @@ const Create{{ model.name }}Page: React.FC = () => {
                     lockKeys
                     {% endif %}
                   />
+                  {% elif field.json_item_kind %}
+                  <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
                   {% elif field.json_item_schema %}
                   <JsonModelArrayEditor
                     itemSchema={ {{ field.json_item_schema | tojson }} }
@@ -261,6 +272,11 @@ const Create{{ model.name }}Page: React.FC = () => {
                 type="number"
                 {% elif field.ui_type == 'datetime' %}
                 type="datetime-local"
+                {% elif field.ui_type == 'date' %}
+                type="date"
+                {% if field.default_factory == 'date' %}
+                defaultValue={new Date().toLocaleDateString('en-CA')}
+                {% endif %}
                 {% else %}
                 type="text"
                 {% endif %}

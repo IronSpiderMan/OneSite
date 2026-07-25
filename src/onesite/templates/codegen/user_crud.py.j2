@@ -311,6 +311,10 @@ async def create(session: AsyncSession, obj_in: UserCreate) -> User:
 
 async def update(session: AsyncSession, db_obj: User, obj_in: Union[UserUpdate, UserUpdateMe]) -> User:
     hero_data = obj_in.dict(exclude_unset=True)
+    {% for field in model.fields | selectattr('json_item_kind') | list %}
+    if isinstance(hero_data.get("{{ field.name }}"), list):
+        hero_data["{{ field.name }}"] = [value.isoformat() if hasattr(value, "isoformat") else value for value in hero_data["{{ field.name }}"]]
+    {% endfor %}
     # Remove password from data if present (it's transient)
     if 'password' in hero_data:
         del hero_data['password']

@@ -1,4 +1,5 @@
 import inspect
+from datetime import date as date_type, datetime as datetime_type, time as time_type
 from enum import Enum
 from typing import Any, Dict, List, Optional, Set, Union, get_args, get_origin
 
@@ -382,6 +383,7 @@ def get_model_fields(
         json_py_imports: List[str] = []
         json_model_schema = None
         json_item_schema = None
+        json_item_kind = None
 
         if inspect.isclass(_inner) and issubclass(_inner, (str, int)) and hasattr(_inner, "__members__"):
             is_enum = True
@@ -423,7 +425,25 @@ def get_model_fields(
                     else:
                         type_str = "List[Dict[str, Any]]"
                 else:
-                    type_str = "List[Any]"
+                    if item_type is str:
+                        type_str = "List[str]"
+                    elif item_type is int:
+                        type_str = "List[int]"
+                    elif item_type is float:
+                        type_str = "List[float]"
+                    elif item_type is bool:
+                        type_str = "List[bool]"
+                    elif item_type is date_type:
+                        type_str = "List[date]"
+                        json_item_kind = "date"
+                    elif item_type is datetime_type:
+                        type_str = "List[datetime]"
+                        json_item_kind = "datetime"
+                    elif item_type is time_type:
+                        type_str = "List[time]"
+                        json_item_kind = "time"
+                    else:
+                        type_str = "List[Any]"
             else:
                 json_kind = "object"
                 value_type = args[1] if len(args) >= 2 else Any
@@ -439,11 +459,16 @@ def get_model_fields(
             json_py_imports.append(resolved_annotation.__name__)
             json_model_schema = _build_json_model_schema(resolved_annotation)
         else:
-            # Check for time type first - must check before datetime since datetime.time contains "datetime"
-            # The type_str is like "<class 'datetime.time'>" for time type
-            # We need to check for 'datetime.time' specifically to not match datetime.datetime
-            if "'datetime.time'" in type_str:
+            # Check the specific datetime module types before the broad datetime
+            # match: ``datetime.date`` and ``datetime.time`` both contain the
+            # word "datetime" in their representation.  Use the unwrapped
+            # annotation too, so Optional[date] is handled correctly.
+            if _inner is time_type or "'datetime.time'" in type_str:
                 type_str = "time"
+            elif _inner is date_type or "'datetime.date'" in type_str:
+                type_str = "date"
+            elif _inner is datetime_type:
+                type_str = "datetime"
             elif "int" in type_str:
                 type_str = "int"
             elif "str" in type_str:
@@ -465,6 +490,8 @@ def get_model_fields(
             ui_type = "textarea"
         elif site_props.get("component") == "image":
             ui_type = "image"
+        elif site_props.get("component") == "images":
+            ui_type = "images"
         elif site_props.get("component") == "file":
             ui_type = "file"
         elif ui_type == "str" and (
@@ -575,6 +602,7 @@ def get_model_fields(
                 json_kind=json_kind,
                 json_model_schema=json_model_schema,
                 json_item_schema=json_item_schema,
+                json_item_kind=json_item_kind,
                 json_fixed_keys=json_fixed_keys,
                 json_lock_keys=json_lock_keys,
                 py_imports=sorted(set(json_py_imports)),
@@ -589,6 +617,8 @@ def get_model_fields(
                     if getattr(field, "default_factory", None) is list
                     else "dict"
                     if getattr(field, "default_factory", None) is dict
+                    else "date"
+                    if ui_type == "date" and getattr(field, "default_factory", None) is not None
                     else None
                 ),
                 is_enum=is_enum,

@@ -18,8 +18,9 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '.
 import { useForm, Controller } from 'react-hook-form';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { ImageUpload } from '../../components/ui/image-upload';
+import { ImagesUpload } from '../../components/ui/images-upload';
 import { TimePicker } from '../../components/ui/time-picker';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
@@ -690,6 +691,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <ImageUpload value={value} onChange={onChange} />
                                     )}
                                 />
+                                {% elif field.ui_type == 'images' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <ImagesUpload id="edit-{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
+                                    )}
+                                />
                                 {% elif field.ui_type == 'file' %}
                                 <Controller
                                     control={editControl}
@@ -782,6 +791,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             lockKeys
                                             {% endif %}
                                         />
+                                        {% elif field.json_item_kind %}
+                                        <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
                                         {% elif field.json_item_schema %}
                                         <JsonModelArrayEditor
                                             itemSchema={ {{ field.json_item_schema | tojson }} }
@@ -809,6 +820,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     type="number"
                                     {% elif field.ui_type == 'datetime' %}
                                     type="datetime-local"
+                                    {% elif field.ui_type == 'date' %}
+                                    type="date"
                                     {% else %}
                                     type="text"
                                     {% endif %}
@@ -924,6 +937,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     </div>
                                 ) : (
                                     <span className="text-muted-foreground italic">No image</span>
+                                )}
+                                {% elif field.ui_type == 'images' %}
+                                {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.length ? (
+                                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                                        {currentItem.{{ field.name }}.map((url: string, index: number) => (
+                                            <div key={`${url}-${index}`} className="aspect-video overflow-hidden rounded-lg border bg-muted">
+                                                <img src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
+                                            </div>
+                                        ))}
+                                    </div>
+                                ) : (
+                                    <span className="text-muted-foreground italic">No images</span>
                                 )}
                                 {% elif field.ui_type == 'file' %}
                                 {currentItem.{{ field.name }} ? (
