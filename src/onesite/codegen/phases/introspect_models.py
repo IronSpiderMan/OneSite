@@ -163,22 +163,36 @@ def _build_model_dict(
 
 
 def _extract_event_listeners(model_cls: type) -> list[EventListener]:
-    """Extract ``on_before_*`` / ``on_after_*`` methods as event listeners.
+    """Extract explicitly ORM-scoped methods as SQLAlchemy event listeners.
 
-    Scans the model class for methods whose names match the pattern
-    ``on_(before|after)_<event>``, extracts their source code bodies,
-    and returns ``EventListener`` objects for code generation.
+    ``on_orm_before_*`` / ``on_orm_after_*`` are the unambiguous low-level
+    names. The legacy ``on_before_insert`` / ``on_after_insert`` aliases remain
+    supported because they do not collide with the service-level CUD lifecycle
+    (which uses create/update/delete).
 
     The ``self`` parameter is stripped from the generated function —
     the template adds ``self = target`` so existing ``self.`` references
     in the body still work.
     """
     listeners: list[EventListener] = []
+    orm_events = {
+        "before_insert",
+        "after_insert",
+        "before_update",
+        "after_update",
+        "before_delete",
+        "after_delete",
+    }
     for name, method in inspect.getmembers(model_cls, predicate=inspect.isfunction):
-        if not (name.startswith("on_before_") or name.startswith("on_after_")):
+        if name.startswith("on_orm_"):
+            event_name = name[len("on_orm_"):]
+        elif name in {"on_before_insert", "on_after_insert"}:
+            event_name = name[len("on_"):]
+        else:
             continue
 
-        event_name = name[3:]  # strip "on_" prefix → "before_insert", etc.
+        if event_name not in orm_events:
+            continue
         try:
             source = inspect.getsource(method)
         except (OSError, TypeError):
@@ -234,7 +248,7 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
 
 
 def _process_introspected_class(
-    obj: type, name: str, module_name: str, full_module_name: str
+    obj: type, name: str, module_name: str
 ) -> ModelDefinition | None:
     """Run ``get_model_fields`` on a single class and build its metadata dict."""
     model_module_name = to_snake(name)
@@ -263,14 +277,14 @@ def _process_introspected_class(
         name, module_name, module_name, result,
     )
 
-    # Attach event listeners (extracted from on_before_* / on_after_* methods)
+    # Attach low-level SQLAlchemy event listeners (on_orm_before_*/on_orm_after_*).
     mdl["event_listeners"] = _extract_event_listeners(obj)
 
     return mdl
 
 
 def _introspect_module(
-    module: Any, module_name: str, full_module_name: str
+    module: Any, module_name: str
 ) -> list[ModelDefinition] | None:
     """Introspect a single model module and return model metadata dicts."""
     results: list[ModelDefinition] = []
@@ -300,7 +314,7 @@ def _introspect_module(
         if not (hasattr(obj, "metadata") and (getattr(obj, "__table__", None) is not None or singleton_marker or onesite_marker or builtin_marker)):
             continue
 
-        mdl = _process_introspected_class(obj, name, module_name, full_module_name)
+        mdl = _process_introspected_class(obj, name, module_name)
         if mdl is None:
             return None  # fatal — caller should stop
         results.append(mdl)
@@ -321,8 +335,8 @@ def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
 
     try:
         import app.models  # noqa: F401
-    except ImportError as e:
-        console.print(f"[red]Could not import app.models: {e}[/red]")
+    except Exception as exc:
+        console.print(f"[red]Could not import app.models: {exc}[/red]")
         return []
 
     models_dir = backend_path / "app" / "models"
@@ -339,11 +353,11 @@ def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
                 module = sys.modules[full_module_name]
             else:
                 module = importlib.import_module(full_module_name)
-        except ImportError as e:
-            console.print(f"[red]Error importing {full_module_name}: {e}[/red]")
-            continue
+        except Exception as exc:
+            console.print(f"[red]Error importing {full_module_name}: {exc}[/red]")
+            return []
 
-        module_models = _introspect_module(module, module_name, full_module_name)
+        module_models = _introspect_module(module, module_name)
         if module_models is None:  # fatal error (e.g. missing import_key)
             return []
         found_models.extend(module_models)

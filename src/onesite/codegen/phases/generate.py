@@ -315,7 +315,7 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
 
 
 def _generate_event_listeners(model: ModelDefinition, backend_path: Path) -> None:
-    """Generate event listener file for a model that has on_before_*/on_after_* methods."""
+    """Generate event listener file for a model that has low-level ORM hooks."""
     listeners = model.get("event_listeners", [])
     if not listeners:
         return
@@ -391,7 +391,7 @@ def phase_generate_per_model(
         if model["is_link_table"] and not model.get("is_association_table"):
             continue
 
-        # Generate event listener file if the model has on_before_*/on_after_* methods
+        # Generate event listener file if the model has low-level ORM hooks.
         _generate_event_listeners(model, backend_path)
 
         # Generate background task handler file if model has async on_* methods
@@ -593,4 +593,3 @@ def phase_generate_aggregated(
             {"handler_models": handler_models, "export_models": export_models},
             backend_path / "app" / "handlers" / "__init__.py",
         )
-

@@ -15,7 +15,12 @@ _ONESITE_ROOT = Path(__file__).resolve().parent.parent.parent
 
 
 def phase_sync_models(cwd: Path, backend_path: Path) -> None:
-    """Copy model .py files from *project* models/ and *template* models/ into backend."""
+    """Mirror source and built-in models into the generated backend.
+
+    ``backend/app/models`` is generated output, not a second model source.
+    Removing obsolete copies before writing prevents deleted project models
+    from being imported and regenerated on the next ``site sync``.
+    """
     models_src_dir = cwd / "models"
     models_dest_dir = backend_path / "app" / "models"
     template_models_dir = _ONESITE_ROOT / "templates" / "models"
@@ -23,16 +28,26 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
     models_dest_dir.mkdir(parents=True, exist_ok=True)
     write_file_with_status(models_dest_dir / "__init__.py", "")
 
-    if models_src_dir.exists():
-        for model_file in models_src_dir.glob("*.py"):
-            copy_file_with_status(model_file, models_dest_dir / model_file.name)
+    source_models = (
+        {model_file.name: model_file for model_file in models_src_dir.glob("*.py")}
+        if models_src_dir.exists()
+        else {}
+    )
+    template_models = (
+        {model_file.name: model_file for model_file in template_models_dir.glob("*.py")}
+        if template_models_dir.exists()
+        else {}
+    )
 
-    if template_models_dir.exists():
-        for model_file in template_models_dir.glob("*.py"):
-            target_in_project = models_src_dir / model_file.name
-            if not target_in_project.exists():
-                copy_file_with_status(model_file, models_dest_dir / model_file.name)
-            else:
-                console.print(
-                    f"[dim]Skipping template model {model_file.name} (overridden in project)[/dim]"
-                )
+    # Project models override bundled models with the same name.
+    desired_models = {**template_models, **source_models}
+
+    for model_file in models_dest_dir.glob("*.py"):
+        if model_file.name != "__init__.py" and model_file.name not in desired_models:
+            model_file.unlink()
+            console.print(f"[yellow]Removed stale generated model {model_file}[/yellow]")
+
+    for name, model_file in sorted(desired_models.items()):
+        if name in source_models and name in template_models:
+            console.print(f"[dim]Project model {name} overrides the bundled model[/dim]")
+        copy_file_with_status(model_file, models_dest_dir / name)

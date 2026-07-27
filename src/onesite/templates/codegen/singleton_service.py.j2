@@ -1,13 +1,42 @@
+import logging
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Update
 from app.models.{{ model.source_module }} import {{ model.name }}
+from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
+
+logger = logging.getLogger(__name__)
 
 class {{ model.name }}Service:
     async def get(self, session: AsyncSession) -> {{ model.name }}:
         return await crud.get(session)
 
     async def update(self, session: AsyncSession, obj_in: {{ model.name }}Update) -> {{ model.name }}:
-        return await crud.update(session, obj_in)
+        db_obj = await crud.get(session)
+        old = snapshot_model(db_obj)
+        changes = obj_in.dict(exclude_unset=True)
+        context = ModelHookContext(
+            operation="update",
+            input_data=dict(changes),
+            changed_fields=frozenset(changes),
+        )
+        try:
+            obj = await crud.update(session, obj_in)
+            await session.commit()
+            await session.refresh(obj)
+        except Exception:
+            await session.rollback()
+            raise
+        try:
+            await invoke_model_hook(
+                obj,
+                "on_after_commit_update",
+                old=old,
+                changes=changes,
+                context=context,
+            )
+        except Exception:
+            logger.exception("Post-commit update hook failed for {{ model.name }}")
+        return obj
 
 service = {{ model.name }}Service()

@@ -238,7 +238,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
                 else:
                     console.print(f"[dim]Skipped existing callback: {handler_name}[/dim]")
 
-    for name in ["logger.py", "security.py", "deps.py", "tablenames.py"]:
+    for name in ["logger.py", "security.py", "deps.py", "tablenames.py", "model_hooks.py"]:
         src = template_backend_root / "app" / "core" / name
         dst = backend_path / "app" / "core" / name
         if src.exists():
@@ -270,6 +270,11 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     target_backend_dockerfile = backend_path / "Dockerfile"
     if template_backend_dockerfile.exists():
         copy_file_with_status(template_backend_dockerfile, target_backend_dockerfile)
+
+    nuitka_entrypoint_src = template_backend_root / "nuitka_entrypoint.py"
+    nuitka_entrypoint_dst = backend_path / "nuitka_entrypoint.py"
+    if nuitka_entrypoint_src.exists():
+        copy_file_with_status(nuitka_entrypoint_src, nuitka_entrypoint_dst)
 
     pagination_schema_src = template_backend_root / "app" / "schemas" / "pagination.py"
     pagination_schema_dst = backend_path / "app" / "schemas" / "pagination.py"

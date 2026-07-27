@@ -1,3 +1,4 @@
+import logging
 from typing import Optional, Union
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -5,11 +6,14 @@ from app.cruds import user as crud
 from app.schemas.user import UserCreate, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
+from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
 from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 {% endfor %}
 {% endif %}
+
+logger = logging.getLogger(__name__)
 
 class UserService:
     async def get(self, session: AsyncSession, id: int) -> Optional[User]:
@@ -121,9 +125,37 @@ class UserService:
             password = user_data.pop('password')
             user_data['hashed_password'] = get_password_hash(password)
         db_obj = User(**user_data)
-        session.add(db_obj)
-        await session.commit()
-        await session.refresh(db_obj)
+        hook_context = ModelHookContext(
+            operation="create",
+            input_data=dict(user_data),
+            changed_fields=frozenset(user_data),
+        )
+        try:
+            await invoke_model_hook(
+                db_obj,
+                "on_before_create",
+                session=session,
+                context=hook_context,
+            )
+            session.add(db_obj)
+            await session.flush()
+            await session.refresh(db_obj)
+            await invoke_model_hook(
+                db_obj,
+                "on_after_create",
+                session=session,
+                context=hook_context,
+            )
+            await session.flush()
+            await session.commit()
+            await session.refresh(db_obj)
+        except Exception:
+            await session.rollback()
+            raise
+        try:
+            await invoke_model_hook(db_obj, "on_after_commit_create", context=hook_context)
+        except Exception:
+            logger.exception("Post-commit create hook failed for User id=%s", getattr(db_obj, "id", None))
         return db_obj
 
     async def update(self, session: AsyncSession, id: int, obj_in: Union[UserUpdate, UserUpdateMe]) -> User:
@@ -147,14 +179,98 @@ class UserService:
         {% endfor %}
         {% endif %}
         
+        old = snapshot_model(db_obj)
+        changes = obj_in.dict(exclude_unset=True)
+        new_password_hash = None
         if hasattr(obj_in, 'password') and obj_in.password:
             from app.core.security import get_password_hash
-            db_obj.hashed_password = get_password_hash(obj_in.password)
-        
-        return await crud.update(session, db_obj, obj_in)
+            new_password_hash = get_password_hash(obj_in.password)
+            changes.pop("password", None)
+            changes.pop("old_password", None)
+            changes["hashed_password"] = new_password_hash
+        hook_context = ModelHookContext(
+            operation="update",
+            input_data=dict(changes),
+            changed_fields=frozenset(changes),
+        )
+        try:
+            await invoke_model_hook(
+                db_obj,
+                "on_before_update",
+                session=session,
+                old=old,
+                changes=changes,
+                context=hook_context,
+            )
+            for key, value in changes.items():
+                if hasattr(obj_in, key):
+                    setattr(obj_in, key, value)
+            if new_password_hash is not None:
+                db_obj.hashed_password = changes.get("hashed_password", new_password_hash)
+            obj = await crud.update(session, db_obj, obj_in)
+            await invoke_model_hook(
+                obj,
+                "on_after_update",
+                session=session,
+                old=old,
+                changes=changes,
+                context=hook_context,
+            )
+            await session.flush()
+            await session.commit()
+            await session.refresh(obj)
+        except Exception:
+            await session.rollback()
+            raise
+        try:
+            await invoke_model_hook(
+                obj,
+                "on_after_commit_update",
+                old=old,
+                changes=changes,
+                context=hook_context,
+            )
+        except Exception:
+            logger.exception("Post-commit update hook failed for User id=%s", id)
+        return obj
 
     async def delete(self, session: AsyncSession, id: int) -> User:
-        return await crud.delete(session, id)
+        db_obj = await crud.get(session, id)
+        if not db_obj:
+            raise ValueError("User not found")
+        old = snapshot_model(db_obj)
+        hook_context = ModelHookContext(operation="delete")
+        try:
+            await invoke_model_hook(
+                db_obj,
+                "on_before_delete",
+                session=session,
+                old=old,
+                context=hook_context,
+            )
+            deleted = await crud.delete(session, id)
+            await invoke_model_hook(
+                deleted,
+                "on_after_delete",
+                session=session,
+                old=old,
+                context=hook_context,
+            )
+            await session.flush()
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+        try:
+            await invoke_model_hook(
+                deleted,
+                "on_after_commit_delete",
+                old=old,
+                context=hook_context,
+            )
+        except Exception:
+            logger.exception("Post-commit delete hook failed for User id=%s", id)
+        return deleted
 
     {% if model.reverse_m2m %}
     # Reverse M2M Relationship methods

@@ -8,6 +8,7 @@ from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not model.is_timescaledb %}, {{ model.name }}Update{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
+from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -28,7 +29,26 @@ class {{ model.name }}Service:
     {% if model.is_timescaledb %}
 
     async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> dict:
-        return await crud.create(session, obj_in)
+        context = ModelHookContext(
+            operation="create",
+            input_data=obj_in.dict(exclude_none=True),
+            changed_fields=frozenset(obj_in.dict(exclude_none=True)),
+        )
+        try:
+            obj = await crud.create(session, obj_in)
+            await session.commit()
+            await session.refresh(obj)
+        except Exception:
+            await session.rollback()
+            raise
+        try:
+            await invoke_model_hook(obj, "on_after_commit_create", context=context)
+        except Exception:
+            logger.exception(
+                "Post-commit create hook failed for {{ model.name }} id=%s",
+                getattr(obj, "id", None),
+            )
+        return obj.model_dump()
 
     async def get_realtime_by_entity(
         self,
@@ -169,6 +189,12 @@ class {{ model.name }}Service:
         return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
 
     async def create(self, session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}Read:
+        obj = None
+        hook_context = ModelHookContext(
+            operation="create",
+            input_data=obj_in.dict(exclude_none=True),
+            changed_fields=frozenset(obj_in.dict(exclude_none=True)),
+        )
         {% if model.fields | selectattr('is_unique') | list %}
         # Check unique field constraints
         {% for field in model.fields %}
@@ -200,20 +226,51 @@ class {{ model.name }}Service:
             
             created_at = datetime.now(timezone.utc)
             created_objects = []
-            
-            for uid in user_ids:
-                obj_data = obj_in.dict()
-                obj_data["user_id"] = uid
-                obj_data["created_at"] = created_at
-                db_obj = {{ model.name }}(**obj_data)
-                session.add(db_obj)
-                created_objects.append(db_obj)
-            
-            await session.commit()
-            
-            # Refresh all objects to get their IDs
+
+            try:
+                for uid in user_ids:
+                    obj_data = obj_in.dict()
+                    obj_data["user_id"] = uid
+                    obj_data["created_at"] = created_at
+                    db_obj = {{ model.name }}(**obj_data)
+                    await invoke_model_hook(
+                        db_obj,
+                        "on_before_create",
+                        session=session,
+                        context=hook_context,
+                    )
+                    session.add(db_obj)
+                    created_objects.append(db_obj)
+
+                await session.flush()
+
+                # Refresh all objects to get their IDs, then run transactional hooks.
+                for obj in created_objects:
+                    await session.refresh(obj)
+                    await invoke_model_hook(
+                        obj,
+                        "on_after_create",
+                        session=session,
+                        context=hook_context,
+                    )
+                await session.flush()
+                await session.commit()
+            except Exception:
+                await session.rollback()
+                raise
+
             for obj in created_objects:
-                await session.refresh(obj)
+                try:
+                    await invoke_model_hook(
+                        obj,
+                        "on_after_commit_create",
+                        context=hook_context,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Post-commit create hook failed for {{ model.name }} id=%s",
+                        getattr(obj, "id", None),
+                    )
             
             # Push notifications to all users
             for obj in created_objects:
@@ -235,15 +292,22 @@ class {{ model.name }}Service:
             # Return the first created object as representative
             return {{ model.name }}Read.model_validate(created_objects[0]) if created_objects else {{ model.name }}Read.model_validate({{ model.name }}())
         {% endif %}
-        obj = await crud.create(session, obj_in)
+        try:
+            obj = await crud.create(session, obj_in)
+            await session.commit()
+            await session.refresh(obj)
+        except Exception:
+            await session.rollback()
+            raise
 
-        {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
-        # Auto-set updated_at on create
-        obj.updated_at = datetime.now(timezone.utc)
-        session.add(obj)
-        await session.commit()
-        await session.refresh(obj)
-        {% endif %}
+        try:
+            await invoke_model_hook(
+                obj,
+                "on_after_commit_create",
+                context=hook_context,
+            )
+        except Exception:
+            logger.exception("Post-commit create hook failed for {{ model.name }} id=%s", getattr(obj, "id", None))
 
         {% if model.is_notification_table %}
         # Auto-push for notification
@@ -271,9 +335,18 @@ class {{ model.name }}Service:
         Raises ValueError if unique constraint is violated.
         Raises NotFoundError if object doesn't exist.
         """
+        db_obj = None
+        old = None
+        changes = obj_in.dict(exclude_unset=True)
+        hook_context = ModelHookContext(
+            operation="update",
+            input_data=dict(changes),
+            changed_fields=frozenset(changes),
+        )
         db_obj = await crud.get(session, id)
         if not db_obj:
             raise ValueError("{{ model.name }} not found")
+        old = snapshot_model(db_obj)
         
         {% if model.fields | selectattr('is_unique') | list %}
         # Check unique field constraints (only for fields being updated)
@@ -286,15 +359,24 @@ class {{ model.name }}Service:
         {% endfor %}
         {% endif %}
 
-        obj = await crud.update(session, db_obj, obj_in)
+        try:
+            obj = await crud.update(session, db_obj, obj_in)
+            await session.commit()
+            await session.refresh(obj)
+        except Exception:
+            await session.rollback()
+            raise
 
-        {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
-        # Auto-update updated_at timestamp
-        obj.updated_at = datetime.now(timezone.utc)
-        session.add(obj)
-        await session.commit()
-        await session.refresh(obj)
-        {% endif %}
+        try:
+            await invoke_model_hook(
+                obj,
+                "on_after_commit_update",
+                old=old,
+                changes=changes,
+                context=hook_context,
+            )
+        except Exception:
+            logger.exception("Post-commit update hook failed for {{ model.name }} id=%s", id)
 
         {% if model.is_notification_table %}
         # Auto-push read status
@@ -307,7 +389,30 @@ class {{ model.name }}Service:
         return {{ model.name }}Read.model_validate(obj)
 
     async def delete(self, session: AsyncSession, id: {{ model.id_type }}) -> {{ model.id_type }}:
-        return await crud.delete(session, id)
+        db_obj = None
+        old = None
+        hook_context = ModelHookContext(operation="delete")
+        try:
+            db_obj = await crud.get(session, id)
+            if not db_obj:
+                raise ValueError("{{ model.name }} not found")
+            old = snapshot_model(db_obj)
+            deleted_id = await crud.delete(session, id)
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+        try:
+            await invoke_model_hook(
+                db_obj,
+                "on_after_commit_delete",
+                old=old,
+                context=hook_context,
+            )
+        except Exception:
+            logger.exception("Post-commit delete hook failed for {{ model.name }} id=%s", id)
+        return deleted_id
 
     {% if model.property_config_meta %}
     async def update_properties_config(

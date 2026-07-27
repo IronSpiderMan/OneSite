@@ -27,20 +27,22 @@ def generate_code() -> None:
     """
     cwd = Path(os.getcwd())
 
-    # Phase 1 — Config
-    backend_path = cwd / "backend"
-    if not backend_path.exists():
-        console.print("[yellow]Backend directory not found, creating...[/yellow]")
-        backend_path.mkdir(parents=True, exist_ok=True)
+    # Phase 1 — Config. Validate it before creating or modifying generated
+    # project files so malformed input cannot be replaced by defaults.
     site_config, backend_path = phase_config.phase_load_config(cwd)
 
     # Phase 2 — Generate model tables (into models/, before sync so they are picked up)
     phase_model_tables.phase_generate_model_tables(cwd, backend_path)
 
-    # Phase 2.1 — Generate plugin models (into models/, before sync)
-    if "site_logger" in site_config.get("plugins", []):
+    # Phase 2.1 — Generate plugin models directly into generated output.  Do
+    # not write plugin implementation details into the user's models/ source
+    # directory, and allow an explicit project model to override the default.
+    if (
+        "site_logger" in site_config.get("plugins", [])
+        and not (cwd / "models" / "app_log.py").exists()
+    ):
         from .render import generate_file as _gf
-        _gf("app_log.py.j2", {}, cwd / "models" / "app_log.py")
+        _gf("app_log.py.j2", {}, backend_path / "app" / "models" / "app_log.py")
 
     # Phase 2.5 — Sync model files (copies generated + user models to backend)
     phase_sync_models.phase_sync_models(cwd, backend_path)

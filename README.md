@@ -54,7 +54,7 @@ Do not treat `backend/app/models/` as the model source of truth: it is synced fr
 | `site run --component backend` | Run only FastAPI. |
 | `site run --component frontend` | Run only Vite. |
 | `site run <project_path> --component all` | Run a project from another directory. |
-| `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t TAG] [-p PORT]` | Build images and generate `docker-compose.yml`. |
+| `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t TAG] [--development\|--production] [-p PORT]` | Build tagged images and generate `docker-compose.yml`; production compiles the backend with Nuitka. |
 | `site compose [--engine docker\|podman] up -d` | Forward a Compose command to Docker Compose or Podman Compose. |
 
 `component` is an option: use `site run --component backend`, not `site run backend`.
@@ -104,7 +104,33 @@ class Product(SQLModel, table=True):
     is_active: bool = True
 ```
 
-Field types, requiredness, defaults, enums and unique constraints become API validation and form controls. Fields named like `image`, `avatar`, `photo`, `*_image` use the image uploader; `file`, `attachment`, `*_file` use the file uploader. Override detection with `site_props.component`: `image`, `file`, `textarea` or `json`.
+Field types, requiredness, defaults, enums and unique constraints become API validation and form controls. Fields named like `image`, `avatar`, `photo`, `*_image` use the image uploader; `file`, `attachment`, `*_file` use the file uploader. Override detection with `site_props.component`: `image`, `images`, `file`, `textarea` or `json`. Use `images` with a JSON-backed `list[str]` field to upload multiple images.
+
+### Transactional CUD hooks
+
+Models can define service-level hooks around create, update and delete operations:
+
+```python
+class Order(SQLModel, table=True):
+    # fields ...
+
+    async def on_before_update(self, session, old, changes, context):
+        if old["status"] == "completed":
+            raise ValueError("Completed orders cannot be changed")
+
+    async def on_after_update(self, session, old, context):
+        session.add(OrderAudit(order_id=self.id, action="updated"))
+
+    async def on_after_commit_update(self, old, context):
+        # The database transaction is already committed here.
+        pass
+```
+
+`on_before_create/update/delete` and `on_after_create/update/delete` run in the same transaction as the CUD operation. The generated service commits only after they succeed and rolls back on any exception. A hook may declare only the named arguments it needs: `session`, `old`, `changes`, or `context`. `context` contains `operation`, `input_data`, and `changed_fields`.
+
+`on_after_commit_create/update/delete` runs after commit; failures are logged and cannot roll back the database. Use a transactional outbox rather than direct email, HTTP or message-broker calls when reliable external delivery is required.
+
+Low-level SQLAlchemy mapper hooks use the explicit `on_orm_before_insert/update/delete` and `on_orm_after_insert/update/delete` names. The legacy `on_before_insert` and `on_after_insert` aliases remain supported.
 
 ### Business primary keys
 
@@ -214,12 +240,17 @@ Roles are `user`, `admin`, `developer` (in ascending hierarchy). A model permiss
 After syncing a project, build and start it:
 
 ```bash
-site build --engine docker --tag v1 --port 3000
+# Regular Python backend (the default)
+site build --development --engine docker --tag v1 --port 3000
+
+# Nuitka-compiled Python backend
+site build --production --engine docker --tag v1 --port 3000
+
 site compose up -d
 site compose logs -f
 ```
 
-`site build` writes `docker-compose.yml`. PostgreSQL is included when `database_url` starts with `postgresql`; configure production credentials and API origins before exposing the application.
+The tag is applied to both `<project>-backend` and `<project>-frontend`. `site build` writes `docker-compose.yml`. PostgreSQL is included when `database_url` starts with `postgresql`; configure production credentials and API origins before exposing the application.
 
 ## Generated project layout
 

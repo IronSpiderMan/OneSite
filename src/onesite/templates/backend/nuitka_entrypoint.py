@@ -1,0 +1,7 @@
+"""Executable entry point used by the production Nuitka container build."""
+
+import uvicorn
+
+
+if __name__ == "__main__":
+    uvicorn.run("app.main:app", host="0.0.0.0", port=80)

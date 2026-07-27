@@ -1,13 +1,12 @@
 import typer
 import shutil
 import os
+import re
 import sys
 import importlib.util
 import subprocess
-from typing import Optional
 from pathlib import Path
 from rich.console import Console
-from jinja2 import Environment, FileSystemLoader
 
 # Add current path to sys.path so we can import modules from the generated project
 try:
@@ -92,12 +91,6 @@ def get_cwd_safely() -> Path:
         raise typer.Exit(code=1)
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
-
-def render_template(template_path: Path, context: dict, output_path: Path):
-    env = Environment(loader=FileSystemLoader(str(template_path.parent)))
-    template = env.get_template(template_path.name)
-    content = template.render(context)
-    output_path.write_text(content, encoding="utf-8")
 
 @app.command()
 def init():
@@ -329,8 +322,10 @@ def run(
 def build(
     component: str = typer.Option("all", "--component", "-c", help="Component to build: backend, frontend, or all"),
     engine: str = typer.Option("docker", "--engine", "-e", help="Container engine: docker or podman"),
-    tag: str = typer.Option("latest", "--tag", "-t", help="Image tag"),
+    tag: str = typer.Option("latest", "--tag", "-t", help="Tag applied to both backend and frontend images"),
     frontend_port: int = typer.Option(3000, "--port", "-p", help="Frontend exposed port"),
+    production: bool = typer.Option(False, "--production", help="Compile the Python backend with Nuitka"),
+    development: bool = typer.Option(False, "--development", help="Use the regular Python backend image (default)"),
 ):
     """
     Build container images for the project and generate docker-compose.yml.
@@ -345,30 +340,76 @@ def build(
     base_dir = get_cwd_safely()
     project_name = base_dir.name.lower()
 
+    if production and development:
+        raise typer.BadParameter("--production and --development cannot be used together")
+    if component not in {"backend", "frontend", "all"}:
+        raise typer.BadParameter("--component must be backend, frontend, or all")
+    if engine not in {"docker", "podman"}:
+        raise typer.BadParameter("--engine must be docker or podman")
+    if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag):
+        raise typer.BadParameter(
+            "--tag must be a valid container tag using letters, digits, '.', '_' or '-'"
+        )
+
+    build_mode = "production" if production else "development"
     backend_image = f"{project_name}-backend:{tag}"
     frontend_image = f"{project_name}-frontend:{tag}"
 
-    def run_build(context_dir, image_name):
-        console.print(f"[blue]Building {image_name} with {engine}...[/blue]")
+    def run_build(context_dir, image_name, *, target=None) -> bool:
+        mode_suffix = f" ({target})" if target else ""
+        console.print(f"[blue]Building {image_name} with {engine}{mode_suffix}...[/blue]")
+        command = [engine, "build", "-t", image_name]
+        if target:
+            command.extend(["--target", target])
+        command.append(".")
         try:
             subprocess.run(
-                [engine, "build", "-t", image_name, "."],
+                command,
                 cwd=str(context_dir),
                 check=True
             )
             console.print(f"[green]Successfully built {image_name}[/green]")
+            return True
         except subprocess.CalledProcessError as e:
             console.print(f"[red]Failed to build {image_name}: {e}[/red]")
+            return False
         except FileNotFoundError:
             console.print(f"[red]Engine '{engine}' not found. Please install it or check your path.[/red]")
+            return False
 
     if component in ["backend", "all"]:
         backend_dir = base_dir / "backend"
-        if (backend_dir / "Dockerfile").exists():
+        backend_dockerfile = backend_dir / "Dockerfile"
+        if backend_dockerfile.exists():
+            if production:
+                dockerfile_content = backend_dockerfile.read_text(
+                    encoding="utf-8", errors="replace"
+                )
+                has_production_target = re.search(
+                    r"(?im)^\s*FROM\s+\S+(?:\s+AS\s+production)\s*$",
+                    dockerfile_content,
+                )
+                nuitka_entrypoint = backend_dir / "nuitka_entrypoint.py"
+                if not has_production_target or not nuitka_entrypoint.exists():
+                    console.print(
+                        "[bold red]Backend production build files are out of date.[/bold red]"
+                    )
+                    console.print(
+                        "Run [bold]site sync[/bold] in this project, then retry "
+                        "[bold]site build --production[/bold]."
+                    )
+                    raise typer.Exit(code=1)
+
             # Prompt for deleting existing images
             should_build = True
             try:
-                existing_images = subprocess.getoutput(f"{engine} images -q {backend_image}")
+                image_query = subprocess.run(
+                    [engine, "images", "-q", backend_image],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                existing_images = image_query.stdout.strip()
                 if existing_images and "command not found" not in existing_images:
                     if typer.confirm(f"Image {backend_image} already exists. Delete it?", default=True):
                         console.print(f"[blue]Deleting {backend_image}...[/blue]")
@@ -381,9 +422,11 @@ def build(
                 pass
 
             if should_build:
-                run_build(backend_dir, backend_image)
+                if not run_build(backend_dir, backend_image, target=build_mode):
+                    raise typer.Exit(code=1)
         else:
             console.print(f"[yellow]Backend Dockerfile not found in {backend_dir}. Run 'site sync' first.[/yellow]")
+            raise typer.Exit(code=1)
 
     if component in ["frontend", "all"]:
         frontend_dir = base_dir / "frontend"
@@ -391,7 +434,13 @@ def build(
             # Prompt for deleting existing images
             should_build = True
             try:
-                existing_images = subprocess.getoutput(f"{engine} images -q {frontend_image}")
+                image_query = subprocess.run(
+                    [engine, "images", "-q", frontend_image],
+                    check=False,
+                    capture_output=True,
+                    text=True,
+                )
+                existing_images = image_query.stdout.strip()
                 if existing_images and "command not found" not in existing_images:
                     if typer.confirm(f"Image {frontend_image} already exists. Delete it?", default=True):
                         console.print(f"[blue]Deleting {frontend_image}...[/blue]")
@@ -403,9 +452,11 @@ def build(
                 pass
 
             if should_build:
-                run_build(frontend_dir, frontend_image)
+                if not run_build(frontend_dir, frontend_image):
+                    raise typer.Exit(code=1)
         else:
             console.print(f"[yellow]Frontend Dockerfile not found in {frontend_dir}. Run 'site sync' first.[/yellow]")
+            raise typer.Exit(code=1)
 
     # Generate docker-compose.yml with correct images and ports
     console.print(f"[blue]Generating docker-compose.yml...[/blue]")
@@ -435,7 +486,10 @@ def build(
     }
     generate_file("docker-compose.yml.j2", context, base_dir / "docker-compose.yml")
 
-    console.print(f"[green]Generated docker-compose.yml with images: {backend_image}, {frontend_image} and port {frontend_port}[/green]")
+    console.print(
+        f"[green]Generated docker-compose.yml with images: {backend_image}, "
+        f"{frontend_image}, backend mode: {build_mode}, and port {frontend_port}[/green]"
+    )
     if use_pg:
         console.print("[green]PostgreSQL service added to docker-compose.yml[/green]")
 

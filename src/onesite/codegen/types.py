@@ -182,8 +182,8 @@ class ModelIntrospectResult:
 class EventListener:
     """A database event listener method extracted from a model.
 
-    Generated from model methods named ``on_before_<event>`` or
-    ``on_after_<event>`` — the method body is extracted and wrapped
+    Generated from model methods named ``on_orm_before_<event>`` or
+    ``on_orm_after_<event>`` (plus legacy insert aliases) — the method body is extracted and wrapped
     in a ``@event.listens_for`` decorated function.
 
     If ``is_async`` is True the body is routed to a background task
