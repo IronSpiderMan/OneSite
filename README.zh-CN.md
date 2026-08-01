@@ -33,6 +33,7 @@ site run
 | `site sync [-i/--install]` | 同步模型并生成代码；`-i` 会安装依赖。 |
 | `site run [项目路径] --component backend\|frontend\|all` | 启动后端、前端或两者。 |
 | `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t 标签] [-p 端口]` | 构建镜像并生成 `deploy/docker-compose.yml`。 |
+| `site build --component desktop` | 为当前 macOS 或 Windows 平台构建原生 Tauri 客户端。 |
 | `site compose [--engine docker\|podman] up -d` | 使用 `deploy/docker-compose.yml` 执行 Compose；也支持 `down`、`logs -f`。 |
 
 `backend`/`frontend` 是 `--component` 选项值，正确写法是 `site run --component backend`，不是 `site run backend`。
@@ -170,6 +171,39 @@ from app.utils.formatting import format_alarm
 
 ## 部署与目录
 
+### 桌面客户端
+
+`site sync` 会在 `generated/frontend/src-tauri` 生成 Tauri 2 桌面外壳。
+先在 `site_config.json` 中配置桌面客户端访问的 FastAPI 地址：
+
+```json
+{
+  "desktop": {
+    "identifier": "com.example.inventory",
+    "version": "1.0.0",
+    "api_url": "https://api.example.com/api/v1",
+    "width": 1280,
+    "height": 800
+  }
+}
+```
+
+`desktop.api_url` 必须是绝对 HTTP(S) 地址；打包后的客户端不能使用 Vite
+开发代理。同步时会将 macOS 和 Windows 的 Tauri 精确来源加入后端 CORS。
+
+```bash
+site sync --install
+site build --component desktop
+```
+
+macOS 当前平台会生成 `.app` 和 `.dmg`，Windows 当前平台会生成 NSIS
+安装程序，不进行跨平台交叉编译。macOS 需安装 Rust 和 Xcode Command Line
+Tools；Windows 需安装 Rust MSVC 工具链、Microsoft C++ Build Tools 和
+WebView2。产物位于
+`generated/frontend/src-tauri/target/release/bundle/`。
+
+### 容器部署
+
 ```bash
 site build --engine docker --tag v1 --port 3000
 site compose up -d
@@ -197,6 +231,7 @@ pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢�
 │   │   └── app/                 # 生成的 FastAPI 应用
 │   └── frontend/
 │       ├── Dockerfile
+│       ├── src-tauri/            # 生成的 Tauri 2 桌面外壳
 │       └── src/                 # 生成的 React/Vite 应用
 ├── deploy/
 │   ├── .env.example
