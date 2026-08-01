@@ -1,6 +1,8 @@
 import keyword
+import re
 from pathlib import Path
 from typing import Any, Dict
+from urllib.parse import urlparse
 
 
 class SiteConfigError(ValueError):
@@ -36,6 +38,69 @@ _SCHEDULED_PARAM_TYPE_ALIASES = {
     "json": "json",
 }
 _TOOL_ROLES = {"user", "admin", "developer"}
+
+
+def _default_desktop_identifier(project_name: str) -> str:
+    """Build a stable reverse-domain identifier from a project name."""
+    slug = re.sub(r"[^A-Za-z0-9-]+", "-", project_name).strip("-").lower()
+    if not slug:
+        slug = "app"
+    if slug[0].isdigit():
+        slug = f"app-{slug}"
+    return f"com.onesite.{slug}"
+
+
+def validate_desktop_config(config: Dict[str, Any]) -> None:
+    """Validate and fill defaults for the generated Tauri desktop shell."""
+    desktop = config.setdefault("desktop", {})
+    if not isinstance(desktop, dict):
+        raise SiteConfigError("site_config.json field 'desktop' must be a JSON object.")
+
+    project_name = str(config.get("project_name", "OneSite"))
+    identifier = desktop.setdefault(
+        "identifier", _default_desktop_identifier(project_name)
+    )
+    if (
+        not isinstance(identifier, str)
+        or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", identifier)
+        or "." not in identifier
+    ):
+        raise SiteConfigError(
+            "site_config.json field 'desktop.identifier' must be a reverse-domain "
+            "identifier containing only letters, digits, periods, and hyphens."
+        )
+
+    version = desktop.setdefault("version", "0.1.0")
+    if not isinstance(version, str) or not re.fullmatch(
+        r"\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?", version
+    ):
+        raise SiteConfigError(
+            "site_config.json field 'desktop.version' must be a semantic version, "
+            "for example '1.0.0'."
+        )
+
+    default_api_url = config.get("api_url", "")
+    if not isinstance(default_api_url, str) or not default_api_url.startswith(
+        ("http://", "https://")
+    ):
+        default_api_url = "http://127.0.0.1:8000/api/v1"
+    api_url = desktop.setdefault("api_url", default_api_url)
+    parsed_api_url = urlparse(api_url) if isinstance(api_url, str) else None
+    if (
+        parsed_api_url is None
+        or parsed_api_url.scheme not in {"http", "https"}
+        or not parsed_api_url.netloc
+    ):
+        raise SiteConfigError(
+            "site_config.json field 'desktop.api_url' must be an absolute http(s) URL."
+        )
+
+    for key, default in (("width", 1280), ("height", 800)):
+        value = desktop.setdefault(key, default)
+        if isinstance(value, bool) or not isinstance(value, int) or value < 400:
+            raise SiteConfigError(
+                f"site_config.json field 'desktop.{key}' must be an integer of at least 400."
+            )
 
 
 def validate_tools_config(config: Dict[str, Any]) -> None:

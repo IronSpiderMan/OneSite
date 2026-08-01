@@ -1,4 +1,5 @@
 import ast
+import re
 from pathlib import Path
 from typing import Any, Dict, List
 
@@ -10,6 +11,33 @@ from .file_utils import copy_file_with_status, write_file_with_status
 from .render import generate_file
 
 console = Console()
+
+
+def _sync_desktop_assets(target_frontend_root: Path, site_config: Dict[str, Any]) -> None:
+    """Generate the Tauri 2 shell used by current-platform desktop builds."""
+    template_root = Path(__file__).resolve().parent.parent / "templates" / "desktop"
+    target_root = target_frontend_root / "src-tauri"
+
+    for source in template_root.rglob("*"):
+        if source.is_file():
+            copy_file_with_status(source, target_root / source.relative_to(template_root))
+
+    desktop = dict(site_config["desktop"])
+    crate_name = re.sub(
+        r"[^a-z0-9_]+",
+        "_",
+        str(site_config.get("project_name", "onesite")).lower().replace("-", "_"),
+    ).strip("_")
+    if not crate_name:
+        crate_name = "onesite_app"
+    if crate_name[0].isdigit():
+        crate_name = f"app_{crate_name}"
+    desktop["crate_name"] = crate_name
+    context = {"config": site_config, "desktop": desktop}
+    generate_file("desktop_Cargo.toml.j2", context, target_root / "Cargo.toml")
+    generate_file(
+        "desktop_tauri.conf.json.j2", context, target_root / "tauri.conf.json"
+    )
 
 
 def _ensure_init_py(dir_path: Path) -> None:
@@ -430,6 +458,8 @@ window.__ENV__ = {
             template_frontend_dockerignore,
             target_frontend_dockerignore,
         )
+
+    _sync_desktop_assets(target_frontend_root, site_config)
 
 
 def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, Any]):

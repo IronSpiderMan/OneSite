@@ -7,6 +7,7 @@ from ..config import (
     SiteConfigError,
     load_site_config,
     validate_mqtt_config,
+    validate_desktop_config,
     validate_scheduled_tasks_config,
     validate_tools_config,
 )
@@ -52,6 +53,20 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
             "http://127.0.0.1:8000",
         ],
     )
+    validate_desktop_config(site_config)
+    allowed_origins = site_config["allowed_origins"]
+    if not isinstance(allowed_origins, list) or any(
+        not isinstance(origin, str) for origin in allowed_origins
+    ):
+        raise SiteConfigError(
+            "site_config.json field 'allowed_origins' must be an array of strings."
+        )
+    # Tauri 2 serves release assets from these platform-specific origins.
+    # Exact origins keep the API usable without opening CORS to arbitrary hosts.
+    for desktop_origin in ("tauri://localhost", "http://tauri.localhost"):
+        if desktop_origin not in allowed_origins:
+            allowed_origins.append(desktop_origin)
+
     validate_mqtt_config(site_config)
     validate_tools_config(site_config)
     validate_scheduled_tasks_config(site_config)

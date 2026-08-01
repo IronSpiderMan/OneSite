@@ -63,3 +63,7 @@ setup_logging(
     console=os.getenv("LOG_CONSOLE", "true").lower() in {"1", "true", "yes", "y", "on"},
     filename=os.getenv("LOG_FILENAME", "app.log"),
 )
+
+# APScheduler logs every successful job execution at INFO. Suppress those
+# high-frequency messages while keeping scheduler warnings and errors visible.
+logging.getLogger("apscheduler.executors.default").setLevel(logging.WARNING)

@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List, Any
-from pydantic import field_validator, AnyHttpUrl
+from pydantic import field_validator
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 class Settings(BaseSettings):
@@ -11,7 +11,7 @@ class Settings(BaseSettings):
     DATABASE_URI: str = "{{ config.database_url }}"
     FIRST_SUPERUSER: str = "admin@example.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin"
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = {{ config.allowed_origins | tojson }}
+    BACKEND_CORS_ORIGINS: List[str] = {{ config.allowed_origins | tojson }}
     
     # Upload config
     UPLOAD_DIR: str = "{{ config.upload_dir }}"

@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
+import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './components/Layout';
 import { GeneratedRoutes } from './Routes';
 import LoginPage from './pages/Login';
@@ -19,8 +19,13 @@ function RequireAuth({ children }: { children: JSX.Element }) {
 }
 
 function App() {
+  // Release builds are served through Tauri's custom protocol. Hash routing
+  // keeps every route anchored to index.html while preserving BrowserRouter
+  // URLs for the regular web build and Tauri development server.
+  const Router = import.meta.env.VITE_DESKTOP === 'true' ? HashRouter : BrowserRouter;
+
   return (
-    <BrowserRouter>
+    <Router>
       <AppToaster />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
@@ -43,7 +48,7 @@ function App() {
         </Route>
         <Route path="*" element={<Navigate to="/login" replace />} />
       </Routes>
-    </BrowserRouter>
+    </Router>
   );
 }
 

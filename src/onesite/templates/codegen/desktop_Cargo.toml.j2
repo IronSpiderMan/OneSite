@@ -1,0 +1,15 @@
+[package]
+name = "{{ desktop.crate_name }}"
+version = "{{ desktop.version }}"
+description = "Desktop client for {{ config.project_name }}"
+authors = ["OneSite"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+
+[features]
+custom-protocol = ["tauri/custom-protocol"]

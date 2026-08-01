@@ -95,6 +95,19 @@ def get_cwd_safely() -> Path:
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
+def _desktop_config_defaults(project_name: str) -> dict[str, object]:
+    slug = re.sub(r"[^A-Za-z0-9-]+", "-", project_name).strip("-").lower() or "app"
+    if slug[0].isdigit():
+        slug = f"app-{slug}"
+    return {
+        "identifier": f"com.onesite.{slug}",
+        "version": "0.1.0",
+        "api_url": "http://127.0.0.1:8000/api/v1",
+        "width": 1280,
+        "height": 800,
+    }
+
+
 def _ensure_deploy_files(base_dir: Path) -> Path:
     """Create the deployment directory without overwriting user environment files."""
     deploy_dir = get_project_paths(base_dir).deploy
@@ -157,7 +170,10 @@ def init():
                 "http://localhost:3000",
                 "http://127.0.0.1:5173",
                 "http://127.0.0.1:3000",
+                "tauri://localhost",
+                "http://tauri.localhost",
             ],
+            "desktop": _desktop_config_defaults(project_name),
             "logo": "",
         }
         site_config_file.write_text(json.dumps(site_config, indent=4), encoding="utf-8")
@@ -274,7 +290,13 @@ def create(
         "extra": {
             "TIMEZONE": "Asia/Shanghai",
         },
-        "allowed_origins": ["http://localhost:5173", "http://localhost:3000"]
+        "allowed_origins": [
+            "http://localhost:5173",
+            "http://localhost:3000",
+            "tauri://localhost",
+            "http://tauri.localhost",
+        ],
+        "desktop": _desktop_config_defaults(project_name),
     }
     (target_dir / "site_config.json").write_text(
         json.dumps(site_config, indent=4), encoding="utf-8"
@@ -378,7 +400,7 @@ def run(
 
 @app.command()
 def build(
-    component: str = typer.Option("all", "--component", "-c", help="Component to build: backend, frontend, or all"),
+    component: str = typer.Option("all", "--component", "-c", help="Component to build: backend, frontend, desktop, or all"),
     engine: str = typer.Option("docker", "--engine", "-e", help="Container engine: docker or podman"),
     tag: str = typer.Option("latest", "--tag", "-t", help="Tag applied to both backend and frontend images"),
     frontend_port: int = typer.Option(3000, "--port", "-p", help="Frontend exposed port"),
@@ -386,7 +408,7 @@ def build(
     development: bool = typer.Option(False, "--development", help="Use the regular Python backend image (default)"),
 ):
     """
-    Build container images and generate deploy/docker-compose.yml.
+    Build container images, or a native desktop client for the current platform.
 
     Note: Frontend API URL can be configured at runtime via docker-compose environment variables:
     - API_URL: Backend API URL (default: http://backend:80)
@@ -397,13 +419,81 @@ def build(
 
     base_dir = get_cwd_safely()
     paths = get_project_paths(base_dir)
-    _ensure_deploy_files(base_dir)
-    project_name = base_dir.name.lower()
 
     if production and development:
         raise typer.BadParameter("--production and --development cannot be used together")
-    if component not in {"backend", "frontend", "all"}:
-        raise typer.BadParameter("--component must be backend, frontend, or all")
+    if component not in {"backend", "frontend", "desktop", "all"}:
+        raise typer.BadParameter(
+            "--component must be backend, frontend, desktop, or all"
+        )
+
+    if component == "desktop":
+        if production or development:
+            raise typer.BadParameter(
+                "--production/--development apply to backend container builds only"
+            )
+        if sys.platform not in {"darwin", "win32"}:
+            console.print(
+                "[bold red]Desktop builds currently support macOS and Windows hosts only.[/bold red]"
+            )
+            raise typer.Exit(code=1)
+
+        frontend_dir = paths.frontend
+        tauri_config = frontend_dir / "src-tauri" / "tauri.conf.json"
+        desktop_env = frontend_dir / ".env.desktop"
+        package_json = frontend_dir / "package.json"
+        if not all(path.exists() for path in (tauri_config, desktop_env, package_json)):
+            console.print("[bold red]Desktop build files are missing or out of date.[/bold red]")
+            console.print(
+                "Run [bold]site sync --install[/bold], then retry "
+                "[bold]site build --component desktop[/bold]."
+            )
+            raise typer.Exit(code=1)
+
+        npm = _npm_executable()
+        if npm is None:
+            console.print(
+                "[bold red]npm was not found.[/bold red] Install Node.js and ensure npm is on PATH."
+            )
+            raise typer.Exit(code=1)
+        if shutil.which("cargo") is None:
+            console.print(
+                "[bold red]Rust/Cargo was not found.[/bold red] Install the Rust toolchain required by Tauri."
+            )
+            raise typer.Exit(code=1)
+        tauri_cli = frontend_dir / "node_modules" / ".bin" / (
+            "tauri.cmd" if sys.platform == "win32" else "tauri"
+        )
+        if not tauri_cli.exists():
+            console.print("[bold red]The Tauri CLI dependency is not installed.[/bold red]")
+            console.print(
+                "Run [bold]site sync --install[/bold], then retry the desktop build."
+            )
+            raise typer.Exit(code=1)
+
+        platform_name = "macOS" if sys.platform == "darwin" else "Windows"
+        console.print(f"[blue]Building native {platform_name} desktop client...[/blue]")
+        try:
+            subprocess.run(
+                [npm, "run", "tauri", "--", "build"],
+                cwd=str(frontend_dir),
+                check=True,
+            )
+        except (OSError, subprocess.CalledProcessError) as exc:
+            console.print(f"[bold red]Desktop build failed:[/bold red] {exc}")
+            raise typer.Exit(code=1)
+
+        bundle_kind = "macos and dmg" if sys.platform == "darwin" else "nsis"
+        bundle_dir = frontend_dir / "src-tauri" / "target" / "release" / "bundle"
+        console.print(
+            f"[bold green]Desktop build complete.[/bold green] "
+            f"Bundles ({bundle_kind}) are under {bundle_dir}."
+        )
+        return
+
+    _ensure_deploy_files(base_dir)
+    project_name = base_dir.name.lower()
+
     if engine not in {"docker", "podman"}:
         raise typer.BadParameter("--engine must be docker or podman")
     if not re.fullmatch(r"[A-Za-z0-9_][A-Za-z0-9_.-]{0,127}", tag):

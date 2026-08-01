@@ -55,6 +55,7 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
 | `site run --component frontend` | Run only Vite. |
 | `site run <project_path> --component all` | Run a project from another directory. |
 | `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t TAG] [--development\|--production] [-p PORT]` | Build tagged images and generate `deploy/docker-compose.yml`; production compiles the backend with Nuitka. |
+| `site build --component desktop` | Build a native Tauri client for the current macOS or Windows host. |
 | `site compose [--engine docker\|podman] up -d` | Run Compose using `deploy/docker-compose.yml`. |
 
 `component` is an option: use `site run --component backend`, not `site run backend`.
@@ -74,6 +75,13 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
     "TIMEZONE": "Asia/Shanghai"
   },
   "allowed_origins": ["http://localhost:5173", "http://localhost:3000"],
+  "desktop": {
+    "identifier": "com.example.inventory",
+    "version": "1.0.0",
+    "api_url": "https://api.example.com/api/v1",
+    "width": 1280,
+    "height": 800
+  },
   "style": "normal",
   "radius": 1.0,
   "nav_order": ["user", "category", "product"]
@@ -86,6 +94,10 @@ Every key under `extra` is synchronized to the backend `.env`. `TIMEZONE`
 accepts an IANA timezone name, defaults to `Asia/Shanghai`, controls the
 default frontend display timezone and APScheduler cron timezone, while
 datetimes are normalized to UTC before database persistence.
+
+`desktop.api_url` must be an absolute HTTP(S) URL because a packaged desktop
+client cannot use Vite's development proxy. `site sync` adds the exact Tauri
+origins to the generated backend CORS configuration.
 
 ### MQTT callbacks
 
@@ -498,6 +510,24 @@ compile with Nuitka in a Python builder stage, then run the standalone output
 on `debian:bookworm-slim` without installing Python in the final image. The
 system CA bundle is copied from the builder so outbound HTTPS remains usable.
 
+## Desktop builds
+
+`site sync` generates a Tauri 2 shell under `generated/frontend/src-tauri`.
+Install dependencies once, configure the remote FastAPI endpoint, and build on
+the platform that will run the client:
+
+```bash
+site sync --install
+site build --component desktop
+```
+
+On macOS this produces `.app` and `.dmg` bundles; on Windows it produces an
+NSIS installer. OneSite intentionally builds only for the current host—use a
+macOS machine for macOS artifacts and a Windows machine for Windows artifacts.
+macOS requires Rust and Xcode Command Line Tools. Windows requires Rust with
+the MSVC toolchain, Microsoft C++ Build Tools, and WebView2. Release bundles are
+written under `generated/frontend/src-tauri/target/release/bundle/`.
+
 ## Generated project layout
 
 ```text
@@ -519,6 +549,7 @@ project/
 │   │       └── models/        # synced model copy
 │   └── frontend/
 │       ├── Dockerfile
+│       ├── src-tauri/          # generated Tauri 2 desktop shell
 │       └── src/
 │           ├── pages/ services/ stores/
 │           └── components/

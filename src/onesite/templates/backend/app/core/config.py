@@ -1,6 +1,6 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List, Any
-from pydantic import field_validator, AnyHttpUrl
+from pydantic import field_validator
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "{{ project_name }}"
@@ -10,7 +10,7 @@ class Settings(BaseSettings):
     DATABASE_URI: str = "sqlite:///./app.db"
     FIRST_SUPERUSER: str = "admin@example.com"
     FIRST_SUPERUSER_PASSWORD: str = "admin"
-    BACKEND_CORS_ORIGINS: List[AnyHttpUrl] = []
+    BACKEND_CORS_ORIGINS: List[str] = []
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

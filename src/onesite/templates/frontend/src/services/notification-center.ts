@@ -1,4 +1,4 @@
-import request from '../utils/request';
+import request, { getBaseURL } from '../utils/request';
 import { features } from '../features';
 
 export type NotificationPreview = {
@@ -57,8 +57,9 @@ export function buildNotificationWsUrl(): string | null {
   const token = localStorage.getItem('token');
   if (!token) return null;
 
-  // Always build WS URL if user is authenticated
-  // The connection is used for both online status and notifications
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  return `${protocol}//${window.location.host}/api/v1/ws?token=${encodeURIComponent(token)}`;
+  const apiUrl = new URL(getBaseURL() || '/api/v1', window.location.origin);
+  apiUrl.protocol = apiUrl.protocol === 'https:' ? 'wss:' : 'ws:';
+  apiUrl.pathname = `${apiUrl.pathname.replace(/\/$/, '')}/ws`;
+  apiUrl.search = `token=${encodeURIComponent(token)}`;
+  return apiUrl.toString();
 }

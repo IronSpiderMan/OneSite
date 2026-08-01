@@ -9,12 +9,22 @@ declare global {
   }
 }
 
-const getBaseURL = () => {
+export const getBaseURL = () => {
+  if (import.meta.env.VITE_DESKTOP === 'true') {
+    return import.meta.env.VITE_API_URL;
+  }
   if (typeof window !== 'undefined' && window.__ENV__?.API_URL) {
     return window.__ENV__.API_URL;
   }
-  return window.__ENV__?.API_URL || import.meta.env.VITE_API_URL;
-  // return import.meta.env.VITE_API_URL || '/api/v1';
+  return import.meta.env.VITE_API_URL || '/api/v1';
+};
+
+const redirectTo = (path: string) => {
+  if (import.meta.env.VITE_DESKTOP === 'true') {
+    window.location.hash = `#${path}`;
+  } else {
+    window.location.href = path;
+  }
 };
 
 const baseURL = getBaseURL();
@@ -52,7 +62,7 @@ request.interceptors.response.use(
       if (error.response.status === 401) {
         localStorage.removeItem('token');
         if (window.location.pathname !== '/login') {
-            window.location.href = '/login';
+            redirectTo('/login');
         }
       } else if (error.response.status === 403) {
         // If the 403 is actually an auth failure (stale/expired token),
@@ -61,14 +71,14 @@ request.interceptors.response.use(
         if (detail.includes('Could not validate credentials')) {
           localStorage.removeItem('token');
           if (window.location.pathname !== '/login') {
-            window.location.href = '/login';
+            redirectTo('/login');
           }
         } else if (!window.location.pathname.startsWith('/error/403')) {
-          window.location.href = '/error/403';
+          redirectTo('/error/403');
         }
       } else if (error.response.status >= 500) {
         if (!window.location.pathname.startsWith('/error/500')) {
-          window.location.href = '/error/500';
+          redirectTo('/error/500');
         }
       }
       console.error(error.response.data.detail || 'Request failed');
@@ -78,7 +88,7 @@ request.interceptors.response.use(
       console.error('Request timeout');
     } else {
       if (!window.location.pathname.startsWith('/error/offline')) {
-        window.location.href = '/error/offline';
+        redirectTo('/error/offline');
       }
       console.error('Network error');
     }

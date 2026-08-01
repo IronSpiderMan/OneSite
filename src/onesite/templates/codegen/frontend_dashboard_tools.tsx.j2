@@ -111,7 +111,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
   };
 
   return (
-    <form onSubmit={submit} className="rounded-xl border bg-card p-6 shadow-sm space-y-5">
+    <form onSubmit={submit} className="rounded-lg border bg-background p-4 space-y-5">
       <div className="flex items-start gap-3">
         <div className="rounded-lg bg-primary/10 p-2 text-primary"><Wrench className="h-5 w-5" /></div>
         <div>
@@ -215,9 +215,9 @@ export const DashboardTools: React.FC = () => {
   const tools = useMemo(() => TOOL_DEFINITIONS.filter((tool) => tool.permissions.includes(role)), [role]);
   if (tools.length === 0) return null;
   return (
-    <section className="space-y-4">
-      <h2 className="text-xl font-semibold tracking-tight">{t('tools.title', 'Tools')}</h2>
-      <div className="grid gap-6 lg:grid-cols-2">{tools.map((tool) => <ToolCard key={tool.name} tool={tool} />)}</div>
+    <section className="rounded-xl border bg-card text-card-foreground p-6 shadow-sm">
+      <h2 className="mb-4 text-lg font-semibold">{t('tools.title', 'Tools')}</h2>
+      <div className="grid gap-4 lg:grid-cols-2">{tools.map((tool) => <ToolCard key={tool.name} tool={tool} />)}</div>
     </section>
   );
 };

@@ -52,6 +52,8 @@ frontend/dist/
 frontend/coverage/
 generated/frontend/dist/
 generated/frontend/coverage/
+frontend/src-tauri/target/
+generated/frontend/src-tauri/target/
 
 # Mac
 .DS_Store
