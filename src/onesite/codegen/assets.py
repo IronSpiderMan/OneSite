@@ -4,6 +4,8 @@ from typing import Any, Dict, List
 
 from rich.console import Console
 
+from ..project_paths import get_project_paths
+from .config import SiteConfigError
 from .file_utils import copy_file_with_status, write_file_with_status
 from .render import generate_file
 
@@ -33,9 +35,144 @@ def _function_exists(file_path: Path, func_name: str) -> bool:
     return False
 
 
+def _async_function_exists(file_path: Path, func_name: str) -> bool:
+    """Return whether a module defines the named top-level async function."""
+    if not file_path.exists():
+        return False
+    try:
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError):
+        return False
+    return any(
+        isinstance(node, ast.AsyncFunctionDef) and node.name == func_name
+        for node in tree.body
+    )
+
+
+def _mirror_python_tree(source: Path, destination: Path) -> None:
+    """Mirror Python source files without treating the generated copy as source."""
+    destination.mkdir(parents=True, exist_ok=True)
+    desired = {
+        path.relative_to(source): path
+        for path in source.rglob("*.py")
+        if path.is_file()
+    }
+
+    for existing in sorted(destination.rglob("*.py")):
+        relative = existing.relative_to(destination)
+        if relative not in desired:
+            existing.unlink()
+            console.print(
+                f"[yellow]Removed stale generated MQTT source {existing}[/yellow]"
+            )
+
+    for relative, source_file in sorted(desired.items()):
+        copy_file_with_status(source_file, destination / relative)
+
+
+def _mirror_source_tree(source: Path, destination: Path, label: str) -> None:
+    """Mirror a developer-owned source tree into generated backend output."""
+    desired = {}
+    if source.exists():
+        desired = {
+            path.relative_to(source): path
+            for path in source.rglob("*")
+            if path.is_file()
+            and "__pycache__" not in path.parts
+            and path.suffix != ".pyc"
+        }
+
+    if destination.exists():
+        for existing in sorted(
+            (path for path in destination.rglob("*") if path.is_file()),
+            reverse=True,
+        ):
+            relative = existing.relative_to(destination)
+            if relative not in desired:
+                existing.unlink()
+                console.print(
+                    f"[yellow]Removed stale generated {label} file {existing}[/yellow]"
+                )
+
+        for directory in sorted(
+            (path for path in destination.rglob("*") if path.is_dir()),
+            reverse=True,
+        ):
+            if not any(directory.iterdir()):
+                directory.rmdir()
+
+    for relative, source_file in sorted(desired.items()):
+        copy_file_with_status(source_file, destination / relative)
+
+
+def _sync_project_utils(cwd: Path, backend_path: Path) -> None:
+    """Sync the project's ``utils`` package into the generated backend."""
+    paths = get_project_paths(cwd)
+    source_utils = paths.source / "utils"
+    target_utils = backend_path / "app" / "utils"
+
+    if source_utils.exists():
+        _ensure_init_py(source_utils)
+    _mirror_source_tree(source_utils, target_utils, "utils")
+
+
+def _sync_mqtt_callbacks(
+    cwd: Path,
+    backend_path: Path,
+    callbacks: List[Dict[str, Any]],
+) -> None:
+    """Scaffold project MQTT handlers and mirror them into the backend."""
+    source_integrations = get_project_paths(cwd).integrations
+    source_mqtt = source_integrations / "mqtt"
+    target_integrations = backend_path / "app" / "integrations"
+    target_mqtt = target_integrations / "mqtt"
+    legacy_mqtt = backend_path / "app" / "consumers" / "mqtt"
+
+    _ensure_init_py(source_integrations)
+    _ensure_init_py(source_mqtt)
+
+    for callback in callbacks:
+        handler_name = callback["handler"]
+        source_file = source_mqtt / f"{handler_name}.py"
+
+        if not source_file.exists():
+            legacy_file = legacy_mqtt / f"{handler_name}.py"
+            if _async_function_exists(legacy_file, handler_name):
+                copy_file_with_status(legacy_file, source_file)
+                console.print(
+                    f"[yellow]Migrated legacy MQTT handler to {source_file}[/yellow]"
+                )
+            else:
+                generate_file(
+                    "mqtt_callback.py.j2",
+                    {"callback": callback},
+                    source_file,
+                )
+
+        if not _async_function_exists(source_file, handler_name):
+            raise SiteConfigError(
+                f"{source_file} must define a top-level async function named "
+                f"{handler_name!r}."
+            )
+
+    copy_file_with_status(
+        source_integrations / "__init__.py",
+        target_integrations / "__init__.py",
+    )
+    _mirror_python_tree(source_mqtt, target_mqtt)
+    generate_file(
+        "mqtt_bindings.py.j2",
+        {
+            "callbacks": callbacks,
+            "handlers": sorted({callback["handler"] for callback in callbacks}),
+        },
+        backend_path / "app" / "core" / "mqtt_bindings.py",
+    )
+
+
 def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
     template_root = Path(__file__).resolve().parent.parent / "templates" / "frontend"
-    target_frontend_root = cwd / "frontend"
+    target_frontend_root = get_project_paths(cwd).frontend
 
     template_components_dir = template_root / "src" / "components" / "ui"
     target_components_dir = target_frontend_root / "src" / "components" / "ui"
@@ -127,8 +264,9 @@ window.__ENV__ = {
   API_URL: '/api/v1',
   NODE_ENV: 'development',
   BUILD_VERSION: 'local',
+  TIMEZONE: '{{ timezone }}',
 };
-"""
+""".replace("{{ timezone }}", str(site_config.get("extra", {}).get("TIMEZONE", "Asia/Shanghai")))
         write_file_with_status(target_frontend_root / "config.js", config_js_content)
 
     template_env_sh = template_root / "entrypoint.sh"
@@ -139,6 +277,14 @@ window.__ENV__ = {
     target_frontend_dockerfile = target_frontend_root / "Dockerfile"
     if template_frontend_dockerfile.exists():
         copy_file_with_status(template_frontend_dockerfile, target_frontend_dockerfile)
+
+    template_frontend_dockerignore = template_root / ".dockerignore"
+    target_frontend_dockerignore = target_frontend_root / ".dockerignore"
+    if template_frontend_dockerignore.exists():
+        copy_file_with_status(
+            template_frontend_dockerignore,
+            target_frontend_dockerignore,
+        )
 
 
 def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, Any]):
@@ -153,6 +299,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     _ensure_init_py(backend_path / "app" / "services")
     _ensure_init_py(backend_path / "app" / "consumers")
     _ensure_init_py(backend_path / "app" / "tasks")
+    _sync_project_utils(cwd, backend_path)
 
     template_endpoints_dir = template_backend_root / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
@@ -164,6 +311,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
             copy_file_with_status(login_py, target_endpoints_dir / "login.py")
 
     generate_file("backend_config.py.j2", {"config": site_config}, backend_path / "app" / "core" / "config.py")
+    generate_file("backend_datetime.py.j2", {}, backend_path / "app" / "core" / "datetime.py")
     generate_file("backend_main.py.j2", {"config": site_config}, backend_path / "app" / "main.py")
 
     # Always sync scheduler (no user-edited code, purely infra)
@@ -209,34 +357,9 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         generate_file("mqtt.py.j2", {"mqtt": mqtt_config},
                       backend_path / "app" / "core" / "mqtt.py")
 
-        # Generate MQTT callback files
         callbacks = mqtt_config.get("callbacks", [])
         if callbacks:
-            consumers_dir = backend_path / "app" / "consumers"
-            consumers_dir.mkdir(parents=True, exist_ok=True)
-            # Create __init__.py for consumers package
-            consumers_init = consumers_dir / "__init__.py"
-            if not consumers_init.exists():
-                write_file_with_status(consumers_init, "")
-
-            mqtt_consumers_dir = consumers_dir / "mqtt"
-            mqtt_consumers_dir.mkdir(parents=True, exist_ok=True)
-
-            # Generate __init__.py
-            generate_file("mqtt_callbacks_init.py.j2", {"callbacks": callbacks},
-                          mqtt_consumers_dir / "__init__.py")
-
-            # Generate each callback file (only if function doesn't exist)
-            for callback in callbacks:
-                handler_name = callback.get("handler", "")
-                if not handler_name:
-                    continue
-
-                callback_file = mqtt_consumers_dir / f"{handler_name}.py"
-                if not _function_exists(callback_file, handler_name):
-                    generate_file("mqtt_callback.py.j2", {"callback": callback}, callback_file)
-                else:
-                    console.print(f"[dim]Skipped existing callback: {handler_name}[/dim]")
+            _sync_mqtt_callbacks(cwd, backend_path, callbacks)
 
     for name in ["logger.py", "security.py", "deps.py", "tablenames.py", "model_hooks.py"]:
         src = template_backend_root / "app" / "core" / name

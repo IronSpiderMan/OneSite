@@ -10,7 +10,7 @@ import importlib
 import inspect
 import sys
 import textwrap
-import asyncio
+import warnings
 from pathlib import Path
 from typing import Any
 
@@ -20,6 +20,7 @@ from sqlmodel import SQLModel
 
 from ..introspect import get_model_fields
 from ..types import (
+    BackgroundHook,
     EventListener,
     FieldDefinition,
     ModelDefinition,
@@ -162,13 +163,94 @@ def _build_model_dict(
 # ── Event listener extraction ───────────────────────────────────────────
 
 
+_TRANSACTIONAL_HOOK_ARGUMENTS = {
+    "on_before_create": {"self", "session", "context"},
+    "on_after_create": {"self", "session", "context"},
+    "on_before_update": {"self", "session", "old", "changes", "context"},
+    "on_after_update": {"self", "session", "old", "changes", "context"},
+    "on_before_delete": {"self", "session", "old", "context"},
+    "on_after_delete": {"self", "session", "old", "context"},
+    "on_after_commit_create": {"self", "context"},
+    "on_after_commit_update": {"self", "old", "changes", "context"},
+    "on_after_commit_delete": {"self", "old", "context"},
+}
+_BACKGROUND_OPERATIONS = {"create", "update", "delete"}
+
+
+def _validate_named_hook_signature(
+    model_cls: type,
+    hook_name: str,
+    method: Any,
+    supported: set[str],
+) -> None:
+    """Fail generation when a hook cannot be invoked with its documented API."""
+    signature = inspect.signature(method)
+    for parameter in signature.parameters.values():
+        if parameter.kind in (
+            inspect.Parameter.VAR_POSITIONAL,
+            inspect.Parameter.VAR_KEYWORD,
+        ):
+            continue
+        if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+            raise ValueError(
+                f"{model_cls.__name__}.{hook_name} parameter "
+                f"'{parameter.name}' cannot be positional-only"
+            )
+        if parameter.name not in supported and parameter.default is inspect.Parameter.empty:
+            expected = ", ".join(sorted(supported - {"self"}))
+            raise ValueError(
+                f"{model_cls.__name__}.{hook_name} has unsupported required "
+                f"parameter '{parameter.name}'. Supported parameters: {expected}"
+            )
+
+
+def _validate_service_hooks(model_cls: type) -> None:
+    """Validate transactional, post-commit, and background hook signatures."""
+    for hook_name, supported in _TRANSACTIONAL_HOOK_ARGUMENTS.items():
+        method = inspect.getattr_static(model_cls, hook_name, None)
+        if method is None:
+            continue
+        if isinstance(method, (classmethod, staticmethod)) or not inspect.isfunction(method):
+            raise ValueError(
+                f"{model_cls.__name__}.{hook_name} must be an instance method"
+            )
+        _validate_named_hook_signature(model_cls, hook_name, method, supported)
+
+    for operation in _BACKGROUND_OPERATIONS:
+        hook_name = f"on_background_after_{operation}"
+        method = inspect.getattr_static(model_cls, hook_name, None)
+        if method is None:
+            continue
+        if isinstance(method, (classmethod, staticmethod)) or not inspect.isfunction(method):
+            raise ValueError(
+                f"{model_cls.__name__}.{hook_name} must be an instance method"
+            )
+        supported = {"self", "session", "context"}
+        if operation == "update":
+            supported.update({"old", "changes"})
+        elif operation == "delete":
+            supported.add("old")
+        _validate_named_hook_signature(model_cls, hook_name, method, supported)
+
+
+def _extract_background_hooks(model_cls: type) -> list[BackgroundHook]:
+    """Return explicitly named post-commit background hooks."""
+    return [
+        BackgroundHook(operation=operation)
+        for operation in sorted(_BACKGROUND_OPERATIONS)
+        if inspect.getattr_static(
+            model_cls, f"on_background_after_{operation}", None
+        ) is not None
+    ]
+
+
 def _extract_event_listeners(model_cls: type) -> list[EventListener]:
     """Extract explicitly ORM-scoped methods as SQLAlchemy event listeners.
 
     ``on_orm_before_*`` / ``on_orm_after_*`` are the unambiguous low-level
-    names. The legacy ``on_before_insert`` / ``on_after_insert`` aliases remain
-    supported because they do not collide with the service-level CUD lifecycle
-    (which uses create/update/delete).
+    names. The legacy ``on_before_insert`` / ``on_after_insert`` aliases emit a
+    migration warning. Async ORM hooks are rejected because silently moving a
+    mapper event to a background worker changes its transaction semantics.
 
     The ``self`` parameter is stripped from the generated function —
     the template adds ``self = target`` so existing ``self.`` references
@@ -184,15 +266,50 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
         "after_delete",
     }
     for name, method in inspect.getmembers(model_cls, predicate=inspect.isfunction):
+        is_legacy = False
         if name.startswith("on_orm_"):
             event_name = name[len("on_orm_"):]
         elif name in {"on_before_insert", "on_after_insert"}:
             event_name = name[len("on_"):]
+            is_legacy = True
         else:
             continue
 
         if event_name not in orm_events:
             continue
+        if inspect.iscoroutinefunction(method):
+            transactional_name = (
+                "on_before_create" if event_name == "before_insert"
+                else "on_after_create" if event_name == "after_insert"
+                else None
+            )
+            suggestion = (
+                f" Use '{transactional_name}' for rollback semantics."
+                if transactional_name
+                else ""
+            )
+            raise ValueError(
+                f"{model_cls.__name__}.{name} is async, but ORM hooks must use "
+                f"'def', not 'async def'.{suggestion} Use an explicit "
+                f"'on_background_after_create/update/delete' hook for "
+                f"post-commit background work."
+            )
+        if is_legacy:
+            replacement = f"on_orm_{event_name}"
+            warnings.warn(
+                f"{model_cls.__name__}.{name} is deprecated and is a low-level "
+                f"ORM event, not a transactional CUD hook. Rename it to "
+                f"'{replacement}', or use "
+                f"'on_{'before' if event_name.startswith('before') else 'after'}_create' "
+                f"for rollback semantics.",
+                FutureWarning,
+                stacklevel=2,
+            )
+
+        supported = {"self", "mapper", "connection", "target"}
+        if event_name == "after_update":
+            supported.add("old")
+        _validate_named_hook_signature(model_cls, name, method, supported)
         try:
             source = inspect.getsource(method)
         except (OSError, TypeError):
@@ -210,23 +327,12 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
         if not body_lines:
             continue
 
-        is_async = asyncio.iscoroutinefunction(method)
-
-        has_session_param = False
         has_old_param = False
-        if is_async:
-            try:
-                sig = inspect.signature(method)
-                has_session_param = "session" in sig.parameters
-                has_old_param = "old" in sig.parameters
-            except (ValueError, TypeError):
-                pass
-        else:
-            try:
-                sig = inspect.signature(method)
-                has_old_param = "old" in sig.parameters
-            except (ValueError, TypeError):
-                pass
+        try:
+            sig = inspect.signature(method)
+            has_old_param = "old" in sig.parameters
+        except (ValueError, TypeError):
+            pass
 
         body = textwrap.dedent("\n".join(body_lines))
         # Remove surrounding blank lines
@@ -235,8 +341,6 @@ def _extract_event_listeners(model_cls: type) -> list[EventListener]:
             EventListener(
                 event_name=event_name,
                 body=body,
-                is_async=is_async,
-                has_session_param=has_session_param,
                 has_old_param=has_old_param,
             )
         )
@@ -253,6 +357,7 @@ def _process_introspected_class(
     """Run ``get_model_fields`` on a single class and build its metadata dict."""
     model_module_name = to_snake(name)
     result = get_model_fields(obj, model_module_name)
+    _validate_service_hooks(obj)
 
     if name == "User":
         _ensure_user_password_field(result.fields)
@@ -279,6 +384,7 @@ def _process_introspected_class(
 
     # Attach low-level SQLAlchemy event listeners (on_orm_before_*/on_orm_after_*).
     mdl["event_listeners"] = _extract_event_listeners(obj)
+    mdl["background_hooks"] = _extract_background_hooks(obj)
 
     return mdl
 

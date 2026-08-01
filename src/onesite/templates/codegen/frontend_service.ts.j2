@@ -235,13 +235,13 @@ export const create{{ model.name }} = async (data: any) => {
     return response.data;
 };
 
-export const get{{ model.name }}Realtime = async (entityId: number) => {
+export const get{{ model.name }}Realtime = async (entityId: {{ 'string' if model.timescaledb_entity_sql_type == 'TEXT' else 'number' }}) => {
     const response = await request.get<{{ model.name }}RealtimeResponse>(`${API_URL}/realtime?entity_id=${entityId}`);
     return response.data;
 };
 
 export const get{{ model.name }}History = async (
-    entityId: number,
+    entityId: {{ 'string' if model.timescaledb_entity_sql_type == 'TEXT' else 'number' }},
     metric?: string,
     startTime?: string,
     endTime?: string,

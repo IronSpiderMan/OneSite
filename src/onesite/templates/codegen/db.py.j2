@@ -1,5 +1,7 @@
 from typing import AsyncGenerator
+from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
@@ -8,10 +10,25 @@ from app.core.config import settings
 
 # Parse DATABASE_URI to determine async driver
 database_url = settings.DATABASE_URI
-if database_url.startswith("sqlite://"):
+if database_url.startswith(("sqlite://", "sqlite+aiosqlite://")):
     # Ensure aiosqlite driver
-    if not "sqlite+aiosqlite://" in database_url:
+    if not database_url.startswith("sqlite+aiosqlite://"):
         database_url = database_url.replace("sqlite://", "sqlite+aiosqlite://")
+
+    # SQLite cannot create a missing parent directory. Container deployments
+    # commonly mount /app/data, while local development uses a relative path.
+    sqlite_database = make_url(database_url).database
+    if sqlite_database and sqlite_database != ":memory:":
+        sqlite_path = Path(sqlite_database)
+        if not sqlite_path.is_absolute():
+            sqlite_path = Path.cwd() / sqlite_path
+        if sqlite_path.exists() and sqlite_path.is_dir():
+            raise RuntimeError(
+                f"SQLite database path points to a directory: {sqlite_path}. "
+                "Mount a directory at /app/data and use "
+                "sqlite+aiosqlite:////app/data/app.db."
+            )
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 elif database_url.startswith("postgresql://"):
     # Ensure asyncpg driver
     if not "postgresql+asyncpg://" in database_url:

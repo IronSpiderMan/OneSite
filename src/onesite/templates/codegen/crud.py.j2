@@ -2,6 +2,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
+from app.core.datetime import to_utc
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
 from app.models.{{ model.source_module }} import {{ model.name }}{% if model.property_config_meta %}, {{ model.property_config_meta.config_class }}{% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
@@ -24,13 +25,37 @@ from app.models.{{ rel.source_source_module }} import {{ rel.source_model }}
 {% endif %}
 
 {% set scalar_json_arrays = model.fields | selectattr('json_item_kind') | list %}
+{% set datetime_fields = model.fields | selectattr('ui_type', 'equalto', 'datetime') | list %}
+{% if datetime_fields %}
+def _normalize_datetimes(data: dict) -> dict:
+    """Interpret naive form values in the system timezone and persist UTC."""
+    {% for field in datetime_fields %}
+    if isinstance(data.get("{{ field.name }}"), datetime):
+        data["{{ field.name }}"] = to_utc(data["{{ field.name }}"])
+    {% endfor %}
+    return data
+
+
+def _normalize_model_datetimes(obj: Any) -> None:
+    """Normalize model defaults and hook-assigned datetime values as well."""
+    {% for field in datetime_fields %}
+    value = getattr(obj, "{{ field.name }}", None)
+    if isinstance(value, datetime):
+        setattr(obj, "{{ field.name }}", to_utc(value))
+    {% endfor %}
+
+{% endif %}
 {% if scalar_json_arrays %}
 def _serialize_json_scalar_arrays(data: dict) -> dict:
     """Convert date/time objects to JSON-safe ISO strings before persistence."""
     {% for field in scalar_json_arrays %}
     if isinstance(data.get("{{ field.name }}"), list):
         data["{{ field.name }}"] = [
+            {% if field.json_item_kind == "datetime" %}
+            to_utc(value).isoformat() if isinstance(value, datetime) else value
+            {% else %}
             value.isoformat() if hasattr(value, "isoformat") else value
+            {% endif %}
             for value in data["{{ field.name }}"]
         ]
     {% endfor %}
@@ -48,6 +73,9 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     obj_dict = _serialize_json_scalar_arrays(obj_in.dict(exclude_none=True))
     {% else %}
     obj_dict = obj_in.dict(exclude_none=True)
+    {% endif %}
+    {% if datetime_fields %}
+    obj_dict = _normalize_datetimes(obj_dict)
     {% endif %}
     {% if model.timescaledb_model_table and model.timescaledb_metric_field and model.timescaledb_model_class and model.timescaledb_entity_model %}
     # Validate metric_key against {{ model.timescaledb_model_class }}.properties
@@ -80,6 +108,9 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
         session=session,
         context=hook_context,
     )
+    {% if datetime_fields %}
+    _normalize_model_datetimes(db_obj)
+    {% endif %}
     session.add(db_obj)
     await session.flush()
     await session.refresh(db_obj)
@@ -269,12 +300,12 @@ def _apply_filters(
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
     {% elif field.ui_type == 'datetime' %}
     if {{ field.name }}_from is not None:
-        if isinstance({{ field.name }}_from, datetime) and {{ field.name }}_from.tzinfo is None:
-            {{ field.name }}_from = {{ field.name }}_from.replace(tzinfo=timezone.utc)
+        if isinstance({{ field.name }}_from, datetime):
+            {{ field.name }}_from = to_utc({{ field.name }}_from)
         statement = statement.where({{ model.name }}.{{ field.name }} >= {{ field.name }}_from)
     if {{ field.name }}_to is not None:
-        if isinstance({{ field.name }}_to, datetime) and {{ field.name }}_to.tzinfo is None:
-            {{ field.name }}_to = {{ field.name }}_to.replace(tzinfo=timezone.utc)
+        if isinstance({{ field.name }}_to, datetime):
+            {{ field.name }}_to = to_utc({{ field.name }}_to)
         statement = statement.where({{ model.name }}.{{ field.name }} <= {{ field.name }}_to)
     {% elif field.ui_type == 'time' %}
     if {{ field.name }} is not None:
@@ -580,6 +611,9 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     {% else %}
     obj_dict = obj_in.dict(exclude_none=True)
     {% endif %}
+    {% if datetime_fields %}
+    obj_dict = _normalize_datetimes(obj_dict)
+    {% endif %}
 
     {% if model.property_config_meta %}
     # Initialize properties_config from blueprint model if not explicitly provided
@@ -625,6 +659,9 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
         session=session,
         context=hook_context,
     )
+    {% if datetime_fields %}
+    _normalize_model_datetimes(db_obj)
+    {% endif %}
     session.add(db_obj)
     await session.flush()
     await session.refresh(db_obj)
@@ -661,6 +698,9 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     obj_data = _serialize_json_scalar_arrays(obj_in.dict(exclude_unset=True))
     {% else %}
     obj_data = obj_in.dict(exclude_unset=True)
+    {% endif %}
+    {% if datetime_fields %}
+    obj_data = _normalize_datetimes(obj_data)
     {% endif %}
     
     old = snapshot_model(db_obj)
@@ -760,6 +800,9 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
 
     {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
     db_obj.updated_at = datetime.now(timezone.utc)
+    {% endif %}
+    {% if datetime_fields %}
+    _normalize_model_datetimes(db_obj)
     {% endif %}
     session.add(db_obj)
     await session.flush()

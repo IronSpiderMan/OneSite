@@ -1,6 +1,7 @@
 from pydantic_settings import BaseSettings
 from typing import Optional, List, Any
 from pydantic import field_validator, AnyHttpUrl
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 class Settings(BaseSettings):
     PROJECT_NAME: str = "{{ config.project_name }}"
@@ -14,6 +15,7 @@ class Settings(BaseSettings):
     
     # Upload config
     UPLOAD_DIR: str = "{{ config.upload_dir }}"
+    TIMEZONE: str = "{{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}"
 
     # Global Resources
     {% if config.redis %}
@@ -33,9 +35,20 @@ class Settings(BaseSettings):
     {% if config.extra %}
     # Custom extra config from site_config.json
     {% for key, value in config.extra.items() %}
+    {% if key != "TIMEZONE" %}
     {{ key }}: {% if value is string %}str{% elif value is integer %}int{% elif value is float %}float{% elif value is boolean %}bool{% else %}Any{% endif %} = {% if value is boolean %}{{ value | string | capitalize }}{% else %}{{ value | tojson }}{% endif %}
+    {% endif %}
     {% endfor %}
     {% endif %}
+
+    @field_validator("TIMEZONE")
+    @classmethod
+    def validate_timezone(cls, value: str) -> str:
+        try:
+            ZoneInfo(value)
+        except ZoneInfoNotFoundError as exc:
+            raise ValueError(f"Invalid IANA timezone: {value}") from exc
+        return value
 
     @field_validator("BACKEND_CORS_ORIGINS", mode="before")
     @classmethod

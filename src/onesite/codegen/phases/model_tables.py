@@ -12,6 +12,7 @@ from typing import Any
 
 from ..file_utils import write_file_with_status
 from ..render import generate_file
+from ...project_paths import get_project_paths
 from .base import console, to_pascal
 
 
@@ -429,11 +430,11 @@ def _inject_property_config_into_entity(
 def phase_generate_model_tables(cwd: Path, backend_path: Path) -> None:
     """Generate model table files, ``_latest`` tables, and FK extensions for timeseries configs.
 
-    Generates into ``cwd/models/`` (source) so the files are synced to backend
+    Generates into the resolved project models source directory so the files are synced to backend
     by :func:`~onesite.codegen.phases.sync_models.phase_sync_models`.
     Must run before ``phase_sync_models`` and ``phase_introspect``.
     """
-    models_src_dir = cwd / "models"
+    models_src_dir = get_project_paths(cwd).models
     if not models_src_dir.exists():
         return
 

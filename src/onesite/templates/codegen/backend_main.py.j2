@@ -29,6 +29,9 @@ except ImportError:
 {% endif %}
 {% if config.mqtt %}
 from app.core.mqtt import mqtt_manager
+{% if config.mqtt.callbacks %}
+from app.core.mqtt_bindings import register_mqtt_handlers
+{% endif %}
 {% endif %}
 # Import event listeners to register them with SQLAlchemy
 try:
@@ -73,6 +76,9 @@ async def lifespan(app: FastAPI):
     {% if config.mqtt %}
     # Initialize MQTT
     if mqtt_manager:
+        {% if config.mqtt.callbacks %}
+        register_mqtt_handlers()
+        {% endif %}
         await mqtt_manager.connect()
     {% endif %}
 

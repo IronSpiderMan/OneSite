@@ -186,15 +186,20 @@ class EventListener:
     ``on_orm_after_<event>`` (plus legacy insert aliases) — the method body is extracted and wrapped
     in a ``@event.listens_for`` decorated function.
 
-    If ``is_async`` is True the body is routed to a background task
-    handler instead of being inlined in the event listener.
+    ORM listeners are always synchronous. Background work uses the explicit
+    ``on_background_after_<operation>`` lifecycle instead.
     """
 
     event_name: str   # e.g. "before_insert", "after_update"
     body: str          # dedented source code of the method body
-    is_async: bool = False  # async def → background task handler
-    has_session_param: bool = False  # method signature has "session" param
     has_old_param: bool = False  # method signature has "old" param (after_update only)
+
+
+@dataclass(frozen=True)
+class BackgroundHook:
+    """An explicit post-commit background model hook."""
+
+    operation: str  # create, update, or delete
 
 
 @dataclass

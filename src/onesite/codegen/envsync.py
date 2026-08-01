@@ -4,6 +4,19 @@ from typing import Any, Dict
 from .file_utils import write_file_with_status
 
 
+def _env_value(value: Any) -> str:
+    """Serialize a site config value into a pydantic-settings friendly value."""
+    if isinstance(value, (dict, list)):
+        import json
+
+        return json.dumps(value, ensure_ascii=False)
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    if value is None:
+        return ""
+    return str(value)
+
+
 def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Path):
     backend_env = backend_path / ".env"
     env_content = ""
@@ -17,6 +30,13 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         "FIRST_SUPERUSER": config.get("first_superuser", "admin@example.com"),
         "FIRST_SUPERUSER_PASSWORD": config.get("first_superuser_password", "admin"),
     }
+
+    # ``extra`` is the generic escape hatch for backend settings. Keep every
+    # entry available for runtime overrides instead of only baking the values
+    # into the generated Settings class.
+    extra = config.get("extra", {})
+    if isinstance(extra, dict):
+        new_keys.update(extra)
 
     if config.get("redis"):
         redis_cfg = config["redis"]
@@ -54,7 +74,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
             key, _ = line.split("=", 1)
             key = key.strip()
             if key in new_keys:
-                updated_lines.append(f"{key}={new_keys[key]}")
+                updated_lines.append(f"{key}={_env_value(new_keys[key])}")
                 del new_keys[key]
             else:
                 updated_lines.append(line)
@@ -62,7 +82,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
             updated_lines.append(line)
 
     for key, val in new_keys.items():
-        updated_lines.append(f"{key}={val}")
+        updated_lines.append(f"{key}={_env_value(val)}")
 
     write_file_with_status(backend_env, "\n".join(updated_lines))
 
@@ -86,6 +106,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         "VITE_API_URL": api_url,
         "VITE_PROJECT_LOGO": logo,
         "VITE_LOGO_LINK": logo_link,
+        "VITE_TIMEZONE": extra.get("TIMEZONE", "Asia/Shanghai") if isinstance(extra, dict) else "Asia/Shanghai",
     }
 
     f_lines = f_env_content.splitlines()

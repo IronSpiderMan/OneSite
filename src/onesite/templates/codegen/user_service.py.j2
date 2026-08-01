@@ -6,7 +6,7 @@ from app.cruds import user as crud
 from app.schemas.user import UserCreate, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
-from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
+from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
 from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
@@ -156,6 +156,7 @@ class UserService:
             await invoke_model_hook(db_obj, "on_after_commit_create", context=hook_context)
         except Exception:
             logger.exception("Post-commit create hook failed for User id=%s", getattr(db_obj, "id", None))
+        publish_model_background_hook(db_obj, "create", context=hook_context)
         return db_obj
 
     async def update(self, session: AsyncSession, id: int, obj_in: Union[UserUpdate, UserUpdateMe]) -> User:
@@ -232,6 +233,13 @@ class UserService:
             )
         except Exception:
             logger.exception("Post-commit update hook failed for User id=%s", id)
+        publish_model_background_hook(
+            obj,
+            "update",
+            old=old,
+            changes=changes,
+            context=hook_context,
+        )
         return obj
 
     async def delete(self, session: AsyncSession, id: int) -> User:
@@ -270,6 +278,12 @@ class UserService:
             )
         except Exception:
             logger.exception("Post-commit delete hook failed for User id=%s", id)
+        publish_model_background_hook(
+            deleted,
+            "delete",
+            old=old,
+            context=hook_context,
+        )
         return deleted
 
     {% if model.reverse_m2m %}

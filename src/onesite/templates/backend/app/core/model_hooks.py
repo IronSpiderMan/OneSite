@@ -57,3 +57,31 @@ async def invoke_model_hook(target: Any, hook_name: str, **values: Any) -> None:
     result = hook(**kwargs)
     if inspect.isawaitable(result):
         await result
+
+
+def publish_model_background_hook(
+    target: Any,
+    operation: Literal["create", "update", "delete"],
+    *,
+    old: dict[str, Any] | None = None,
+    changes: dict[str, Any] | None = None,
+    context: ModelHookContext,
+) -> None:
+    """Queue an explicitly declared post-commit background hook."""
+    hook_name = f"on_background_after_{operation}"
+    if getattr(target, hook_name, None) is None:
+        return
+
+    from app.core.task_queue import task_queue
+
+    module_name = type(target).__module__.rsplit(".", 1)[-1]
+    task_queue.publish(
+        f"{module_name}.background_after_{operation}",
+        {
+            "id": getattr(target, "id", None),
+            "old": old,
+            "changes": changes,
+            "input_data": dict(context.input_data),
+            "changed_fields": list(context.changed_fields),
+        },
+    )

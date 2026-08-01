@@ -25,6 +25,8 @@ MANIFEST
 # The generated frontend runtime is source, not a Python virtual-environment lib.
 !frontend/src/lib/
 !frontend/src/lib/theme.ts
+!generated/frontend/src/lib/
+!generated/frontend/src/lib/theme.ts
 
 # Virtual Environment
 venv/
@@ -48,6 +50,8 @@ pnpm-debug.log
 # Frontend build
 frontend/dist/
 frontend/coverage/
+generated/frontend/dist/
+generated/frontend/coverage/
 
 # Mac
 .DS_Store

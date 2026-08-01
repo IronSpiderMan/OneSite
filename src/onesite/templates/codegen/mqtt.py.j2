@@ -8,7 +8,6 @@ from app.core.logger import get_logger
 
 logger = get_logger(__name__)
 
-{% if mqtt.url %}
 class MQTTManager:
     def __init__(self):
         self.client: Optional[MQTTClient] = None
@@ -88,21 +87,16 @@ class MQTTManager:
         if topic not in self._handlers:
             self._handlers[topic] = []
 
-        self._handlers[topic].append(callback)
-        self._pending_subscriptions.append((topic, qos))
+        if callback not in self._handlers[topic]:
+            self._handlers[topic].append(callback)
+        if (topic, qos) not in self._pending_subscriptions:
+            self._pending_subscriptions.append((topic, qos))
 
     async def _dispatch_message(self, topic: str, payload: str):
         """
         Dispatch message to all matching handlers.
         Supports MQTT wildcard matching (# for multi-level, + for single-level).
         """
-        if topic in self._handlers:
-            for callback in self._handlers[topic]:
-                try:
-                    await callback(topic, payload)
-                except Exception as e:
-                    logger.error(f"MQTT handler error for {topic}: {e}")
-
         topic_parts = topic.split("/")
         for pattern, callbacks in self._handlers.items():
             if self._topic_matches(pattern, topic_parts):
@@ -164,15 +158,3 @@ class MQTTManager:
 
 
 mqtt_manager = MQTTManager()
-
-{# Import MQTT callbacks to register handlers #}
-{% if mqtt.callbacks %}
-try:
-    import app.consumers.mqtt
-except Exception as e:
-    logger.error(f"Failed to import app.consumers.mqtt: {e}")
-{% endif %}
-{% else %}
-# MQTT not configured in site_config.json
-mqtt_manager = None
-{% endif %}

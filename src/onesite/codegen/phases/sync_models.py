@@ -7,6 +7,7 @@ for the Python import step.
 
 from pathlib import Path
 
+from ...project_paths import get_project_paths
 from ..file_utils import copy_file_with_status, write_file_with_status
 from .base import console
 
@@ -21,7 +22,7 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
     Removing obsolete copies before writing prevents deleted project models
     from being imported and regenerated on the next ``site sync``.
     """
-    models_src_dir = cwd / "models"
+    models_src_dir = get_project_paths(cwd).models
     models_dest_dir = backend_path / "app" / "models"
     template_models_dir = _ONESITE_ROOT / "templates" / "models"
 

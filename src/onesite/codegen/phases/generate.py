@@ -11,6 +11,7 @@ Phase 7 — Aggregated / cross-cutting generation: API router, route tables,
 from pathlib import Path
 from typing import Any
 
+from ...project_paths import get_project_paths
 from ..i18n import generate_locale_files
 from ..render import generate_file
 from ..router import update_api_router
@@ -83,6 +84,8 @@ def _resolve_visualize_filters(
                 "filter_table": source_table,
                 "fk_table": source_table,
                 "fk_col": _quote_col(f"{source_table}.{field_name}"),
+                "owner_model_class": model["name"],
+                "owner_source_module": model["source_module"],
                 "joins": [],
                 "new_joins": [],
             }
@@ -162,6 +165,8 @@ def _resolve_visualize_filters(
                 "filter_table": filter_table,
                 "fk_table": fk_table,
                 "fk_col": _quote_col(f"{fk_table}.{filter_field}"),
+                "owner_model_class": current_model["name"],
+                "owner_source_module": current_model["source_module"],
                 "filter_id_col": _quote_col(f"{filter_table}.id"),
                 "filter_model": filter_model_name,
                 "filter_model_class": filter_model["name"],
@@ -215,6 +220,7 @@ model_lookup_global: dict[str, ModelDefinition] = {}
 def _generate_singleton(model: ModelDefinition, cwd: Path, backend_path: Path, is_postgresql: bool = False) -> None:
     """Generate code for singleton / config models."""
     context = {"model": model, "is_postgresql": is_postgresql}
+    frontend_path = get_project_paths(cwd).frontend
     is_config = (
         model["module_name"] == "system_config" and model["name"] == "SystemConfig"
     ) or (
@@ -227,18 +233,18 @@ def _generate_singleton(model: ModelDefinition, cwd: Path, backend_path: Path, i
             generate_file(tpl, context, _backend_path(tpl, model, backend_path))
         generate_file(
             "singleton_frontend_service.ts.j2", context,
-            cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts",
+            frontend_path / "src" / "services" / f"{model['module_name']}.ts",
         )
 
     generate_file(
         "singleton_store.ts.j2", context,
-        cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts",
+        frontend_path / "src" / "stores" / f"use{model['name']}Store.ts",
     )
 
     if not is_config:
         generate_file(
             "singleton_page.tsx.j2", context,
-            cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
+            frontend_path / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
         )
 
 
@@ -264,6 +270,7 @@ def _backend_path(tpl: str, model: ModelDefinition, backend_path: Path) -> Path:
 def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Path, is_postgresql: bool = False) -> None:
     """Generate code for a regular (non-singleton, non-link) model."""
     context = {"model": model, "is_postgresql": is_postgresql}
+    frontend_path = get_project_paths(cwd).frontend
     is_user_model = model["name"] == "User"
 
     tpl_schema = "user_schema.py.j2" if is_user_model else "schema.py.j2"
@@ -281,7 +288,7 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
 
     generate_file(
         "frontend_service.ts.j2", context,
-        cwd / "frontend" / "src" / "services" / f"{model['module_name']}.ts",
+        frontend_path / "src" / "services" / f"{model['module_name']}.ts",
     )
 
     # Timeseries models: no standalone pages/store — data is shown on parent entity detail
@@ -290,21 +297,21 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
 
     generate_file(
         "frontend_store.ts.j2", context,
-        cwd / "frontend" / "src" / "stores" / f"use{model['name']}Store.ts",
+        frontend_path / "src" / "stores" / f"use{model['name']}Store.ts",
     )
     generate_file(
         "frontend_page_list.tsx.j2", context,
-        cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
+        frontend_path / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
     )
     generate_file(
         "frontend_page_detail.tsx.j2", context,
-        cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
+        frontend_path / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
     )
 
     if model.get("page_edit"):
         generate_file(
             "frontend_page_create.tsx.j2", context,
-            cwd / "frontend" / "src" / "pages" / f"{model['module_name']}" / "create.tsx",
+            frontend_path / "src" / "pages" / f"{model['module_name']}" / "create.tsx",
         )
 
     if not model.get("frontend_only"):
@@ -317,28 +324,36 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
 def _generate_event_listeners(model: ModelDefinition, backend_path: Path) -> None:
     """Generate event listener file for a model that has low-level ORM hooks."""
     listeners = model.get("event_listeners", [])
+    output_path = (
+        backend_path / "app" / "events" / f"{model['module_name']}.py"
+    )
     if not listeners:
+        # Generated hooks may have been removed or renamed. Do not leave a
+        # stale module behind for an old events/__init__.py to import.
+        output_path.unlink(missing_ok=True)
         return
 
     generate_file(
         "events.py.j2",
         {"model": model},
-        backend_path / "app" / "events" / f"{model['module_name']}.py",
+        output_path,
     )
 
 
 def _generate_task_handlers(model: ModelDefinition, backend_path: Path) -> None:
-    """Generate background task handler file for async event methods."""
-    has_async = any(
-        listener.is_async for listener in model.get("event_listeners", [])
+    """Generate handlers for explicit post-commit background hooks."""
+    output_path = (
+        backend_path / "app" / "handlers" / f"{model['module_name']}.py"
     )
-    if not has_async:
+    if not model.get("background_hooks"):
+        # Remove handlers generated by the retired async-ORM behavior.
+        output_path.unlink(missing_ok=True)
         return
 
     generate_file(
         "handler.py.j2",
         {"model": model},
-        backend_path / "app" / "handlers" / f"{model['module_name']}.py",
+        output_path,
     )
 
 
@@ -394,7 +409,7 @@ def phase_generate_per_model(
         # Generate event listener file if the model has low-level ORM hooks.
         _generate_event_listeners(model, backend_path)
 
-        # Generate background task handler file if model has async on_* methods
+        # Generate handlers for explicit on_background_after_* methods.
         _generate_task_handlers(model, backend_path)
 
         # Generate background export handler file if model is exportable
@@ -456,6 +471,7 @@ def phase_generate_aggregated(
     backend_path: Path,
 ) -> None:
     """Generate cross-cutting files: router, routes, menu, dashboard, i18n, etc."""
+    frontend_path = get_project_paths(cwd).frontend
     # ── TimescaleDB: collect models and generate db.py ──
     timescaledb_models = [m for m in models if m.get("is_timescaledb")]
     has_timescaledb = bool(timescaledb_models)
@@ -511,7 +527,7 @@ def phase_generate_aggregated(
     generate_file(
         "settings_page.tsx.j2",
         {"system_model": system_model, "custom_model": custom_model},
-        cwd / "frontend" / "src" / "pages" / "Settings.tsx",
+        frontend_path / "src" / "pages" / "Settings.tsx",
     )
 
     # ── Profile page ──
@@ -520,7 +536,7 @@ def phase_generate_aggregated(
         generate_file(
             "profile.tsx.j2",
             {"model": user_model},
-            cwd / "frontend" / "src" / "pages" / "Profile.tsx",
+            frontend_path / "src" / "pages" / "Profile.tsx",
         )
 
     # ── Routes, Menu, Dashboard ──
@@ -532,20 +548,33 @@ def phase_generate_aggregated(
     generate_file(
         "frontend_routes.tsx.j2",
         {"models": frontend_models},
-        cwd / "frontend" / "src" / "Routes.tsx",
+        frontend_path / "src" / "Routes.tsx",
     )
     # Collect unique icon names used across models (for dynamic import)
     used_icons = sorted({m.get("icon", "LayoutDashboard") for m in frontend_models})
     generate_file(
         "frontend_menu.tsx.j2",
         {"models": frontend_models, "used_icons": used_icons},
-        cwd / "frontend" / "src" / "Menu.tsx",
+        frontend_path / "src" / "Menu.tsx",
     )
     site_logger_enabled = "site_logger" in site_config.get("plugins", [])
+    show_dashboard_announcement = bool(
+        system_model
+        and any(
+            field["name"] == "announcement_content"
+            and "r" in field.get("permissions", "")
+            for field in system_model["fields"]
+        )
+    )
     generate_file(
         "dashboard_page.tsx.j2",
-        {"models": frontend_models, "scheduled_tasks": scheduled_tasks, "site_logger": site_logger_enabled},
-        cwd / "frontend" / "src" / "pages" / "Dashboard.tsx",
+        {
+            "models": frontend_models,
+            "scheduled_tasks": scheduled_tasks,
+            "site_logger": site_logger_enabled,
+            "show_dashboard_announcement": show_dashboard_announcement,
+        },
+        frontend_path / "src" / "pages" / "Dashboard.tsx",
     )
 
     # ── Feature flags ──
@@ -555,41 +584,39 @@ def phase_generate_aggregated(
             "notifications_enabled": notifications_enabled,
             "notifications_api_base": notifications_api_base,
         },
-        cwd / "frontend" / "src" / "features.ts",
+        frontend_path / "src" / "features.ts",
     )
 
     # ── Scheduled task service/store ──
     if scheduled_tasks:
         generate_file(
             "frontend_task_service.ts.j2", {},
-            cwd / "frontend" / "src" / "services" / "tasks.ts",
+            frontend_path / "src" / "services" / "tasks.ts",
         )
         generate_file(
             "task_store.ts.j2", {},
-            cwd / "frontend" / "src" / "stores" / "useTaskStore.ts",
+            frontend_path / "src" / "stores" / "useTaskStore.ts",
         )
 
     # ── Locale files ──
-    generate_locale_files(models, cwd / "frontend" / "src" / "locales")
+    generate_locale_files(models, frontend_path / "src" / "locales")
 
     # ── Event listeners __init__.py (imports all model event modules) ──
     event_models = [m for m in models if m.get("event_listeners")]
-    if event_models:
-        generate_file(
-            "events_init.py.j2",
-            {"event_models": event_models},
-            backend_path / "app" / "events" / "__init__.py",
-        )
+    generate_file(
+        "events_init.py.j2",
+        {"event_models": event_models},
+        backend_path / "app" / "events" / "__init__.py",
+    )
 
     # ── Background task handlers __init__.py ──
     handler_models = [
         m for m in models
-        if any(l.is_async for l in m.get("event_listeners", []))
+        if m.get("background_hooks")
     ]
     export_models = [m for m in models if m.get("exportable")]
-    if handler_models or export_models:
-        generate_file(
-            "handlers_init.py.j2",
-            {"handler_models": handler_models, "export_models": export_models},
-            backend_path / "app" / "handlers" / "__init__.py",
-        )
+    generate_file(
+        "handlers_init.py.j2",
+        {"handler_models": handler_models, "export_models": export_models},
+        backend_path / "app" / "handlers" / "__init__.py",
+    )

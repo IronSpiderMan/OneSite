@@ -2,10 +2,13 @@ FROM python:3.10-slim-bookworm AS base
 
 WORKDIR /app
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app \
+    PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    PIP_DEFAULT_TIMEOUT=180
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN python -m pip install --no-cache-dir --retries 10 --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir --retries 20 -r requirements.txt
 
 FROM base AS development
 
@@ -17,11 +20,14 @@ FROM python:3.10-bookworm AS production-builder
 
 WORKDIR /app
 
-ENV PYTHONPATH=/app
+ENV PYTHONPATH=/app \
+    PIP_INDEX_URL=https://mirrors.tuna.tsinghua.edu.cn/pypi/web/simple \
+    PIP_DEFAULT_TIMEOUT=180
 
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
-RUN pip install --no-cache-dir nuitka ordered-set zstandard patchelf
+RUN python -m pip install --no-cache-dir --retries 10 --upgrade pip setuptools wheel \
+    && python -m pip install --no-cache-dir --retries 20 -r requirements.txt
+RUN python -m pip install --no-cache-dir --retries 20 nuitka ordered-set zstandard patchelf
 
 COPY . .
 RUN python -m nuitka \
@@ -29,15 +35,19 @@ RUN python -m nuitka \
     --assume-yes-for-downloads \
     --include-package=app \
     --include-package=sqlalchemy.dialects \
+    --include-package=passlib.handlers \
+    --include-package=bcrypt \
     --output-dir=/build \
     nuitka_entrypoint.py
 
-FROM python:3.10-slim-bookworm AS production
+FROM debian:bookworm-slim AS production
 
 WORKDIR /app
+RUN mkdir -p /app/data /app/uploads
 
-ENV PYTHONUNBUFFERED=1
+ENV SSL_CERT_FILE=/etc/ssl/certs/ca-certificates.crt
 
+COPY --from=production-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=production-builder /build/nuitka_entrypoint.dist/ /app/
 
 EXPOSE 80

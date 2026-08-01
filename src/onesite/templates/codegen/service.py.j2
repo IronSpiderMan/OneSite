@@ -8,7 +8,8 @@ from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not model.is_timescaledb %}, {{ model.name }}Update{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
-from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
+from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
+from app.core.datetime import to_utc
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -48,6 +49,7 @@ class {{ model.name }}Service:
                 "Post-commit create hook failed for {{ model.name }} id=%s",
                 getattr(obj, "id", None),
             )
+        publish_model_background_hook(obj, "create", context=context)
         return obj.model_dump()
 
     async def get_realtime_by_entity(
@@ -271,6 +273,7 @@ class {{ model.name }}Service:
                         "Post-commit create hook failed for {{ model.name }} id=%s",
                         getattr(obj, "id", None),
                     )
+                publish_model_background_hook(obj, "create", context=hook_context)
             
             # Push notifications to all users
             for obj in created_objects:
@@ -308,6 +311,7 @@ class {{ model.name }}Service:
             )
         except Exception:
             logger.exception("Post-commit create hook failed for {{ model.name }} id=%s", getattr(obj, "id", None))
+        publish_model_background_hook(obj, "create", context=hook_context)
 
         {% if model.is_notification_table %}
         # Auto-push for notification
@@ -377,6 +381,13 @@ class {{ model.name }}Service:
             )
         except Exception:
             logger.exception("Post-commit update hook failed for {{ model.name }} id=%s", id)
+        publish_model_background_hook(
+            obj,
+            "update",
+            old=old,
+            changes=changes,
+            context=hook_context,
+        )
 
         {% if model.is_notification_table %}
         # Auto-push read status
@@ -412,6 +423,12 @@ class {{ model.name }}Service:
             )
         except Exception:
             logger.exception("Post-commit delete hook failed for {{ model.name }} id=%s", id)
+        publish_model_background_hook(
+            db_obj,
+            "delete",
+            old=old,
+            context=hook_context,
+        )
         return deleted_id
 
     {% if model.property_config_meta %}
@@ -831,6 +848,16 @@ class {{ model.name }}Service:
 
         model = {{ model.name }}
 
+        def _typed_filter_expression(column, value):
+            """Build a comparison while preserving the mapped database type."""
+            try:
+                python_type = column.type.python_type
+                if not isinstance(value, python_type):
+                    value = python_type(value)
+            except (AttributeError, LookupError, NotImplementedError, TypeError, ValueError):
+                pass
+            return column == value
+
         {% if model.visualize.get('time_field') %}
         if time_field:
             # Time-based aggregation (line chart)
@@ -845,21 +872,19 @@ class {{ model.name }}Service:
                 start_time = (now - timedelta(days=15)).strftime("%Y-%m-%d")
                 end_time = now.strftime("%Y-%m-%d")
 
-            # Parse datetime strings (assume UTC for naive inputs to stay compatible with timezone-aware now)
+            # Parse datetime strings; naive values use the configured system timezone.
             st = None
             et = None
             if start_time:
                 try:
                     st = datetime.fromisoformat(start_time)
-                    if st.tzinfo is None:
-                        st = st.replace(tzinfo=timezone.utc)
+                    st = to_utc(st)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"Invalid start_time: {start_time}")
             if end_time:
                 try:
                     et = datetime.fromisoformat(end_time)
-                    if et.tzinfo is None:
-                        et = et.replace(tzinfo=timezone.utc)
+                    et = to_utc(et)
                 except ValueError:
                     raise HTTPException(status_code=400, detail=f"Invalid end_time: {end_time}")
 
@@ -953,6 +978,10 @@ class {{ model.name }}Service:
                 from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }}
                 {% set _imported.models = _imported.models + [rf.filter_model_class] %}
                 {% endif %}
+                {% if rf.owner_model_class != model.name and rf.owner_model_class not in _imported.models %}
+                from app.models.{{ rf.owner_source_module }} import {{ rf.owner_model_class }}
+                {% set _imported.models = _imported.models + [rf.owner_model_class] %}
+                {% endif %}
                 {% endfor %}
 
                 # Apply shared path joins once
@@ -977,7 +1006,7 @@ class {{ model.name }}Service:
                     {% for join in rf.new_joins %}
                     stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
                     {% endfor %}
-                    stmt = stmt.where(text('{{ rf.fk_col }} = :_fv{{ loop.index }}').bindparams(**{"_fv{{ loop.index }}": _filter_val}))
+                    stmt = stmt.where(_typed_filter_expression({{ rf.owner_model_class }}.{{ rf.filter_field }}, _filter_val))
                 {% endfor %}
             {% endif %}
 
@@ -1077,6 +1106,10 @@ class {{ model.name }}Service:
             from app.models.{{ rf.filter_source_module }} import {{ rf.filter_model_class }}
             {% set _imported.models = _imported.models + [rf.filter_model_class] %}
             {% endif %}
+            {% if rf.owner_model_class != model.name and rf.owner_model_class not in _imported.models %}
+            from app.models.{{ rf.owner_source_module }} import {{ rf.owner_model_class }}
+            {% set _imported.models = _imported.models + [rf.owner_model_class] %}
+            {% endif %}
             {% endfor %}
 
             # Apply shared path joins once
@@ -1101,7 +1134,7 @@ class {{ model.name }}Service:
                 {% for join in rf.new_joins %}
                 stmt = stmt.join({{ join.model_name }}, text('{{ join.from_col }} = {{ join.to_col }}'))
                 {% endfor %}
-                stmt = stmt.where(text('{{ rf.fk_col }} = :_fv{{ loop.index }}').bindparams(**{"_fv{{ loop.index }}": _filter_val}))
+                stmt = stmt.where(_typed_filter_expression({{ rf.owner_model_class }}.{{ rf.filter_field }}, _filter_val))
             {% endfor %}
         {% endif %}
 

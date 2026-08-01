@@ -1,0 +1,29 @@
+"""Application-wide datetime helpers.
+
+Naive datetimes received from forms are interpreted in the configured system
+timezone. Persistence-facing values are always converted to UTC.
+"""
+
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+
+from app.core.config import settings
+
+
+SYSTEM_TIMEZONE = ZoneInfo(settings.TIMEZONE)
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+def to_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=SYSTEM_TIMEZONE)
+    return value.astimezone(timezone.utc)
+
+
+def to_system_timezone(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        value = value.replace(tzinfo=timezone.utc)
+    return value.astimezone(SYSTEM_TIMEZONE)

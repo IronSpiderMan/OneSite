@@ -232,14 +232,23 @@ const {{ model.name }}DetailPage: React.FC = () => {
       setIsEditing(true);
     };
 
-    // Auto-enter edit mode when navigated from list page edit button
-    const hasAutoEdited = useRef(false);
+    // Auto-enter edit mode once per item when navigated from the list page.
+    // React reuses this component when only the route id changes, so a boolean
+    // ref would leave the next item's form populated with the previous item.
+    const autoEditedItemId = useRef<string | null>(null);
     useEffect(() => {
-        if (currentItem && !hasAutoEdited.current && searchParams.get('edit') === 'true' && hasPermission('u')) {
-            hasAutoEdited.current = true;
+        if (
+            id &&
+            currentItem &&
+            String(currentItem.id) === id &&
+            autoEditedItemId.current !== id &&
+            searchParams.get('edit') === 'true' &&
+            hasPermission('u')
+        ) {
+            autoEditedItemId.current = id;
             startEditing();
         }
-    }, [currentItem, searchParams]);
+    }, [currentItem, id, searchParams]);
     {% endif %}
 
     {% if model.refresh_interval %}
@@ -319,7 +328,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
-    const fetch{{ m2m.target_model }}s = async (itemId: number, page: number) => {
+    const fetch{{ m2m.target_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number) => {
         set{{ m2m.target_model }}Loading(true);
         try {
             const result = await get{{ model.name }}{{ m2m.target_model }}s(itemId, page, 5); // Small page size for detail view
@@ -338,7 +347,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% if model.reverse_m2m %}
     {% for rel in model.reverse_m2m %}
     {% if rel.display %}
-    const fetch{{ model.name }}{{ rel.source_model }}s = async (itemId: number, page: number) => {
+    const fetch{{ model.name }}{{ rel.source_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number) => {
         set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Loading(true);
         try {
             const result = await get{{ model.name }}{{ rel.source_model }}s(itemId, page, 5);
@@ -358,7 +367,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% if model.reverse_foreign_keys %}
     {% for rfk in model.reverse_foreign_keys %}
     {% if rfk.display %}
-    const fetch{{ rfk.source_model }}s = async (itemId: number, page: number) => {
+    const fetch{{ rfk.source_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number) => {
         set{{ rfk.source_model }}Loading(true);
         try {
             // Filter by foreign key
@@ -379,7 +388,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     {% if model.reverse_timeseries %}
     {% for ts in model.reverse_timeseries %}
-    const fetch{{ ts.model_name }}Realtime = async (itemId: number) => {
+    const fetch{{ ts.model_name }}Realtime = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         try {
             const result = await get{{ ts.model_name }}Realtime(itemId);
             set{{ ts.model_name }}Realtime(result.data || []);
@@ -390,7 +399,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         }
     };
 
-    const fetch{{ ts.model_name }}History = async (itemId: number) => {
+    const fetch{{ ts.model_name }}History = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         set{{ ts.model_name }}HistoryLoading(true);
         try {
             let limit = -1;
@@ -414,7 +423,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         }
     };
 
-    const refresh{{ ts.model_name }}History = async (itemId: number) => {
+    const refresh{{ ts.model_name }}History = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         try {
             let limit = -1;
             let startTime: string | undefined;
@@ -1277,7 +1286,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                              <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => fetch{{ rfk.source_model }}s(parseInt(id!), {{ rfk.name }}Page - 1)}
+                                onClick={() => fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page - 1)}
                                 disabled={ {{ rfk.name }}Page <= 1 || {{ rfk.name }}Loading}
                             >
                                 Previous
@@ -1288,7 +1297,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             <Button
                                 variant="outline"
                                 size="sm"
-                                onClick={() => fetch{{ rfk.source_model }}s(parseInt(id!), {{ rfk.name }}Page + 1)}
+                                onClick={() => fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page + 1)}
                                 disabled={ {{ rfk.name }}Page >= Math.ceil({{ rfk.name }}Total / 5) || {{ rfk.name }}Loading}
                             >
                                 Next

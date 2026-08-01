@@ -1,5 +1,4 @@
 # MQTT callback for topic: {{ callback.topic }}
-from app.core.mqtt import mqtt_manager
 
 async def {{ callback.handler }}(topic: str, payload: str):
     """
@@ -11,7 +10,3 @@ async def {{ callback.handler }}(topic: str, payload: str):
     """
     # TODO: Implement your business logic here
     pass
-
-# Register handler
-if mqtt_manager:
-    mqtt_manager.register_handler("{{ callback.topic }}", {{ callback.handler }})

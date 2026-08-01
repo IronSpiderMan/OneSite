@@ -9,6 +9,7 @@ from pathlib import Path
 
 from rich.console import Console
 
+from ..project_paths import get_project_paths
 from .phases import config as phase_config
 from .phases import generate as phase_generate
 from .phases import introspect_models as phase_introspect
@@ -26,6 +27,7 @@ def generate_code() -> None:
     This is the public entry point called by ``site sync``.
     """
     cwd = Path(os.getcwd())
+    paths = get_project_paths(cwd)
 
     # Phase 1 — Config. Validate it before creating or modifying generated
     # project files so malformed input cannot be replaced by defaults.
@@ -39,7 +41,7 @@ def generate_code() -> None:
     # directory, and allow an explicit project model to override the default.
     if (
         "site_logger" in site_config.get("plugins", [])
-        and not (cwd / "models" / "app_log.py").exists()
+        and not (paths.models / "app_log.py").exists()
     ):
         from .render import generate_file as _gf
         _gf("app_log.py.j2", {}, backend_path / "app" / "models" / "app_log.py")

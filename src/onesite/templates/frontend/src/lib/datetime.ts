@@ -3,6 +3,7 @@ import i18n from "../i18n"
 export function getUserTimeZone(): string {
   return (
     localStorage.getItem("timezone") ||
+    import.meta.env.VITE_TIMEZONE ||
     Intl.DateTimeFormat().resolvedOptions().timeZone ||
     "UTC"
   )
@@ -81,4 +82,3 @@ export function formatTime(value: unknown): string {
 
   return str
 }
-

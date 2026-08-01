@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from rich.console import Console
 
+from .project_paths import get_project_paths
+
 # Add current path to sys.path so we can import modules from the generated project
 try:
     sys.path.append(os.getcwd())
@@ -92,6 +94,19 @@ def get_cwd_safely() -> Path:
 
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
+
+def _ensure_deploy_files(base_dir: Path) -> Path:
+    """Create the deployment directory without overwriting user environment files."""
+    deploy_dir = get_project_paths(base_dir).deploy
+    deploy_dir.mkdir(parents=True, exist_ok=True)
+    env_example_source = TEMPLATE_DIR / "deploy" / ".env.example"
+    env_example_target = deploy_dir / ".env.example"
+    if env_example_source.exists() and not env_example_target.exists():
+        shutil.copy2(env_example_source, env_example_target)
+        console.print(f"[green]Created {env_example_target}[/green]")
+    return deploy_dir
+
+
 @app.command()
 def init():
     """
@@ -99,12 +114,20 @@ def init():
     Ensures necessary models (User, SystemConfig, CustomConfig) exist.
     """
     base_dir = get_cwd_safely()
+    has_modern_layout = (base_dir / "app").exists() or (base_dir / "generated").exists()
+    has_legacy_layout = any(
+        (base_dir / name).exists() for name in ("models", "backend", "frontend")
+    )
+    paths = get_project_paths(
+        base_dir,
+        modern=has_modern_layout or not has_legacy_layout,
+    )
 
     # Check current state
-    has_models = (base_dir / "models").exists()
+    has_models = paths.models.exists()
     has_site_config = (base_dir / "site_config.json").exists()
-    has_backend = (base_dir / "backend").exists()
-    has_frontend = (base_dir / "frontend").exists()
+    has_backend = paths.backend.exists()
+    has_frontend = paths.frontend.exists()
 
     # If any project files exist, treat as existing project
     if has_models or has_site_config or has_backend or has_frontend:
@@ -113,7 +136,7 @@ def init():
         console.print("[yellow]No existing project files found, will initialize from scratch[/yellow]")
 
     template_models_dir = Path(__file__).parent / "templates" / "models"
-    models_dir = base_dir / "models"
+    models_dir = paths.models
     site_config_file = base_dir / "site_config.json"
 
     # Create site_config.json if not exists
@@ -126,6 +149,9 @@ def init():
             "upload_dir": "uploads",
             "secret_key": "changeme",
             "access_token_expire_minutes": 11520,
+            "extra": {
+                "TIMEZONE": "Asia/Shanghai",
+            },
             "allowed_origins": [
                 "http://localhost:5173",
                 "http://localhost:3000",
@@ -156,12 +182,21 @@ def init():
     else:
         console.print(f"[blue]models directory already exists[/blue]")
 
-    # Copy icon reference page if not present
-    icon_ref_src = TEMPLATE_DIR / "icon-reference.html"
-    icon_ref_dst = base_dir / "icon-reference.html"
-    if icon_ref_src.exists() and not icon_ref_dst.exists():
-        shutil.copy2(icon_ref_src, icon_ref_dst)
-        console.print("[green]Created icon-reference.html[/green]")
+    utils_dir = paths.source / "utils"
+    utils_dir.mkdir(parents=True, exist_ok=True)
+    utils_init = utils_dir / "__init__.py"
+    if not utils_init.exists():
+        utils_init.write_text("", encoding="utf-8")
+        console.print("[green]Created utils/__init__.py[/green]")
+
+    _ensure_deploy_files(base_dir)
+
+    for filename in (".gitignore", "icon-reference.html"):
+        source = TEMPLATE_DIR / filename
+        destination = base_dir / filename
+        if source.exists() and not destination.exists():
+            shutil.copy2(source, destination)
+            console.print(f"[green]Created {filename}[/green]")
 
     console.print("[bold green]Initialization complete![/bold green]")
     console.print("[green]Run 'site sync' to generate API code.[/green]")
@@ -181,29 +216,48 @@ def create(
         console.print(f"[red]Directory {project_name} already exists![/red]")
         raise typer.Exit(code=1)
 
-    # Copy templates
-    # shutil.copytree(TEMPLATE_DIR, target_dir)
+    target_dir.mkdir(parents=True)
+    paths = get_project_paths(target_dir, modern=True)
+    copy_ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
+
     shutil.copytree(
-        TEMPLATE_DIR,
-        target_dir,
-        ignore=shutil.ignore_patterns(
-            "templates/codegen"
-        )
+        TEMPLATE_DIR / "models",
+        paths.models,
+        ignore=copy_ignore,
     )
+    shutil.copytree(
+        TEMPLATE_DIR / "backend",
+        paths.backend,
+        ignore=copy_ignore,
+    )
+    shutil.copytree(
+        TEMPLATE_DIR / "frontend",
+        paths.frontend,
+        ignore=copy_ignore,
+    )
+    utils_dir = paths.source / "utils"
+    utils_dir.mkdir(parents=True)
+    (utils_dir / "__init__.py").write_text("", encoding="utf-8")
+    _ensure_deploy_files(target_dir)
+
+    for filename in (".gitignore", "icon-reference.html"):
+        source = TEMPLATE_DIR / filename
+        if source.exists():
+            shutil.copy2(source, target_dir / filename)
 
     # Render templates (e.g. .env, config.py)
     # Walk through the directory and render files ending with .py or .env or others if needed
     # For now, we just copied, let's assume simple copy is fine for most,
     # but we might want to replace {{ project_name }} in config.py
 
-    config_file = target_dir / "backend/app/core/config.py"
+    config_file = paths.backend / "app" / "core" / "config.py"
     if config_file.exists():
         content = config_file.read_text(encoding="utf-8")
         content = content.replace("{{ project_name }}", project_name)
         content = content.replace("{{ access_token_expire_minutes }}", "11520")
         config_file.write_text(content, encoding="utf-8")
 
-    index_html = target_dir / "frontend/index.html"
+    index_html = paths.frontend / "index.html"
     if index_html.exists():
         content = index_html.read_text(encoding="utf-8")
         content = content.replace("{{ project_name }}", project_name)
@@ -217,6 +271,9 @@ def create(
         "upload_dir": "uploads",
         "secret_key": "changeme",
         "access_token_expire_minutes": 11520,
+        "extra": {
+            "TIMEZONE": "Asia/Shanghai",
+        },
         "allowed_origins": ["http://localhost:5173", "http://localhost:3000"]
     }
     (target_dir / "site_config.json").write_text(
@@ -235,7 +292,8 @@ def sync(
     Optionally install dependencies with --install.
     """
     # Ensure we are in a valid directory
-    get_cwd_safely()
+    base_dir = get_cwd_safely()
+    _ensure_deploy_files(base_dir)
 
     console.print("[green]Syncing models...[/green]")
     from onesite.generator import generate_code
@@ -244,9 +302,8 @@ def sync(
     if install:
         console.print("[green]Installing dependencies...[/green]")
         base_dir = get_cwd_safely()
-        backend_dir = base_dir / "backend"
-        frontend_dir = base_dir / "frontend"
-        _install_project_dependencies(backend_dir, frontend_dir)
+        paths = get_project_paths(base_dir)
+        _install_project_dependencies(paths.backend, paths.frontend)
 
 @app.command()
 def run(
@@ -261,8 +318,9 @@ def run(
     import concurrent.futures
 
     base_dir = project_path.resolve()
-    backend_dir = base_dir / "backend"
-    frontend_dir = base_dir / "frontend"
+    paths = get_project_paths(base_dir)
+    backend_dir = paths.backend
+    frontend_dir = paths.frontend
 
     def run_backend():
         if not backend_dir.exists():
@@ -328,7 +386,7 @@ def build(
     development: bool = typer.Option(False, "--development", help="Use the regular Python backend image (default)"),
 ):
     """
-    Build container images for the project and generate docker-compose.yml.
+    Build container images and generate deploy/docker-compose.yml.
 
     Note: Frontend API URL can be configured at runtime via docker-compose environment variables:
     - API_URL: Backend API URL (default: http://backend:80)
@@ -338,6 +396,8 @@ def build(
     from onesite.generator import generate_file
 
     base_dir = get_cwd_safely()
+    paths = get_project_paths(base_dir)
+    _ensure_deploy_files(base_dir)
     project_name = base_dir.name.lower()
 
     if production and development:
@@ -378,7 +438,7 @@ def build(
             return False
 
     if component in ["backend", "all"]:
-        backend_dir = base_dir / "backend"
+        backend_dir = paths.backend
         backend_dockerfile = backend_dir / "Dockerfile"
         if backend_dockerfile.exists():
             if production:
@@ -389,8 +449,19 @@ def build(
                     r"(?im)^\s*FROM\s+\S+(?:\s+AS\s+production)\s*$",
                     dockerfile_content,
                 )
+                has_required_dynamic_packages = all(
+                    option in dockerfile_content
+                    for option in (
+                        "--include-package=passlib.handlers",
+                        "--include-package=bcrypt",
+                    )
+                )
                 nuitka_entrypoint = backend_dir / "nuitka_entrypoint.py"
-                if not has_production_target or not nuitka_entrypoint.exists():
+                if (
+                    not has_production_target
+                    or not has_required_dynamic_packages
+                    or not nuitka_entrypoint.exists()
+                ):
                     console.print(
                         "[bold red]Backend production build files are out of date.[/bold red]"
                     )
@@ -429,8 +500,28 @@ def build(
             raise typer.Exit(code=1)
 
     if component in ["frontend", "all"]:
-        frontend_dir = base_dir / "frontend"
+        frontend_dir = paths.frontend
         if (frontend_dir / "Dockerfile").exists():
+            dockerignore = frontend_dir / ".dockerignore"
+            ignored_entries = set()
+            if dockerignore.exists():
+                ignored_entries = {
+                    line.strip().rstrip("/")
+                    for line in dockerignore.read_text(
+                        encoding="utf-8", errors="replace"
+                    ).splitlines()
+                    if line.strip() and not line.lstrip().startswith("#")
+                }
+            if "node_modules" not in ignored_entries:
+                console.print(
+                    "[bold red]Frontend Docker build files are out of date.[/bold red]"
+                )
+                console.print(
+                    f"The Docker context must exclude {frontend_dir}/node_modules. "
+                    "Run [bold]site sync[/bold], then retry the build."
+                )
+                raise typer.Exit(code=1)
+
             # Prompt for deleting existing images
             should_build = True
             try:
@@ -458,8 +549,8 @@ def build(
             console.print(f"[yellow]Frontend Dockerfile not found in {frontend_dir}. Run 'site sync' first.[/yellow]")
             raise typer.Exit(code=1)
 
-    # Generate docker-compose.yml with correct images and ports
-    console.print(f"[blue]Generating docker-compose.yml...[/blue]")
+    # Generate deploy/docker-compose.yml with correct images and ports
+    console.print("[blue]Generating deploy/docker-compose.yml...[/blue]")
 
     # Check for PG usage
     use_pg = False
@@ -483,15 +574,17 @@ def build(
         "use_pg": use_pg,
         "config": site_config,
         "version": tag,
+        "project_root_prefix": "..",
     }
-    generate_file("docker-compose.yml.j2", context, base_dir / "docker-compose.yml")
+    compose_file = paths.deploy / "docker-compose.yml"
+    generate_file("docker-compose.yml.j2", context, compose_file)
 
     console.print(
-        f"[green]Generated docker-compose.yml with images: {backend_image}, "
+        f"[green]Generated {compose_file} with images: {backend_image}, "
         f"{frontend_image}, backend mode: {build_mode}, and port {frontend_port}[/green]"
     )
     if use_pg:
-        console.print("[green]PostgreSQL service added to docker-compose.yml[/green]")
+        console.print("[green]PostgreSQL service added to deploy/docker-compose.yml[/green]")
 
 @app.command(context_settings={"allow_extra_args": True, "ignore_unknown_options": True})
 def compose(
@@ -508,10 +601,15 @@ def compose(
     import subprocess
 
     base_dir = get_cwd_safely()
-    compose_file = base_dir / "docker-compose.yml"
+    deploy_compose = get_project_paths(base_dir).deploy / "docker-compose.yml"
+    legacy_compose = base_dir / "docker-compose.yml"
+    compose_file = deploy_compose if deploy_compose.exists() else legacy_compose
 
     if not compose_file.exists():
-        console.print(f"[red]docker-compose.yml not found in {base_dir}. Run 'site sync' first.[/red]")
+        console.print(
+            f"[red]docker-compose.yml not found in {deploy_compose.parent}. "
+            "Run 'site build' first.[/red]"
+        )
         raise typer.Exit(code=1)
 
     # Use context args for the command
@@ -525,7 +623,12 @@ def compose(
         # If no args provided, show help for the compose tool
         compose_args = ["--help"]
 
-    full_cmd = [compose_cmd] + compose_args
+    full_cmd = [compose_cmd]
+    deploy_env = compose_file.parent / ".env"
+    if deploy_env.exists():
+        full_cmd.extend(["--env-file", str(deploy_env)])
+    full_cmd.extend(["-f", str(compose_file)])
+    full_cmd.extend(compose_args)
 
     console.print(f"[blue]Running: {' '.join(full_cmd)}[/blue]")
 

@@ -1,6 +1,6 @@
 """Database event listeners for {{ model.name }}.
 
-Auto-generated from ``on_*`` methods on the model class.
+Auto-generated from synchronous ``on_orm_*`` methods on the model class.
 """
 
 from sqlalchemy import event
@@ -10,24 +10,6 @@ from sqlalchemy.orm.attributes import get_history as _get_history
 from app.models.{{ model.module_name }} import {{ model.name }}
 
 {% for listener in model.event_listeners %}
-{% if listener.is_async %}
-{# Async → publish a background task message (non-blocking) #}
-
-@event.listens_for({{ model.name }}, "{{ listener.event_name }}")
-def {{ listener.event_name }}(mapper, connection, target):
-    from app.core.task_queue import task_queue
-{% if listener.event_name == 'after_update' %}
-    _old = {_col.key: _get_history(target, _col.key).deleted[0] for _col in mapper.column_attrs if _get_history(target, _col.key).deleted}
-    task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id, "old": _old})
-{% elif listener.event_name == 'after_delete' %}
-    data = {c.name: getattr(target, c.name) for c in target.__table__.columns}
-    task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id, "data": data})
-{% else %}
-    task_queue.publish("{{ model.module_name }}.{{ listener.event_name }}", {"id": target.id})
-{% endif %}
-{% else %}
-{# Sync → inline the user's logic (current behavior) #}
-
 @event.listens_for({{ model.name }}, "{{ listener.event_name }}")
 def {{ listener.event_name }}(mapper, connection, target):
     self = target
@@ -38,5 +20,4 @@ def {{ listener.event_name }}(mapper, connection, target):
 {% endif %}
 {% endif %}
 {{ listener.body | indent(4, first=True) }}
-{% endif %}
 {% endfor %}

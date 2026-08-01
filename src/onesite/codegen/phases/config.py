@@ -1,9 +1,11 @@
 """Phase 1 — Configuration loading and environment setup."""
 
 from pathlib import Path
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
-from ..config import load_site_config
+from ..config import SiteConfigError, load_site_config, validate_mqtt_config
 from ..envsync import sync_env_files
+from ...project_paths import get_project_paths
 from .base import console
 
 
@@ -21,6 +23,18 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
     site_config.setdefault("upload_dir", "uploads")
     site_config.setdefault("secret_key", "changeme")
     site_config.setdefault("access_token_expire_minutes", 11520)
+    extra = site_config.setdefault("extra", {})
+    if not isinstance(extra, dict):
+        raise SiteConfigError("site_config.json field 'extra' must be a JSON object.")
+    timezone_name = extra.setdefault("TIMEZONE", "Asia/Shanghai")
+    if not isinstance(timezone_name, str):
+        raise SiteConfigError("site_config.json field 'extra.TIMEZONE' must be a string.")
+    try:
+        ZoneInfo(timezone_name)
+    except ZoneInfoNotFoundError as exc:
+        raise SiteConfigError(
+            f"site_config.json field 'extra.TIMEZONE' is not a valid IANA timezone: {timezone_name!r}."
+        ) from exc
     site_config.setdefault(
         "allowed_origins",
         [
@@ -32,7 +46,9 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
             "http://127.0.0.1:8000",
         ],
     )
+    validate_mqtt_config(site_config)
 
-    backend_path = cwd / "backend"
-    sync_env_files(site_config, backend_path, cwd / "frontend")
+    paths = get_project_paths(cwd)
+    backend_path = paths.backend
+    sync_env_files(site_config, backend_path, paths.frontend)
     return site_config, backend_path
