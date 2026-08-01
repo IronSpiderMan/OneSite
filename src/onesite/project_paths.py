@@ -10,6 +10,8 @@ class ProjectPaths:
     source: Path
     models: Path
     integrations: Path
+    tools: Path
+    tasks: Path
     generated: Path
     backend: Path
     frontend: Path
@@ -36,6 +38,8 @@ def get_project_paths(root: Path, *, modern: bool | None = None) -> ProjectPaths
             source=source,
             models=source / "models",
             integrations=source / "integrations",
+            tools=source / "tools",
+            tasks=source / "tasks",
             generated=generated,
             backend=generated / "backend",
             frontend=generated / "frontend",
@@ -48,6 +52,8 @@ def get_project_paths(root: Path, *, modern: bool | None = None) -> ProjectPaths
         source=root,
         models=root / "models",
         integrations=root / "integrations",
+        tools=root / "tools",
+        tasks=root / "tasks",
         generated=root,
         backend=root / "backend",
         frontend=root / "frontend",

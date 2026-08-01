@@ -9,3 +9,9 @@ from . import {{ model.module_name }}
 {% for model in export_models %}
 from . import export_{{ model.module_name }}
 {% endfor %}
+{% if tools_enabled %}
+from . import tool_execution
+{% endif %}
+{% if scheduled_tasks_enabled %}
+from . import scheduled_task_execution
+{% endif %}

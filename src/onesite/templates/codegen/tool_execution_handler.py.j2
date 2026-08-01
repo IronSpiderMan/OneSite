@@ -1,0 +1,111 @@
+"""Background runner for configuration-driven project tools."""
+
+import asyncio
+import json
+import logging
+from datetime import datetime, timezone
+
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core.db import engine
+from app.core.task_queue import task_queue
+from app.core.background_execution import BackgroundExecution
+from app.core.tool_registry import TOOL_HANDLERS, TOOLS_BY_NAME
+from app.core.tool_runtime import (
+    ToolContext,
+    download_url_for,
+    normalize_tool_result,
+    serialize_result,
+)
+from app.core.ws import manager
+from app.models.user import User
+
+logger = logging.getLogger(__name__)
+
+
+async def _notify(execution: BackgroundExecution) -> None:
+    await manager.send_personal_message(
+        {
+            "type": "tool_status",
+            "data": {
+                "task_id": execution.id,
+                "tool_name": execution.name,
+                "status": execution.status,
+                "progress": execution.progress,
+                "message": execution.message,
+                "result": None if execution.result_json is None else json.loads(execution.result_json),
+                "download_url": execution.download_url,
+                "error": execution.error,
+            },
+        },
+        execution.requested_by,
+    )
+
+
+@task_queue.handler("tool.execute")
+async def execute_tool(payload: dict) -> None:
+    task_id = payload["task_id"]
+    tool_name = payload["tool_name"]
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        execution = await session.get(BackgroundExecution, task_id)
+        if execution is None:
+            logger.warning("Tool execution %s no longer exists", task_id)
+            return
+        tool = TOOLS_BY_NAME.get(tool_name)
+        handler = TOOL_HANDLERS.get(tool_name)
+        if tool is None or handler is None:
+            execution.status = "failed"
+            execution.error = "Tool handler is not registered"
+            execution.completed_at = datetime.now(timezone.utc)
+            session.add(execution)
+            await session.commit()
+            await _notify(execution)
+            return
+
+        user = await session.get(User, execution.requested_by)
+        if user is None:
+            execution.status = "failed"
+            execution.error = "User no longer exists"
+            execution.completed_at = datetime.now(timezone.utc)
+            session.add(execution)
+            await session.commit()
+            await _notify(execution)
+            return
+
+        execution.status = "running"
+        execution.started_at = datetime.now(timezone.utc)
+        execution.message = "Running"
+        session.add(execution)
+        await session.commit()
+        await _notify(execution)
+
+        context = ToolContext(
+            task_id=task_id,
+            user_id=execution.requested_by,
+            current_user=user,
+            session=session,
+        )
+        try:
+            timeout = tool.get("execution", {}).get("timeout_seconds", 600)
+            value = await asyncio.wait_for(
+                handler(**payload.get("inputs", {}), context=context),
+                timeout=timeout,
+            )
+            result = normalize_tool_result(value)
+            execution.status = "succeeded"
+            execution.progress = 100
+            execution.message = result.message
+            execution.result_json = serialize_result(result.data)
+            execution.download_url = download_url_for(task_id, result.download_path)
+        except asyncio.TimeoutError:
+            execution.status = "failed"
+            execution.error = "Tool execution timed out"
+            logger.exception("Tool %s timed out for task %s", tool_name, task_id)
+        except Exception:
+            execution.status = "failed"
+            execution.error = "Tool execution failed"
+            logger.exception("Tool %s failed for task %s", tool_name, task_id)
+        execution.completed_at = datetime.now(timezone.utc)
+        session.add(execution)
+        await session.commit()
+        await _notify(execution)

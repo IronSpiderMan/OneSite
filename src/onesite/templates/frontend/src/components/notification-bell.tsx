@@ -144,6 +144,26 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
               return;
             }
 
+            if (payload?.type === 'tool_status' && payload?.data) {
+              window.dispatchEvent(new CustomEvent('onesite:tool-status', { detail: payload.data }));
+              if (payload.data.status === 'succeeded') {
+                toast.success(payload.data.message || t('tools.completed', 'Tool completed'));
+              } else if (payload.data.status === 'failed') {
+                toast.error(payload.data.error || t('tools.failed', 'Tool failed'));
+              }
+              return;
+            }
+
+            if (payload?.type === 'scheduled_task_status' && payload?.data) {
+              window.dispatchEvent(new CustomEvent('onesite:scheduled-task-status', { detail: payload.data }));
+              if (payload.data.status === 'succeeded') {
+                toast.success(payload.data.message || t('tasks.completed', 'Scheduled task completed'));
+              } else if (payload.data.status === 'failed') {
+                toast.error(payload.data.error || t('tasks.failed', 'Scheduled task failed'));
+              }
+              return;
+            }
+
             // Only process notifications if enabled
             if (!enabled) return;
 
@@ -347,4 +367,3 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
     </div>
   );
 }
-

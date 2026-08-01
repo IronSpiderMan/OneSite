@@ -9,6 +9,22 @@ export interface Task {
   enabled: boolean;
   params: Record<string, { type: string; default: string | number | boolean | string[]; label: string; value: string | number | boolean | string[] }>;
   next_run: string | null;
+  last_execution: ScheduledTaskExecution | null;
+}
+
+export interface ScheduledTaskExecution {
+  execution_id: string;
+  task_name: string;
+  trigger: 'manual' | 'schedule';
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  progress: number;
+  message?: string | null;
+  result?: unknown;
+  download_url?: string | null;
+  error?: string | null;
+  created_at?: string;
+  started_at?: string | null;
+  completed_at?: string | null;
 }
 
 export interface TaskUpdate {
@@ -29,7 +45,7 @@ export async function getTask(name: string): Promise<Task> {
   return response.data;
 }
 
-export async function runTask(name: string): Promise<{ status: string; message: string }> {
+export async function runTask(name: string): Promise<ScheduledTaskExecution> {
   const response = await request.post(`/tasks/${name}/run`);
   return response.data;
 }

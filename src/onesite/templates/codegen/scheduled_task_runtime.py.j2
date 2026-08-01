@@ -1,0 +1,183 @@
+"""Runtime services exposed to developer-owned scheduled task handlers."""
+
+import asyncio
+import json
+import uuid
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core.background_execution import BackgroundExecution
+from app.core.config import settings
+from app.core.db import engine
+from app.core.task_queue import task_queue
+from app.core.ws import manager
+
+
+@dataclass
+class ScheduledTaskResult:
+    message: str = "Completed"
+    data: Any = None
+    download_path: str | Path | None = None
+
+
+@dataclass
+class ScheduledTaskContext:
+    execution_id: str
+    trigger: str
+    requested_by: int | None
+    current_user: Any
+    session: AsyncSession
+
+    @property
+    def output_dir(self) -> Path:
+        path = Path(settings.UPLOAD_DIR) / "scheduled_tasks" / self.execution_id / "outputs"
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def output_path(self, filename: str) -> Path:
+        safe_name = Path(filename).name
+        if not safe_name:
+            raise ValueError("Output filename cannot be empty")
+        return self.output_dir / safe_name
+
+    async def run_sync(self, function: Callable[..., Any], *args, **kwargs) -> Any:
+        return await asyncio.to_thread(function, *args, **kwargs)
+
+    async def set_progress(self, progress: int, message: str | None = None) -> None:
+        execution = await self.session.get(BackgroundExecution, self.execution_id)
+        if execution is None:
+            return
+        execution.progress = max(0, min(100, int(progress)))
+        if message is not None:
+            execution.message = message
+        self.session.add(execution)
+        await self.session.commit()
+        if self.requested_by is not None:
+            await manager.send_personal_message(
+                {"type": "scheduled_task_status", "data": execution_to_dict(execution)},
+                self.requested_by,
+            )
+
+
+def execution_to_dict(execution: BackgroundExecution) -> dict:
+    return {
+        "execution_id": execution.id,
+        "task_name": execution.name,
+        "trigger": execution.trigger,
+        "status": execution.status,
+        "progress": execution.progress,
+        "message": execution.message,
+        "result": json.loads(execution.result_json) if execution.result_json else None,
+        "download_url": execution.download_url,
+        "error": execution.error,
+        "created_at": execution.created_at,
+        "started_at": execution.started_at,
+        "completed_at": execution.completed_at,
+    }
+
+
+async def enqueue_scheduled_task(
+    task: dict,
+    *,
+    params: dict,
+    trigger: str,
+    requested_by: int | None,
+) -> BackgroundExecution:
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        if task.get("overlap", "skip") == "skip":
+            statement = select(BackgroundExecution).where(
+                BackgroundExecution.kind == "scheduled_task",
+                BackgroundExecution.name == task["name"],
+                BackgroundExecution.status.in_(["queued", "running"]),
+            )
+            existing = (await session.exec(statement)).first()
+            if existing is not None:
+                return existing
+
+        execution = BackgroundExecution(
+            id=str(uuid.uuid4()),
+            kind="scheduled_task",
+            name=task["name"],
+            trigger=trigger,
+            requested_by=requested_by,
+            inputs_json=json.dumps(params, ensure_ascii=False, default=str),
+        )
+        session.add(execution)
+        await session.commit()
+        task_queue.publish(
+            "scheduled_task.execute",
+            {
+                "execution_id": execution.id,
+                "task_name": task["name"],
+                "params": params,
+            },
+        )
+        return execution
+
+
+def normalize_scheduled_result(value: Any) -> ScheduledTaskResult:
+    if isinstance(value, ScheduledTaskResult):
+        return value
+    if isinstance(value, str):
+        return ScheduledTaskResult(message=value)
+    if value is None:
+        return ScheduledTaskResult()
+    return ScheduledTaskResult(data=value)
+
+
+def scheduled_download_url(
+    execution_id: str,
+    download_path: str | Path | None,
+) -> str | None:
+    if download_path is None:
+        return None
+    upload_root = Path(settings.UPLOAD_DIR).resolve()
+    path = Path(download_path).resolve()
+    expected = (upload_root / "scheduled_tasks" / execution_id / "outputs").resolve()
+    if not path.is_file():
+        raise ValueError(f"Scheduled task output does not exist: {path}")
+    try:
+        relative = path.relative_to(expected)
+    except ValueError as exc:
+        raise ValueError("Scheduled task output must be inside context.output_dir") from exc
+    return f"/uploads/scheduled_tasks/{execution_id}/outputs/{relative.as_posix()}"
+
+
+async def recover_scheduled_executions() -> None:
+    """Recover queued schedules and close executions interrupted while running."""
+    from app.core.scheduled_task_bindings import SCHEDULED_TASKS_BY_NAME
+
+    async with AsyncSession(engine) as session:
+        statement = select(BackgroundExecution).where(
+            BackgroundExecution.kind == "scheduled_task",
+            BackgroundExecution.status.in_(["queued", "running"]),
+        )
+        executions = (await session.exec(statement)).all()
+        for execution in executions:
+            if execution.status == "running":
+                execution.status = "failed"
+                execution.error = "Scheduled task was interrupted by an application restart"
+                execution.completed_at = datetime.now(timezone.utc)
+                session.add(execution)
+                continue
+            if execution.name not in SCHEDULED_TASKS_BY_NAME:
+                execution.status = "failed"
+                execution.error = "Scheduled task is no longer configured"
+                execution.completed_at = datetime.now(timezone.utc)
+                session.add(execution)
+                continue
+            task_queue.publish(
+                "scheduled_task.execute",
+                {
+                    "execution_id": execution.id,
+                    "task_name": execution.name,
+                    "params": json.loads(execution.inputs_json or "{}"),
+                },
+            )
+        if executions:
+            await session.commit()

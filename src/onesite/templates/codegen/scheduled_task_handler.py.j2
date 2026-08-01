@@ -1,0 +1,20 @@
+"""{{ task.title }} scheduled task.
+
+This file is developer-owned. ``site sync`` mirrors it into the generated
+backend but does not overwrite it after creation.
+"""
+
+from app.core.scheduled_task_runtime import ScheduledTaskContext, ScheduledTaskResult
+
+
+async def {{ task.handler }}(
+    *,
+{% for name, param in task.params.items() %}
+    {{ name }}: {{ 'str' if param.type == 'str' else 'int | float' if param.type == 'number' else 'bool' if param.type == 'bool' else 'list' if param.type == 'multi_select' else 'dict | list' }},
+{% endfor %}
+    context: ScheduledTaskContext,
+) -> ScheduledTaskResult:
+    """Implement {{ task.title }} here."""
+    await context.set_progress(10, "Started")
+    # TODO: Implement the scheduled task.
+    return ScheduledTaskResult(message="Not implemented")

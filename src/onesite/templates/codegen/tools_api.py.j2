@@ -1,0 +1,238 @@
+"""Generated API for configuration-driven project tools."""
+
+import json
+import re
+import uuid
+from pathlib import Path
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from starlette.datastructures import UploadFile
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.core.config import settings
+from app.core.task_queue import task_queue
+from app.core.background_execution import BackgroundExecution
+from app.core.tool_registry import TOOLS_BY_NAME
+from app.models.user import User
+
+router = APIRouter()
+
+
+def _role_name(user: User) -> str:
+    return getattr(user.role, "value", str(user.role))
+
+
+def _assert_allowed(tool: dict, user: User) -> None:
+    if _role_name(user) not in tool.get("permissions", []):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+def _option_values(input_config: dict) -> set[str]:
+    values = set()
+    for option in input_config.get("options", []):
+        value = option.get("value") if isinstance(option, dict) else option
+        values.add(str(value))
+    return values
+
+
+def _parse_scalar(raw: str, input_config: dict) -> Any:
+    input_type = input_config["type"]
+    try:
+        if input_type == "number":
+            value = int(raw) if input_config.get("number_kind") == "int" else float(raw)
+            if input_config.get("min") is not None and value < input_config["min"]:
+                raise ValueError("value is below the minimum")
+            if input_config.get("max") is not None and value > input_config["max"]:
+                raise ValueError("value is above the maximum")
+            return value
+        if input_type == "bool":
+            lowered = raw.lower()
+            if lowered not in {"true", "false", "1", "0", "yes", "no", "on", "off"}:
+                raise ValueError("expected a boolean")
+            return lowered in {"true", "1", "yes", "on"}
+        if input_type == "json":
+            return json.loads(raw)
+        if input_type == "select" and raw not in _option_values(input_config):
+            raise ValueError("value is not an allowed option")
+        if input_config.get("min_length") is not None and len(raw) < input_config["min_length"]:
+            raise ValueError("value is shorter than min_length")
+        if input_config.get("max_length") is not None and len(raw) > input_config["max_length"]:
+            raise ValueError("value is longer than max_length")
+        pattern = input_config.get("pattern")
+        if pattern and re.fullmatch(pattern, raw) is None:
+            raise ValueError("value does not match pattern")
+        return raw
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid value for {input_config['name']}: {exc}",
+        ) from exc
+
+
+async def _save_upload(upload: UploadFile, destination: Path, max_size_mb: float) -> str:
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    max_bytes = int(max_size_mb * 1024 * 1024)
+    written = 0
+    try:
+        with destination.open("wb") as output:
+            while chunk := await upload.read(1024 * 1024):
+                written += len(chunk)
+                if written > max_bytes:
+                    raise HTTPException(
+                        status_code=413,
+                        detail=f"File {upload.filename!r} exceeds {max_size_mb} MB",
+                    )
+                output.write(chunk)
+    except Exception:
+        destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await upload.close()
+    return str(destination)
+
+
+def _validate_file(upload: UploadFile, input_config: dict) -> None:
+    accepted = input_config.get("accept") or []
+    if not accepted:
+        return
+    filename = upload.filename or ""
+    content_type = upload.content_type or ""
+    allowed = any(
+        filename.lower().endswith(rule.lower()) if rule.startswith(".")
+        else content_type == rule or (rule.endswith("/*") and content_type.startswith(rule[:-1]))
+        for rule in accepted
+    )
+    if not allowed:
+        raise HTTPException(status_code=422, detail=f"File type is not allowed for {input_config['name']}")
+
+
+def _execution_dict(execution: BackgroundExecution) -> dict:
+    return {
+        "task_id": execution.id,
+        "tool_name": execution.name,
+        "status": execution.status,
+        "progress": execution.progress,
+        "message": execution.message,
+        "result": json.loads(execution.result_json) if execution.result_json else None,
+        "download_url": execution.download_url,
+        "error": execution.error,
+        "created_at": execution.created_at,
+        "started_at": execution.started_at,
+        "completed_at": execution.completed_at,
+    }
+
+
+@router.post("/{tool_name}/execute", status_code=202)
+async def execute_tool(
+    tool_name: str,
+    request: Request,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict:
+    tool = TOOLS_BY_NAME.get(tool_name)
+    if tool is None:
+        raise HTTPException(status_code=404, detail="Tool not found")
+    _assert_allowed(tool, current_user)
+
+    form = await request.form()
+    task_id = str(uuid.uuid4())
+    input_dir = Path(settings.UPLOAD_DIR) / "tools" / task_id / "inputs"
+    parsed: dict[str, Any] = {}
+    public_inputs: dict[str, Any] = {}
+
+    for input_config in tool.get("inputs", []):
+        name = input_config["name"]
+        input_type = input_config["type"]
+        values = form.getlist(name)
+        if input_type in {"file", "files"}:
+            uploads = [value for value in values if isinstance(value, UploadFile) and value.filename]
+            if input_config.get("required") and not uploads:
+                raise HTTPException(status_code=422, detail=f"{name} is required")
+            if input_type == "file" and len(uploads) > 1:
+                raise HTTPException(status_code=422, detail=f"{name} accepts one file")
+            if input_type == "files" and len(uploads) > input_config.get("max_files", 10):
+                raise HTTPException(status_code=422, detail=f"Too many files for {name}")
+            paths: list[str] = []
+            filenames: list[str] = []
+            for position, upload in enumerate(uploads):
+                _validate_file(upload, input_config)
+                safe_name = Path(upload.filename or f"file-{position}").name
+                destination = input_dir / f"{position}-{safe_name}"
+                paths.append(await _save_upload(upload, destination, input_config.get("max_size_mb", 20)))
+                filenames.append(safe_name)
+            parsed[name] = paths[0] if input_type == "file" and paths else (paths if input_type == "files" else None)
+            public_inputs[name] = filenames[0] if input_type == "file" and filenames else (filenames if input_type == "files" else None)
+            continue
+
+        if input_type == "multi_select":
+            raw_values = [str(value) for value in values if not isinstance(value, UploadFile)]
+            if input_config.get("required") and not raw_values:
+                raise HTTPException(status_code=422, detail=f"{name} is required")
+            allowed = _option_values(input_config)
+            if any(value not in allowed for value in raw_values):
+                raise HTTPException(status_code=422, detail=f"Invalid option for {name}")
+            parsed[name] = raw_values
+            public_inputs[name] = raw_values
+            continue
+
+        raw = form.get(name)
+        if raw is None or raw == "":
+            if "default" in input_config:
+                parsed[name] = input_config["default"]
+            elif input_config.get("required"):
+                raise HTTPException(status_code=422, detail=f"{name} is required")
+            else:
+                parsed[name] = None
+        else:
+            parsed[name] = _parse_scalar(str(raw), input_config)
+        public_inputs[name] = parsed[name]
+
+    execution = BackgroundExecution(
+        id=task_id,
+        kind="tool",
+        name=tool_name,
+        trigger="manual",
+        requested_by=current_user.id,
+        inputs_json=json.dumps(public_inputs, ensure_ascii=False, default=str),
+    )
+    session.add(execution)
+    await session.commit()
+    task_queue.publish(
+        "tool.execute",
+        {"task_id": task_id, "tool_name": tool_name, "user_id": current_user.id, "inputs": parsed},
+    )
+    return _execution_dict(execution)
+
+
+@router.get("/executions/{task_id}")
+async def get_execution(
+    task_id: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict:
+    execution = await session.get(BackgroundExecution, task_id)
+    if execution is None or execution.kind != "tool" or execution.requested_by != current_user.id:
+        raise HTTPException(status_code=404, detail="Tool execution not found")
+    return _execution_dict(execution)
+
+
+@router.get("/executions")
+async def list_executions(
+    limit: int = 20,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> list[dict]:
+    statement = (
+        select(BackgroundExecution)
+        .where(
+            BackgroundExecution.kind == "tool",
+            BackgroundExecution.requested_by == current_user.id,
+        )
+        .order_by(BackgroundExecution.created_at.desc())
+        .limit(max(1, min(limit, 100)))
+    )
+    executions = (await session.exec(statement)).all()
+    return [_execution_dict(execution) for execution in executions]

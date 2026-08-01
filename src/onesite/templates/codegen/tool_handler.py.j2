@@ -1,0 +1,20 @@
+"""{{ tool.title }} tool handler.
+
+This file is developer-owned. ``site sync`` mirrors it into the generated
+backend but does not overwrite it after creation.
+"""
+
+from app.core.tool_runtime import ToolContext, ToolResult
+
+
+async def {{ tool.handler }}(
+    *,
+{% for input in tool.inputs %}
+    {{ input.name }}: {{ 'list[str]' if input.type in ['files', 'multi_select'] else 'str' if input.type in ['str', 'text', 'select', 'date', 'datetime', 'file'] else 'int' if input.type == 'number' and input.number_kind == 'int' else 'float' if input.type == 'number' else 'bool' if input.type == 'bool' else 'dict | list' if input.type == 'json' else 'object' }},
+{% endfor %}
+    context: ToolContext,
+) -> ToolResult:
+    """Implement {{ tool.title }} here."""
+    await context.set_progress(10, "Started")
+    # TODO: Implement the tool. File inputs are local path strings.
+    return ToolResult(message="Not implemented")

@@ -1,0 +1,30 @@
+"""Persistent state shared by tools and scheduled tasks."""
+
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlmodel import Field, SQLModel
+
+
+def utc_now() -> datetime:
+    return datetime.now(timezone.utc)
+
+
+class BackgroundExecution(SQLModel, table=True):
+    __tablename__ = "onesite_background_execution"
+
+    id: str = Field(primary_key=True)
+    kind: str = Field(index=True)
+    name: str = Field(index=True)
+    trigger: str = Field(default="manual", index=True)
+    requested_by: Optional[int] = Field(default=None, index=True)
+    status: str = Field(default="queued", index=True)
+    progress: int = Field(default=0)
+    message: Optional[str] = None
+    inputs_json: str = Field(default="{}")
+    result_json: Optional[str] = None
+    download_url: Optional[str] = None
+    error: Optional[str] = None
+    created_at: datetime = Field(default_factory=utc_now)
+    started_at: Optional[datetime] = None
+    completed_at: Optional[datetime] = None

@@ -4,7 +4,12 @@ from typing import Any, Dict, List
 from .file_utils import write_file_with_status
 
 
-def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, scheduled_tasks: List[Dict[str, Any]] = None):
+def update_api_router(
+    models: List[Dict[str, Any]],
+    api_file_path: Path,
+    scheduled_tasks: List[Dict[str, Any]] | None = None,
+    tools: List[Dict[str, Any]] | None = None,
+):
     imports: List[str] = []
     routers: List[str] = []
 
@@ -23,6 +28,12 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, schedul
         imports.append("from app.api.endpoints import tasks")
         routers.append('api_router.include_router(tasks.router, tags=["tasks"])')
 
+    if tools:
+        imports.append("from app.api.endpoints import tools")
+        routers.append(
+            'api_router.include_router(tools.router, prefix="/tools", tags=["tools"])'
+        )
+
     for model in models:
         imports.append(f"from app.api.endpoints import {model['module_name']}")
         prefix = f"/{model['module_name']}s" if not model.get('is_singleton') else f"/{model['module_name']}"
@@ -38,4 +49,3 @@ def update_api_router(models: List[Dict[str, Any]], api_file_path: Path, schedul
         + "\n".join(routers)
     )
     write_file_with_status(api_file_path, content)
-

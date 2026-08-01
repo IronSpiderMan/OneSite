@@ -1,9 +1,8 @@
-import asyncio
 import json
 import os
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 from zoneinfo import ZoneInfo
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -59,26 +58,22 @@ class TaskRegistry:
         except OSError as e:
             print(f"Failed to save task state: {e}")
 
-    def _resolve_func(self, func_path: str) -> Callable:
-        """Resolve function path like 'app.tasks.alarm:daily_summary'"""
-        module_path, func_name = func_path.split(":")
-        import importlib
-        module = importlib.import_module(module_path)
-        return getattr(module, func_name)
-
     def _get_param_values(self, params: Dict[str, dict]) -> Dict[str, Any]:
         """Extract current param values from params dict."""
         return {k: v["value"] for k, v in params.items()}
 
-    def _make_wrapper(self, func_path: str, params: Dict[str, dict]):
-        """Create a wrapper function that resolves the target function at call time."""
+    def _make_wrapper(self, name: str):
+        """Create a lightweight scheduler callback that only enqueues work."""
         async def wrapper():
-            func = self._resolve_func(func_path)
-            kwargs = self._get_param_values(params)
-            if asyncio.iscoroutinefunction(func):
-                await func(**kwargs)
-            else:
-                func(**kwargs)
+            from app.core.scheduled_task_runtime import enqueue_scheduled_task
+
+            task = self._tasks[name]
+            await enqueue_scheduled_task(
+                task,
+                params=self._get_param_values(task.get("params", {})),
+                trigger="schedule",
+                requested_by=None,
+            )
         return wrapper
 
     def register(self, config: dict) -> bool:
@@ -94,6 +89,11 @@ class TaskRegistry:
             "description": config.get("description", ""),
             "enabled": config.get("enabled", True),
             "params": config.get("params", {}),
+            "title": config.get("title", name),
+            "handler": config.get("handler", name),
+            "timeout_seconds": config.get("timeout_seconds", 600),
+            "overlap": config.get("overlap", "skip"),
+            "manual_permissions": config.get("manual_permissions", ["admin", "developer"]),
             "_job": None,
         }
 
@@ -112,7 +112,7 @@ class TaskRegistry:
                 pass
 
         try:
-            wrapper = self._make_wrapper(task["func_path"], task.get("params", {}))
+            wrapper = self._make_wrapper(name)
             if task["interval"] > 0:
                 # Interval task
                 job = self._scheduler.add_job(
@@ -225,6 +225,11 @@ class TaskRegistry:
                 "description": t.get("description", ""),
                 "enabled": t["enabled"],
                 "params": t.get("params", {}),
+                "title": t.get("title", t["name"]),
+                "handler": t.get("handler", t["name"]),
+                "timeout_seconds": t.get("timeout_seconds", 600),
+                "overlap": t.get("overlap", "skip"),
+                "manual_permissions": t.get("manual_permissions", ["admin", "developer"]),
                 "next_run": self._format_next_run(t["_job"]) if t["_job"] else None,
             }
             for t in self._tasks.values()
@@ -243,20 +248,27 @@ class TaskRegistry:
             "description": t.get("description", ""),
             "enabled": t["enabled"],
             "params": t.get("params", {}),
+            "title": t.get("title", t["name"]),
+            "handler": t.get("handler", t["name"]),
+            "timeout_seconds": t.get("timeout_seconds", 600),
+            "overlap": t.get("overlap", "skip"),
+            "manual_permissions": t.get("manual_permissions", ["admin", "developer"]),
             "next_run": self._format_next_run(t["_job"]) if t["_job"] else None,
         }
 
-    async def run(self, name: str) -> bool:
-        """Manually trigger a task"""
+    async def run(self, name: str, requested_by: int | None = None):
+        """Enqueue a manual task execution."""
         if name not in self._tasks:
-            return False
-        func = self._resolve_func(self._tasks[name]["func_path"])
-        kwargs = self._get_param_values(self._tasks[name].get("params", {}))
-        if asyncio.iscoroutinefunction(func):
-            await func(**kwargs)
-        else:
-            func(**kwargs)
-        return True
+            return None
+        from app.core.scheduled_task_runtime import enqueue_scheduled_task
+
+        task = self._tasks[name]
+        return await enqueue_scheduled_task(
+            task,
+            params=self._get_param_values(task.get("params", {})),
+            trigger="manual",
+            requested_by=requested_by,
+        )
 
     def start(self):
         """Start the scheduler and add all enabled tasks"""

@@ -1,0 +1,132 @@
+"""Background runner for configuration-driven scheduled tasks."""
+
+import asyncio
+import inspect
+import json
+import logging
+from datetime import datetime, timezone
+
+from sqlmodel.ext.asyncio.session import AsyncSession
+from sqlmodel import select
+
+from app.core.background_execution import BackgroundExecution
+from app.core.db import engine
+from app.core.scheduled_task_bindings import (
+    SCHEDULED_TASK_HANDLERS,
+    SCHEDULED_TASKS_BY_NAME,
+)
+from app.core.scheduled_task_runtime import (
+    ScheduledTaskContext,
+    execution_to_dict,
+    normalize_scheduled_result,
+    scheduled_download_url,
+)
+from app.core.task_queue import task_queue
+from app.core.ws import manager
+from app.models.user import User
+
+logger = logging.getLogger(__name__)
+
+
+async def _notify(
+    execution: BackgroundExecution,
+    session: AsyncSession,
+    task: dict | None = None,
+) -> None:
+    recipients: set[int] = set()
+    if execution.requested_by is not None:
+        recipients.add(execution.requested_by)
+    if task and execution.status in {"succeeded", "failed"}:
+        notify = task.get("notify", {})
+        event_enabled = (
+            notify.get("on_success", False)
+            if execution.status == "succeeded"
+            else notify.get("on_failure", True)
+        )
+        if event_enabled:
+            roles = set(notify.get("roles", []))
+            users = (await session.exec(select(User))).all()
+            recipients.update(
+                user.id
+                for user in users
+                if user.id is not None
+                and getattr(user.role, "value", str(user.role)) in roles
+            )
+    for user_id in recipients:
+        await manager.send_personal_message(
+            {"type": "scheduled_task_status", "data": execution_to_dict(execution)},
+            user_id,
+        )
+
+
+@task_queue.handler("scheduled_task.execute")
+async def execute_scheduled_task(payload: dict) -> None:
+    execution_id = payload["execution_id"]
+    task_name = payload["task_name"]
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        execution = await session.get(BackgroundExecution, execution_id)
+        if execution is None:
+            logger.warning("Scheduled execution %s no longer exists", execution_id)
+            return
+        task = SCHEDULED_TASKS_BY_NAME.get(task_name)
+        handler = SCHEDULED_TASK_HANDLERS.get(task_name)
+        if task is None or handler is None:
+            execution.status = "failed"
+            execution.error = "Scheduled task handler is not registered"
+            execution.completed_at = datetime.now(timezone.utc)
+            session.add(execution)
+            await session.commit()
+            await _notify(execution, session)
+            return
+
+        current_user = (
+            await session.get(User, execution.requested_by)
+            if execution.requested_by is not None
+            else None
+        )
+        execution.status = "running"
+        execution.started_at = datetime.now(timezone.utc)
+        execution.message = "Running"
+        session.add(execution)
+        await session.commit()
+        await _notify(execution, session, task)
+
+        context = ScheduledTaskContext(
+            execution_id=execution.id,
+            trigger=execution.trigger,
+            requested_by=execution.requested_by,
+            current_user=current_user,
+            session=session,
+        )
+        try:
+            kwargs = dict(payload.get("params", {}))
+            if "context" in inspect.signature(handler).parameters:
+                kwargs["context"] = context
+            value = await asyncio.wait_for(
+                handler(**kwargs),
+                timeout=task.get("timeout_seconds", 600),
+            )
+            result = normalize_scheduled_result(value)
+            execution.status = "succeeded"
+            execution.progress = 100
+            execution.message = result.message
+            execution.result_json = (
+                json.dumps(result.data, ensure_ascii=False, default=str)
+                if result.data is not None
+                else None
+            )
+            execution.download_url = scheduled_download_url(
+                execution.id, result.download_path
+            )
+        except asyncio.TimeoutError:
+            execution.status = "failed"
+            execution.error = "Scheduled task timed out"
+            logger.exception("Scheduled task %s timed out", task_name)
+        except Exception:
+            execution.status = "failed"
+            execution.error = "Scheduled task failed"
+            logger.exception("Scheduled task %s failed", task_name)
+        execution.completed_at = datetime.now(timezone.utc)
+        session.add(execution)
+        await session.commit()
+        await _notify(execution, session, task)

@@ -132,6 +132,147 @@ The same handler may be bound to multiple topics. For production deployments,
 override MQTT credentials through `MQTT_URL`, `MQTT_USERNAME`,
 `MQTT_PASSWORD`, and `MQTT_CLIENT_ID` rather than committing secrets.
 
+### Dashboard tools
+
+Project tools add configuration-driven forms to the Dashboard and execute the
+developer implementation in the background:
+
+```json
+{
+  "tools": [
+    {
+      "name": "merge_reports",
+      "title": "Merge reports",
+      "description": "Upload CSV files and merge them in the background",
+      "permissions": ["admin", "developer"],
+      "execution": {"mode": "background", "timeout_seconds": 600},
+      "inputs": [
+        {
+          "name": "copies",
+          "type": "number",
+          "number_kind": "int",
+          "label": "Copies",
+          "default": 1,
+          "min": 1
+        },
+        {
+          "name": "files",
+          "type": "files",
+          "label": "CSV files",
+          "required": true,
+          "accept": [".csv"],
+          "max_files": 10,
+          "max_size_mb": 20
+        }
+      ],
+      "result": {"type": "file"}
+    }
+  ]
+}
+```
+
+On the first `site sync`, OneSite scaffolds `app/tools/merge_reports.py` and
+mirrors it to `generated/backend/app/tools/merge_reports.py`. Only edit the
+developer-owned source file:
+
+```python
+from app.core.tool_runtime import ToolContext, ToolResult
+
+
+async def merge_reports(
+    *,
+    copies: int,
+    files: list[str],
+    context: ToolContext,
+) -> ToolResult:
+    await context.set_progress(10, "Reading files")
+    output = context.output_path("merged.csv")
+    # Implement the merge and write output here. File inputs are local paths.
+    await context.set_progress(90, "Finalizing")
+    return ToolResult(
+        message="Merge completed",
+        data={"copies": copies},
+        download_path=output,
+    )
+```
+
+Supported input types are `str`, `text`, `number`, `bool`, `select`,
+`multi_select`, `date`, `datetime`, `file`, `files`, and `json`. The submit API
+also accepts the aliases `string`, `boolean`, and `list`, normalizing them to
+`str`, `bool`, and `multi_select` respectively. It stores uploaded files before
+publishing to the in-process task queue. Execution
+state is persisted in `onesite_background_execution`; WebSocket messages update the
+Dashboard immediately, while the status API lets the UI recover after refresh
+or reconnection. The current queue remains process-local, so queued work does
+not provide distributed delivery across multiple backend instances.
+
+### Scheduled tasks
+
+Scheduled tasks use the same developer-owned source and background execution
+model. A scheduler trigger creates an execution record and publishes work to
+the task queue; it does not run business code inside the scheduler callback.
+
+```json
+{
+  "scheduled_tasks": [
+    {
+      "name": "daily_summary",
+      "title": "Daily summary",
+      "schedule": {"type": "cron", "cron": "0 8 * * *"},
+      "enabled": true,
+      "timeout_seconds": 600,
+      "overlap": "skip",
+      "manual_permissions": ["admin", "developer"],
+      "params": [
+        {"name": "region", "type": "str", "default": "cn"},
+        {"name": "include_inactive", "type": "bool", "default": false}
+      ],
+      "notify": {
+        "on_success": false,
+        "on_failure": true,
+        "roles": ["developer"]
+      }
+    }
+  ]
+}
+```
+
+An interval schedule uses `{"type": "interval", "seconds": 300}`. Legacy
+`cron`, `interval`, and object-shaped `params` remain supported and are
+normalized during generation.
+Scheduled-task parameters accept both the concise names used by tools
+(`str`, `bool`, and `multi_select`) and their descriptive aliases (`string`,
+`boolean`, and `list`); aliases are normalized to the concise names.
+
+The first `site sync` creates `app/tasks/daily_summary.py`:
+
+```python
+from app.core.scheduled_task_runtime import (
+    ScheduledTaskContext,
+    ScheduledTaskResult,
+)
+
+
+async def daily_summary(
+    *,
+    region: str,
+    include_inactive: bool,
+    context: ScheduledTaskContext,
+) -> ScheduledTaskResult:
+    await context.set_progress(10, "Reading data")
+    # Implement the task here.
+    return ScheduledTaskResult(message="Summary completed")
+```
+
+`site sync` mirrors this source to `generated/backend/app/tasks/`, generates a
+separate binding module, and validates the handler signature. Existing handlers
+from the older generated-only layout are migrated into the developer source
+directory; handlers without `context` remain callable for compatibility.
+
+Manual runs return `202 Accepted` with an execution id. Scheduled and manual
+runs share progress, timeout, result, history, failure notification and
+WebSocket infrastructure. `overlap` supports `skip` and `queue`.
+
 ### Developer utilities
 
 Place reusable backend helpers in `app/utils/`:
@@ -366,6 +507,8 @@ project/
 │   ├── models/                # SQLModel source of truth
 │   ├── integrations/
 │   │   └── mqtt/              # MQTT handler implementations
+│   ├── tools/                  # Dashboard tool implementations
+│   ├── tasks/                  # scheduled task implementations
 │   └── utils/                 # reusable developer-owned backend helpers
 ├── generated/                 # replaceable OneSite output
 │   ├── backend/

@@ -1,0 +1,15 @@
+"""Generated tool definitions and handler bindings. Do not edit."""
+
+import json
+
+{% for tool in tools %}
+from app.tools.{{ tool.handler }} import {{ tool.handler }}
+{% endfor %}
+
+TOOL_DEFINITIONS = json.loads({{ tools_json | tojson }})
+TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
+TOOL_HANDLERS = {
+{% for tool in tools %}
+    "{{ tool.name }}": {{ tool.handler }},
+{% endfor %}
+}

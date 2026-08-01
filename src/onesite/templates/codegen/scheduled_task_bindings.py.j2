@@ -1,0 +1,31 @@
+"""Generated scheduled task definitions and handler bindings. Do not edit."""
+
+import json
+
+from app.core.scheduler import task_registry
+{% for task in tasks %}
+from app.tasks.{{ task.handler }} import {{ task.handler }}
+{% endfor %}
+
+SCHEDULED_TASK_DEFINITIONS = json.loads({{ tasks_json | tojson }})
+SCHEDULED_TASKS_BY_NAME = {
+    task["name"]: task for task in SCHEDULED_TASK_DEFINITIONS
+}
+SCHEDULED_TASK_HANDLERS = {
+{% for task in tasks %}
+    "{{ task.name }}": {{ task.handler }},
+{% endfor %}
+}
+
+_registered = False
+
+
+def register_scheduled_tasks() -> None:
+    global _registered
+    if _registered:
+        return
+    for task in SCHEDULED_TASK_DEFINITIONS:
+        config = dict(task)
+        config["func"] = f"app.tasks.{task['handler']}:{task['handler']}"
+        task_registry.register(config)
+    _registered = True

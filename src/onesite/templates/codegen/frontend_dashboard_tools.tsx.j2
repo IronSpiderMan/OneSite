@@ -1,0 +1,223 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { Loader2, Play, Wrench } from 'lucide-react';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import { Label } from './ui/label';
+import { Textarea } from './ui/textarea';
+import { executeTool, getToolExecution, ToolExecution } from '../services/tools';
+
+interface ToolInput {
+  [key: string]: unknown;
+  name: string;
+  type: string;
+  label: string;
+  required?: boolean;
+  default?: unknown;
+  placeholder?: string;
+  help?: string;
+  min?: number;
+  max?: number;
+  step?: number;
+  accept?: string[];
+  options?: Array<string | number | { label: string; value: string | number }>;
+}
+
+interface ToolDefinition {
+  [key: string]: unknown;
+  name: string;
+  title: string;
+  description?: string;
+  permissions: string[];
+  inputs: ToolInput[];
+  result?: { type?: string };
+}
+
+const TOOL_DEFINITIONS: ToolDefinition[] = {{ tools | tojson }};
+const TERMINAL = new Set(['succeeded', 'failed']);
+
+const optionValue = (option: NonNullable<ToolInput['options']>[number]): string =>
+  typeof option === 'object' ? String(option.value) : String(option);
+const optionLabel = (option: NonNullable<ToolInput['options']>[number]): string =>
+  typeof option === 'object' ? option.label : String(option);
+
+const initialValues = (tool: ToolDefinition): Record<string, unknown> =>
+  Object.fromEntries(tool.inputs.map((input) => [
+    input.name,
+    input.default ?? (input.type === 'bool' ? false : input.type === 'multi_select' || input.type === 'files' ? [] : ''),
+  ]));
+
+const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
+  const { t } = useTranslation();
+  const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(tool));
+  const [execution, setExecution] = useState<ToolExecution | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const next = (event as CustomEvent<ToolExecution>).detail;
+      if (next?.task_id === execution?.task_id) setExecution(next);
+    };
+    window.addEventListener('onesite:tool-status', listener);
+    return () => window.removeEventListener('onesite:tool-status', listener);
+  }, [execution?.task_id]);
+
+  useEffect(() => {
+    if (!execution || TERMINAL.has(execution.status)) return;
+    const timer = window.setInterval(async () => {
+      try {
+        const next = await getToolExecution(execution.task_id);
+        setExecution(next);
+        if (TERMINAL.has(next.status)) window.clearInterval(timer);
+      } catch (error) {
+        console.error('Failed to refresh tool execution', error);
+      }
+    }, 2000);
+    return () => window.clearInterval(timer);
+  }, [execution?.task_id, execution?.status]);
+
+  const setValue = (name: string, value: unknown) =>
+    setValues((previous) => ({ ...previous, [name]: value }));
+
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    const form = new FormData();
+    for (const input of tool.inputs) {
+      const value = values[input.name];
+      if (input.type === 'files') {
+        for (const file of (value as File[]) || []) form.append(input.name, file);
+      } else if (input.type === 'file') {
+        if (value instanceof File) form.append(input.name, value);
+      } else if (input.type === 'multi_select') {
+        for (const item of (value as string[]) || []) form.append(input.name, item);
+      } else if (input.type === 'json') {
+        if (value !== '' && value != null) form.append(input.name, typeof value === 'string' ? value : JSON.stringify(value));
+      } else if (value !== '' && value != null) {
+        form.append(input.name, String(value));
+      }
+    }
+    try {
+      setSubmitting(true);
+      const next = await executeTool(tool.name, form);
+      setExecution(next);
+      toast.success(t('tools.queued', 'Tool queued'));
+    } catch (error: any) {
+      toast.error(error?.response?.data?.detail || t('tools.submit_failed', 'Failed to start tool'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <form onSubmit={submit} className="rounded-xl border bg-card p-6 shadow-sm space-y-5">
+      <div className="flex items-start gap-3">
+        <div className="rounded-lg bg-primary/10 p-2 text-primary"><Wrench className="h-5 w-5" /></div>
+        <div>
+          <h3 className="font-semibold">{tool.title}</h3>
+          {tool.description && <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>}
+        </div>
+      </div>
+
+      <div className="grid gap-4 md:grid-cols-2">
+        {tool.inputs.map((input) => (
+          <div key={input.name} className={input.type === 'text' || input.type === 'json' || input.type === 'files' ? 'md:col-span-2 space-y-2' : 'space-y-2'}>
+            <Label htmlFor={`${tool.name}-${input.name}`}>
+              {input.label}{input.required && <span className="text-destructive"> *</span>}
+            </Label>
+            {input.type === 'text' || input.type === 'json' ? (
+              <Textarea
+                id={`${tool.name}-${input.name}`}
+                required={input.required}
+                placeholder={input.placeholder}
+                value={String(values[input.name] ?? '')}
+                onChange={(event) => setValue(input.name, event.target.value)}
+              />
+            ) : input.type === 'select' ? (
+              <select
+                id={`${tool.name}-${input.name}`}
+                required={input.required}
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={String(values[input.name] ?? '')}
+                onChange={(event) => setValue(input.name, event.target.value)}
+              >
+                <option value="">{input.placeholder || t('common.select', 'Select')}</option>
+                {(input.options || []).map((option) => <option key={optionValue(option)} value={optionValue(option)}>{optionLabel(option)}</option>)}
+              </select>
+            ) : input.type === 'multi_select' ? (
+              <select
+                id={`${tool.name}-${input.name}`}
+                multiple
+                required={input.required}
+                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                value={(values[input.name] as string[]) || []}
+                onChange={(event) => setValue(input.name, Array.from(event.target.selectedOptions, (option) => option.value))}
+              >
+                {(input.options || []).map((option) => <option key={optionValue(option)} value={optionValue(option)}>{optionLabel(option)}</option>)}
+              </select>
+            ) : input.type === 'bool' ? (
+              <label className="flex h-10 items-center gap-2">
+                <input type="checkbox" checked={Boolean(values[input.name])} onChange={(event) => setValue(input.name, event.target.checked)} />
+                <span className="text-sm text-muted-foreground">{input.help || input.label}</span>
+              </label>
+            ) : input.type === 'file' || input.type === 'files' ? (
+              <Input
+                id={`${tool.name}-${input.name}`}
+                type="file"
+                required={input.required}
+                multiple={input.type === 'files'}
+                accept={(input.accept || []).join(',') || undefined}
+                onChange={(event) => setValue(input.name, input.type === 'files' ? Array.from(event.target.files || []) : event.target.files?.[0] || null)}
+              />
+            ) : (
+              <Input
+                id={`${tool.name}-${input.name}`}
+                type={input.type === 'number' ? 'number' : input.type === 'date' ? 'date' : input.type === 'datetime' ? 'datetime-local' : 'text'}
+                required={input.required}
+                placeholder={input.placeholder}
+                min={input.min}
+                max={input.max}
+                step={input.step}
+                value={String(values[input.name] ?? '')}
+                onChange={(event) => setValue(input.name, event.target.value)}
+              />
+            )}
+            {input.help && input.type !== 'bool' && <p className="text-xs text-muted-foreground">{input.help}</p>}
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3">
+        <Button type="submit" disabled={submitting || (!!execution && !TERMINAL.has(execution.status))}>
+          {submitting || (!!execution && !TERMINAL.has(execution.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+          {t('tools.execute', 'Execute')}
+        </Button>
+        {execution && <span className="text-sm text-muted-foreground">{execution.message || execution.status}</span>}
+      </div>
+
+      {execution && (
+        <div className="space-y-2 rounded-lg bg-muted/40 p-4">
+          <div className="flex justify-between text-xs"><span>{execution.status}</span><span>{execution.progress}%</span></div>
+          <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={ { width: `${execution.progress}%` } } /></div>
+          {execution.error && <p className="text-sm text-destructive">{execution.error}</p>}
+          {execution.result != null && <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>}
+          {execution.download_url && <Button type="button" variant="outline" onClick={() => window.open(execution.download_url!, '_blank')}>{t('tools.download', 'Download result')}</Button>}
+        </div>
+      )}
+    </form>
+  );
+};
+
+export const DashboardTools: React.FC = () => {
+  const { t } = useTranslation();
+  const role = localStorage.getItem('user_role') || 'user';
+  const tools = useMemo(() => TOOL_DEFINITIONS.filter((tool) => tool.permissions.includes(role)), [role]);
+  if (tools.length === 0) return null;
+  return (
+    <section className="space-y-4">
+      <h2 className="text-xl font-semibold tracking-tight">{t('tools.title', 'Tools')}</h2>
+      <div className="grid gap-6 lg:grid-cols-2">{tools.map((tool) => <ToolCard key={tool.name} tool={tool} />)}</div>
+    </section>
+  );
+};

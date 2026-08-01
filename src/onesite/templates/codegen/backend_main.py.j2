@@ -47,12 +47,12 @@ try:
 except ImportError:
     pass
 {% if config.scheduled_tasks %}
-# Import tasks to register them with the scheduler
-try:
-    import app.tasks
-except ImportError:
-    pass
 from app.core.scheduler import task_registry
+from app.core.scheduled_task_bindings import register_scheduled_tasks
+from app.core.scheduled_task_runtime import recover_scheduled_executions
+{% endif %}
+{% if config.tools %}
+from app.core.tool_runtime import reconcile_interrupted_tool_executions
 {% endif %}
 {% if config.plugins and "site_logger" in config.plugins %}
 # Import site_logger to register AppLog table with SQLModel.metadata
@@ -84,8 +84,14 @@ async def lifespan(app: FastAPI):
 
     {% if config.scheduled_tasks %}
     # Start scheduler
+    register_scheduled_tasks()
+    await recover_scheduled_executions()
     task_registry.start()
     logger.info("Scheduler started")
+    {% endif %}
+
+    {% if config.tools %}
+    await reconcile_interrupted_tool_executions()
     {% endif %}
 
     # Start background task worker

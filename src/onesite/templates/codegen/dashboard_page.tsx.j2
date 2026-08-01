@@ -8,6 +8,9 @@ import { Button } from '../components/ui/button';
 import { SearchableSelect } from '../components/ui/searchable-select';
 import { useSystemConfigStore } from '../stores/useSystemConfigStore';
 import Markdown from 'react-markdown';
+{% if tools %}
+import { DashboardTools } from '../components/dashboard-tools';
+{% endif %}
 {% if site_logger %}
 import { getAppLogs } from '../services/app_log';
 import { buildNotificationWsUrl } from '../services/notification-center';
@@ -339,13 +342,26 @@ const DashboardPage: React.FC = () => {
     {% if scheduled_tasks %}
     useEffect(() => {
         fetchTasks();
+        const timer = window.setInterval(() => { fetchTasks(); }, 5000);
+        return () => window.clearInterval(timer);
+    }, []);
+
+    useEffect(() => {
+        const listener = (event: Event) => {
+            const execution = (event as CustomEvent<any>).detail;
+            if (execution?.status === 'succeeded' || execution?.status === 'failed') {
+                fetchTasks();
+            }
+        };
+        window.addEventListener('onesite:scheduled-task-status', listener);
+        return () => window.removeEventListener('onesite:scheduled-task-status', listener);
     }, []);
 
     const handleRunTask = async (name: string) => {
         setRunningTasks(prev => new Set(prev).add(name));
         try {
             await runTask(name);
-            toast.success(t('dashboard.task_run_success', { name }));
+            toast.success(t('dashboard.task_queued', `Task '${name}' queued`));
         } catch (error: any) {
             toast.error(t('dashboard.task_run_error', { name, message: error.message }));
         } finally {
@@ -675,6 +691,10 @@ const DashboardPage: React.FC = () => {
                     </div>
                 </div>
             )}
+            {% endif %}
+
+            {% if tools %}
+            <DashboardTools />
             {% endif %}
 
             {chartModels.length > 0 && (
@@ -1012,6 +1032,22 @@ const DashboardPage: React.FC = () => {
                                             {t('dashboard.next_run', 'Next run')}: {formatLocalDateTime(task.next_run)}
                                         </div>
                                     )}
+                                    {task.last_execution && (
+                                        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+                                            <span>{t('dashboard.last_execution', 'Last execution')}:</span>
+                                            <span className={
+                                                task.last_execution.status === 'succeeded' ? 'text-green-600' :
+                                                task.last_execution.status === 'failed' ? 'text-red-600' :
+                                                'text-blue-600'
+                                            }>
+                                                {task.last_execution.status}
+                                            </span>
+                                            {(task.last_execution.status === 'queued' || task.last_execution.status === 'running') && (
+                                                <span>{task.last_execution.progress}%</span>
+                                            )}
+                                            {task.last_execution.message && <span>- {task.last_execution.message}</span>}
+                                        </div>
+                                    )}
                                 </div>
                                 <div className="flex items-center gap-2">
                                     <Button
@@ -1198,7 +1234,7 @@ const DashboardPage: React.FC = () => {
                                     {Object.entries(editingTask.params).map(([key, param]) => (
                                         <div key={key}>
                                             <Label className="text-sm">{param.label || key}</Label>
-                                            {param.type === 'boolean' ? (
+                                            {param.type === 'bool' ? (
                                                 <div className="flex items-center gap-2 mt-1">
                                                     <input
                                                         type="checkbox"
@@ -1207,7 +1243,7 @@ const DashboardPage: React.FC = () => {
                                                         className="h-4 w-4"
                                                     />
                                                 </div>
-                                            ) : param.type === 'list' ? (
+                                            ) : param.type === 'multi_select' ? (
                                                 <Input
                                                     id={`param-${key}`}
                                                     defaultValue={Array.isArray(param.value) ? param.value.join(', ') : String(param.value ?? '')}
@@ -1238,11 +1274,11 @@ const DashboardPage: React.FC = () => {
                                     for (const [key, param] of Object.entries(editingTask.params || {})) {
                                         const el = document.getElementById(`param-${key}`) as HTMLInputElement;
                                         if (el) {
-                                            if (param.type === 'boolean') {
+                                            if (param.type === 'bool') {
                                                 params[key] = el.checked;
                                             } else if (param.type === 'number') {
                                                 params[key] = parseFloat(el.value) || 0;
-                                            } else if (param.type === 'list') {
+                                            } else if (param.type === 'multi_select') {
                                                 params[key] = el.value.split(',').map(s => s.trim()).filter(Boolean);
                                             } else {
                                                 params[key] = el.value;

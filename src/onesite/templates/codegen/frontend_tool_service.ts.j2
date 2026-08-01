@@ -1,0 +1,22 @@
+import request from '../utils/request';
+
+export interface ToolExecution {
+  task_id: string;
+  tool_name: string;
+  status: 'queued' | 'running' | 'succeeded' | 'failed';
+  progress: number;
+  message?: string | null;
+  result?: unknown;
+  download_url?: string | null;
+  error?: string | null;
+}
+
+export const executeTool = async (name: string, form: FormData): Promise<ToolExecution> => {
+  const response = await request.post<ToolExecution>(`/tools/${name}/execute`, form);
+  return response.data;
+};
+
+export const getToolExecution = async (taskId: string): Promise<ToolExecution> => {
+  const response = await request.get<ToolExecution>(`/tools/executions/${taskId}`);
+  return response.data;
+};

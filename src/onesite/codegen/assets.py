@@ -19,22 +19,6 @@ def _ensure_init_py(dir_path: Path) -> None:
         write_file_with_status(init_file, "")
 
 
-def _function_exists(file_path: Path, func_name: str) -> bool:
-    """Check if a function exists in a Python file."""
-    if not file_path.exists():
-        return False
-    try:
-        tree = ast.parse(file_path.read_text(encoding="utf-8"))
-        for node in ast.walk(tree):
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == func_name:
-                return True
-            if isinstance(node, ast.FunctionDef) and node.name == func_name:
-                return True
-    except Exception:
-        pass
-    return False
-
-
 def _async_function_exists(file_path: Path, func_name: str) -> bool:
     """Return whether a module defines the named top-level async function."""
     if not file_path.exists():
@@ -47,6 +31,54 @@ def _async_function_exists(file_path: Path, func_name: str) -> bool:
         isinstance(node, ast.AsyncFunctionDef) and node.name == func_name
         for node in tree.body
     )
+
+
+def _validate_async_function_signature(
+    file_path: Path,
+    func_name: str,
+    expected_parameters: set[str],
+    allow_missing_context: bool = False,
+) -> None:
+    """Require a top-level async handler with the configured named inputs."""
+    try:
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise SiteConfigError(f"Unable to parse {file_path}: {exc}") from exc
+    function = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == func_name
+        ),
+        None,
+    )
+    if function is None:
+        raise SiteConfigError(
+            f"{file_path} must define a top-level async function named {func_name!r}."
+        )
+    if function.args.vararg or function.args.kwarg or function.args.posonlyargs:
+        raise SiteConfigError(
+            f"{file_path}:{func_name} must use explicit named parameters."
+        )
+    actual = {
+        argument.arg
+        for argument in [*function.args.args, *function.args.kwonlyargs]
+    }
+    allowed = [expected_parameters]
+    if allow_missing_context:
+        allowed.append(expected_parameters - {"context"})
+    if actual not in allowed:
+        missing = sorted(expected_parameters - actual)
+        unexpected = sorted(actual - expected_parameters)
+        details = []
+        if missing:
+            details.append(f"missing {', '.join(missing)}")
+        if unexpected:
+            details.append(f"unexpected {', '.join(unexpected)}")
+        raise SiteConfigError(
+            f"{file_path}:{func_name} parameters do not match configured inputs "
+            f"({'; '.join(details)})."
+        )
 
 
 def _mirror_python_tree(source: Path, destination: Path) -> None:
@@ -168,6 +200,119 @@ def _sync_mqtt_callbacks(
         },
         backend_path / "app" / "core" / "mqtt_bindings.py",
     )
+
+
+def _sync_tools(cwd: Path, backend_path: Path, tools: List[Dict[str, Any]]) -> None:
+    """Scaffold developer-owned tool handlers and mirror them into backend."""
+    source_tools = get_project_paths(cwd).tools
+    target_tools = backend_path / "app" / "tools"
+    _ensure_init_py(source_tools)
+
+    for tool in tools:
+        handler_name = tool["handler"]
+        source_file = source_tools / f"{handler_name}.py"
+        if not source_file.exists():
+            generate_file("tool_handler.py.j2", {"tool": tool}, source_file)
+        _validate_async_function_signature(
+            source_file,
+            handler_name,
+            {input_config["name"] for input_config in tool.get("inputs", [])}
+            | {"context"},
+        )
+
+    _mirror_python_tree(source_tools, target_tools)
+
+
+def _strip_legacy_task_registration(file_path: Path) -> None:
+    """Remove generator-owned registry boilerplate from a task source file.
+
+    Older OneSite versions placed both the handler and a top-level
+    ``task_registry.register(...)`` call in the generated task module. Once
+    that module becomes developer-owned, only the handler belongs there;
+    registration is generated separately in ``scheduled_task_bindings.py``.
+    """
+    try:
+        source = file_path.read_text(encoding="utf-8")
+        tree = ast.parse(source)
+    except (OSError, SyntaxError, UnicodeError):
+        return
+
+    lines = source.splitlines(keepends=True)
+    removals: list[tuple[int, int]] = []
+    for node in tree.body:
+        if (
+            isinstance(node, ast.ImportFrom)
+            and node.module == "app.core.scheduler"
+            and len(node.names) == 1
+            and node.names[0].name == "task_registry"
+        ):
+            removals.append((node.lineno - 1, node.end_lineno or node.lineno))
+            continue
+        if not (
+            isinstance(node, ast.Expr)
+            and isinstance(node.value, ast.Call)
+            and isinstance(node.value.func, ast.Attribute)
+            and node.value.func.attr == "register"
+            and isinstance(node.value.func.value, ast.Name)
+            and node.value.func.value.id == "task_registry"
+        ):
+            continue
+        start = node.lineno - 1
+        end = node.end_lineno or node.lineno
+        while start > 0 and not lines[start - 1].strip():
+            start -= 1
+        if start > 0:
+            comment = lines[start - 1].strip().lower()
+            if comment.startswith("#") and (
+                "注册" in comment or "register" in comment or "registration" in comment
+            ):
+                start -= 1
+        removals.append((start, end))
+
+    if not removals:
+        return
+    removed_lines = {
+        index
+        for start, end in removals
+        for index in range(start, end)
+    }
+    cleaned = "".join(
+        line for index, line in enumerate(lines) if index not in removed_lines
+    ).rstrip() + "\n"
+    write_file_with_status(file_path, cleaned)
+
+
+def _sync_scheduled_tasks(
+    cwd: Path,
+    backend_path: Path,
+    tasks: List[Dict[str, Any]],
+) -> None:
+    """Scaffold developer-owned scheduled task handlers and mirror them."""
+    source_tasks = get_project_paths(cwd).tasks
+    target_tasks = backend_path / "app" / "tasks"
+    _ensure_init_py(source_tasks)
+
+    for task in tasks:
+        handler_name = task["handler"]
+        source_file = source_tasks / f"{handler_name}.py"
+        legacy_file = target_tasks / f"{handler_name}.py"
+        if not source_file.exists():
+            if _async_function_exists(legacy_file, handler_name):
+                copy_file_with_status(legacy_file, source_file)
+                console.print(
+                    f"[yellow]Migrated generated task handler to {source_file}[/yellow]"
+                )
+            else:
+                generate_file("scheduled_task_handler.py.j2", {"task": task}, source_file)
+        _strip_legacy_task_registration(source_file)
+        _validate_async_function_signature(
+            source_file,
+            handler_name,
+            set(task.get("params", {})) | {"context"},
+            allow_missing_context=True,
+        )
+
+    _mirror_python_tree(source_tasks, target_tasks)
 
 
 def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
@@ -300,6 +445,10 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     _ensure_init_py(backend_path / "app" / "consumers")
     _ensure_init_py(backend_path / "app" / "tasks")
     _sync_project_utils(cwd, backend_path)
+    if site_config.get("tools"):
+        _sync_tools(cwd, backend_path, site_config["tools"])
+    if site_config.get("scheduled_tasks"):
+        _sync_scheduled_tasks(cwd, backend_path, site_config["scheduled_tasks"])
 
     template_endpoints_dir = template_backend_root / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"
@@ -316,26 +465,6 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
 
     # Always sync scheduler (no user-edited code, purely infra)
     generate_file("scheduler.py.j2", {}, backend_path / "app" / "core" / "scheduler.py")
-
-    # Generate tasks API endpoint
-    if site_config.get("scheduled_tasks"):
-        generate_file("app_tasks_api.py.j2", {}, backend_path / "app" / "api" / "endpoints" / "tasks.py")
-
-        # Generate each task as a separate file (only if function doesn't exist)
-        tasks = site_config["scheduled_tasks"]
-        for task in tasks:
-            task_name = task.get("name", "")
-            if not task_name:
-                continue
-
-            task_file = backend_path / "app" / "tasks" / f"{task_name}.py"
-            if not _function_exists(task_file, task_name):
-                generate_file("task.py.j2", {"task": task}, task_file)
-            else:
-                console.print(f"[dim]Skipped existing task: {task_name}[/dim]")
-
-        # Generate __init__.py for tasks package
-        generate_file("tasks_init.py.j2", {"tasks": tasks}, backend_path / "app" / "tasks" / "__init__.py")
 
     if site_config.get("redis"):
         generate_file("redis.py.j2", {"redis": site_config["redis"]}, backend_path / "app" / "core" / "redis.py")

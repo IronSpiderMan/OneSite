@@ -1,82 +1,178 @@
 from typing import Any
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
 
+from app.core import db, deps
+from app.core.background_execution import BackgroundExecution
 from app.core.scheduler import task_registry
+from app.core.scheduled_task_runtime import execution_to_dict
+from app.models.user import User
 
 router = APIRouter()
 
 
 class TaskUpdate(BaseModel):
     cron: str | None = None
-    interval: int | None = None  # 0 means cron task, >0 means interval in seconds
+    interval: int | None = None
     description: str | None = None
     enabled: bool | None = None
     params: dict[str, Any] | None = None
 
 
+def _role_name(user: User) -> str:
+    return getattr(user.role, "value", str(user.role))
+
+
+def _assert_manage_allowed(task: dict, user: User) -> None:
+    if _role_name(user) not in task.get("manual_permissions", ["admin", "developer"]):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+
+async def _latest_execution(session: AsyncSession, name: str):
+    statement = (
+        select(BackgroundExecution)
+        .where(
+            BackgroundExecution.kind == "scheduled_task",
+            BackgroundExecution.name == name,
+        )
+        .order_by(BackgroundExecution.created_at.desc())
+        .limit(1)
+    )
+    return (await session.exec(statement)).first()
+
+
 @router.get("/tasks/")
-def list_tasks() -> list[dict[str, Any]]:
-    """List all registered tasks"""
-    return task_registry.get_tasks()
+async def list_tasks(
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> list[dict[str, Any]]:
+    result = []
+    for task in task_registry.get_tasks():
+        if _role_name(current_user) not in task.get("manual_permissions", []):
+            continue
+        latest = await _latest_execution(session, task["name"])
+        task["last_execution"] = execution_to_dict(latest) if latest else None
+        result.append(task)
+    return result
+
+
+@router.get("/tasks/executions")
+async def list_task_executions(
+    task_name: str | None = None,
+    limit: int = Query(20, ge=1, le=100),
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> list[dict]:
+    allowed_names = [
+        task["name"]
+        for task in task_registry.get_tasks()
+        if _role_name(current_user) in task.get("manual_permissions", [])
+    ]
+    statement = select(BackgroundExecution).where(
+        BackgroundExecution.kind == "scheduled_task",
+        BackgroundExecution.name.in_(allowed_names),
+    )
+    if task_name:
+        task = task_registry.get_task(task_name)
+        if not task:
+            raise HTTPException(status_code=404, detail=f"Task '{task_name}' not found")
+        _assert_manage_allowed(task, current_user)
+        statement = statement.where(BackgroundExecution.name == task_name)
+    statement = statement.order_by(BackgroundExecution.created_at.desc()).limit(limit)
+    return [execution_to_dict(item) for item in (await session.exec(statement)).all()]
+
+
+@router.get("/tasks/executions/{execution_id}")
+async def get_task_execution(
+    execution_id: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict:
+    execution = await session.get(BackgroundExecution, execution_id)
+    if execution is None or execution.kind != "scheduled_task":
+        raise HTTPException(status_code=404, detail="Scheduled task execution not found")
+    task = task_registry.get_task(execution.name)
+    if not task:
+        raise HTTPException(status_code=404, detail="Scheduled task not found")
+    _assert_manage_allowed(task, current_user)
+    return execution_to_dict(execution)
 
 
 @router.get("/tasks/{name}")
-def get_task(name: str) -> dict[str, Any]:
-    """Get a single task by name"""
+async def get_task(
+    name: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict[str, Any]:
     task = task_registry.get_task(name)
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    _assert_manage_allowed(task, current_user)
+    latest = await _latest_execution(session, name)
+    task["last_execution"] = execution_to_dict(latest) if latest else None
     return task
 
 
-@router.post("/tasks/{name}/run")
-async def run_task(name: str) -> dict[str, str]:
-    """Manually trigger a task"""
-    success = await task_registry.run(name)
-    if not success:
-        raise HTTPException(status_code=404, detail=f"Task '{name}' not found or function could not be resolved")
-    return {"status": "ok", "message": f"Task '{name}' triggered successfully"}
+@router.post("/tasks/{name}/run", status_code=202)
+async def run_task(
+    name: str,
+    current_user: User = Depends(deps.get_current_user),
+) -> dict:
+    task = task_registry.get_task(name)
+    if not task:
+        raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    _assert_manage_allowed(task, current_user)
+    execution = await task_registry.run(name, requested_by=current_user.id)
+    return execution_to_dict(execution)
 
 
 @router.post("/tasks/{name}/enable")
-def enable_task(name: str) -> dict[str, str]:
-    """Enable a task"""
-    if not task_registry.enable(name):
+def enable_task(
+    name: str,
+    current_user: User = Depends(deps.get_current_user),
+) -> dict[str, str]:
+    task = task_registry.get_task(name)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    _assert_manage_allowed(task, current_user)
+    task_registry.enable(name)
     return {"status": "ok", "message": f"Task '{name}' enabled"}
 
 
 @router.post("/tasks/{name}/disable")
-def disable_task(name: str) -> dict[str, str]:
-    """Disable a task"""
-    if not task_registry.disable(name):
+def disable_task(
+    name: str,
+    current_user: User = Depends(deps.get_current_user),
+) -> dict[str, str]:
+    task = task_registry.get_task(name)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
+    _assert_manage_allowed(task, current_user)
+    task_registry.disable(name)
     return {"status": "ok", "message": f"Task '{name}' disabled"}
 
 
 @router.put("/tasks/{name}")
-def update_task(name: str, config: TaskUpdate) -> dict[str, str]:
-    """Update task configuration"""
-    if not task_registry.get_task(name):
+def update_task(
+    name: str,
+    config: TaskUpdate,
+    current_user: User = Depends(deps.get_current_user),
+) -> dict[str, str]:
+    task = task_registry.get_task(name)
+    if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
-
+    _assert_manage_allowed(task, current_user)
     if config.interval is not None and config.interval > 0:
         task_registry.update_interval(name, config.interval)
     elif config.cron is not None:
         task_registry.update_cron(name, config.cron)
-
     if config.description is not None:
         task_registry.update_description(name, config.description)
-
     if config.enabled is not None:
-        if config.enabled:
-            task_registry.enable(name)
-        else:
-            task_registry.disable(name)
-
+        task_registry.enable(name) if config.enabled else task_registry.disable(name)
     if config.params is not None:
         task_registry.update_params(name, config.params)
-
     return {"status": "ok", "message": f"Task '{name}' updated"}

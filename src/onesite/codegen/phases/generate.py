@@ -8,6 +8,7 @@ Phase 7 — Aggregated / cross-cutting generation: API router, route tables,
           scaffolding, task pages, and feature flags.
 """
 
+import json
 from pathlib import Path
 from typing import Any
 
@@ -503,9 +504,66 @@ def phase_generate_aggregated(
 
     # ── API router ──
     scheduled_tasks = site_config.get("scheduled_tasks", [])
+    tools = site_config.get("tools", [])
     update_api_router(
-        api_models, backend_path / "app" / "api" / "api.py", scheduled_tasks
+        api_models,
+        backend_path / "app" / "api" / "api.py",
+        scheduled_tasks,
+        tools,
     )
+
+    if tools or scheduled_tasks:
+        generate_file(
+            "tool_execution_model.py.j2",
+            {},
+            backend_path / "app" / "core" / "background_execution.py",
+        )
+    if tools:
+        generate_file(
+            "tool_runtime.py.j2",
+            {},
+            backend_path / "app" / "core" / "tool_runtime.py",
+        )
+        generate_file(
+            "tool_registry.py.j2",
+            {"tools": tools, "tools_json": json.dumps(tools, ensure_ascii=False)},
+            backend_path / "app" / "core" / "tool_registry.py",
+        )
+        generate_file(
+            "tools_api.py.j2",
+            {"tools": tools},
+            backend_path / "app" / "api" / "endpoints" / "tools.py",
+        )
+        generate_file(
+            "tool_execution_handler.py.j2",
+            {},
+            backend_path / "app" / "handlers" / "tool_execution.py",
+        )
+
+    if scheduled_tasks:
+        generate_file(
+            "scheduled_task_runtime.py.j2",
+            {},
+            backend_path / "app" / "core" / "scheduled_task_runtime.py",
+        )
+        generate_file(
+            "scheduled_task_bindings.py.j2",
+            {
+                "tasks": scheduled_tasks,
+                "tasks_json": json.dumps(scheduled_tasks, ensure_ascii=False),
+            },
+            backend_path / "app" / "core" / "scheduled_task_bindings.py",
+        )
+        generate_file(
+            "app_tasks_api.py.j2",
+            {},
+            backend_path / "app" / "api" / "endpoints" / "tasks.py",
+        )
+        generate_file(
+            "scheduled_task_execution_handler.py.j2",
+            {},
+            backend_path / "app" / "handlers" / "scheduled_task_execution.py",
+        )
 
     # ── Settings page ──
     system_model = next(
@@ -573,6 +631,7 @@ def phase_generate_aggregated(
             "scheduled_tasks": scheduled_tasks,
             "site_logger": site_logger_enabled,
             "show_dashboard_announcement": show_dashboard_announcement,
+            "tools": tools,
         },
         frontend_path / "src" / "pages" / "Dashboard.tsx",
     )
@@ -598,6 +657,18 @@ def phase_generate_aggregated(
             frontend_path / "src" / "stores" / "useTaskStore.ts",
         )
 
+    if tools:
+        generate_file(
+            "frontend_tool_service.ts.j2",
+            {},
+            frontend_path / "src" / "services" / "tools.ts",
+        )
+        generate_file(
+            "frontend_dashboard_tools.tsx.j2",
+            {"tools": tools},
+            frontend_path / "src" / "components" / "dashboard-tools.tsx",
+        )
+
     # ── Locale files ──
     generate_locale_files(models, frontend_path / "src" / "locales")
 
@@ -617,6 +688,11 @@ def phase_generate_aggregated(
     export_models = [m for m in models if m.get("exportable")]
     generate_file(
         "handlers_init.py.j2",
-        {"handler_models": handler_models, "export_models": export_models},
+        {
+            "handler_models": handler_models,
+            "export_models": export_models,
+            "tools_enabled": bool(tools),
+            "scheduled_tasks_enabled": bool(scheduled_tasks),
+        },
         backend_path / "app" / "handlers" / "__init__.py",
     )
