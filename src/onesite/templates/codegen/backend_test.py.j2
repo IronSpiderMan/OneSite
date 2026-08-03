@@ -70,7 +70,7 @@ class Test{{ model.name }}Singleton:
         payload = {
 {% for field in model.fields %}
 {% if 'u' in field.permissions and field.name != 'id' %}
-            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% else %}""{% endif %},
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'location' %}{"latitude": 31.2304, "longitude": 121.4737}{% else %}""{% endif %},
 {% endif %}
 {% endfor %}
         }
@@ -96,7 +96,7 @@ class Test{{ model.name }}API:
         payload = {
 {% for field in model.fields %}
 {% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
-            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% elif field.ui_type == 'location' %}{"latitude": 31.2304, "longitude": 121.4737}{% else %}""{% endif %},
 {% endif %}
 {% endfor %}
         }
@@ -112,7 +112,7 @@ class Test{{ model.name }}API:
         payload = {
 {% for field in model.fields %}
 {% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
-            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% elif field.ui_type == 'location' %}{"latitude": 31.2304, "longitude": 121.4737}{% else %}""{% endif %},
 {% endif %}
 {% endfor %}
         }
@@ -133,7 +133,7 @@ class Test{{ model.name }}API:
         payload = {
 {% for field in model.fields %}
 {% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
-            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% elif field.ui_type == 'location' %}{"latitude": 31.2304, "longitude": 121.4737}{% else %}""{% endif %},
 {% endif %}
 {% endfor %}
         }
@@ -145,7 +145,7 @@ class Test{{ model.name }}API:
         update_payload = {
 {% for field in model.fields %}
 {% if 'u' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
-            "{{ field.name }}": {% if field.ui_type == 'int' %}2{% elif field.ui_type == 'float' %}2.0{% elif field.ui_type == 'bool' %}False{% elif field.ui_type == 'datetime' %}null{% else %}"updated"{% endif %},
+            "{{ field.name }}": {% if field.ui_type == 'int' %}2{% elif field.ui_type == 'float' %}2.0{% elif field.ui_type == 'bool' %}False{% elif field.ui_type == 'datetime' %}null{% elif field.ui_type == 'location' %}{"latitude": 39.9042, "longitude": 116.4074}{% else %}"updated"{% endif %},
 {% endif %}
 {% endfor %}
         }
@@ -161,7 +161,7 @@ class Test{{ model.name }}API:
         payload = {
 {% for field in model.fields %}
 {% if 'c' in field.permissions and field.name != 'id' and field.name != 'created_at' and field.name != 'updated_at' %}
-            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% else %}""{% endif %},
+            "{{ field.name }}": {% if field.ui_type == 'int' %}1{% elif field.ui_type == 'float' %}1.0{% elif field.ui_type == 'bool' %}True{% elif field.ui_type == 'datetime' %}null{% elif field.ui_type == 'location' %}{"latitude": 31.2304, "longitude": 121.4737}{% else %}""{% endif %},
 {% endif %}
 {% endfor %}
         }

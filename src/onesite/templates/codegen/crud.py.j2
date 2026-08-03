@@ -23,6 +23,11 @@ from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }}
 from app.models.{{ rel.source_source_module }} import {{ rel.source_model }}
 {% endfor %}
 {% endif %}
+{% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'inline' %}
+from app.models.{{ rfk.source_module }} import {{ rfk.source_model }}
+{% endif %}
+{% endfor %}
 
 {% set scalar_json_arrays = model.fields | selectattr('json_item_kind') | list %}
 {% set datetime_fields = model.fields | selectattr('ui_type', 'equalto', 'datetime') | list %}
@@ -63,6 +68,127 @@ def _serialize_json_scalar_arrays(data: dict) -> dict:
 
 {% endif %}
 
+{% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'inline' %}
+async def _sync_inline_{{ rfk.name }}(
+    session: AsyncSession,
+    parent_id: {{ model.id_type }},
+    items: list,
+) -> None:
+    statement = select({{ rfk.source_model }}).where(
+        {{ rfk.source_model }}.{{ rfk.source_fk_field }} == parent_id
+    )
+    result = await session.exec(statement)
+    existing = {item.id: item for item in result.all()}
+    kept_ids = set()
+
+    for item in items:
+        data = item.model_dump(exclude_unset=True) if hasattr(item, "model_dump") else dict(item)
+        item_id = data.pop("id", None)
+        data.pop("{{ rfk.source_fk_field }}", None)
+        if item_id is None:
+            missing = [
+                name for name in [
+                    {% for field in rfk.inline_fields %}
+                    {% if field.required and not field.create_optional %}"{{ field.name }}",{% endif %}
+                    {% endfor %}
+                ]
+                if data.get(name) is None
+            ]
+            if missing:
+                raise ValueError("Missing required {{ rfk.source_model }} fields: " + ", ".join(missing))
+            child = {{ rfk.source_model }}(**data)
+            setattr(child, "{{ rfk.source_fk_field }}", parent_id)
+            session.add(child)
+            await session.flush()
+            kept_ids.add(child.id)
+        else:
+            child = existing.get(item_id)
+            if child is None:
+                raise ValueError("{{ rfk.source_model }} is not related to this {{ model.name }}")
+            for key, value in data.items():
+                setattr(child, key, value)
+            session.add(child)
+            kept_ids.add(item_id)
+
+    for item_id, child in existing.items():
+        if item_id in kept_ids:
+            continue
+        {% if rfk.on_remove == 'nullify' %}
+        setattr(child, "{{ rfk.source_fk_field }}", None)
+        session.add(child)
+        {% else %}
+        await session.delete(child)
+        {% endif %}
+
+
+{% endif %}
+{% endfor %}
+{% for m2m in model.m2m_fields %}
+{% if m2m.editor == 'inline' %}
+async def _sync_inline_{{ m2m.write_name }}(
+    session: AsyncSession,
+    parent_id: {{ model.id_type }},
+    items: list,
+) -> None:
+    statement = select({{ m2m.link_model }}).where(
+        {{ m2m.link_model }}.{{ m2m.source_fk_field }} == parent_id
+    )
+    result = await session.exec(statement)
+    existing_links = list(result.all())
+    links_by_target = {
+        getattr(link, "{{ m2m.target_fk_field }}"): link for link in existing_links
+    }
+    kept_ids = set()
+
+    for index, item in enumerate(items, start=1):
+        data = item.model_dump(exclude_unset=True) if hasattr(item, "model_dump") else dict(item)
+        target_id = data.pop("id", None)
+        if target_id is None:
+            missing = [
+                name for name in [
+                    {% for field in m2m.inline_fields %}
+                    {% if field.required and not field.create_optional %}"{{ field.name }}",{% endif %}
+                    {% endfor %}
+                ]
+                if data.get(name) is None
+            ]
+            if missing:
+                raise ValueError("Missing required {{ m2m.target_model }} fields: " + ", ".join(missing))
+            target = {{ m2m.target_model }}(**data)
+            session.add(target)
+            await session.flush()
+            target_id = target.id
+        else:
+            link = links_by_target.get(target_id)
+            if link is None and not {{ 'True' if m2m.allow_existing else 'False' }}:
+                raise ValueError("{{ m2m.target_model }} is not related to this {{ model.name }}")
+            target = await session.get({{ m2m.target_model }}, target_id)
+            if target is None:
+                raise ValueError("{{ m2m.target_model }} not found")
+            for key, value in data.items():
+                setattr(target, key, value)
+            session.add(target)
+
+        link = links_by_target.get(target_id)
+        if link is None:
+            link = {{ m2m.link_model }}(
+                {{ m2m.source_fk_field }}=parent_id,
+                {{ m2m.target_fk_field }}=target_id,
+            )
+            session.add(link)
+        {% if m2m.order_field %}
+        setattr(link, "{{ m2m.order_field }}", index)
+        {% endif %}
+        kept_ids.add(target_id)
+
+    for target_id, link in links_by_target.items():
+        if target_id not in kept_ids:
+            await session.delete(link)
+
+
+{% endif %}
+{% endfor %}
 {% if model.is_timescaledb %}
 
 # ── TimescaleDB CRUD ──────────────────────────────────────────────────────────
@@ -595,15 +721,23 @@ async def count(
 async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ model.name }}:
     # Note: validation should happen before, here we assume obj_in is valid pydantic model
     
-    # Handle M2M fields
+    # Separate relationship payloads from concrete {{ model.name }} columns.
     {% if model.m2m_fields %}
     m2m_data = {}
     {% for m2m in model.m2m_fields %}
-    if hasattr(obj_in, "{{ m2m.name }}"):
-        m2m_data["{{ m2m.name }}"] = getattr(obj_in, "{{ m2m.name }}")
-        delattr(obj_in, "{{ m2m.name }}")
+    if hasattr(obj_in, "{{ m2m.write_name }}"):
+        m2m_data["{{ m2m.write_name }}"] = getattr(obj_in, "{{ m2m.write_name }}")
+        delattr(obj_in, "{{ m2m.write_name }}")
     {% endfor %}
     {% endif %}
+    inline_reverse_data = {}
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    if hasattr(obj_in, "{{ rfk.write_name }}"):
+        inline_reverse_data["{{ rfk.write_name }}"] = getattr(obj_in, "{{ rfk.write_name }}")
+        delattr(obj_in, "{{ rfk.write_name }}")
+    {% endif %}
+    {% endfor %}
 
     # Convert to dict to handle nested Pydantic models in JSON fields
     {% if scalar_json_arrays %}
@@ -669,8 +803,12 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
     {% if model.m2m_fields %}
     # Insert M2M relations
     {% for m2m in model.m2m_fields %}
-    if m2m_data.get("{{ m2m.name }}") is not None:
-        for idx, target_id in enumerate(m2m_data["{{ m2m.name }}"], start=1):
+    {% if m2m.editor == 'inline' %}
+    if m2m_data.get("{{ m2m.write_name }}") is not None:
+        await _sync_inline_{{ m2m.write_name }}(session, db_obj.id, m2m_data["{{ m2m.write_name }}"])
+    {% else %}
+    if m2m_data.get("{{ m2m.write_name }}") is not None:
+        for idx, target_id in enumerate(m2m_data["{{ m2m.write_name }}"], start=1):
             link = {{ m2m.link_model }}(
                 {{ m2m.source_fk_field }}=db_obj.id,
                 {{ m2m.target_fk_field }}=target_id
@@ -679,10 +817,20 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
                 {% endif %}
             )
             session.add(link)
+    {% endif %}
     {% endfor %}
     await session.flush()
     await session.refresh(db_obj)
     {% endif %}
+
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    if inline_reverse_data.get("{{ rfk.write_name }}") is not None:
+        await _sync_inline_{{ rfk.name }}(
+            session, db_obj.id, inline_reverse_data["{{ rfk.write_name }}"]
+        )
+    {% endif %}
+    {% endfor %}
 
     await invoke_model_hook(
         db_obj,
@@ -702,6 +850,13 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% if datetime_fields %}
     obj_data = _normalize_datetimes(obj_data)
     {% endif %}
+    inline_reverse_data = {}
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    if "{{ rfk.write_name }}" in obj_data:
+        inline_reverse_data["{{ rfk.write_name }}"] = obj_data.pop("{{ rfk.write_name }}")
+    {% endif %}
+    {% endfor %}
     
     old = snapshot_model(db_obj)
     hook_context = ModelHookContext(
@@ -721,9 +876,12 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% if model.m2m_fields %}
     # Handle M2M updates
     {% for m2m in model.m2m_fields %}
-    if "{{ m2m.name }}" in obj_data:
-        new_ids = obj_data.pop("{{ m2m.name }}")
+    if "{{ m2m.write_name }}" in obj_data:
+        new_ids = obj_data.pop("{{ m2m.write_name }}")
         if new_ids is not None:
+            {% if m2m.editor == 'inline' %}
+            await _sync_inline_{{ m2m.write_name }}(session, db_obj.id, new_ids)
+            {% else %}
             # 1. Clear existing relations
             # This is a naive implementation (delete all and re-insert). 
             # Better would be to calculate diff.
@@ -743,8 +901,18 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
                     {% endif %}
                 )
                 session.add(link)
+            {% endif %}
     {% endfor %}
     {% endif %}
+
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    if inline_reverse_data.get("{{ rfk.write_name }}") is not None:
+        await _sync_inline_{{ rfk.name }}(
+            session, db_obj.id, inline_reverse_data["{{ rfk.write_name }}"]
+        )
+    {% endif %}
+    {% endfor %}
     
     {% if model.property_config_meta %}
     # Capture old blueprint FK before setattr overwrites it

@@ -1,7 +1,7 @@
 from typing import List, Any, Optional, Annotated
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -41,6 +41,32 @@ router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ mode
 router = APIRouter()
 {% else %}
 router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
+{% endif %}
+
+{% if model.inline_relations %}
+def _check_inline_relation_permissions(payload: Any, current_user: User, *, updating: bool) -> None:
+    raw_role = getattr(current_user, "role", "user")
+    role = str(getattr(raw_role, "value", raw_role))
+    {% for rel in model.inline_relations %}
+    {{ rel.write_name }}_items = getattr(payload, "{{ rel.write_name }}", None)
+    if {{ rel.write_name }}_items is not None:
+        permissions = {{ rel.role_permissions | tojson }}.get(role, "")
+        for item in {{ rel.write_name }}_items:
+            required = "u" if getattr(item, "id", None) is not None else "c"
+            if required not in permissions:
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"No {required} permission for {{ rel.target_model }}",
+                )
+        {% if rel.remove_permission %}
+        if updating and "{{ rel.remove_permission }}" not in permissions:
+            raise HTTPException(
+                status_code=403,
+                detail="No {{ rel.remove_permission }} permission for removing {{ rel.target_model }} items",
+            )
+        {% endif %}
+    {% endfor %}
+
 {% endif %}
 
 {% if model.is_timescaledb %}
@@ -373,7 +399,7 @@ async def read_{{ model.lower_name }}s(
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field %}
+    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.inline_relations %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     {{ model.lower_name }}_in: {{ model.name }}Create,
@@ -390,6 +416,9 @@ async def create_{{ model.lower_name }}(
     user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
     if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
         setattr({{ model.lower_name }}_in, "{{ model.owner_field }}", current_user.id)
+    {% endif %}
+    {% if model.inline_relations %}
+    _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=False)
     {% endif %}
     try:
         return await service.create(session, {{ model.lower_name }}_in)
@@ -488,12 +517,15 @@ async def update_{{ model.lower_name }}(
     current_user: User = Depends(deps.get_current_user),
     {% elif model.module_name == "user" and model.name == "User" %}
     current_user: User = Depends(deps.get_current_user),
-    {% elif model.owner_field %}
+    {% elif model.owner_field or model.inline_relations %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: {{ model.id_type }},
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
+    {% if model.inline_relations %}
+    _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=True)
+    {% endif %}
     {% if model.is_notification_table %}
     # Check permission for notification
     {{ model.lower_name }} = await service.get(session, id)

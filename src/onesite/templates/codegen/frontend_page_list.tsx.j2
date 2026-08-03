@@ -45,6 +45,7 @@ import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
 import { TimePicker } from '../../components/ui/time-picker';
+import { LocationInput } from '../../components/ui/location-input';
 import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
@@ -54,6 +55,11 @@ import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../servi
 import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service }}';
 {% endfor %}
 {% endif %}
+{% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'inline' %}
+import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service }}';
+{% endif %}
+{% endfor %}
 
 const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
@@ -250,10 +256,17 @@ const {{ model.name }}Page: React.FC = () => {
     {% endfor %}
     {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
-    setValue('{{ m2m.name }}', []);
+    setValue('{{ m2m.write_name }}', []);
+    {% if m2m.editor != 'inline' %}
     set{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({});
+    {% endif %}
     {% endfor %}
     {% endif %}
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    setValue('{{ rfk.write_name }}', []);
+    {% endif %}
+    {% endfor %}
     setIsModalOpen(true);
     {% endif %}
   };
@@ -272,10 +285,17 @@ const {{ model.name }}Page: React.FC = () => {
     {% endfor %}
     {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
-    setValue('{{ m2m.name }}', []);
+    setValue('{{ m2m.write_name }}', []);
+    {% if m2m.editor != 'inline' %}
     set{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({});
+    {% endif %}
     {% endfor %}
     {% endif %}
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    setValue('{{ rfk.write_name }}', []);
+    {% endif %}
+    {% endfor %}
     setValue('{{ model.tree_parent_field }}', parentNode.id);
     set{{ model.tree_parent_field|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [parentNode.id]: parentNode.{{ model.search_field }} || `#${parentNode.id}` });
     setIsModalOpen(true);
@@ -375,7 +395,10 @@ const {{ model.name }}Page: React.FC = () => {
     {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
     try {
-      {% if m2m.order_field %}
+      {% if m2m.editor == 'inline' %}
+      const rel = await get{{ model.name }}{{ m2m.target_model }}s(record.id, 1, -1);
+      setValue('{{ m2m.write_name }}', rel.items);
+      {% elif m2m.order_field %}
       const rel = await get{{ model.name }}{{ m2m.target_model }}sWithMeta(record.id, 1, 200);
       const ordered = [...rel.items].sort((a: any, b: any) => (a.order ?? 0) - (b.order ?? 0));
       setValue('{{ m2m.name }}', ordered.map((x: any) => x.id));
@@ -391,6 +414,17 @@ const {{ model.name }}Page: React.FC = () => {
     }
     {% endfor %}
     {% endif %}
+    {% for rfk in model.reverse_foreign_keys %}
+    {% if rfk.editor == 'inline' %}
+    try {
+      const rel = await get{{ rfk.source_model }}s(1, -1, { {{ rfk.source_fk_field }}: record.id });
+      setValue('{{ rfk.write_name }}', rel.items);
+    } catch (error) {
+      console.error(error);
+      setValue('{{ rfk.write_name }}', []);
+    }
+    {% endif %}
+    {% endfor %}
     setIsModalOpen(true);
     {% endif %}
   };
@@ -799,7 +833,7 @@ const {{ model.name }}Page: React.FC = () => {
             ) : data.length === 0 ? (
                 <TableRow>
                     <TableCell colSpan={ {{ model.fields|length + 2 }} } className="h-24 text-center">
-                        {t('common.no result')}
+                        {t('common.no_result')}
                     </TableCell>
                 </TableRow>
             ) : (
@@ -884,6 +918,12 @@ const {{ model.name }}Page: React.FC = () => {
                         <span className="text-muted-foreground">{formatDateTime(item.{{ field.name }}, timeZone)}</span>
                         {% elif field.ui_type == 'time' %}
                         <span className="text-muted-foreground">{formatTime(item.{{ field.name }})}</span>
+                        {% elif field.ui_type == 'location' %}
+                        <span className="whitespace-nowrap text-muted-foreground">
+                        {item.{{ field.name }}?.latitude != null && item.{{ field.name }}?.longitude != null
+                          ? `${item.{{ field.name }}.latitude}, ${item.{{ field.name }}.longitude}`
+                          : '-'}
+                        </span>
                         {% elif field.ui_type == 'json' %}
                         <span className="block max-w-[250px] truncate" title={item.{{ field.name }} !== undefined && item.{{ field.name }} !== null ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }})) : '-'}>
                         {item.{{ field.name }} !== undefined && item.{{ field.name }} !== null
@@ -1067,7 +1107,7 @@ const {{ model.name }}Page: React.FC = () => {
           </div>
         ) : !rootLoading && rootItems.length === 0 ? (
           <div className="h-24 text-center py-8">
-            {t('common.no result')}
+            {t('common.no_result')}
           </div>
         ) : (
           <div className="py-2">
@@ -1393,6 +1433,15 @@ const {{ model.name }}Page: React.FC = () => {
                     />
                 )}
             />
+            {% elif field.ui_type == 'location' %}
+            <Controller
+                control={control}
+                name="{{ field.name }}"
+                defaultValue={null}
+                render={({ field: { onChange, value } }) => (
+                    <LocationInput value={value} onChange={onChange} />
+                )}
+            />
             {% elif field.ui_type == 'json' %}
             <Controller
                 control={control}
@@ -1464,12 +1513,18 @@ const {{ model.name }}Page: React.FC = () => {
           {% if model.m2m_fields %}
           {% for m2m in model.m2m_fields %}
           <div className="space-y-2">
-            <Label>{t('models.{{ m2m.target_service }}.name')}s</Label>
+            <Label>{t('models.{{ m2m.target_service }}.plural')}</Label>
             <Controller
                 control={control}
-                name="{{ m2m.name }}"
+                name="{{ m2m.write_name }}"
                 render={({ field: { onChange, value } }) => (
-                    {% if m2m.order_field %}
+                    {% if m2m.editor == 'inline' %}
+                    <JsonModelArrayEditor
+                        itemSchema={ {{ m2m.inline_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                    />
+                    {% elif m2m.order_field %}
                     <LinkTableOrderedSelect
                         value={value}
                         onValueChange={onChange}
@@ -1508,6 +1563,25 @@ const {{ model.name }}Page: React.FC = () => {
           </div>
           {% endfor %}
           {% endif %}
+          {% for rfk in model.reverse_foreign_keys %}
+          {% if rfk.editor == 'inline' %}
+          <div className="space-y-2">
+            <Label>{t('models.{{ rfk.source_service }}.plural')}</Label>
+            <Controller
+                control={control}
+                name="{{ rfk.write_name }}"
+                defaultValue={[]}
+                render={({ field: { onChange, value } }) => (
+                    <JsonModelArrayEditor
+                        itemSchema={ {{ rfk.inline_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                    />
+                )}
+            />
+          </div>
+          {% endif %}
+          {% endfor %}
           <div className="flex justify-end space-x-2 pt-4">
             <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>{t('common.cancel')}</Button>
             <Button type="submit">{t('common.save')}</Button>

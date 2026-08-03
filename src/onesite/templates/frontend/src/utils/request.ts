@@ -77,20 +77,27 @@ request.interceptors.response.use(
           redirectTo('/error/403');
         }
       } else if (error.response.status >= 500) {
-        if (!window.location.pathname.startsWith('/error/500')) {
-          redirectTo('/error/500');
-        }
+        // Keep the current page usable and surface the server's safe error message.
+        // Structured errors (for example a missing DB migration) are not connectivity
+        // failures and must never be presented as "offline".
+        const detail = error.response.data?.detail;
+        toast.error(typeof detail === 'string' ? detail : 'The server could not complete the request. Please try again.');
       }
-      console.error(error.response.data.detail || 'Request failed');
+      console.error(error.response.data?.detail || 'Request failed');
     } else if (error.code === 'ECONNABORTED') {
       // Request timed out — show toast, don't redirect
       toast.error('Request timed out. Please try again.');
       console.error('Request timeout');
-    } else {
+    } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       if (!window.location.pathname.startsWith('/error/offline')) {
         redirectTo('/error/offline');
       }
       console.error('Network error');
+    } else {
+      // A reachable network with no HTTP response usually means the API server or
+      // proxy is unavailable, not that the user's device is offline.
+      toast.error('Unable to reach the server. Please try again.');
+      console.error('Server connection error');
     }
     return Promise.reject(error);
   }

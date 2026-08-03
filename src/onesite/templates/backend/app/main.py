@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 
 from app.core.config import settings
 from app.core.db import init_db
+from app.core.error_handlers import register_error_handlers
 from app.initial_data import init_data
 
 @asynccontextmanager
@@ -23,6 +24,8 @@ app = FastAPI(
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
     lifespan=lifespan
 )
+
+register_error_handlers(app)
 
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:

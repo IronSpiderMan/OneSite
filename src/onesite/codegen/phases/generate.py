@@ -296,6 +296,11 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
     if model.get("is_timescaledb") or model.get("is_latest_table"):
         return
 
+    # Embedded-only models keep their backend API and frontend service, but
+    # intentionally have no independent store, pages, or routes.
+    if not model.get("standalone", True):
+        return
+
     generate_file(
         "frontend_store.ts.j2", context,
         frontend_path / "src" / "stores" / f"use{model['name']}Store.ts",
@@ -601,7 +606,9 @@ def phase_generate_aggregated(
     frontend_models = [
         m
         for m in api_models
-        if not m.get("is_timescaledb") and not m.get("is_latest_table")
+        if not m.get("is_timescaledb")
+        and not m.get("is_latest_table")
+        and m.get("standalone", True)
     ]
     generate_file(
         "frontend_routes.tsx.j2",

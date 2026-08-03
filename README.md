@@ -332,7 +332,40 @@ class Product(SQLModel, table=True):
     is_active: bool = True
 ```
 
-Field types, requiredness, defaults, enums and unique constraints become API validation and form controls. Fields named like `image`, `avatar`, `photo`, `*_image` use the image uploader; `file`, `attachment`, `*_file` use the file uploader. Override detection with `site_props.component`: `image`, `images`, `file`, `textarea` or `json`. Use `images` with a JSON-backed `list[str]` field to upload multiple images.
+Field types, requiredness, defaults, enums and unique constraints become API validation and form controls. Fields named like `image`, `avatar`, `photo`, `*_image` use the image uploader; `file`, `attachment`, `*_file` use the file uploader. Override detection with `site_props.component`: `image`, `images`, `file`, `textarea`, `json` or `location`. Use `images` with a JSON-backed `list[str]` field to upload multiple images.
+
+For a browser-assisted latitude/longitude field, use the bundled `Location`
+value object with a JSON column and `component: "location"`:
+
+```python
+from typing import Optional
+
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+from app.models.location import Location
+
+
+class Store(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    location: Optional[Location] = Field(
+        default=None,
+        sa_column=Column(
+            JSON,
+            nullable=True,
+            info={"site_props": {"component": "location"}},
+        ),
+    )
+```
+
+The generated form accepts manual coordinates, provides a **Use current
+location** button backed by the browser Geolocation API, and can open an
+OpenStreetMap map for click-to-select positioning. Browser geolocation requires
+user permission and, outside localhost, a secure HTTPS context. Existing
+projects should run `site sync -i` once to install the Leaflet dependencies.
+The default raster tiles use the official OpenStreetMap endpoint. Deployments
+can override it with `VITE_MAP_TILE_URL` and `VITE_MAP_ATTRIBUTION` in the
+frontend build environment.
 
 ### Transactional CUD hooks
 

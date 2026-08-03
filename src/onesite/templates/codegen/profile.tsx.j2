@@ -9,6 +9,7 @@ import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { LocationInput } from '../components/ui/location-input';
 import { getMe, updateMe } from '../services/user';
 import { toast } from 'sonner';
 
@@ -16,7 +17,7 @@ type Me = {
   id: number;
 {% for field in model.fields %}
   {% if 'r' in field.permissions and field.name != 'hashed_password' and field.name != 'id' %}
-  {{ field.name }}{% if not field.required %}?{% endif %}: {% if field.ui_type == 'int' or field.ui_type == 'float' %}number{% elif field.ui_type == 'bool' %}boolean{% elif field.ui_type == 'images' %}string[]{% elif field.is_enum %}string{% elif field.ui_type == 'json' %}any{% else %}string{% endif %} | null;
+  {{ field.name }}{% if not field.required %}?{% endif %}: {% if field.ui_type == 'int' or field.ui_type == 'float' %}number{% elif field.ui_type == 'bool' %}boolean{% elif field.ui_type == 'images' %}string[]{% elif field.is_enum %}string{% elif field.ui_type in ['json', 'location'] %}any{% else %}string{% endif %} | null;
   {% endif %}
 {% endfor %}
 };
@@ -203,6 +204,11 @@ export default function ProfilePage() {
                   value={me.{{ field.name }} ?? ''}
                   onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: Number(e.target.value) } : prev))}
                 />
+      {% elif field.ui_type == 'location' %}
+                <LocationInput
+                  value={me.{{ field.name }}}
+                  onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                />
       {% elif field.ui_type == 'json' %}
                 <Input
                   value={me.{{ field.name }} ? (typeof me.{{ field.name }} === 'object' ? JSON.stringify(me.{{ field.name }}) : String(me.{{ field.name }})) : ''}
@@ -252,6 +258,12 @@ export default function ProfilePage() {
                 <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}
                 <div className="text-muted-foreground">{me.{{ field.name }} || '-'}</div>
+      {% elif field.ui_type == 'location' %}
+                <div className="text-muted-foreground">
+                  {me.{{ field.name }}?.latitude != null && me.{{ field.name }}?.longitude != null
+                    ? `${me.{{ field.name }}.latitude}, ${me.{{ field.name }}.longitude}`
+                    : '-'}
+                </div>
       {% elif field.ui_type == 'json' %}
                 <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
                   {me.{{ field.name }} !== undefined && me.{{ field.name }} !== null
@@ -289,6 +301,12 @@ export default function ProfilePage() {
                 <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}
                 <div className="text-muted-foreground">{me.{{ field.name }} || '-'}</div>
+      {% elif field.ui_type == 'location' %}
+                <div className="text-muted-foreground">
+                  {me.{{ field.name }}?.latitude != null && me.{{ field.name }}?.longitude != null
+                    ? `${me.{{ field.name }}.latitude}, ${me.{{ field.name }}.longitude}`
+                    : '-'}
+                </div>
       {% elif field.ui_type == 'json' %}
                 <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
                   {me.{{ field.name }} !== undefined && me.{{ field.name }} !== null

@@ -186,7 +186,12 @@ def init():
         models_dir.mkdir(parents=True, exist_ok=True)
 
         # Ensure necessary models exist
-        necessary_models = ["user.py", "system_config.py", "custom_config.py"]
+        necessary_models = [
+            "user.py",
+            "system_config.py",
+            "custom_config.py",
+            "location.py",
+        ]
         for model_file in necessary_models:
             src = template_models_dir / model_file
             dst = models_dir / model_file

@@ -14,6 +14,7 @@ import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
 import { FileUpload } from '../../components/ui/file-upload';
 import { TimePicker } from '../../components/ui/time-picker';
+import { LocationInput } from '../../components/ui/location-input';
 
 const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
@@ -112,6 +113,16 @@ const {{ model.name }}Page: React.FC = () => {
               control={control}
               render={({ field: { onChange, value } }) => (
                 <FileUpload value={value} onChange={onChange} />
+              )}
+            />
+
+            {% elif field.ui_type == 'location' %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              defaultValue={null}
+              render={({ field: { onChange, value } }) => (
+                <LocationInput value={value} onChange={onChange} />
               )}
             />
 

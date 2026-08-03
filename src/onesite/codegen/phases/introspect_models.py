@@ -148,6 +148,7 @@ def _build_model_dict(
         has_created_at=any(f.name == "created_at" for f in result.fields),
         owner_field=result.owner_field,
         page_edit=result.page_edit,
+        standalone=bool(result.model_site_props.get("standalone", True)),
         is_timescaledb=result.is_timescaledb,
         is_latest_table=result.model_site_props.get("is_latest_table", False),
         timescaledb_entity_field=result.timescaledb_entity_field,

@@ -5,11 +5,12 @@ import { Label } from "./label"
 import { Switch } from "./switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select"
 import { JsonInput } from "./json-input"
+import { LocationInput } from "./location-input"
 import { cn } from "../../lib/utils"
 
 export type JsonFieldSchema = {
   name?: string
-  kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "model" | "array" | "any"
+  kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "model" | "array" | "location" | "any"
   enumValues?: Array<string | number>
   model?: JsonModelSchema
   item?: JsonFieldSchema
@@ -30,6 +31,7 @@ const buildDefaultValue = (schema: JsonModelSchema) => {
     else if (f.kind === "enum") obj[f.name] = f.enumValues?.[0]
     else if (f.kind === "model" && f.model) obj[f.name] = buildDefaultValue(f.model)
     else if (f.kind === "array") obj[f.name] = []
+    else if (f.kind === "location") obj[f.name] = { latitude: null, longitude: null }
     else obj[f.name] = ""
   }
   return obj
@@ -110,6 +112,17 @@ const JsonModelForm: React.FC<{
                 schema={f.model}
                 value={cur}
                 onChange={(nv) => onChange(setPathValue(v, fieldPath.slice(path.length), nv))}
+              />
+            </div>
+          )
+        }
+        if (f.kind === "location") {
+          return (
+            <div key={key} className="space-y-2">
+              <Label>{key}</Label>
+              <LocationInput
+                value={cur}
+                onChange={(next) => onChange(setPathValue(v, fieldPath.slice(path.length), next))}
               />
             </div>
           )

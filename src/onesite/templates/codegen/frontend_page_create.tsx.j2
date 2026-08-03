@@ -19,6 +19,7 @@ import { FileUpload } from '../../components/ui/file-upload';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { TimePicker } from '../../components/ui/time-picker';
+import { LocationInput } from '../../components/ui/location-input';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -219,6 +220,15 @@ const Create{{ model.name }}Page: React.FC = () => {
                   />
                 )}
               />
+              {% elif field.ui_type == 'location' %}
+              <Controller
+                control={control}
+                name="{{ field.name }}"
+                defaultValue={null}
+                render={({ field: { onChange, value } }) => (
+                  <LocationInput value={value} onChange={onChange} />
+                )}
+              />
               {% elif field.ui_type == 'json' %}
               <Controller
                 control={control}
@@ -290,12 +300,19 @@ const Create{{ model.name }}Page: React.FC = () => {
             {% if model.m2m_fields %}
             {% for m2m in model.m2m_fields %}
             <div className="space-y-2">
-              <Label>{t('models.{{ m2m.target_service }}.name')}s</Label>
+              <Label>{t('models.{{ m2m.target_service }}.plural')}</Label>
               <Controller
                 control={control}
-                name="{{ m2m.name }}"
+                name="{{ m2m.write_name }}"
+                defaultValue={[]}
                 render={({ field: { onChange, value } }) => (
-                  {% if m2m.order_field %}
+                  {% if m2m.editor == 'inline' %}
+                  <JsonModelArrayEditor
+                    itemSchema={ {{ m2m.inline_schema | tojson }} }
+                    value={value}
+                    onChange={onChange}
+                  />
+                  {% elif m2m.order_field %}
                   <LinkTableOrderedSelect
                     value={value}
                     onValueChange={onChange}
@@ -334,6 +351,25 @@ const Create{{ model.name }}Page: React.FC = () => {
             </div>
             {% endfor %}
             {% endif %}
+            {% for rfk in model.reverse_foreign_keys %}
+            {% if rfk.editor == 'inline' %}
+            <div className="space-y-2">
+              <Label>{t('models.{{ rfk.source_service }}.plural')}</Label>
+              <Controller
+                control={control}
+                name="{{ rfk.write_name }}"
+                defaultValue={[]}
+                render={({ field: { onChange, value } }) => (
+                  <JsonModelArrayEditor
+                    itemSchema={ {{ rfk.inline_schema | tojson }} }
+                    value={value}
+                    onChange={onChange}
+                  />
+                )}
+              />
+            </div>
+            {% endif %}
+            {% endfor %}
 
             <div className="flex justify-end space-x-2 pt-4">
               <Button variant="outline" type="button" onClick={() => navigate('/{{ model.module_name }}s')}>

@@ -16,6 +16,79 @@ from ..types import ModelDefinition
 from .base import ROLE_ORDER, ROLE_TO_ENUM, console, pluralize
 
 
+_RELATION_EDITORS = {"select", "inline", "readonly", "hidden"}
+
+
+def _inline_field_type(field: dict) -> str:
+    """Return a dependency-free type for an inline relation item schema."""
+    if field.get("is_enum"):
+        return "List[str]" if field.get("is_multi_select") else "str"
+    ui_type = field.get("ui_type")
+    if ui_type == "int":
+        return "int"
+    if ui_type == "float":
+        return "float"
+    if ui_type == "bool":
+        return "bool"
+    if ui_type == "date":
+        return "date"
+    if ui_type == "datetime":
+        return "datetime"
+    if ui_type == "time":
+        return "time"
+    if ui_type in {"json", "location"}:
+        return "List[Any]" if field.get("json_kind") == "array" else "Dict[str, Any]"
+    return "str"
+
+
+def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[list[dict], dict]:
+    """Build backend and frontend metadata for a one-level nested editor."""
+    fields = []
+    ui_fields = []
+    for field in model.get("fields", []):
+        if field["name"] == "id" or field["name"] in excluded:
+            continue
+        if not ({"c", "u"} & set(field.get("permissions", ""))):
+            continue
+        item = {
+            "name": field["name"],
+            "type": _inline_field_type(field),
+            "required": bool(field.get("required")),
+            "create_optional": bool(field.get("create_optional")),
+        }
+        fields.append(item)
+        if field.get("is_enum"):
+            kind = "enum"
+        elif field.get("ui_type") in {
+            "int",
+            "float",
+            "bool",
+            "datetime",
+            "location",
+        }:
+            kind = field["ui_type"]
+        else:
+            kind = "any" if field.get("ui_type") == "json" else "str"
+        ui_field = {"name": field["name"], "kind": kind}
+        if field.get("is_enum"):
+            ui_field["enumValues"] = field.get("enum_values", [])
+        ui_fields.append(ui_field)
+    return fields, {"name": model["name"], "fields": ui_fields}
+
+
+def _normalise_editor(config: dict, *, legacy_editable: Any = None) -> str:
+    editor = config.get("editor")
+    if editor is None and legacy_editable is not None:
+        editor = "select" if legacy_editable else "readonly"
+    editor = str(editor or "readonly").lower()
+    if editor not in _RELATION_EDITORS:
+        console.print(
+            f"[yellow]Warning: unsupported relation editor '{editor}'; using readonly.[/yellow]"
+        )
+        return "readonly"
+    return editor
+
+
 # ── Min-role computation ─────────────────────────────────────────────────
 
 
@@ -143,13 +216,44 @@ def _resolve_fk_labels_and_reverse(
                 and f["name"] != "password"
             ]
 
+            reverse_cfg = fk.get("reverse", {}) or {}
+            editor = _normalise_editor(reverse_cfg)
+            on_remove = str(reverse_cfg.get("on_remove", "delete")).lower()
+            if on_remove not in {"delete", "nullify"}:
+                console.print(
+                    f"[yellow]Warning: {model['name']}.{fk['name']} reverse.on_remove "
+                    f"must be delete or nullify; using delete.[/yellow]"
+                )
+                on_remove = "delete"
+            if on_remove == "nullify":
+                source_fk_field = next(
+                    (field for field in model["fields"] if field["name"] == fk["name"]),
+                    None,
+                )
+                if source_fk_field and not str(source_fk_field.get("type", "")).startswith("Optional["):
+                    raise ValueError(
+                        f"{model['name']}.{fk['name']} uses reverse.on_remove='nullify' "
+                        "but the foreign key is not Optional"
+                    )
+            inline_fields, inline_schema = _inline_item_schema(
+                model, excluded={fk["name"]}
+            )
+
             target_model["reverse_foreign_keys"].append({
                 "name": reverse_name,
+                "write_name": reverse_name,
                 "source_model": model["name"],
                 "source_service": model["module_name"],
+                "source_module": model["source_module"],
+                "source_id_type": model["id_type"],
                 "source_fk_field": fk["name"],
                 "label_field": model.get("unique_search_field") or model["search_field"],
-                "display": fk.get("reverse_display", True),
+                "display": editor != "hidden" and fk.get("reverse_display", True),
+                "editor": editor,
+                "on_remove": on_remove,
+                "inline_fields": inline_fields,
+                "inline_schema": inline_schema,
+                "role_permissions": model.get("role_permissions", {}),
                 "source_readable_fields": source_readable_fields,
             })
 
@@ -186,7 +290,9 @@ def _resolve_m2m(
         editable_edges = {
             (str(d.get("from", "")), str(d.get("to", "")))
             for d in directions
-            if isinstance(d, dict) and d.get("editable", True)
+            if isinstance(d, dict)
+            and _normalise_editor(d, legacy_editable=d.get("editable", True))
+            in {"select", "inline"}
         }
 
         for d in directions:
@@ -227,9 +333,18 @@ def _apply_m2m_direction(
     if not from_fk or not to_fk:
         return
 
-    # Forward direction: add m2m_field to from_model
-    if d.get("editable", True):
+    editor = _normalise_editor(d, legacy_editable=d.get("editable", True))
+    if editor == "inline" and link_model.get("is_association_table"):
+        raise ValueError(
+            f"{link_model['name']} cannot use editor='inline' while the link table "
+            "has extra association fields"
+        )
+
+    # Forward direction: add an editable field to from_model.
+    if editor in {"select", "inline"}:
         m2m_field_name = f"{to_model['lower_name']}_ids"
+        write_name = pluralize(to_model["module_name"]) if editor == "inline" else m2m_field_name
+        inline_fields, inline_schema = _inline_item_schema(to_model, excluded=set())
         existing = next(
             (x for x in from_model.get("m2m_fields", [])
              if x.get("name") == m2m_field_name and x.get("target_model") == to_model["name"]),
@@ -238,6 +353,10 @@ def _apply_m2m_direction(
         if existing is None:
             from_model["m2m_fields"].append({
                 "name": m2m_field_name,
+                "write_name": write_name,
+                "editor": editor,
+                "on_remove": "unlink",
+                "allow_existing": bool(d.get("allow_existing", False)),
                 "target_model": to_model["name"],
                 "target_service": to_model["module_name"],
                 "target_endpoint": f"{to_model['module_name']}s",
@@ -258,6 +377,10 @@ def _apply_m2m_direction(
                 "link_model": link_model["name"],
                 "link_module": link_model["source_module"],
                 "target_source_module": to_model["source_module"],
+                "target_id_type": to_model["id_type"],
+                "target_role_permissions": to_model.get("role_permissions", {}),
+                "inline_fields": inline_fields,
+                "inline_schema": inline_schema,
                 "source_fk_field": from_fk["name"],
                 "target_fk_field": to_fk["name"],
                 "order_field": link_model.get("link_order_field"),
@@ -532,5 +655,28 @@ def phase_resolve_relationships(
     _resolve_property_config_relations(models)
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_m2m(models, model_map, module_map)
+
+    for model in models:
+        model["inline_relations"] = [
+            {
+                "kind": "reverse_fk",
+                "write_name": rel["write_name"],
+                "target_model": rel["source_model"],
+                "role_permissions": rel["role_permissions"],
+                "remove_permission": "d" if rel["on_remove"] == "delete" else "u",
+            }
+            for rel in model.get("reverse_foreign_keys", [])
+            if rel.get("editor") == "inline"
+        ] + [
+            {
+                "kind": "m2m",
+                "write_name": rel["write_name"],
+                "target_model": rel["target_model"],
+                "role_permissions": rel["target_role_permissions"],
+                "remove_permission": None,
+            }
+            for rel in model.get("m2m_fields", [])
+            if rel.get("editor") == "inline"
+        ]
 
     return models

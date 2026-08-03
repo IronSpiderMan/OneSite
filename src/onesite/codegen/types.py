@@ -27,6 +27,7 @@ class ForeignKeyInfo:
     target_endpoint: str
     label_field: str
     reverse_display: bool = True
+    reverse: dict[str, Any] = field(default_factory=dict)
     is_self_referencing: bool = False
 
     # ── Set during relationship resolution (Phase 4) ────────────────────────

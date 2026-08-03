@@ -474,6 +474,11 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     _ensure_init_py(backend_path / "app" / "services")
     _ensure_init_py(backend_path / "app" / "consumers")
     _ensure_init_py(backend_path / "app" / "tasks")
+
+    error_handlers = template_backend_root / "app" / "core" / "error_handlers.py"
+    copy_file_with_status(
+        error_handlers, backend_path / "app" / "core" / "error_handlers.py"
+    )
     _sync_project_utils(cwd, backend_path)
     if site_config.get("tools"):
         _sync_tools(cwd, backend_path, site_config["tools"])

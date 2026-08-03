@@ -90,7 +90,37 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
 权限分三层：模型级 `c/r/u/d`，字段级 `c/r/u`，以及 `visible` 菜单可见性。角色由低到高为 `user`、`admin`、`developer`。字段权限未配置时会继承模型权限（移除 `d`）；默认 `id` 隐藏、`created_at` 只读、`updated_at` 可读写。用字段 `site_props.permissions` 显式配置即可覆盖默认值。
 
-字段 `site_props` 还支持 `is_search_field`、`component`（`image`/`file`/`textarea`/`json`）、`create_optional`、`update_optional`、`reverse_display`、`allow_download`、`group`、`fixed_keys`、`lock_keys` 等。
+字段 `site_props` 还支持 `is_search_field`、`component`（`image`/`images`/`file`/`textarea`/`json`/`location`）、`create_optional`、`update_optional`、`reverse_display`、`allow_download`、`group`、`fixed_keys`、`lock_keys` 等。
+
+定位字段使用内置的 `Location` 值对象、JSON 列和 `location` 组件：
+
+```python
+from typing import Optional
+
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+from app.models.location import Location
+
+
+class Store(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    location: Optional[Location] = Field(
+        default=None,
+        sa_column=Column(
+            JSON,
+            nullable=True,
+            info={"site_props": {"component": "location"}},
+        ),
+    )
+```
+
+生成的表单既可以手动输入经纬度，也可以通过“获取当前位置”按钮调用浏览器
+Geolocation API，或展开 OpenStreetMap 地图点击选点。浏览器会请求用户授权；除
+localhost 外，定位功能通常要求 HTTPS。现有项目需要执行一次 `site sync -i` 安装
+Leaflet 依赖。
+地图默认使用 OpenStreetMap 官方瓦片地址；部署时可以通过前端构建环境变量
+`VITE_MAP_TILE_URL` 和 `VITE_MAP_ATTRIBUTION` 切换瓦片服务。
 
 ## MQTT 回调
 

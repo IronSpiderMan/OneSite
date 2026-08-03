@@ -22,7 +22,7 @@ class {{ model.name }}Base(SQLModel):
     {% if 'r' in field.permissions and field.name != 'id' %}
     {{ field.name }}: {{ field.type }}
     {% set ns.has_field = true %}
-    {% if (field.ui_type == 'json' and field.type not in ('Dict[str, Any]', 'Any', 'dict')) or field.ui_type == 'multi_select' %}
+    {% if (field.ui_type in ['json', 'location'] and field.type not in ('Dict[str, Any]', 'Any', 'dict')) or field.ui_type == 'multi_select' %}
     {% set ns_json_fields.fields = ns_json_fields.fields + [field.name] %}
     {% endif %}
     {% endif %}
@@ -54,6 +54,26 @@ class {{ model.name }}Base(SQLModel):
         return data
 {% endif %}
 
+{% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'inline' %}
+class {{ model.name }}Inline{{ rfk.source_model }}Item(SQLModel):
+    id: Optional[{{ rfk.source_id_type }}] = None
+{% for field in rfk.inline_fields %}
+    {{ field.name }}: Optional[{{ field.type }}] = None
+{% endfor %}
+
+{% endif %}
+{% endfor %}
+{% for m2m in model.m2m_fields %}
+{% if m2m.editor == 'inline' %}
+class {{ model.name }}Inline{{ m2m.target_model }}Item(SQLModel):
+    id: Optional[{{ m2m.target_id_type }}] = None
+{% for field in m2m.inline_fields %}
+    {{ field.name }}: Optional[{{ field.type }}] = None
+{% endfor %}
+
+{% endif %}
+{% endfor %}
 
 # Properties to receive via API on creation
 class {{ model.name }}Create(SQLModel):
@@ -88,10 +108,20 @@ class {{ model.name }}Create(SQLModel):
 {% endfor %}
 {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
+    {% if m2m.editor == 'inline' %}
+    {{ m2m.write_name }}: Optional[List[{{ model.name }}Inline{{ m2m.target_model }}Item]] = Field(default_factory=list)
+    {% else %}
     {{ m2m.name }}: Optional[List[int]] = []
+    {% endif %}
     {% set ns.has_field = true %}
     {% endfor %}
 {% endif %}
+{% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'inline' %}
+    {{ rfk.write_name }}: Optional[List[{{ model.name }}Inline{{ rfk.source_model }}Item]] = Field(default_factory=list)
+    {% set ns.has_field = true %}
+{% endif %}
+{% endfor %}
 {% if not ns.has_field %}
     pass
 {% endif %}
@@ -129,10 +159,20 @@ class {{ model.name }}Update(SQLModel):
 {% endfor %}
 {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
+    {% if m2m.editor == 'inline' %}
+    {{ m2m.write_name }}: Optional[List[{{ model.name }}Inline{{ m2m.target_model }}Item]] = None
+    {% else %}
     {{ m2m.name }}: Optional[List[int]] = None
+    {% endif %}
     {% set ns.has_field = true %}
     {% endfor %}
 {% endif %}
+{% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'inline' %}
+    {{ rfk.write_name }}: Optional[List[{{ model.name }}Inline{{ rfk.source_model }}Item]] = None
+    {% set ns.has_field = true %}
+{% endif %}
+{% endfor %}
 
 {% if not ns.has_field %}
     pass

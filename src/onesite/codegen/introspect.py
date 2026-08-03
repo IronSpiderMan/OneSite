@@ -453,11 +453,11 @@ def get_model_fields(
                     json_item_schema = _build_json_model_schema(value_type)
                 else:
                     type_str = "Dict[str, Any]"
-        elif inspect.isclass(resolved_annotation) and _is_pydantic_model(resolved_annotation):
+        elif inspect.isclass(_inner) and _is_pydantic_model(_inner):
             json_kind = "object"
-            type_str = resolved_annotation.__name__
-            json_py_imports.append(resolved_annotation.__name__)
-            json_model_schema = _build_json_model_schema(resolved_annotation)
+            type_str = _inner.__name__
+            json_py_imports.append(_inner.__name__)
+            json_model_schema = _build_json_model_schema(_inner)
         else:
             # Check the specific datetime module types before the broad datetime
             # match: ``datetime.date`` and ``datetime.time`` both contain the
@@ -494,6 +494,22 @@ def get_model_fields(
             ui_type = "images"
         elif site_props.get("component") == "file":
             ui_type = "file"
+        elif site_props.get("component") == "location":
+            if json_kind != "object":
+                raise ValueError(
+                    f"{model_cls.__name__}.{name} uses component='location' but "
+                    "is not an object field. Use the built-in Location model with "
+                    "a SQLAlchemy JSON column."
+                )
+            location_fields = {
+                item.get("name") for item in (json_model_schema or {}).get("fields", [])
+            }
+            if not {"latitude", "longitude"}.issubset(location_fields):
+                raise ValueError(
+                    f"{model_cls.__name__}.{name} uses component='location' but "
+                    "its model does not define latitude and longitude fields."
+                )
+            ui_type = "location"
         elif ui_type == "str" and (
             name.endswith("_image")
             or name.endswith("_img")
@@ -552,6 +568,16 @@ def get_model_fields(
                 target_endpoint = f"{target_service}s"
 
                 reverse_display = site_props.get("reverse_display", True)
+                reverse = site_props.get("reverse", {}) or {}
+                if not isinstance(reverse, dict):
+                    console.print(
+                        f"[yellow]Warning: {model_cls.__name__}.{name} site_props.reverse "
+                        "must be an object; ignoring it.[/yellow]"
+                    )
+                    reverse = {}
+                # The nested form supersedes the legacy display-only flag.
+                if "display" in reverse:
+                    reverse_display = bool(reverse["display"])
                 model_table_name = getattr(model_cls, '__tablename__', None) or _to_snake(model_cls.__name__)
                 is_self_referencing = (target_model_class == model_cls.__name__) or (fk_table == model_table_name)
                 fk_info = ForeignKeyInfo(
@@ -561,6 +587,7 @@ def get_model_fields(
                     target_endpoint=target_endpoint,
                     label_field="name",
                     reverse_display=reverse_display,
+                    reverse=reverse,
                     is_self_referencing=is_self_referencing,
                 )
 

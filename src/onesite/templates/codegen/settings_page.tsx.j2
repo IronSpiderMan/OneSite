@@ -15,6 +15,7 @@ import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
 import { TimePicker } from '../components/ui/time-picker';
 import { MarkdownEditor } from '../components/ui/markdown-editor';
+import { LocationInput } from '../components/ui/location-input';
 import { applyTheme, saveTheme } from '../lib/theme';
 {% if system_model %}
 import { use{{ system_model.name }}Store } from '../stores/use{{ system_model.name }}Store';
@@ -283,6 +284,15 @@ const SettingsPage: React.FC = () => {
                           <FileUpload value={value} onChange={onChange} />
                         )}
                       />
+                      {% elif field.ui_type == 'location' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        defaultValue={null}
+                        render={({ field: { onChange, value } }) => (
+                          <LocationInput value={value} onChange={onChange} />
+                        )}
+                      />
                       {% elif field.ui_type == 'json' %}
                         {% if field.json_model_schema %}
                           {% if field.json_kind == 'array' %}
@@ -426,6 +436,15 @@ const SettingsPage: React.FC = () => {
                 control={control}
                 render={({ field: { onChange, value } }) => (
                   <FileUpload value={value} onChange={onChange} />
+                )}
+              />
+              {% elif field.ui_type == 'location' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                defaultValue={null}
+                render={({ field: { onChange, value } }) => (
+                  <LocationInput value={value} onChange={onChange} />
                 )}
               />
               {% elif field.ui_type == 'json' %}
