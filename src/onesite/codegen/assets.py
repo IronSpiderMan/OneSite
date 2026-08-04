@@ -1,4 +1,5 @@
 import ast
+import json
 import re
 from pathlib import Path
 from typing import Any, Dict, List
@@ -9,8 +10,44 @@ from ..project_paths import get_project_paths
 from .config import SiteConfigError
 from .file_utils import copy_file_with_status, write_file_with_status
 from .render import generate_file
+from .theme import resolve_theme
 
 console = Console()
+
+
+THEME_FRONTEND_DEPENDENCIES: Dict[str, Dict[str, str]] = {
+    "normal": {"antd": "^6.5.1"},
+}
+
+
+def _sync_frontend_theme_assets(
+    template_root: Path,
+    target_frontend_root: Path,
+    site_config: Dict[str, Any],
+) -> None:
+    """Overlay build-time theme assets and add their npm dependencies."""
+    theme_name = resolve_theme(site_config)[0]["id"]
+    theme_root = template_root / "themes" / theme_name
+    if theme_root.is_dir():
+        for source in theme_root.rglob("*"):
+            if source.is_file():
+                copy_file_with_status(
+                    source,
+                    target_frontend_root / source.relative_to(theme_root),
+                )
+
+    dependencies = THEME_FRONTEND_DEPENDENCIES.get(theme_name, {})
+    if not dependencies:
+        return
+    package_path = target_frontend_root / "package.json"
+    package_data = json.loads(package_path.read_text(encoding="utf-8"))
+    package_dependencies = package_data.setdefault("dependencies", {})
+    package_dependencies.update(dependencies)
+    package_data["dependencies"] = dict(sorted(package_dependencies.items()))
+    write_file_with_status(
+        package_path,
+        json.dumps(package_data, ensure_ascii=False, indent=2) + "\n",
+    )
 
 
 def _sync_desktop_assets(target_frontend_root: Path, site_config: Dict[str, Any]) -> None:
@@ -423,6 +460,10 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         dst = target_frontend_root / config_file
         if src.exists():
             copy_file_with_status(src, dst)
+
+    # Theme assets intentionally run last so a build-time theme can replace
+    # shared UI adapters and entry points without duplicating page templates.
+    _sync_frontend_theme_assets(template_root, target_frontend_root, site_config)
 
     generate_file("frontend_nginx.conf.j2", {"config": site_config}, target_frontend_root / "nginx.template.conf")
 

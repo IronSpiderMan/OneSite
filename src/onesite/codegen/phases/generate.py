@@ -14,7 +14,8 @@ from typing import Any
 
 from ...project_paths import get_project_paths
 from ..i18n import generate_locale_files
-from ..render import generate_file
+from ..render import generate_file, generate_theme_file
+from ..theme import resolve_theme
 from ..router import update_api_router
 from ..types import ModelDefinition
 from .base import console
@@ -218,7 +219,13 @@ model_lookup_global: dict[str, ModelDefinition] = {}
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-def _generate_singleton(model: ModelDefinition, cwd: Path, backend_path: Path, is_postgresql: bool = False) -> None:
+def _generate_singleton(
+    model: ModelDefinition,
+    cwd: Path,
+    backend_path: Path,
+    is_postgresql: bool = False,
+    theme_name: str = "normal",
+) -> None:
     """Generate code for singleton / config models."""
     context = {"model": model, "is_postgresql": is_postgresql}
     frontend_path = get_project_paths(cwd).frontend
@@ -243,9 +250,10 @@ def _generate_singleton(model: ModelDefinition, cwd: Path, backend_path: Path, i
     )
 
     if not is_config:
-        generate_file(
+        generate_theme_file(
             "singleton_page.tsx.j2", context,
             frontend_path / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
+            theme_name,
         )
 
 
@@ -268,7 +276,13 @@ def _backend_path(tpl: str, model: ModelDefinition, backend_path: Path) -> Path:
     return mapping[tpl]
 
 
-def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Path, is_postgresql: bool = False) -> None:
+def _generate_regular_model(
+    model: ModelDefinition,
+    cwd: Path,
+    backend_path: Path,
+    is_postgresql: bool = False,
+    theme_name: str = "normal",
+) -> None:
     """Generate code for a regular (non-singleton, non-link) model."""
     context = {"model": model, "is_postgresql": is_postgresql}
     frontend_path = get_project_paths(cwd).frontend
@@ -305,19 +319,22 @@ def _generate_regular_model(model: ModelDefinition, cwd: Path, backend_path: Pat
         "frontend_store.ts.j2", context,
         frontend_path / "src" / "stores" / f"use{model['name']}Store.ts",
     )
-    generate_file(
+    generate_theme_file(
         "frontend_page_list.tsx.j2", context,
         frontend_path / "src" / "pages" / f"{model['module_name']}" / "index.tsx",
+        theme_name,
     )
-    generate_file(
+    generate_theme_file(
         "frontend_page_detail.tsx.j2", context,
         frontend_path / "src" / "pages" / f"{model['module_name']}" / "detail.tsx",
+        theme_name,
     )
 
     if model.get("page_edit"):
-        generate_file(
+        generate_theme_file(
             "frontend_page_create.tsx.j2", context,
             frontend_path / "src" / "pages" / f"{model['module_name']}" / "create.tsx",
+            theme_name,
         )
 
     if not model.get("frontend_only"):
@@ -403,6 +420,7 @@ def phase_generate_per_model(
     global model_lookup_global
     model_lookup_global = _build_model_lookup(models)
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
+    theme_name = resolve_theme(site_config)[0]["id"]
 
     # Resolve visualize filter paths for all models
     for model in models:
@@ -426,9 +444,21 @@ def phase_generate_per_model(
         ) or (
             model["module_name"] == "custom_config" and model["name"] == "CustomConfig"
         ):
-            _generate_singleton(model, cwd, backend_path, is_postgresql=is_postgresql)
+            _generate_singleton(
+                model,
+                cwd,
+                backend_path,
+                is_postgresql=is_postgresql,
+                theme_name=theme_name,
+            )
         else:
-            _generate_regular_model(model, cwd, backend_path, is_postgresql=is_postgresql)
+            _generate_regular_model(
+                model,
+                cwd,
+                backend_path,
+                is_postgresql=is_postgresql,
+                theme_name=theme_name,
+            )
 
     api_models = [
         m for m in models
@@ -478,6 +508,7 @@ def phase_generate_aggregated(
 ) -> None:
     """Generate cross-cutting files: router, routes, menu, dashboard, i18n, etc."""
     frontend_path = get_project_paths(cwd).frontend
+    theme_name = resolve_theme(site_config)[0]["id"]
     # ── TimescaleDB: collect models and generate db.py ──
     timescaledb_models = [m for m in models if m.get("is_timescaledb")]
     has_timescaledb = bool(timescaledb_models)
@@ -587,19 +618,21 @@ def phase_generate_aggregated(
         ),
         None,
     )
-    generate_file(
+    generate_theme_file(
         "settings_page.tsx.j2",
         {"system_model": system_model, "custom_model": custom_model},
         frontend_path / "src" / "pages" / "Settings.tsx",
+        theme_name,
     )
 
     # ── Profile page ──
     user_model = next((m for m in models if m["name"] == "User"), None)
     if user_model is not None:
-        generate_file(
+        generate_theme_file(
             "profile.tsx.j2",
             {"model": user_model},
             frontend_path / "src" / "pages" / "Profile.tsx",
+            theme_name,
         )
 
     # ── Routes, Menu, Dashboard ──
@@ -631,7 +664,7 @@ def phase_generate_aggregated(
             for field in system_model["fields"]
         )
     )
-    generate_file(
+    generate_theme_file(
         "dashboard_page.tsx.j2",
         {
             "models": frontend_models,
@@ -641,6 +674,7 @@ def phase_generate_aggregated(
             "tools": tools,
         },
         frontend_path / "src" / "pages" / "Dashboard.tsx",
+        theme_name,
     )
 
     # ── Feature flags ──

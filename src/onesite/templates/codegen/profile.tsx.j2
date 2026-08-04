@@ -118,7 +118,11 @@ export default function ProfilePage() {
   };
 
   return (
-    <div className="max-w-3xl space-y-6">
+    <div
+      className="{{ page_shell_class | default('max-w-3xl space-y-6') }}"
+      data-codegen-theme="{{ codegen_theme | default('normal') }}"
+      data-page-kind="profile"
+    >
       <div className="flex items-center justify-between">
         <div>
           <div className="text-sm text-muted-foreground">{t('common.profile')}</div>

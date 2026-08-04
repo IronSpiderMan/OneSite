@@ -55,7 +55,11 @@ const {{ model.name }}Page: React.FC = () => {
   }
 
   return (
-    <div className="max-w-4xl mx-auto space-y-6">
+    <div
+      className="{{ page_shell_class | default('max-w-4xl mx-auto space-y-6') }}"
+      data-codegen-theme="{{ codegen_theme | default('normal') }}"
+      data-page-kind="singleton"
+    >
       <div className="flex justify-between items-center">
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           {t('menu.{{ model.module_name }}', '{{ model.name }}')}

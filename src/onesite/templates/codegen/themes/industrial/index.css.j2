@@ -1,0 +1,17 @@
+{% include "common/index.css.j2" %}
+
+@layer components {
+  [data-codegen-theme="industrial"] > div:first-of-type {
+    border-bottom: 2px solid hsl(var(--accent));
+    padding-bottom: 0.75rem;
+  }
+  [data-codegen-theme="industrial"] [data-ui="card"],
+  [data-codegen-theme="industrial"] [data-ui="table-container"] {
+    border-width: 1px;
+    border-radius: 0;
+    box-shadow: var(--shadow-sm-style);
+  }
+  [data-codegen-theme="industrial"] [data-page-region="detail-grid"] {
+    align-items: start;
+  }
+}

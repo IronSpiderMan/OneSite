@@ -666,7 +666,11 @@ const DashboardPage: React.FC = () => {
 {% endraw %}
 
     return (
-        <div className="space-y-6">
+        <div
+            className="{{ page_shell_class | default('space-y-6') }}"
+            data-codegen-theme="{{ codegen_theme | default('normal') }}"
+            data-page-kind="dashboard"
+        >
             {% if site_logger %}
             <style>{`
                 @keyframes log-highlight {

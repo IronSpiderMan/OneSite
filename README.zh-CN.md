@@ -76,7 +76,7 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
 ## 配置与权限
 
-`site_config.json` 常用配置包括 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`nav_order`。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置主题：`normal`、`industrial`、`anime`、`cute`。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
+`site_config.json` 常用配置包括 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`nav_order`。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置结构主题：`normal`、`industrial`、`anime`、`cute`、`emqx`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
 
 模型级选项写入 `__onesite__`：
 
@@ -196,7 +196,7 @@ from app.utils.formatting import format_alarm
 - 外键标签、多对多、树结构、单例配置页
 - 自定义按钮、CSV 导入导出、通知中心和 WebSocket
 - 自动刷新、统计图表、APScheduler 定时任务
-- EN/ZH 国际化、四套主题
+- EN/ZH 国际化、六套结构主题
 - Docker/Podman、Compose 与可选 TimescaleDB 时序能力
 
 ## 部署与目录

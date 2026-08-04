@@ -1,0 +1,11 @@
+{% include "common/index.css.j2" %}
+
+@layer components {
+  [data-codegen-theme="emqx"] [data-ui="card"] {
+    border-color: hsl(var(--border));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.04);
+  }
+  [data-codegen-theme="emqx"] [data-page-region="detail-grid"] > :first-child {
+    min-width: 0;
+  }
+}

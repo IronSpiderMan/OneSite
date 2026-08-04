@@ -1,0 +1,224 @@
+{% include "common/index.css.j2" %}
+
+@layer components {
+  [data-theme="normal"] body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: hsl(var(--background));
+  }
+
+  [data-theme="normal"] .ant-admin-shell {
+    background: hsl(var(--background));
+  }
+
+  [data-theme="normal"] .ant-admin-sider {
+    border-right: 1px solid hsl(var(--border));
+    box-shadow: 2px 0 8px rgb(0 21 41 / 0.04);
+  }
+
+  [data-theme="normal"] .ant-admin-brand {
+    height: 64px;
+    background: hsl(var(--card));
+  }
+
+  [data-theme="normal"] .ant-admin-brand img,
+  [data-theme="normal"] .ant-admin-brand > a > div > div:first-child {
+    border-radius: 4px;
+  }
+
+  [data-theme="normal"] .ant-admin-menu > div:first-child,
+  [data-theme="normal"] .ant-admin-menu > div:last-of-type > div:first-child {
+    padding-left: 20px;
+    color: hsl(var(--muted-foreground));
+    letter-spacing: 0.08em;
+  }
+
+  [data-theme="normal"] .ant-admin-menu a {
+    min-height: 44px;
+    padding-left: 24px;
+    padding-right: 20px;
+  }
+
+  [data-theme="normal"] .ant-admin-menu a svg {
+    width: 16px;
+    height: 16px;
+  }
+
+  [data-theme="normal"] .ant-admin-header {
+    padding-left: 20px;
+    padding-right: 20px;
+  }
+
+  [data-theme="normal"] .ant-admin-content {
+    background: hsl(var(--background));
+    padding: 20px;
+  }
+
+  [data-codegen-theme="normal"] {
+    --page-panel-radius: 4px;
+  }
+
+  [data-codegen-theme="normal"] > div:first-of-type h1,
+  [data-codegen-theme="normal"] > h1 {
+    color: hsl(var(--foreground));
+    font-size: 20px;
+    font-weight: 600;
+    line-height: 32px;
+  }
+
+  [data-codegen-theme="normal"] [data-ui="card"],
+  [data-codegen-theme="normal"] .settings-panel,
+  [data-codegen-theme="normal"] > .rounded-xl.border {
+    border: 1px solid hsl(var(--border));
+    border-radius: 4px;
+    background: hsl(var(--card));
+    box-shadow: 0 1px 2px rgb(0 0 0 / 0.03);
+  }
+
+  [data-theme="normal"] .ant-card-compat-head {
+    min-height: 48px;
+    padding: 14px 20px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  [data-theme="normal"] .ant-card-compat-title {
+    margin: 0;
+    color: hsl(var(--foreground));
+    font-size: 16px;
+    font-weight: 600;
+    line-height: 20px;
+  }
+
+  [data-theme="normal"] .ant-card-compat-body {
+    min-width: 0;
+    padding: 20px;
+  }
+
+  [data-codegen-theme="normal"] [data-page-region="page-header"] {
+    max-width: 100%;
+  }
+
+  [data-codegen-theme="normal"] [data-page-region="page-actions"],
+  [data-codegen-theme="normal"] [data-page-region="form-actions"] {
+    max-width: 100%;
+    overflow: visible;
+  }
+
+  [data-theme="normal"] .ant-card-compat-footer {
+    padding: 0 20px 20px;
+  }
+
+  [data-theme="normal"] .ant-card-accent {
+    border-top: 2px solid #409eff;
+  }
+
+  [data-theme="normal"] .ant-btn {
+    box-shadow: none;
+    font-weight: 400;
+  }
+
+  .ant-compat-button {
+    width: auto;
+    max-width: 100%;
+    flex: 0 0 auto;
+    flex-direction: row !important;
+    align-items: center;
+    justify-content: center;
+    white-space: nowrap;
+    line-height: 1;
+  }
+
+  .ant-compat-button > svg,
+  .ant-compat-button .ant-btn-icon > svg {
+    display: block;
+    flex: 0 0 auto;
+    margin-top: 0;
+    margin-bottom: 0;
+  }
+
+  [data-theme="normal"] .ant-btn-secondary {
+    border-color: transparent;
+    background: hsl(var(--secondary));
+  }
+
+  [data-theme="normal"] .ant-btn-icon-only {
+    width: 32px;
+    padding-inline: 0;
+  }
+
+  [data-theme="normal"] .ant-input,
+  [data-theme="normal"] .ant-input-affix-wrapper,
+  [data-theme="normal"] .ant-select-selector,
+  [data-theme="normal"] .ant-picker {
+    border-radius: 4px !important;
+  }
+
+  [data-theme="normal"] [data-ui="table-container"] {
+    border: 1px solid hsl(var(--border));
+    border-radius: 4px;
+    background: hsl(var(--card));
+  }
+
+  [data-theme="normal"] [data-ui="table"] {
+    width: 100%;
+    border-collapse: separate;
+    border-spacing: 0;
+    font-size: 14px;
+  }
+
+  [data-theme="normal"] .ant-table-thead > tr > th {
+    height: 44px;
+    padding: 10px 16px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--muted));
+    color: hsl(var(--secondary-foreground));
+    font-weight: 600;
+    text-align: left;
+  }
+
+  [data-theme="normal"] .ant-table-tbody > tr > td {
+    padding: 12px 16px;
+    border-bottom: 1px solid hsl(var(--border));
+    background: hsl(var(--card));
+  }
+
+  [data-theme="normal"] .ant-table-tbody > tr:last-child > td {
+    border-bottom: 0;
+  }
+
+  [data-theme="normal"] .ant-table-tbody > tr:hover > td {
+    background: hsl(var(--accent));
+  }
+
+  [data-theme="normal"] .ant-tag {
+    margin-inline-end: 0;
+    border-radius: 4px;
+    font-weight: 400;
+  }
+
+  [data-theme="normal"] .ant-modal-content {
+    border-radius: 4px;
+    padding: 20px 24px;
+  }
+
+  [data-theme="normal"] .ant-modal-header {
+    margin-bottom: 20px;
+    padding-bottom: 14px;
+    border-bottom: 1px solid hsl(var(--border));
+  }
+
+  [data-theme="normal"] .settings-panel {
+    padding: 20px;
+  }
+
+  @media (max-width: 767px) {
+    [data-theme="normal"] .ant-admin-content {
+      padding: 12px;
+    }
+
+    [data-codegen-theme="normal"] .ant-card-compat-head,
+    [data-codegen-theme="normal"] .ant-card-compat-body {
+      padding-left: 16px;
+      padding-right: 16px;
+    }
+  }
+}

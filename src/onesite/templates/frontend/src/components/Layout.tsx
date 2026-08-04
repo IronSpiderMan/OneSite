@@ -42,7 +42,7 @@ const SIDEBAR_EXTRA: Record<ThemeStyle, string> = {
 
 // Theme-specific active nav item
 const NAV_ACTIVE: Record<ThemeStyle, string> = {
-  normal: 'bg-primary text-primary-foreground border-l-[3px] border-accent pl-[calc(1rem-3px)]',
+  normal: 'bg-primary/10 text-primary font-medium border-r-[3px] border-primary pr-[calc(1rem-3px)]',
   industrial: 'bg-primary text-primary-foreground border-l-[3px] border-accent pl-[calc(1rem-3px)]',
   emqx: 'bg-primary/10 text-primary font-semibold',
   neuron: 'bg-primary/10 text-primary font-semibold border-l-2 border-primary pl-[calc(1rem-2px)]',
@@ -50,7 +50,7 @@ const NAV_ACTIVE: Record<ThemeStyle, string> = {
   cute: 'bg-primary/15 text-primary rounded-full',
 };
 const NAV_INACTIVE: Record<ThemeStyle, string> = {
-  normal: 'hover:bg-accent hover:text-accent-foreground border-l-[3px] border-transparent',
+  normal: 'text-foreground/75 hover:bg-muted hover:text-primary border-r-[3px] border-transparent',
   industrial: 'hover:bg-accent hover:text-accent-foreground border-l-[3px] border-transparent',
   emqx: 'hover:bg-muted/70',
   neuron: 'hover:bg-muted hover:text-foreground border-l-2 border-transparent',
@@ -58,7 +58,7 @@ const NAV_INACTIVE: Record<ThemeStyle, string> = {
   cute: 'hover:bg-accent/50 hover:text-accent-foreground rounded-full',
 };
 const NAV_ITEM_BASE: Record<ThemeStyle, string> = {
-  normal: 'rounded-md',
+  normal: 'rounded-none',
   industrial: 'rounded-none',
   emqx: 'rounded-md',
   neuron: 'rounded-none',
@@ -68,7 +68,7 @@ const NAV_ITEM_BASE: Record<ThemeStyle, string> = {
 
 // Theme-specific header classes
 const HEADER_EXTRA: Record<ThemeStyle, string> = {
-  normal: 'border-b-2 border-b-accent/20',
+  normal: 'border-b border-b-border shadow-[0_1px_4px_rgb(0_21_41_/_0.08)]',
   industrial: 'border-b-2 border-b-accent/30',
   emqx: 'border-b border-b-border',
   neuron: 'border-b border-b-border',
@@ -78,7 +78,7 @@ const HEADER_EXTRA: Record<ThemeStyle, string> = {
 
 // Theme-specific logo area
 const LOGO_AREA_EXTRA: Record<ThemeStyle, string> = {
-  normal: 'border-b-2 border-b-accent/30',
+  normal: 'border-b border-b-border',
   industrial: 'border-b-2 border-b-accent/40',
   emqx: 'border-b border-b-border',
   neuron: 'border-b border-b-border',
@@ -134,16 +134,17 @@ const AppLayout: React.FC = () => {
   }, [location.pathname]);
 
   const isCollapsed = collapsed;
+  const isNormal = theme === 'normal';
+  const isNeuron = theme === 'neuron';
 
-  const sidebarWidth = isCollapsed ? SIDEBAR_WIDTH_COLLAPSED : SIDEBAR_WIDTH;
-  const mainMargin = isCollapsed ? MAIN_MARGIN_COLLAPSED : MAIN_MARGIN;
+  const sidebarWidth = isCollapsed ? SIDEBAR_WIDTH_COLLAPSED : isNormal ? 'md:w-56' : SIDEBAR_WIDTH;
+  const mainMargin = isCollapsed ? MAIN_MARGIN_COLLAPSED : isNormal ? 'md:ml-56' : MAIN_MARGIN;
 
   const logoUrl = import.meta.env.VITE_PROJECT_LOGO;
   const projectName = import.meta.env.VITE_PROJECT_NAME || 'OneSite';
   const logoLink = window.__ENV__?.LOGO_LINK || import.meta.env.VITE_LOGO_LINK || '/dashboard';
 
   const menuItems = filterMenuByRole(GeneratedMenu, userRole);
-  const isNeuron = theme === 'neuron';
   const activeMenuItem = menuItems.find((item: any) => location.pathname === item.key);
   const activePageName = activeMenuItem
     ? t(activeMenuItem.label)
@@ -152,7 +153,7 @@ const AppLayout: React.FC = () => {
       : t('common.dashboard', 'Dashboard');
 
   return (
-    <div className="min-h-screen flex">
+    <div className={cn("min-h-screen flex", isNormal && "ant-admin-shell")}>
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -167,11 +168,12 @@ const AppLayout: React.FC = () => {
           "fixed inset-y-0 left-0 z-50 bg-card transition-transform duration-300 ease-in-out transform md:translate-x-0",
           sidebarWidth,
           SIDEBAR_EXTRA[theme],
+          isNormal && "ant-admin-sider",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         {/* Logo area */}
-        <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isNeuron && "neuron-brand-area h-[72px] px-5", isCollapsed ? "justify-center" : "justify-between")}>
+        <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isNormal && "ant-admin-brand", isNeuron && "neuron-brand-area h-[72px] px-5", isCollapsed ? "justify-center" : "justify-between")}>
           {isNeuron ? (
             <Link to={logoLink} className="neuron-brand min-w-0 no-underline">
               {logoUrl ? (
@@ -222,14 +224,14 @@ const AppLayout: React.FC = () => {
         </div>
 
         {/* Navigation */}
-        <nav className={cn("flex-1 overflow-y-auto py-4", isNeuron && "neuron-nav", isCollapsed ? "px-2" : "px-4")}>
+        <nav className={cn("flex-1 overflow-y-auto py-4", isNormal && "ant-admin-menu", isNeuron && "neuron-nav", isCollapsed ? "px-2" : isNormal ? "px-0" : "px-4")}>
           {!isCollapsed && (
             <div className={cn("px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground", isNeuron && "neuron-nav-heading")}>
               {isNeuron ? <><span>01</span> OPERATIONS</> : t('common.navigation', 'Navigation')}
             </div>
           )}
 
-          <div className="space-y-1">
+          <div className={cn("space-y-1", isNormal && "space-y-0")}>
             {menuItems.map((item: any) => (
               <Link
                 key={item.key}
@@ -297,7 +299,7 @@ const AppLayout: React.FC = () => {
 
       {/* Main Content */}
       <div className={cn("flex-1 flex flex-col min-w-0", mainMargin)}>
-        <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme], isNeuron && "neuron-header h-[72px] px-5 md:px-7")}>
+        <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme], isNormal && "ant-admin-header", isNeuron && "neuron-header h-[72px] px-5 md:px-7")}>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
                   <MenuIcon className="h-5 w-5" />
@@ -326,7 +328,7 @@ const AppLayout: React.FC = () => {
                 </Button>
             </div>
         </header>
-        <main className={cn("flex-1 p-6 overflow-auto", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7")}>
+        <main className={cn("flex-1 p-6 overflow-auto", isNormal && "ant-admin-content", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7")}>
             <Outlet />
         </main>
       </div>

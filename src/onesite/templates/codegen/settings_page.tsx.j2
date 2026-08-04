@@ -201,7 +201,11 @@ const SettingsPage: React.FC = () => {
   {% endif %}
 
   return (
-    <div className="settings-page max-w-4xl mx-auto space-y-6">
+    <div
+      className="{{ page_shell_class | default('settings-page max-w-4xl mx-auto space-y-6') }}"
+      data-codegen-theme="{{ codegen_theme | default('normal') }}"
+      data-page-kind="settings"
+    >
       <h1 className="settings-page-title text-2xl font-bold text-gray-900 dark:text-white">{t('common.settings')}</h1>
 
       <div className="settings-panel bg-white dark:bg-gray-800 rounded-lg shadow p-6 space-y-8">

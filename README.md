@@ -88,7 +88,7 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
 }
 ```
 
-Supported themes are `normal`, `industrial`, `anime`, `cute`, `emqx` and `neuron`. The `neuron` theme is a dark telemetry-console style with a graphite grid and signal-green accents. Use a production database URL and a strong, private `secret_key` outside local development.
+Supported themes are `normal`, `industrial`, `anime`, `cute`, `emqx` and `neuron`. The `style` value is a build-time structural theme: `site sync` selects that theme's list, detail, create, dashboard, settings, profile, singleton, and CSS templates. Theme templates live under `src/onesite/templates/codegen/themes/<style>/` and fall back to the shared codegen templates when an override is absent. The `normal` theme uses Ant Design 6 through generated compatibility adapters and only adds the `antd` dependency to normal builds. Light/dark/system mode remains a browser-side runtime preference and is synchronized with Ant Design's theme algorithm. The `neuron` theme is a dark telemetry-console style with a graphite grid and signal-green accents. Use a production database URL and a strong, private `secret_key` outside local development.
 
 Every key under `extra` is synchronized to the backend `.env`. `TIMEZONE`
 accepts an IANA timezone name, defaults to `Asia/Shanghai`, controls the
@@ -515,7 +515,7 @@ Roles are `user`, `admin`, `developer` (in ascending hierarchy). A model permiss
 - Notification center and WebSocket real-time updates
 - Dashboard statistics/charts and configurable auto-refresh
 - Scheduled jobs via APScheduler with UI management
-- EN/ZH locale generation and four built-in themes
+- EN/ZH locale generation and six structural themes
 - Docker/Podman images and generated Compose configuration
 - Optional time-series/TimescaleDB flows
 
