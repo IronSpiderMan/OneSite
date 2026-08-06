@@ -213,6 +213,31 @@ def _sync_project_utils(cwd: Path, backend_path: Path) -> None:
     _mirror_source_tree(source_utils, target_utils, "utils")
 
 
+def _sync_project_resources(cwd: Path, backend_path: Path) -> None:
+    """Scaffold and sync developer-owned application resource hooks."""
+    paths = get_project_paths(cwd)
+    source_resources = paths.source / "resources.py"
+    target_resources = backend_path / "app" / "resources.py"
+
+    if not source_resources.exists():
+        template_resources = (
+            Path(__file__).resolve().parent.parent
+            / "templates"
+            / "backend"
+            / "app"
+            / "resources.py"
+        )
+        copy_file_with_status(template_resources, source_resources)
+
+    _validate_async_function_signature(
+        source_resources, "init_resources", {"app"}
+    )
+    _validate_async_function_signature(
+        source_resources, "destroy_resources", {"app"}
+    )
+    copy_file_with_status(source_resources, target_resources)
+
+
 def _sync_mqtt_callbacks(
     cwd: Path,
     backend_path: Path,
@@ -521,6 +546,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         error_handlers, backend_path / "app" / "core" / "error_handlers.py"
     )
     _sync_project_utils(cwd, backend_path)
+    _sync_project_resources(cwd, backend_path)
     if site_config.get("tools"):
         _sync_tools(cwd, backend_path, site_config["tools"])
     if site_config.get("scheduled_tasks"):

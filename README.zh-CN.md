@@ -22,7 +22,24 @@ site run
 - API 文档：`http://localhost:8000/docs`
 - 初始管理员：`admin@example.com` / `admin`（上线前必须修改）
 
-日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/` 或 `site_config.json` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。旧项目使用顶层 `models/`、`backend/`、`frontend/` 时仍可继续同步，CLI 不会自动搬迁目录。
+日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.json` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。旧项目使用顶层 `models/`、`backend/`、`frontend/` 时仍可继续同步，CLI 不会自动搬迁目录。
+
+### 应用资源生命周期
+
+HTTP 客户端、连接池、设备 SDK 句柄等进程级资源可以放在 `app/resources.py`。新项目会自动创建该文件；已有项目首次执行 `site init` 或 `site sync` 时也会补齐。两个钩子都是异步函数，并接收 FastAPI 应用，因此可通过 `app.state` 保存资源：
+
+```python
+from fastapi import FastAPI
+from httpx import AsyncClient
+
+async def init_resources(app: FastAPI) -> None:
+    app.state.http = AsyncClient()
+
+async def destroy_resources(app: FastAPI) -> None:
+    await app.state.http.aclose()
+```
+
+`site sync` 会把该文件同步到生成后端，并由 `main.py` 的 FastAPI `lifespan` 调用：OneSite 内置基础设施启动后执行初始化，内置基础设施关闭前执行销毁。请保留 `init_resources`、`destroy_resources` 函数名和 `app` 参数，生成时会校验其签名。
 
 ## 命令
 
@@ -31,12 +48,22 @@ site run
 | `site init` | 在当前目录初始化配置、基础模型和图标参考页。 |
 | `site create <项目名>` | 创建全栈项目。 |
 | `site sync [-i/--install]` | 同步模型并生成代码；`-i` 会安装依赖。 |
+| `site sync --build-cmd` | 同步代码，并构建命令项目到 `generated/backend/bin/`。 |
 | `site run [项目路径] --component backend\|frontend\|all` | 启动后端、前端或两者。 |
 | `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t 标签] [-p 端口]` | 构建镜像并生成 `deploy/docker-compose.yml`。 |
 | `site build --component desktop` | 为当前 macOS 或 Windows 平台构建原生 Tauri 客户端。 |
 | `site compose [--engine docker\|podman] up -d` | 使用 `deploy/docker-compose.yml` 执行 Compose；也支持 `down`、`logs -f`。 |
 
 `backend`/`frontend` 是 `--component` 选项值，正确写法是 `site run --component backend`，不是 `site run backend`。
+
+### 命令行可执行文件
+
+开发者维护的命令项目可放在 `app/cmd/<项目名>/`。macOS/Linux 项目提供
+`build.sh`，Windows 项目提供 `build.bat`。执行 `site sync --build-cmd` 时，
+OneSite 会在每个项目目录中运行当前平台对应的构建脚本，并要求脚本在该目录
+生成 `<项目名>`（或 `<项目名>.exe`），随后将其复制到
+`generated/backend/bin/`。没有当前平台构建脚本的项目会被跳过；普通
+`site sync` 不会执行这些构建，因此不会拖慢日常同步。
 
 ## 模型、主键与关联
 

@@ -12,6 +12,7 @@ class ProjectPaths:
     integrations: Path
     tools: Path
     tasks: Path
+    cmd: Path
     generated: Path
     backend: Path
     frontend: Path
@@ -40,6 +41,7 @@ def get_project_paths(root: Path, *, modern: bool | None = None) -> ProjectPaths
             integrations=source / "integrations",
             tools=source / "tools",
             tasks=source / "tasks",
+            cmd=source / "cmd",
             generated=generated,
             backend=generated / "backend",
             frontend=generated / "frontend",
@@ -54,6 +56,7 @@ def get_project_paths(root: Path, *, modern: bool | None = None) -> ProjectPaths
         integrations=root / "integrations",
         tools=root / "tools",
         tasks=root / "tasks",
+        cmd=root / "cmd",
         generated=root,
         backend=root / "backend",
         frontend=root / "frontend",

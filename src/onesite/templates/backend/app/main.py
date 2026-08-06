@@ -10,6 +10,7 @@ from app.core.config import settings
 from app.core.db import init_db
 from app.core.error_handlers import register_error_handlers
 from app.initial_data import init_data
+from app.resources import destroy_resources, init_resources
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -17,7 +18,11 @@ async def lifespan(app: FastAPI):
     init_db()
     # Initialize Data
     init_data()
-    yield
+    try:
+        await init_resources(app)
+        yield
+    finally:
+        await destroy_resources(app)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

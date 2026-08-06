@@ -69,7 +69,11 @@ def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[
             kind = field["ui_type"]
         else:
             kind = "any" if field.get("ui_type") == "json" else "str"
-        ui_field = {"name": field["name"], "kind": kind}
+        ui_field = {
+            "name": field["name"],
+            "kind": kind,
+            "labelKey": field.get("label_key", field["name"]),
+        }
         if field.get("is_enum"):
             ui_field["enumValues"] = field.get("enum_values", [])
         ui_fields.append(ui_field)

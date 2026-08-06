@@ -1,4 +1,5 @@
 import * as React from "react"
+import { useTranslation } from "react-i18next"
 import { Button } from "./button"
 import { Input } from "./input"
 import { Label } from "./label"
@@ -10,6 +11,7 @@ import { cn } from "../../lib/utils"
 
 export type JsonFieldSchema = {
   name?: string
+  labelKey?: string
   kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "model" | "array" | "location" | "any"
   enumValues?: Array<string | number>
   model?: JsonModelSchema
@@ -62,6 +64,7 @@ const JsonModelForm: React.FC<{
   onChange: (v: any) => void
   path?: string[]
 }> = ({ schema, value, onChange, path = [] }) => {
+  const { t } = useTranslation()
   const v = value && typeof value === "object" && !Array.isArray(value) ? value : {}
   return (
     <div className="space-y-4">
@@ -73,7 +76,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "bool") {
           return (
             <div key={key} className="flex items-center justify-between gap-4 rounded-md border p-3">
-              <Label className="font-medium">{key}</Label>
+              <Label className="font-medium">{t(f.labelKey || key)}</Label>
               <Switch
                 checked={Boolean(cur)}
                 onCheckedChange={(checked) => onChange(setPathValue(v, fieldPath.slice(path.length), checked))}
@@ -85,7 +88,7 @@ const JsonModelForm: React.FC<{
           const stringValue = cur === undefined || cur === null ? "" : String(cur)
           return (
             <div key={key} className="space-y-2">
-              <Label>{key}</Label>
+              <Label>{t(f.labelKey || key)}</Label>
               <Select
                 value={stringValue}
                 onValueChange={(nv) => onChange(setPathValue(v, fieldPath.slice(path.length), nv))}
@@ -107,7 +110,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "model" && f.model) {
           return (
             <div key={key} className="space-y-2 rounded-md border p-3">
-              <div className="text-sm font-semibold">{key}</div>
+              <div className="text-sm font-semibold">{t(f.labelKey || key)}</div>
               <JsonModelForm
                 schema={f.model}
                 value={cur}
@@ -119,7 +122,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "location") {
           return (
             <div key={key} className="space-y-2">
-              <Label>{key}</Label>
+              <Label>{t(f.labelKey || key)}</Label>
               <LocationInput
                 value={cur}
                 onChange={(next) => onChange(setPathValue(v, fieldPath.slice(path.length), next))}
@@ -131,7 +134,7 @@ const JsonModelForm: React.FC<{
           return (
             <div key={key} className="space-y-2 rounded-md border p-3">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">{key}</div>
+                <div className="text-sm font-semibold">{t(f.labelKey || key)}</div>
                 <Button
                   type="button"
                   variant="outline"
@@ -198,7 +201,7 @@ const JsonModelForm: React.FC<{
         const inputType = f.kind === "int" || f.kind === "float" ? "number" : "text"
         return (
           <div key={key} className="space-y-2">
-            <Label>{key}</Label>
+            <Label>{t(f.labelKey || key)}</Label>
             <Input
               type={inputType}
               value={cur ?? ""}
@@ -421,12 +424,14 @@ export const JsonModelArrayEditor: React.FC<{
   className?: string
   canAdd?: boolean
   canRemove?: boolean
-}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true }) => {
+  showJsonMode?: boolean
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, showJsonMode = true }) => {
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
   const arrValue = Array.isArray(value) ? value : []
 
   return (
     <div className={cn("space-y-3", className)}>
+      {showJsonMode && (
       <div className="flex items-center gap-2">
         <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
           UI
@@ -440,7 +445,8 @@ export const JsonModelArrayEditor: React.FC<{
           JSON
         </Button>
       </div>
-      {mode === "ui" ? (
+      )}
+      {!showJsonMode || mode === "ui" ? (
         <div className="space-y-3">
           {canAdd && (
           <div className="flex items-center justify-end">

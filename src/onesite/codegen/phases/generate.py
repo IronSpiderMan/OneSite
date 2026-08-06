@@ -520,6 +520,9 @@ def phase_generate_aggregated(
     generate_file(
         "db.py.j2",
         {
+            "background_execution_enabled": bool(
+                site_config.get("tools") or site_config.get("scheduled_tasks")
+            ),
             "has_timescaledb": has_timescaledb,
             "timescaledb_models": timescaledb_models,
             "latest_table_imports": latest_table_imports,

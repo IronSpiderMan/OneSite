@@ -37,7 +37,7 @@ The frontend is available at `http://localhost:5173`; FastAPI documentation is a
 The normal edit/generate loop is:
 
 ```text
-edit app/models/, app/integrations/, app/utils/ or site_config.json → site sync → test /docs and the frontend
+edit app/models/, app/integrations/, app/utils/, app/resources.py or site_config.json → site sync → test /docs and the frontend
 ```
 
 Do not treat `generated/backend/app/models/` as the model source of truth: it is synced from `app/models/`. Everything under `generated/` is replaceable output. Keep durable business customizations in `app/`, not solely in generated files. Existing projects with top-level `models/`, `backend/`, and `frontend/` remain supported without an automatic directory migration.
@@ -50,6 +50,7 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
 | `site create <project_name>` | Create a new full-stack project. |
 | `site sync` | Copy application source and regenerate `generated/backend` and `generated/frontend`. |
 | `site sync --install` / `-i` | Regenerate, then install backend and frontend dependencies. |
+| `site sync --build-cmd` | Regenerate, build command projects, and copy their executables to `generated/backend/bin/`. |
 | `site run` | Run backend and frontend. |
 | `site run --component backend` | Run only FastAPI. |
 | `site run --component frontend` | Run only Vite. |
@@ -59,6 +60,16 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
 | `site compose [--engine docker\|podman] up -d` | Run Compose using `deploy/docker-compose.yml`. |
 
 `component` is an option: use `site run --component backend`, not `site run backend`.
+
+### Command executables
+
+Developer-owned command projects can live in `app/cmd/<name>/`. Put a
+`build.sh` in each project on macOS/Linux or a `build.bat` on Windows. When
+`site sync --build-cmd` runs, OneSite executes the platform-specific script
+from that project directory and expects it to create `<name>` (or `<name>.exe`)
+in the same directory. The executable is then copied to
+`generated/backend/bin/`. Projects without a build script for the current
+platform are skipped. Regular `site sync` does not build command projects.
 
 ## Project configuration
 
@@ -94,6 +105,30 @@ Every key under `extra` is synchronized to the backend `.env`. `TIMEZONE`
 accepts an IANA timezone name, defaults to `Asia/Shanghai`, controls the
 default frontend display timezone and APScheduler cron timezone, while
 datetimes are normalized to UTC before database persistence.
+
+### Application resources
+
+Put process-wide application resources, such as HTTP clients, connection pools,
+or device SDK handles, in `app/resources.py`. OneSite creates this file for new
+and existing projects and copies it to the generated backend on `site sync`.
+Both hooks are async and receive the FastAPI application, so resources can be
+stored on `app.state`:
+
+```python
+from fastapi import FastAPI
+from httpx import AsyncClient
+
+async def init_resources(app: FastAPI) -> None:
+    app.state.http = AsyncClient()
+
+async def destroy_resources(app: FastAPI) -> None:
+    await app.state.http.aclose()
+```
+
+The generated `main.py` invokes these hooks from FastAPI's `lifespan`:
+initialization runs after OneSite's built-in infrastructure starts, and cleanup
+runs before that infrastructure is shut down. Keep the two function names and
+the `app` parameter unchanged; `site sync` validates their signatures.
 
 `desktop.api_url` must be an absolute HTTP(S) URL because a packaged desktop
 client cannot use Vite's development proxy. `site sync` adds the exact Tauri

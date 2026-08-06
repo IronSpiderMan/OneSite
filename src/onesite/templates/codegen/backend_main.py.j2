@@ -14,6 +14,7 @@ from app.core.logger import get_logger
 from app.core.db import init_db
 from app.core.error_handlers import register_error_handlers
 from app.initial_data import init_data
+from app.resources import destroy_resources, init_resources
 
 logger = get_logger(__name__)
 
@@ -99,29 +100,36 @@ async def lifespan(app: FastAPI):
     _task_queue_worker = asyncio.create_task(task_queue.run())
     logger.info("Task queue worker started")
 
-    yield
+    try:
+        # Initialize application-owned resources
+        await init_resources(app)
+        yield
+    finally:
+        try:
+            # Release application-owned resources before infrastructure shutdown
+            await destroy_resources(app)
+        finally:
+            # Shutdown background task worker
+            _task_queue_worker.cancel()
+            logger.info("Task queue worker stopped")
 
-    # Shutdown background task worker
-    _task_queue_worker.cancel()
-    logger.info("Task queue worker stopped")
+            {% if config.scheduled_tasks %}
+            # Stop scheduler
+            task_registry.stop()
+            logger.info("Scheduler stopped")
+            {% endif %}
 
-    {% if config.scheduled_tasks %}
-    # Stop scheduler
-    task_registry.stop()
-    logger.info("Scheduler stopped")
-    {% endif %}
+            {% if config.rabbitmq %}
+            # Disconnect RabbitMQ
+            if rabbitmq_manager:
+                await rabbitmq_manager.disconnect()
+            {% endif %}
 
-    {% if config.rabbitmq %}
-    # Disconnect RabbitMQ
-    if rabbitmq_manager:
-        await rabbitmq_manager.disconnect()
-    {% endif %}
-
-    {% if config.mqtt %}
-    # Disconnect MQTT
-    if mqtt_manager:
-        await mqtt_manager.disconnect()
-    {% endif %}
+            {% if config.mqtt %}
+            # Disconnect MQTT
+            if mqtt_manager:
+                await mqtt_manager.disconnect()
+            {% endif %}
 
 app = FastAPI(
     title=settings.PROJECT_NAME,

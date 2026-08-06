@@ -95,6 +95,16 @@ def get_cwd_safely() -> Path:
 TEMPLATE_DIR = Path(__file__).parent / "templates"
 
 
+def _ensure_resource_hooks(source_dir: Path) -> None:
+    """Create the developer-owned resource lifecycle module when absent."""
+    resource_file = source_dir / "resources.py"
+    if resource_file.exists():
+        return
+    source_dir.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(TEMPLATE_DIR / "backend" / "app" / "resources.py", resource_file)
+    console.print(f"[green]Created {resource_file}[/green]")
+
+
 def _desktop_config_defaults(project_name: str) -> dict[str, object]:
     slug = re.sub(r"[^A-Za-z0-9-]+", "-", project_name).strip("-").lower() or "app"
     if slug[0].isdigit():
@@ -209,6 +219,7 @@ def init():
     if not utils_init.exists():
         utils_init.write_text("", encoding="utf-8")
         console.print("[green]Created utils/__init__.py[/green]")
+    _ensure_resource_hooks(paths.source)
 
     _ensure_deploy_files(base_dir)
 
@@ -259,6 +270,7 @@ def create(
     utils_dir = paths.source / "utils"
     utils_dir.mkdir(parents=True)
     (utils_dir / "__init__.py").write_text("", encoding="utf-8")
+    _ensure_resource_hooks(paths.source)
     _ensure_deploy_files(target_dir)
 
     for filename in (".gitignore", "icon-reference.html"):
@@ -312,11 +324,17 @@ def create(
 
 @app.command()
 def sync(
-    install: bool = typer.Option(False, "--install", "-i", help="Install dependencies for backend and frontend")
+    install: bool = typer.Option(False, "--install", "-i", help="Install dependencies for backend and frontend"),
+    build_cmd: bool = typer.Option(
+        False,
+        "--build-cmd",
+        help="Build app/cmd projects and copy executables to the generated backend",
+    ),
 ):
     """
     Sync models to generate APIs, Schemas, CRUDs, and Frontend code.
-    Optionally install dependencies with --install.
+    Optionally build command projects with --build-cmd and install dependencies
+    with --install.
     """
     # Ensure we are in a valid directory
     base_dir = get_cwd_safely()
@@ -325,6 +343,15 @@ def sync(
     console.print("[green]Syncing models...[/green]")
     from onesite.generator import generate_code
     generate_code()
+
+    if build_cmd:
+        from onesite.cmd_build import CommandBuildError, build_command_projects
+
+        try:
+            build_command_projects(base_dir)
+        except CommandBuildError as exc:
+            console.print(f"[bold red]Error:[/bold red] {exc}")
+            raise typer.Exit(code=1) from exc
 
     if install:
         console.print("[green]Installing dependencies...[/green]")

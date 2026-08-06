@@ -38,12 +38,52 @@ elif database_url.startswith("postgresql://"):
 engine = create_async_engine(database_url, future=True)
 
 async def init_db():
+    # Runtime-owned models are not part of app.models. Import them explicitly
+    # before create_all instead of relying on API/scheduler import side effects.
+    {% if background_execution_enabled %}
+    import app.core.background_execution  # noqa: F401
+    {% endif %}
     # Ensure _latest table models are imported so SQLModel.metadata knows about them
     {% for module in latest_table_imports %}
     import {{ module }}  # noqa: F401
     {% endfor %}
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+    {% if background_execution_enabled %}
+    if settings.DATABASE_URI.startswith("postgresql"):
+        # Older generated projects created these columns as timestamp without
+        # time zone even though the runtime writes timezone-aware UTC values.
+        # create_all does not alter existing columns, so upgrade them once.
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                DO $$
+                DECLARE
+                    target_column TEXT;
+                BEGIN
+                    FOREACH target_column IN ARRAY ARRAY[
+                        'created_at', 'started_at', 'completed_at'
+                    ]
+                    LOOP
+                        IF EXISTS (
+                            SELECT 1
+                            FROM information_schema.columns
+                            WHERE table_schema = current_schema()
+                              AND table_name = 'onesite_background_execution'
+                              AND information_schema.columns.column_name = target_column
+                              AND data_type = 'timestamp without time zone'
+                        ) THEN
+                            EXECUTE format(
+                                'ALTER TABLE onesite_background_execution '
+                                'ALTER COLUMN %I TYPE TIMESTAMPTZ '
+                                'USING %I AT TIME ZONE ''UTC''',
+                                target_column,
+                                target_column
+                            );
+                        END IF;
+                    END LOOP;
+                END $$;
+            """))
+    {% endif %}
     {% if has_timescaledb %}
     if settings.DATABASE_URI.startswith("postgresql"):
         # ── TimescaleDB: create hypertables ──
