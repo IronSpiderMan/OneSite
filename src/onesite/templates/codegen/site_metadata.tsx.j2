@@ -3,7 +3,9 @@ import { useEffect } from 'react';
 import { use{{ system_model.name }}Store } from './stores/use{{ system_model.name }}Store';
 {% endif %}
 
-const fallbackSiteName = import.meta.env.VITE_PROJECT_NAME || 'OneSite';
+const fallbackSiteName = (window as any).__ENV__?.PROJECT_NAME
+  || import.meta.env.VITE_PROJECT_NAME
+  || 'OneSite';
 
 const applySiteName = (value: unknown) => {
   const siteName = typeof value === 'string' && value.trim() ? value.trim() : fallbackSiteName;
@@ -22,7 +24,18 @@ export default function SiteMetadata() {
   const fetchData = use{{ system_model.name }}Store((state) => state.fetchData);
 
   useEffect(() => {
-    void fetchData();
+    const refreshSiteName = () => {
+{% if site_name_field.is_local_storage %}
+      void fetchData();
+{% else %}
+      if (localStorage.getItem('token')) {
+        void fetchData();
+      }
+{% endif %}
+    };
+    refreshSiteName();
+    window.addEventListener('onesite:auth_updated', refreshSiteName);
+    return () => window.removeEventListener('onesite:auth_updated', refreshSiteName);
   }, [fetchData]);
 
   useEffect(() => {

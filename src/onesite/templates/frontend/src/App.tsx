@@ -5,6 +5,7 @@ import LoginPage from './pages/Login';
 import ErrorPage from './pages/ErrorPage';
 import ProfilePage from './pages/Profile';
 import { AppToaster } from './components/ui/sonner';
+import SiteMetadata from './SiteMetadata';
 
 // Simple Auth Guard
 function RequireAuth({ children }: { children: JSX.Element }) {
@@ -26,6 +27,7 @@ function App() {
 
   return (
     <Router>
+      <SiteMetadata />
       <AppToaster />
       <Routes>
         <Route path="/login" element={<LoginPage />} />

@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { Button } from '../components/ui/button';
@@ -15,11 +15,29 @@ export default function LoginPage() {
   const [error, setError] = useState('');
   const navigate = useNavigate();
 
-  const projectName = (window as any).__ENV__?.PROJECT_NAME
+  const fallbackProjectName = (window as any).__ENV__?.PROJECT_NAME
     || import.meta.env.VITE_PROJECT_NAME
     || 'OneSite';
+  const [projectName, setProjectName] = useState(
+    () => localStorage.getItem('onesite_site_name') || fallbackProjectName
+  );
   const logoUrl = (window as any).__ENV__?.PROJECT_LOGO
     || import.meta.env.VITE_PROJECT_LOGO;
+
+  useEffect(() => {
+    const syncSiteName = (event?: Event) => {
+      const updatedName = (event as CustomEvent<string> | undefined)?.detail;
+      setProjectName(
+        updatedName || localStorage.getItem('onesite_site_name') || fallbackProjectName
+      );
+    };
+    window.addEventListener('onesite:site_name_updated', syncSiteName);
+    window.addEventListener('storage', syncSiteName);
+    return () => {
+      window.removeEventListener('onesite:site_name_updated', syncSiteName);
+      window.removeEventListener('storage', syncSiteName);
+    };
+  }, [fallbackProjectName]);
 
   const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -39,6 +57,7 @@ export default function LoginPage() {
 
       const { access_token } = response.data;
       localStorage.setItem('token', access_token);
+      window.dispatchEvent(new Event('onesite:auth_updated'));
 
       // Fetch user info to get role
       try {

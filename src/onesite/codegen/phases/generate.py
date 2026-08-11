@@ -613,6 +613,22 @@ def phase_generate_aggregated(
         ),
         None,
     )
+    site_name_field = next(
+        (
+            field
+            for field in system_model["fields"]
+            if field["name"] == "site_name"
+        ),
+        None,
+    ) if system_model else None
+    generate_file(
+        "site_metadata.tsx.j2",
+        {
+            "system_model": system_model,
+            "site_name_field": site_name_field,
+        },
+        frontend_path / "src" / "SiteMetadata.tsx",
+    )
     custom_model = next(
         (
             m
