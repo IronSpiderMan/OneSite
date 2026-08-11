@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { 
@@ -64,6 +64,9 @@ import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service
 const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
   const navigate = useNavigate();
+  {% if not model.page_edit %}
+  const [searchParams, setSearchParams] = useSearchParams();
+  {% endif %}
   const { data, loading, fetchData, refreshData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
   const timeZone = getUserTimeZone();
   {% if not model.page_edit %}
@@ -428,6 +431,25 @@ const {{ model.name }}Page: React.FC = () => {
     setIsModalOpen(true);
     {% endif %}
   };
+
+  {% if not model.page_edit %}
+  // Relation tables can deep-link into the same edit modal used by this list page.
+  const editRecordId = searchParams.get('edit');
+  useEffect(() => {
+    if (!editRecordId) return;
+    const recordId = {% if 'str' in model.id_type %}editRecordId{% else %}Number(editRecordId){% endif %};
+    if ({% if 'str' in model.id_type %}!recordId{% else %}!Number.isFinite(recordId){% endif %}) return;
+    void handleEdit({ id: recordId } as {{ model.name }}).finally(() => {
+      setSearchParams((current) => {
+        const next = new URLSearchParams(current);
+        next.delete('edit');
+        return next;
+      }, { replace: true });
+    });
+  // The query parameter is consumed once; handleEdit intentionally uses the latest generated form helpers.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editRecordId]);
+  {% endif %}
 
   const requestDelete = (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     setDeleteId(id);

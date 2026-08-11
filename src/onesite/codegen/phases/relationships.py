@@ -262,6 +262,9 @@ def _resolve_fk_labels_and_reverse(
                 "inline_fields": inline_fields,
                 "inline_schema": inline_schema,
                 "role_permissions": model.get("role_permissions", {}),
+                "actions": model.get("actions", {}),
+                "page_edit": model.get("page_edit", False),
+                "standalone": model.get("standalone", True),
                 "source_readable_fields": source_readable_fields,
                 "source_search_fields": source_search_fields,
             })

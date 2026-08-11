@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Eye, Loader2{% if model.page_edit %}, Save, Pencil, X{% endif %} } from 'lucide-react';
+import { ArrowLeft, Eye, Loader2{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
@@ -59,7 +59,7 @@ import { get{{ model.name }}{{ rel.source_model }}s } from '../../services/{{ mo
 {% if model.reverse_foreign_keys %}
 {% for rfk in model.reverse_foreign_keys %}
 {% if rfk.display or rfk.editor == 'inline' %}
-import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service }}';
+import { get{{ rfk.source_model }}s{% if rfk.display %}, delete{{ rfk.source_model }}{% for action_name, action_config in rfk.actions.items() %}, perform{{ rfk.source_model }}{{ action_name.capitalize() }}{% endfor %}{% endif %} } from '../../services/{{ rfk.source_service }}';
 {% endif %}
 {% for field in rfk.source_search_fields %}
 {% if field.fk_info %}
@@ -1221,7 +1221,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         {% for field in m2m.target_readable_fields %}
                                         <TableHead>{t('{{ field.label_key }}')}</TableHead>
                                         {% endfor %}
-                                        <TableHead className="w-16">Actions</TableHead>
+                                        <TableHead className="w-16">{t('common.actions')}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1239,7 +1239,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% if field.fk_info %}
                                                     {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
                                                     {% elif field.ui_type == 'bool' %}
-                                                    {item.{{ field.name }} ? 'Yes' : 'No'}
+                                                    {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
                                                     <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ m2m.target_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
                                                     {% elif field.ui_type == 'datetime' %}
@@ -1286,10 +1286,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 onClick={() => fetch{{ m2m.target_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ m2m.name }}Page - 1)}
                                 disabled={ {{ m2m.name }}Page <= 1 || {{ m2m.name }}Loading}
                             >
-                                Previous
+                                {t('common.previous')}
                             </Button>
                             <span className="text-sm">
-                                Page { {{ m2m.name }}Page } of { Math.ceil({{ m2m.name }}Total / {{ m2m.name }}Size) || 1 }
+                                {t('common.page_info')} { {{ m2m.name }}Page } {t('common.of_page')} { Math.ceil({{ m2m.name }}Total / {{ m2m.name }}Size) || 1 }
                             </span>
                             <Button
                                 variant="outline"
@@ -1297,7 +1297,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 onClick={() => fetch{{ m2m.target_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ m2m.name }}Page + 1)}
                                 disabled={ {{ m2m.name }}Page >= Math.ceil({{ m2m.name }}Total / {{ m2m.name }}Size) || {{ m2m.name }}Loading}
                             >
-                                Next
+                                {t('common.next')}
                             </Button>
                             </div>
                         </div>
@@ -1324,7 +1324,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         {% for field in rel.source_readable_fields %}
                                         <TableHead>{t('{{ field.label_key }}')}</TableHead>
                                         {% endfor %}
-                                        <TableHead className="w-16">Actions</TableHead>
+                                        <TableHead className="w-16">{t('common.actions')}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1342,7 +1342,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% if field.fk_info %}
                                                     {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
                                                     {% elif field.ui_type == 'bool' %}
-                                                    {item.{{ field.name }} ? 'Yes' : 'No'}
+                                                    {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
                                                     <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rel.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
                                                     {% elif field.ui_type == 'datetime' %}
@@ -1389,10 +1389,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 onClick={() => fetch{{ model.name }}{{ rel.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rel.name }}Page - 1)}
                                 disabled={ {{ rel.name }}Page <= 1 || {{ rel.name }}Loading}
                             >
-                                Previous
+                                {t('common.previous')}
                             </Button>
                             <span className="text-sm">
-                                Page { {{ rel.name }}Page } of { Math.ceil({{ rel.name }}Total / {{ rel.name }}Size) || 1 }
+                                {t('common.page_info')} { {{ rel.name }}Page } {t('common.of_page')} { Math.ceil({{ rel.name }}Total / {{ rel.name }}Size) || 1 }
                             </span>
                             <Button
                                 variant="outline"
@@ -1400,7 +1400,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 onClick={() => fetch{{ model.name }}{{ rel.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rel.name }}Page + 1)}
                                 disabled={ {{ rel.name }}Page >= Math.ceil({{ rel.name }}Total / {{ rel.name }}Size) || {{ rel.name }}Loading}
                             >
-                                Next
+                                {t('common.next')}
                             </Button>
                             </div>
                         </div>
@@ -1533,7 +1533,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <TableHead>{t('{{ field.label_key }}')}</TableHead>
                                         {% endif %}
                                         {% endfor %}
-                                        <TableHead className="w-16">Actions</TableHead>
+                                        <TableHead className="min-w-[100px]">{t('common.actions')}</TableHead>
                                     </TableRow>
                                 </TableHeader>
                                 <TableBody>
@@ -1552,7 +1552,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% if field.fk_info %}
                                                     {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
                                                     {% elif field.ui_type == 'bool' %}
-                                                    {item.{{ field.name }} ? 'Yes' : 'No'}
+                                                    {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
                                                     <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rfk.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
                                                     {% elif field.ui_type == 'datetime' %}
@@ -1564,9 +1564,78 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 {% endif %}
                                                 {% endfor %}
                                                 <TableCell>
-                                                    <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ rfk.source_service }}s/${item.id}`)}>
+                                                    <div className="flex items-center gap-2">
+                                                    {% for action_name, action_config in rfk.actions.items() %}
+                                                    {(() => {
+                                                        const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
+                                                        if (!actionPerms.includes(userRole[0])) return false;
+                                                        const cond = {{ action_config.get("condition", None) | tojson }} as any;
+                                                        if (!cond) return true;
+                                                        const actual = (item as any)[cond.field];
+                                                        const expected = cond.value;
+                                                        if (cond.op === 'eq') return actual === expected;
+                                                        if (cond.op === 'ne') return actual !== expected;
+                                                        if (cond.op === 'in') return Array.isArray(expected) && expected.includes(actual);
+                                                        if (cond.op === 'not_in') return !Array.isArray(expected) || !expected.includes(actual);
+                                                        if (cond.op === 'gt') return actual > expected;
+                                                        if (cond.op === 'gte') return actual >= expected;
+                                                        if (cond.op === 'lt') return actual < expected;
+                                                        if (cond.op === 'lte') return actual <= expected;
+                                                        if (cond.op === 'contains') return actual?.includes(expected);
+                                                        if (cond.op === 'startswith') return String(actual).startsWith(String(expected));
+                                                        if (cond.op === 'endswith') return String(actual).endsWith(String(expected));
+                                                        if (cond.op === 'is_null') return actual === null || actual === undefined;
+                                                        if (cond.op === 'is_not_null') return actual !== null && actual !== undefined;
+                                                        return true;
+                                                    })() && (
+                                                    <Button
+                                                        variant="outline"
+                                                        size="sm"
+                                                        onClick={async () => {
+                                                            try {
+                                                                await perform{{ rfk.source_model }}{{ action_name.capitalize() }}(item.id);
+                                                                toast.success(t('common.success'));
+                                                                await fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page, {{ rfk.name }}Size);
+                                                            } catch (error) {
+                                                                toast.error(t('common.error'));
+                                                            }
+                                                        }}
+                                                    >
+                                                        {{ action_name }}
+                                                    </Button>
+                                                    )}
+                                                    {% endfor %}
+                                                    {( {{ rfk.role_permissions | tojson }}[userRole] || '').includes('r') && {{ rfk.standalone | tojson }} && (
+                                                    <Button title={t('common.details')} variant="ghost" size="icon" onClick={() => navigate(`/{{ rfk.source_service }}s/${item.id}`)}>
                                                         <Eye className="h-4 w-4" />
                                                     </Button>
+                                                    )}
+                                                    {( {{ rfk.role_permissions | tojson }}[userRole] || '').includes('u') && {{ rfk.standalone | tojson }} && (
+                                                    <Button title={t('common.edit')} variant="ghost" size="icon" onClick={() => navigate({% if rfk.page_edit %}`/{{ rfk.source_service }}s/${item.id}?edit=true`{% else %}`/{{ rfk.source_service }}s?edit=${item.id}`{% endif %})}>
+                                                        <Pencil className="h-4 w-4" />
+                                                    </Button>
+                                                    )}
+                                                    {( {{ rfk.role_permissions | tojson }}[userRole] || '').includes('d') && (
+                                                    <Button
+                                                        title={t('common.delete')}
+                                                        variant="ghost"
+                                                        size="icon"
+                                                        className="text-destructive"
+                                                        onClick={async () => {
+                                                            if (!window.confirm(t('common.confirm_delete'))) return;
+                                                            try {
+                                                                await delete{{ rfk.source_model }}(item.id);
+                                                                toast.success(t('toast.delete_success'));
+                                                                await fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page, {{ rfk.name }}Size);
+                                                            } catch (error: any) {
+                                                                toast.error(error?.response?.data?.detail || t('toast.delete_failed'));
+                                                            }
+                                                        }}
+                                                    >
+                                                        <Trash2 className="h-4 w-4" />
+                                                    </Button>
+                                                    )}
+                                                    </div>
                                                 </TableCell>
                                             </TableRow>
                                         ))
@@ -1600,10 +1669,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 onClick={() => fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page - 1)}
                                 disabled={ {{ rfk.name }}Page <= 1 || {{ rfk.name }}Loading}
                             >
-                                Previous
+                                {t('common.previous')}
                             </Button>
                             <span className="text-sm">
-                                Page { {{ rfk.name }}Page } of { Math.ceil({{ rfk.name }}Total / {{ rfk.name }}Size) || 1 }
+                                {t('common.page_info')} { {{ rfk.name }}Page } {t('common.of_page')} { Math.ceil({{ rfk.name }}Total / {{ rfk.name }}Size) || 1 }
                             </span>
                             <Button
                                 variant="outline"
@@ -1611,7 +1680,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 onClick={() => fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page + 1)}
                                 disabled={ {{ rfk.name }}Page >= Math.ceil({{ rfk.name }}Total / {{ rfk.name }}Size) || {{ rfk.name }}Loading}
                             >
-                                Next
+                                {t('common.next')}
                             </Button>
                             </div>
                         </div>

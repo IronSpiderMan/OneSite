@@ -697,10 +697,6 @@ const DashboardPage: React.FC = () => {
             )}
             {% endif %}
 
-            {% if tools %}
-            <DashboardTools />
-            {% endif %}
-
             {chartModels.length > 0 && (
                 <div className="grid gap-6 md:grid-cols-2">
                     {chartModels.map((chart, idx) => (
@@ -1122,7 +1118,13 @@ const DashboardPage: React.FC = () => {
                     </div>
                 )}
             </div>
+            {% endif %}
 
+            {% if tools %}
+            <DashboardTools />
+            {% endif %}
+
+            {% if scheduled_tasks %}
             {/* Edit Task Modal */}
             {editingTask && (
                 <Modal
