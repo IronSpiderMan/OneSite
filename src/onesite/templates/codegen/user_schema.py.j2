@@ -27,6 +27,16 @@ class UserCreate(SQLModel):
     {% endif %}
 {% endfor %}
 
+# Public registration payload. Privileged fields are deliberately excluded.
+class UserRegister(SQLModel):
+    email: str
+    password: str
+{% for field in model.fields %}
+    {% if 'c' in (field.role_permissions or {}).get('user', field.permissions) and field.name not in ['id', 'email', 'password', 'role', 'is_active', 'is_superuser', 'hashed_password', 'created_at', 'updated_at'] %}
+    {{ field.name }}: {{ field.type }}{% if not field.required or field.create_optional %} = None{% endif %}
+    {% endif %}
+{% endfor %}
+
 # Properties to receive via API on update
 class UserUpdate(SQLModel):
     email: Optional[str] = None

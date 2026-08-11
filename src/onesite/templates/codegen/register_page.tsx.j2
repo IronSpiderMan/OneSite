@@ -1,0 +1,295 @@
+import { useEffect, useState } from 'react';
+import { Controller, useForm } from 'react-hook-form';
+import { Link, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { Loader2 } from 'lucide-react';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Switch } from '../components/ui/switch';
+import { ImageUpload } from '../components/ui/image-upload';
+import { ImagesUpload } from '../components/ui/images-upload';
+import { FileUpload } from '../components/ui/file-upload';
+import { JsonInput } from '../components/ui/json-input';
+import request from '../utils/request';
+
+export default function RegisterPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const { register, handleSubmit, control } = useForm();
+  const fallbackProjectName = (window as any).__ENV__?.PROJECT_NAME
+    || import.meta.env.VITE_PROJECT_NAME
+    || 'OneSite';
+  const fallbackLogo = (window as any).__ENV__?.PROJECT_LOGO
+    || import.meta.env.VITE_PROJECT_LOGO
+    || '';
+  const [projectName, setProjectName] = useState(
+    () => localStorage.getItem('onesite_site_name') || fallbackProjectName
+  );
+  const [logoUrl, setLogoUrl] = useState(
+    () => localStorage.getItem('onesite_site_logo') || fallbackLogo
+  );
+  const [checking, setChecking] = useState(true);
+  const [allowed, setAllowed] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [error, setError] = useState('');
+  const [passwordMismatch, setPasswordMismatch] = useState(false);
+
+  useEffect(() => {
+    let active = true;
+    request.get('/public-config')
+      .then((response) => {
+        if (!active) return;
+        setAllowed(response.data.allow_registration === true);
+        if (response.data.site_name) setProjectName(response.data.site_name);
+        if (response.data.logo) setLogoUrl(response.data.logo);
+      })
+      .catch(() => {
+        if (active) setAllowed(false);
+      })
+      .finally(() => {
+        if (active) setChecking(false);
+      });
+    return () => { active = false; };
+  }, []);
+
+  const onSubmit = async (formData: Record<string, any>) => {
+    setError('');
+    const { confirm_password, ...payload } = formData;
+    if (payload.password !== confirm_password) {
+      setPasswordMismatch(true);
+      return;
+    }
+    setPasswordMismatch(false);
+    setSubmitting(true);
+    try {
+      await request.post('/register', payload);
+      navigate('/login', { replace: true, state: { registrationSuccess: true } });
+    } catch (err: any) {
+      setError(err.response?.data?.detail || t('register.error'));
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <div className="relative grid h-[100dvh] w-full overflow-hidden bg-background lg:grid-cols-[minmax(360px,0.9fr)_minmax(520px,1.1fr)]">
+      <section className="relative hidden h-full overflow-hidden bg-zinc-950 p-10 text-white lg:flex lg:flex-col xl:p-14">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_20%_15%,rgba(255,255,255,0.12),transparent_28%),radial-gradient(circle_at_80%_80%,rgba(99,102,241,0.25),transparent_35%)]" />
+        <div className="absolute inset-0 opacity-[0.08] [background-image:linear-gradient(rgba(255,255,255,.5)_1px,transparent_1px),linear-gradient(90deg,rgba(255,255,255,.5)_1px,transparent_1px)] [background-size:36px_36px]" />
+
+        <div className="relative z-10 flex items-center text-lg font-semibold tracking-tight">
+          <div className="mr-3 flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-white font-bold text-zinc-950 shadow-lg shadow-black/20">
+            {logoUrl ? (
+              <img src={logoUrl} alt={projectName} className="h-9 w-9 object-contain" />
+            ) : (
+              projectName.charAt(0).toUpperCase()
+            )}
+          </div>
+          {projectName}
+        </div>
+
+        <div className="relative z-10 my-auto max-w-lg space-y-5">
+          <div className="h-1 w-12 rounded-full bg-white/80" />
+          <h2 className="text-4xl font-semibold leading-tight tracking-tight xl:text-5xl">
+            {t('register.title')}
+          </h2>
+          <p className="max-w-md text-base leading-7 text-zinc-300">
+            {t('register.description')}
+          </p>
+        </div>
+
+        <div className="relative z-10 flex items-center gap-3 text-xs font-medium uppercase tracking-[0.2em] text-zinc-500">
+          <span className="h-px w-8 bg-zinc-700" />
+          {t('login.system_access')}
+        </div>
+      </section>
+
+      <main className="relative flex h-full min-h-0 items-center justify-center overflow-hidden bg-muted/20 px-5 py-5 sm:px-8 lg:px-12">
+        <div className="absolute right-6 top-6 hidden items-center gap-2 text-sm text-muted-foreground sm:flex">
+          <span>{t('register.have_account')}</span>
+          <Button type="button" variant="outline" size="sm" onClick={() => navigate('/login')}>
+            {t('login.signIn')}
+          </Button>
+        </div>
+
+        <div className="max-h-[calc(100dvh-2.5rem)] w-full max-w-[410px] overflow-y-auto overscroll-contain rounded-2xl border bg-card p-6 shadow-[0_24px_80px_-36px_rgba(0,0,0,0.35)] sm:p-8">
+          <div className="mb-7 flex items-center justify-center gap-3 lg:hidden">
+            <div className="flex h-9 w-9 items-center justify-center overflow-hidden rounded-xl bg-primary text-sm font-bold text-primary-foreground">
+              {logoUrl ? (
+                <img src={logoUrl} alt={projectName} className="h-9 w-9 object-contain" />
+              ) : (
+                projectName.charAt(0).toUpperCase()
+              )}
+            </div>
+            <span className="max-w-[240px] truncate text-lg font-semibold">{projectName}</span>
+          </div>
+
+          {checking ? (
+            <div className="flex min-h-40 items-center justify-center">
+              <Loader2 className="h-7 w-7 animate-spin text-muted-foreground" />
+            </div>
+          ) : !allowed ? (
+            <div className="space-y-6 text-center">
+              <div className="space-y-2">
+                <h1 className="text-2xl font-semibold tracking-tight">{t('register.disabled')}</h1>
+                <p className="text-sm text-muted-foreground">{t('register.description')}</p>
+              </div>
+              <Button type="button" className="w-full" onClick={() => navigate('/login')}>
+                {t('register.back_to_login')}
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-6">
+              <div className="flex flex-col space-y-2 text-center">
+                <h1 className="text-3xl font-semibold tracking-tight">{t('register.title')}</h1>
+                <p className="text-sm text-muted-foreground">{t('register.description')}</p>
+              </div>
+
+              <form onSubmit={handleSubmit(onSubmit)} className="grid gap-4">
+                <div className="grid gap-2">
+                  <Label htmlFor="email">{t('login.email')}</Label>
+                  <Input
+                    id="email"
+                    type="email"
+                    placeholder={t('login.emailPlaceholder')}
+                    autoComplete="email"
+                    disabled={submitting}
+                    {...register('email', { required: true })}
+                  />
+                </div>
+
+{% if model %}
+{% for field in model.fields %}
+{% if field.required and not field.create_optional and 'c' in (field.role_permissions or {}).get('user', field.permissions) and field.name not in ['id', 'email', 'password', 'role', 'is_active', 'is_superuser', 'hashed_password', 'created_at', 'updated_at'] %}
+                <div className="grid gap-2">
+                  <Label htmlFor="{{ field.name }}">
+                    {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+                  </Label>
+{% if field.ui_type == 'bool' %}
+                  <Controller
+                    control={control}
+                    name="{{ field.name }}"
+                    defaultValue={ {{ 'true' if field.default else 'false' }} }
+                    render={({ field: { onChange, value } }) => (
+                      <Switch id="{{ field.name }}" checked={!!value} onCheckedChange={onChange} disabled={submitting} />
+                    )}
+                  />
+{% elif field.ui_type == 'image' %}
+                  <Controller
+                    control={control}
+                    name="{{ field.name }}"
+                    rules={ { required: true } }
+                    render={({ field: { onChange, value } }) => (
+                      <ImageUpload value={value} onChange={onChange} />
+                    )}
+                  />
+{% elif field.ui_type == 'images' %}
+                  <Controller
+                    control={control}
+                    name="{{ field.name }}"
+                    rules={ { required: true } }
+                    render={({ field: { onChange, value } }) => (
+                      <ImagesUpload id="{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
+                    )}
+                  />
+{% elif field.ui_type == 'file' %}
+                  <Controller
+                    control={control}
+                    name="{{ field.name }}"
+                    rules={ { required: true } }
+                    render={({ field: { onChange, value } }) => (
+                      <FileUpload value={value} onChange={onChange} />
+                    )}
+                  />
+{% elif field.ui_type == 'json' %}
+                  <Controller
+                    control={control}
+                    name="{{ field.name }}"
+                    rules={ { required: true } }
+                    render={({ field: { onChange, value } }) => (
+                      <JsonInput value={value} onChange={onChange} jsonKind="{{ field.json_kind or 'object' }}" />
+                    )}
+                  />
+{% elif field.is_enum %}
+                  <select
+                    id="{{ field.name }}"
+                    disabled={submitting}
+                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    {...register('{{ field.name }}', { required: true })}
+                  >
+                    <option value="">{t('common.select')}</option>
+{% for value in field.enum_values %}
+                    <option value="{{ value }}">{t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ value }}', '{{ value }}')}</option>
+{% endfor %}
+                  </select>
+{% else %}
+                  <Input
+                    id="{{ field.name }}"
+                    disabled={submitting}
+{% if field.ui_type in ['int', 'float'] %}
+                    type="number"
+{% elif field.ui_type == 'date' %}
+                    type="date"
+{% elif field.ui_type == 'datetime' %}
+                    type="datetime-local"
+{% else %}
+                    type="text"
+{% endif %}
+                    {...register('{{ field.name }}', {
+                      required: true{% if field.ui_type in ['int', 'float'] %},
+                      valueAsNumber: true{% endif %}
+                    })}
+                  />
+{% endif %}
+                </div>
+{% endif %}
+{% endfor %}
+{% endif %}
+
+                <div className="grid gap-2">
+                  <Label htmlFor="password">{t('login.password')}</Label>
+                  <Input
+                    id="password"
+                    type="password"
+                    autoComplete="new-password"
+                    disabled={submitting}
+                    {...register('password', { required: true })}
+                  />
+                </div>
+
+                <div className="grid gap-2">
+                  <Label htmlFor="confirm_password">{t('register.confirm_password')}</Label>
+                  <Input
+                    id="confirm_password"
+                    type="password"
+                    autoComplete="new-password"
+                    disabled={submitting}
+                    {...register('confirm_password', { required: true })}
+                  />
+                </div>
+
+                {(passwordMismatch || error) && (
+                  <div className="text-sm font-medium text-destructive">
+                    {passwordMismatch ? t('register.password_mismatch') : error}
+                  </div>
+                )}
+
+                <Button type="submit" className="w-full" disabled={submitting}>
+                  {submitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {submitting ? t('register.submitting') : t('register.submit')}
+                </Button>
+
+                <div className="text-center text-sm text-muted-foreground sm:hidden">
+                  <Link to="/login" className="font-medium text-primary hover:underline">
+                    {t('register.back_to_login')}
+                  </Link>
+                </div>
+              </form>
+            </div>
+          )}
+        </div>
+      </main>
+    </div>
+  );
+}

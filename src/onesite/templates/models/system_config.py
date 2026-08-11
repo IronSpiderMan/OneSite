@@ -20,6 +20,14 @@ class SystemConfig(SQLModel, table=True):
     # Global System Name
     site_name: str = Field(default="OneSite Admin")
 
+    logo: Optional[str] = Field(
+        default=None,
+        sa_column_kwargs={"info": {"site_props": {
+            "permissions": {"user": "r", "admin": "cru", "developer": "cru"},
+            "component": "image",
+        }}},
+    )
+
     allow_registration: bool = Field(default=True)
 
     # Dashboard Announcement (markdown supported)

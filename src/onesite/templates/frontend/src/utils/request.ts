@@ -65,6 +65,10 @@ request.interceptors.response.use(
             redirectTo('/login');
         }
       } else if (error.response.status === 403) {
+        const requestUrl = String(error.config?.url || '');
+        if (requestUrl === '/register') {
+          return Promise.reject(error);
+        }
         // If the 403 is actually an auth failure (stale/expired token),
         // treat it like 401: clear token and redirect to login
         const detail = error.response.data?.detail || '';

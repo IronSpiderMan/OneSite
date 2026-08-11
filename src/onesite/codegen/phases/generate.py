@@ -621,11 +621,25 @@ def phase_generate_aggregated(
         ),
         None,
     ) if system_model else None
+    logo_field = next(
+        (field for field in system_model["fields"] if field["name"] == "logo"),
+        None,
+    ) if system_model else None
+    registration_field = next(
+        (
+            field
+            for field in system_model["fields"]
+            if field["name"] == "allow_registration"
+        ),
+        None,
+    ) if system_model else None
     generate_file(
         "site_metadata.tsx.j2",
         {
             "system_model": system_model,
             "site_name_field": site_name_field,
+            "logo_field": logo_field,
+            "registration_field": registration_field,
         },
         frontend_path / "src" / "SiteMetadata.tsx",
     )
@@ -646,6 +660,11 @@ def phase_generate_aggregated(
 
     # ── Profile page ──
     user_model = next((m for m in models if m["name"] == "User"), None)
+    generate_file(
+        "register_page.tsx.j2",
+        {"model": user_model},
+        frontend_path / "src" / "pages" / "Register.tsx",
+    )
     if user_model is not None:
         generate_theme_file(
             "profile.tsx.j2",

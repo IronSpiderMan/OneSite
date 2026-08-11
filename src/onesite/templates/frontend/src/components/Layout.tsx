@@ -84,6 +84,10 @@ const AppLayout: React.FC = () => {
   const [projectName, setProjectName] = useState(
     () => localStorage.getItem('onesite_site_name') || fallbackProjectName
   );
+  const fallbackLogo = window.__ENV__?.PROJECT_LOGO || import.meta.env.VITE_PROJECT_LOGO || '';
+  const [logoUrl, setLogoUrl] = useState(
+    () => localStorage.getItem('onesite_site_logo') || fallbackLogo
+  );
 
   const toggleCollapsed = useCallback(() => {
     setCollapsed(prev => {
@@ -129,6 +133,21 @@ const AppLayout: React.FC = () => {
     };
   }, [fallbackProjectName]);
 
+  useEffect(() => {
+    const syncSiteLogo = (event?: Event) => {
+      const updatedLogo = (event as CustomEvent<string> | undefined)?.detail;
+      setLogoUrl(
+        updatedLogo || localStorage.getItem('onesite_site_logo') || fallbackLogo
+      );
+    };
+    window.addEventListener('onesite:site_logo_updated', syncSiteLogo);
+    window.addEventListener('storage', syncSiteLogo);
+    return () => {
+      window.removeEventListener('onesite:site_logo_updated', syncSiteLogo);
+      window.removeEventListener('storage', syncSiteLogo);
+    };
+  }, [fallbackLogo]);
+
   // Close mobile sidebar on route change
   useEffect(() => {
     setSidebarOpen(false);
@@ -141,7 +160,6 @@ const AppLayout: React.FC = () => {
   const sidebarWidth = isCollapsed ? SIDEBAR_WIDTH_COLLAPSED : isNormal ? 'md:w-56' : SIDEBAR_WIDTH;
   const mainMargin = isCollapsed ? MAIN_MARGIN_COLLAPSED : isNormal ? 'md:ml-56' : MAIN_MARGIN;
 
-  const logoUrl = import.meta.env.VITE_PROJECT_LOGO;
   const logoLink = window.__ENV__?.LOGO_LINK || import.meta.env.VITE_LOGO_LINK || '/dashboard';
 
   const menuItems = filterMenuByRole(GeneratedMenu, userRole);

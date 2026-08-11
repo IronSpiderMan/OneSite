@@ -11,8 +11,42 @@ from app.core.config import settings
 from app.core.db import get_session
 from app.models.user import User
 from app.schemas.token import Token
+from app.schemas.user import UserCreate, UserRead, UserRegister
+from app.services.system_config import service as system_config_service
+from app.services.user import service as user_service
 
 router = APIRouter()
+
+
+@router.get("/public-config")
+async def public_config(
+    session: AsyncSession = Depends(get_session),
+) -> dict[str, Any]:
+    """Branding and registration settings needed before authentication."""
+    config = await system_config_service.get(session)
+    return {
+        "site_name": getattr(config, "site_name", settings.PROJECT_NAME),
+        "logo": getattr(config, "logo", None),
+        "allow_registration": bool(getattr(config, "allow_registration", False)),
+    }
+
+
+@router.post("/register", response_model=UserRead, status_code=201)
+async def register_user(
+    user_in: UserRegister,
+    session: AsyncSession = Depends(get_session),
+) -> Any:
+    """Create a regular user when public registration is enabled."""
+    config = await system_config_service.get(session)
+    if not bool(getattr(config, "allow_registration", False)):
+        raise HTTPException(status_code=403, detail="Registration is disabled")
+
+    user_data = user_in.model_dump(exclude_none=True)
+    user_data.update({"role": "user", "is_active": True, "is_superuser": False})
+    try:
+        return await user_service.create(session, UserCreate(**user_data))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 @router.post("/login/access-token", response_model=Token)
 async def login_access_token(

@@ -2,6 +2,7 @@ import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 
 import AppLayout from './components/Layout';
 import { GeneratedRoutes } from './Routes';
 import LoginPage from './pages/Login';
+import RegisterPage from './pages/Register';
 import ErrorPage from './pages/ErrorPage';
 import ProfilePage from './pages/Profile';
 import { AppToaster } from './components/ui/sonner';
@@ -31,6 +32,7 @@ function App() {
       <AppToaster />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
+        <Route path="/register" element={<RegisterPage />} />
         <Route
           path="/error/:code"
           element={<ErrorPage />}

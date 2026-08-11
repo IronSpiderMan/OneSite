@@ -1,11 +1,15 @@
 import { useEffect } from 'react';
-{% if system_model and site_name_field %}
+{% if system_model %}
 import { use{{ system_model.name }}Store } from './stores/use{{ system_model.name }}Store';
+import request from './utils/request';
 {% endif %}
 
 const fallbackSiteName = (window as any).__ENV__?.PROJECT_NAME
   || import.meta.env.VITE_PROJECT_NAME
   || 'OneSite';
+const fallbackLogo = (window as any).__ENV__?.PROJECT_LOGO
+  || import.meta.env.VITE_PROJECT_LOGO
+  || '';
 
 const applySiteName = (value: unknown) => {
   const siteName = typeof value === 'string' && value.trim() ? value.trim() : fallbackSiteName;
@@ -14,37 +18,99 @@ const applySiteName = (value: unknown) => {
   window.dispatchEvent(new CustomEvent('onesite:site_name_updated', { detail: siteName }));
 };
 
+const applySiteLogo = (value: unknown) => {
+  const logo = typeof value === 'string' && value.trim() ? value.trim() : fallbackLogo;
+  if (logo) localStorage.setItem('onesite_site_logo', logo);
+  else localStorage.removeItem('onesite_site_logo');
+  window.dispatchEvent(new CustomEvent('onesite:site_logo_updated', { detail: logo }));
+};
+
+const applyRegistration = (value: unknown) => {
+  const allowed = value === true;
+  localStorage.setItem('onesite_allow_registration', String(allowed));
+  window.dispatchEvent(new CustomEvent('onesite:registration_updated', { detail: allowed }));
+};
+
 export default function SiteMetadata() {
+{% if system_model %}
+  const fetchData = use{{ system_model.name }}Store((state) => state.fetchData);
+{% endif %}
 {% if system_model and site_name_field %}
 {% if site_name_field.is_local_storage %}
   const siteName = use{{ system_model.name }}Store((state) => state.localData.site_name);
 {% else %}
   const siteName = use{{ system_model.name }}Store((state) => state.data?.site_name);
 {% endif %}
-  const fetchData = use{{ system_model.name }}Store((state) => state.fetchData);
-
-  useEffect(() => {
-    const refreshSiteName = () => {
-{% if site_name_field.is_local_storage %}
-      void fetchData();
-{% else %}
-      if (localStorage.getItem('token')) {
-        void fetchData();
-      }
 {% endif %}
+{% if system_model and logo_field %}
+{% if logo_field.is_local_storage %}
+  const siteLogo = use{{ system_model.name }}Store((state) => state.localData.logo);
+{% else %}
+  const siteLogo = use{{ system_model.name }}Store((state) => state.data?.logo);
+{% endif %}
+{% endif %}
+{% if system_model and registration_field %}
+{% if registration_field.is_local_storage %}
+  const allowRegistration = use{{ system_model.name }}Store((state) => state.localData.allow_registration);
+{% else %}
+  const allowRegistration = use{{ system_model.name }}Store((state) => state.data?.allow_registration);
+{% endif %}
+{% endif %}
+
+{% if system_model %}
+  useEffect(() => {
+    const refreshConfig = () => {
+      if (localStorage.getItem('token')) void fetchData();
     };
-    refreshSiteName();
-    window.addEventListener('onesite:auth_updated', refreshSiteName);
-    return () => window.removeEventListener('onesite:auth_updated', refreshSiteName);
+    refreshConfig();
+    window.addEventListener('onesite:auth_updated', refreshConfig);
+    return () => window.removeEventListener('onesite:auth_updated', refreshConfig);
   }, [fetchData]);
 
   useEffect(() => {
-    applySiteName(siteName ?? localStorage.getItem('onesite_site_name'));
+    let active = true;
+    request.get('/public-config')
+      .then((response) => {
+        if (!active) return;
+        applySiteName(response.data.site_name);
+        applySiteLogo(response.data.logo);
+        applyRegistration(response.data.allow_registration);
+      })
+      .catch(() => {
+        if (!active) return;
+        applySiteName(localStorage.getItem('onesite_site_name'));
+        applySiteLogo(localStorage.getItem('onesite_site_logo'));
+      });
+    return () => { active = false; };
+  }, []);
+{% endif %}
+
+{% if system_model and site_name_field %}
+  useEffect(() => {
+    if (siteName !== undefined && siteName !== null) applySiteName(siteName);
   }, [siteName]);
 {% else %}
   useEffect(() => {
     applySiteName(localStorage.getItem('onesite_site_name'));
   }, []);
+{% endif %}
+
+{% if system_model and logo_field %}
+  useEffect(() => {
+    if (siteLogo !== undefined) applySiteLogo(siteLogo);
+  }, [siteLogo]);
+{% else %}
+  useEffect(() => {
+    applySiteLogo(localStorage.getItem('onesite_site_logo'));
+  }, []);
+{% endif %}
+
+{% if system_model and registration_field %}
+  useEffect(() => {
+    if (allowRegistration !== undefined && allowRegistration !== null) {
+      applyRegistration(allowRegistration);
+    }
+  }, [allowRegistration]);
 {% endif %}
 
   return null;
