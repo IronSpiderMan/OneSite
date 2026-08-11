@@ -147,7 +147,7 @@ export function SearchableSelect({
   const hasValue = !multiple && selectedLabel && value
 
   return (
-    <div className="relative">
+    <div className="relative min-w-0 w-full">
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
         <Button
@@ -155,34 +155,34 @@ export function SearchableSelect({
           role="combobox"
           aria-expanded={open}
           className={cn(
-            "w-full justify-between font-normal hover:bg-background hover:text-foreground",
+            "min-w-0 w-full justify-between overflow-hidden font-normal hover:bg-background hover:text-foreground",
             hasValue ? "pr-8" : "",
             multiple && selectedItems.length > 0 ? "h-auto py-2" : ""
           )}
         >
             {multiple ? (
                 selectedItems.length > 0 ? (
-                    <div className="flex flex-wrap gap-1.5">
+                    <div className="flex min-w-0 flex-wrap gap-1.5 overflow-hidden">
                         {selectedItems.map(item => (
-                            <Badge key={item.value} variant="default" className="mr-1 border-primary-foreground/20 px-3 py-1 text-sm shadow-sm">
-                                {item.label}
+                            <Badge key={item.value} variant="default" className="mr-1 max-w-full min-w-0 border-primary-foreground/20 px-3 py-1 text-sm shadow-sm">
+                                <span className="truncate">{item.label}</span>
                                 <X
-                                    className="ml-1.5 h-3.5 w-3.5 cursor-pointer opacity-70 hover:opacity-100"
+                                    className="ml-1.5 h-3.5 w-3.5 shrink-0 cursor-pointer opacity-70 hover:opacity-100"
                                     onClick={(e) => handleRemove(e, item.value)}
                                 />
                             </Badge>
                         ))}
                     </div>
                 ) : (
-                    placeholder
+                    <span className="truncate">{placeholder}</span>
                 )
             ) : (
-                selectedLabel || placeholder
+                <span className="truncate">{selectedLabel || placeholder}</span>
             )}
           {!hasValue && <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-full p-0" align="start">
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-0" align="start">
         <Command shouldFilter={false}>
           <CommandInput 
             placeholder={searchPlaceholder} 
@@ -209,8 +209,8 @@ export function SearchableSelect({
                         isSelected ? "opacity-100" : "opacity-0"
                       )}
                     />
-                    <div className="flex flex-col">
-                        <span>{option.label}</span>
+                    <div className="flex min-w-0 flex-1 flex-col">
+                        <span className="truncate" title={option.label}>{option.label}</span>
                         {option.description && (
                             <span className="text-xs text-muted-foreground">{option.description}</span>
                         )}

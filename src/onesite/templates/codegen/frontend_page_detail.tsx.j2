@@ -1435,21 +1435,21 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         />
                         ) : (<>{% endif %}
                         {% if rfk.source_search_fields %}
-                        <div className="mb-4 rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40">
-                            <div className="flex items-center justify-between gap-3">
+                        <div className="mb-4 min-w-0 overflow-hidden rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40">
+                            <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
                                 <Button variant="outline" size="sm" type="button" onClick={() => set{{ rfk.source_model }}SearchValues({})}>{t('common.reset', 'Reset')}</Button>
                             </div>
-                            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            <div className="mt-4 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
                             {% for field in rfk.source_search_fields %}
-                                <div className="space-y-2">
-                                    <Label>{t('{{ field.label_key }}')}</Label>
+                                <div className="min-w-0 space-y-2">
+                                    <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
                                     {% if field.ui_type == 'bool' %}
                                     <Select
                                         value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '__all__' }
                                         onValueChange={(value) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }))}
                                     >
-                                        <SelectTrigger className="h-9"><SelectValue placeholder={t('common.all', 'All')} /></SelectTrigger>
+                                        <SelectTrigger className="h-9 min-w-0 w-full"><SelectValue placeholder={t('common.all', 'All')} /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
                                             <SelectItem value="true">{t('common.yes', 'Yes')}</SelectItem>
@@ -1457,10 +1457,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         </SelectContent>
                                     </Select>
                                     {% elif field.ui_type == 'datetime' %}
-                                    <div className="flex items-center gap-2">
-                                        <Input type="date" className="h-9" value={ {{ rfk.name }}SearchValues['{{ field.name }}_from'] || '' } onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}_from']: event.target.value }))} />
+                                    <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+                                        <Input type="date" className="h-9 min-w-0 w-full" value={ {{ rfk.name }}SearchValues['{{ field.name }}_from'] || '' } onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}_from']: event.target.value }))} />
                                         <span className="text-sm text-muted-foreground">-</span>
-                                        <Input type="date" className="h-9" value={ {{ rfk.name }}SearchValues['{{ field.name }}_to'] || '' } onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}_to']: event.target.value }))} />
+                                        <Input type="date" className="h-9 min-w-0 w-full" value={ {{ rfk.name }}SearchValues['{{ field.name }}_to'] || '' } onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}_to']: event.target.value }))} />
                                     </div>
                                     {% elif field.ui_type == 'time' %}
                                     <TimePicker
@@ -1486,7 +1486,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '__all__' }
                                         onValueChange={(value) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }))}
                                     >
-                                        <SelectTrigger className="h-9"><SelectValue placeholder={t('common.all', 'All')} /></SelectTrigger>
+                                        <SelectTrigger className="h-9 min-w-0 w-full"><SelectValue placeholder={t('common.all', 'All')} /></SelectTrigger>
                                         <SelectContent>
                                             <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
                                             {% for enum_val in field.enum_values %}
@@ -1513,7 +1513,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     />
                                     {% elif field.ui_type == 'str' %}
                                     <Input
-                                        className="h-9"
+                                        className="h-9 min-w-0 w-full"
                                         value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '' }
                                         onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: event.target.value }))}
                                         placeholder={t('common.search')}
