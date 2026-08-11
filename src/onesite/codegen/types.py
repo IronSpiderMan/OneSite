@@ -88,6 +88,8 @@ class FieldDefinition:
     is_unique: bool = False
     is_local_storage: bool = False
     group: str | None = None
+    importable: bool = True
+    exportable: bool = True
 
     # ── Dict-compatible access for Jinja2 templates & pipeline code ─────────
 

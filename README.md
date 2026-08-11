@@ -506,6 +506,32 @@ Place model-level options in `__onesite__` (or table `info.site_props`). Key opt
 | `actions` | Adds permission-controlled custom action buttons. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
 | `import_key` | Field used for import upsert matching. |
+
+CSV import/export can also use an object configuration. M2M relations are
+included only when explicitly listed; their values use `;` as the separator.
+Related objects must already exist when importing.
+
+```python
+__onesite__ = {
+    "import_key": "sku",
+    "exportable": {
+        "fields": ["sku", "name", "category_id"],
+        "foreign_keys": {"category_id": "title"},
+        "m2m": {"tags": "title"},
+    },
+    "importable": {
+        "fields": ["sku", "name", "category_id"],
+        "foreign_keys": {"category_id": "title"},
+        "m2m": {"tags": "title"},
+    },
+}
+```
+
+The example exports `category_id` as `Category.title` and `tags` as
+`tag one;tag two`. Import performs the reverse lookup. A matching `import_key`
+updates the existing row; otherwise a new row is created. Set field-level
+`site_props` `importable=False` or `exportable=False` to exclude a field even
+when it appears in a model-level field list.
 | `refresh_interval` | Enables periodic list refresh. |
 | `visualize` | Adds generated dashboard statistics/charts. |
 | `is_notification_table` | Enables notification-center behavior and realtime push. |

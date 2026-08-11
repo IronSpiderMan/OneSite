@@ -311,6 +311,166 @@ def _resolve_m2m(
             _apply_m2m_direction(d, model, fks, models, model_map, module_map, editable_edges)
 
 
+def _normalise_io_config(model: ModelDefinition, direction: str) -> dict:
+    """Return the model-level import/export config in its canonical shape."""
+    raw = (model.get("site_props") or {}).get(f"{direction}able", False)
+    if isinstance(raw, dict):
+        return raw
+    return {} if raw else {"enabled": False}
+
+
+def _configured_field_names(config: dict) -> tuple[set[str] | None, dict[str, Any]]:
+    """Parse the permissive field-list syntax used by import/export configs."""
+    raw_fields = config.get("fields")
+    if raw_fields is None:
+        return None, {}
+    names: set[str] = set()
+    options: dict[str, Any] = {}
+    if isinstance(raw_fields, dict):
+        for name, value in raw_fields.items():
+            if value is False or value is None:
+                continue
+            names.add(str(name))
+            options[str(name)] = value
+    elif isinstance(raw_fields, (list, tuple, set)):
+        for value in raw_fields:
+            if isinstance(value, str):
+                names.add(value)
+            elif isinstance(value, dict) and value.get("name"):
+                name = str(value["name"])
+                names.add(name)
+                options[name] = value
+    else:
+        raise ValueError("importable/exportable 'fields' must be a list or object")
+    return names, options
+
+
+def _relation_mapping(config: dict, *keys: str) -> dict[str, Any]:
+    for key in keys:
+        value = config.get(key)
+        if value is None:
+            continue
+        if isinstance(value, dict):
+            return dict(value)
+        if isinstance(value, (list, tuple)):
+            result = {}
+            for item in value:
+                if isinstance(item, str):
+                    result[item] = True
+                elif isinstance(item, dict):
+                    name = item.get("name") or item.get("field") or item.get("relation")
+                    if name:
+                        result[str(name)] = item
+            return result
+        raise ValueError(f"importable/exportable '{key}' must be a list or object")
+    return {}
+
+
+def _lookup_field(option: Any, default: str) -> tuple[str, str | None]:
+    if isinstance(option, str):
+        return option, None
+    if isinstance(option, dict):
+        lookup = option.get("lookup_field") or option.get("field") or option.get("target_field") or default
+        column = option.get("column") or option.get("column_name") or option.get("header")
+        return str(lookup), str(column) if column else None
+    return default, None
+
+
+def _resolve_import_export_config(
+    models: list[ModelDefinition], model_map: dict[str, ModelDefinition]
+) -> None:
+    """Resolve scalar, FK and explicitly configured M2M CSV columns."""
+    system_fields = {"id", "created_at", "updated_at"}
+    for model in models:
+        fields_by_name = {field["name"]: field for field in model.get("fields", [])}
+        fk_by_name = {fk["name"]: fk for fk in model.get("foreign_keys", [])}
+
+        for direction in ("export", "import"):
+            config = _normalise_io_config(model, direction)
+            selected, field_options = _configured_field_names(config)
+            excluded = {str(name) for name in config.get("exclude_fields", [])}
+            fk_config = _relation_mapping(config, "foreign_keys", "fk_fields", "fks")
+
+            # A configured FK is also a selected CSV column.
+            if selected is not None:
+                selected.update(fk_config)
+
+            io_fields = []
+            for field in model.get("fields", []):
+                name = field["name"]
+                permissions = field.get("permissions", "")
+                allowed = "r" in permissions if direction == "export" else ("c" in permissions or "u" in permissions)
+                if (
+                    not allowed
+                    or name in system_fields
+                    or name in excluded
+                    or not field.get(f"{direction}able", True)
+                    or (selected is not None and name not in selected)
+                ):
+                    continue
+
+                entry = {"field": field, "name": name, "column_name": name, "kind": "scalar"}
+                if name in fk_by_name:
+                    fk = fk_by_name[name]
+                    option = fk_config.get(name, field_options.get(name))
+                    lookup, column = _lookup_field(option, fk["label_field"])
+                    target = model_map.get(fk["target_model"])
+                    if target and lookup not in {item["name"] for item in target.get("fields", [])}:
+                        raise ValueError(
+                            f"{model['name']}.{direction}able foreign key '{name}' "
+                            f"references unknown {fk['target_model']} field '{lookup}'"
+                        )
+                    entry.update({"kind": "fk", "fk": fk, "lookup_field": lookup})
+                    if column:
+                        entry["column_name"] = column
+                io_fields.append(entry)
+
+            # Import upsert cannot work without its matching column. Include it
+            # automatically even when an allow-list accidentally omitted it.
+            if direction == "import" and model.get("importable") and model.get("import_key"):
+                key = model["import_key"]
+                if key in fields_by_name and not any(item["name"] == key for item in io_fields):
+                    io_fields.insert(0, {
+                        "field": fields_by_name[key], "name": key,
+                        "column_name": key, "kind": "scalar",
+                    })
+
+            raw_m2m = _relation_mapping(config, "m2m", "many_to_many")
+            resolved_m2m = []
+            for relation_name, option in raw_m2m.items():
+                relation = next(
+                    (
+                        item for item in model.get("m2m_fields", [])
+                        if relation_name in {
+                            item.get("name"), item.get("write_name"),
+                            item.get("target_service"), item.get("target_endpoint"),
+                            pluralize(str(item.get("target_service", "")).rsplit("_", 1)[-1]),
+                        }
+                    ),
+                    None,
+                )
+                if relation is None:
+                    raise ValueError(
+                        f"{model['name']}.{direction}able m2m relation '{relation_name}' was not found"
+                    )
+                lookup, column = _lookup_field(option, relation["label_field"])
+                target = model_map.get(relation["target_model"])
+                if target and lookup not in {item["name"] for item in target.get("fields", [])}:
+                    raise ValueError(
+                        f"{model['name']}.{direction}able m2m '{relation_name}' "
+                        f"references unknown {relation['target_model']} field '{lookup}'"
+                    )
+                resolved = dict(relation)
+                resolved.update({
+                    "lookup_field": lookup,
+                    "column_name": column or relation_name,
+                })
+                resolved_m2m.append(resolved)
+
+            model[f"{direction}_fields"] = io_fields
+            model[f"{direction}_m2m"] = resolved_m2m
+
+
 def _apply_m2m_direction(
     d: Any,
     link_model: ModelDefinition,
@@ -667,6 +827,7 @@ def phase_resolve_relationships(
     _resolve_property_config_relations(models)
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_m2m(models, model_map, module_map)
+    _resolve_import_export_config(models, model_map)
 
     for model in models:
         model["inline_relations"] = [

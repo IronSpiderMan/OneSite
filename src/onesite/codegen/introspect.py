@@ -255,9 +255,11 @@ def get_model_fields(
             action_config.setdefault("permissions", "da")
     is_notification_table = bool(model_site_props.get("is_notification_table", False))
     union_key = model_site_props.get("union_key", None)
-    importable = model_site_props.get("importable", False)
+    raw_importable = model_site_props.get("importable", False)
+    importable = isinstance(raw_importable, dict) or bool(raw_importable)
     import_key = model_site_props.get("import_key", None)
-    exportable = model_site_props.get("exportable", False)
+    raw_exportable = model_site_props.get("exportable", False)
+    exportable = isinstance(raw_exportable, dict) or bool(raw_exportable)
     raw_visible = model_site_props.get("visible", None)
     page_edit = model_site_props.get("page_edit", False)  # Use full page for create/edit instead of modal
     owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
@@ -660,6 +662,8 @@ def get_model_fields(
                 is_unique=is_unique,
                 is_local_storage=is_local_storage,
                 group=field_group,
+                importable=bool(site_props.get("importable", True)),
+                exportable=bool(site_props.get("exportable", True)),
             )
         )
 

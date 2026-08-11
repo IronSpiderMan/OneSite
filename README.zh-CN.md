@@ -112,6 +112,30 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 - `owner_field`：用户只能访问自己拥有的数据。
 - `is_link_table`、`is_singleton`、`frontend_only`、`page_edit`：关系、单例、纯前端和编辑页行为。
 - `actions`、`importable`、`exportable`、`import_key`：自定义操作与 CSV 导入导出。
+
+`importable` / `exportable` 也支持对象配置。M2M 只有显式配置后才会参与，
+多个值使用 `;` 分隔；导入时，外键和 M2M 对应的对象必须已经存在。
+
+```python
+__onesite__ = {
+    "import_key": "sku",
+    "exportable": {
+        "fields": ["sku", "name", "category_id"],
+        "foreign_keys": {"category_id": "title"},
+        "m2m": {"tags": "title"},
+    },
+    "importable": {
+        "fields": ["sku", "name", "category_id"],
+        "foreign_keys": {"category_id": "title"},
+        "m2m": {"tags": "title"},
+    },
+}
+```
+
+上例会把 `category_id` 导出为 `Category.title`，把 `tags` 导出为
+`标签一;标签二`；导入时执行反向查找。`import_key` 命中已有记录时覆盖，
+否则创建新记录。字段的 `site_props` 可设置 `importable=False` 或
+`exportable=False`，即使模型级 `fields` 包含该字段也会排除。
 - `refresh_interval`、`visualize`：自动刷新及统计图表。
 - `is_notification_table`、`time_series_table`：通知/WebSocket 与时序表配置。
 

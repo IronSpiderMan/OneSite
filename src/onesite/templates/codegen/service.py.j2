@@ -596,7 +596,8 @@ class {{ model.name }}Service:
         """
         Export {{ model.name }} records to CSV.
         Returns the file path of the exported CSV.
-        Foreign key fields are exported as labels (not IDs).
+        Configured foreign keys are exported through their lookup field and
+        configured many-to-many relations are joined with semicolons.
         """
         import csv
         import os
@@ -615,14 +616,18 @@ class {{ model.name }}Service:
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
 
-            # Header - exclude id, created_at, updated_at for clean import/export cycle
-            headers = [{% for field in model.fields %}{% if 'r' in field.permissions and field.name not in ['id', 'created_at', 'updated_at'] %}"{{ field.name }}"{% if not loop.last %}, {% endif %}{% endif %}{% endfor %}]
+            headers = [
+                {% for column in model.export_fields %}"{{ column.column_name }}",
+                {% endfor %}{% for m2m in model.export_m2m %}"{{ m2m.column_name }}",
+                {% endfor %}
+            ]
             writer.writerow(headers)
             
-            {% if model.foreign_keys %}
+            {% set export_fks = model.export_fields | selectattr('kind', 'equalto', 'fk') | list %}
+            {% if export_fks %}
             # Build FK label caches
-            {% for fk in model.foreign_keys %}
-            {{ fk.name }}_label_cache = {}
+            {% for column in export_fks %}
+            {{ column.name }}_label_cache = {}
             {% endfor %}
             {% endif %}
             
@@ -635,42 +640,65 @@ class {{ model.name }}Service:
                 if not items:
                     break
                 
-                {% if model.foreign_keys %}
+                {% if export_fks %}
                 # Collect unique FK IDs for batch label resolution
-                {% for fk in model.foreign_keys %}
-                {{ fk.name }}_ids = list(set(
-                    getattr(item, "{{ fk.name }}") for item in items 
-                    if getattr(item, "{{ fk.name }}") is not None 
-                    and getattr(item, "{{ fk.name }}") not in {{ fk.name }}_label_cache
+                {% for column in export_fks %}
+                {{ column.name }}_ids = list(set(
+                    getattr(item, "{{ column.name }}") for item in items
+                    if getattr(item, "{{ column.name }}") is not None
+                    and getattr(item, "{{ column.name }}") not in {{ column.name }}_label_cache
                 ))
                 {% endfor %}
                 
                 # Batch fetch FK labels
-                {% for fk in model.foreign_keys %}
-                if {{ fk.name }}_ids:
-                    from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
-                    stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
+                {% for column in export_fks %}
+                if {{ column.name }}_ids:
+                    from app.models.{{ column.fk.target_source_module }} import {{ column.fk.target_model }} as {{ column.name }}_export_model
+                    stmt = select({{ column.name }}_export_model).where({{ column.name }}_export_model.id.in_({{ column.name }}_ids))
                     result = await session.exec(stmt)
                     for obj in result.all():
-                        {{ fk.name }}_label_cache[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+                        {{ column.name }}_label_cache[obj.id] = getattr(obj, "{{ column.lookup_field }}", None)
                 {% endfor %}
                 {% endif %}
+
+                {% for m2m in model.export_m2m %}
+                # Resolve one configured M2M column for the whole batch.
+                from app.models.{{ m2m.link_module }} import {{ m2m.link_model }} as {{ m2m.name }}_export_link
+                from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }} as {{ m2m.name }}_export_target
+                item_ids = [item.id for item in items]
+                stmt = (
+                    select(
+                        {{ m2m.name }}_export_link.{{ m2m.source_fk_field }},
+                        getattr({{ m2m.name }}_export_target, "{{ m2m.lookup_field }}"),
+                    )
+                    .join(
+                        {{ m2m.name }}_export_target,
+                        {{ m2m.name }}_export_target.id == {{ m2m.name }}_export_link.{{ m2m.target_fk_field }},
+                    )
+                    .where({{ m2m.name }}_export_link.{{ m2m.source_fk_field }}.in_(item_ids))
+                    {% if m2m.order_field %}.order_by({{ m2m.name }}_export_link.{{ m2m.order_field }}){% endif %}
+                )
+                result = await session.exec(stmt)
+                {{ m2m.name }}_values = {}
+                for source_id, value in result.all():
+                    {{ m2m.name }}_values.setdefault(source_id, []).append(str(value))
+                {% endfor %}
                 
                 for item in items:
                     row = []
-                    {% for field in model.fields %}
-                    {% if 'r' in field.permissions and field.name not in ['id', 'created_at', 'updated_at'] %}
-                    {% if field.fk_info %}
+                    {% for column in model.export_fields %}
+                    {% set field = column.field %}
+                    {% if column.kind == 'fk' %}
                     # FK field - export label instead of ID
-                    fk_id = getattr(item, "{{ field.name }}", None)
+                    fk_id = getattr(item, "{{ column.name }}", None)
                     if fk_id is None:
                         row.append("")
-                    elif fk_id in {{ field.name }}_label_cache:
-                        row.append({{ field.name }}_label_cache[fk_id])
+                    elif fk_id in {{ column.name }}_label_cache:
+                        row.append({{ column.name }}_label_cache[fk_id])
                     else:
-                        row.append(str(fk_id))
+                        row.append("")
                     {% else %}
-                    val = getattr(item, "{{ field.name }}", None)
+                    val = getattr(item, "{{ column.name }}", None)
                     # Convert to string, handle Enum/datetime specially
                     if val is None:
                         row.append("")
@@ -688,7 +716,9 @@ class {{ model.name }}Service:
                     else:
                         row.append(str(val))
                     {% endif %}
-                    {% endif %}
+                    {% endfor %}
+                    {% for m2m in model.export_m2m %}
+                    row.append(";".join({{ m2m.name }}_values.get(item.id, [])))
                     {% endfor %}
                     writer.writerow(row)
                 
@@ -714,7 +744,7 @@ class {{ model.name }}Service:
         """
         Import {{ model.name }} records from CSV.
         Uses upsert logic: if record with same {{ model.import_key }} exists, update it; otherwise create new.
-        Foreign key fields in CSV should be labels (not IDs), and will be resolved to IDs.
+        Configured FK and M2M values must match existing related objects.
         """
         import csv
         import io
@@ -732,23 +762,38 @@ class {{ model.name }}Service:
         stats = {"success": 0, "failed": 0, "created": 0, "updated": 0, "errors": []}
         import_key = "{{ model.import_key }}"
 
-        {% if model.foreign_keys %}
-        # Build FK label-to-ID caches
-        {% for fk in model.foreign_keys %}
-        {{ fk.name }}_cache = {}
-        {% endfor %}
-        
-        # Pre-fetch all FK targets for label resolution
-        {% for fk in model.foreign_keys %}
-        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }} as {{ fk.target_model }}_model
-        stmt = select({{ fk.target_model }}_model)
-        result = await session.exec(stmt)
+        {% set import_fks = model.import_fields | selectattr('kind', 'equalto', 'fk') | list %}
+        {% for column in import_fks %}
+        from app.models.{{ column.fk.target_source_module }} import {{ column.fk.target_model }} as {{ column.name }}_import_model
+        {{ column.name }}_cache = {}
+        {{ column.name }}_ambiguous = set()
+        result = await session.exec(select({{ column.name }}_import_model))
         for obj in result.all():
-            label = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
-            {{ fk.name }}_cache[label] = obj.id
-            {{ fk.name }}_cache[str(obj.id)] = obj.id  # Also allow ID as fallback
+            lookup_value = getattr(obj, "{{ column.lookup_field }}", None)
+            if lookup_value is None:
+                continue
+            label = str(lookup_value)
+            if label in {{ column.name }}_cache:
+                {{ column.name }}_ambiguous.add(label)
+            else:
+                {{ column.name }}_cache[label] = obj.id
         {% endfor %}
-        {% endif %}
+
+        {% for m2m in model.import_m2m %}
+        from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }} as {{ m2m.name }}_import_target
+        {{ m2m.name }}_cache = {}
+        {{ m2m.name }}_ambiguous = set()
+        result = await session.exec(select({{ m2m.name }}_import_target))
+        for obj in result.all():
+            lookup_value = getattr(obj, "{{ m2m.lookup_field }}", None)
+            if lookup_value is None:
+                continue
+            label = str(lookup_value)
+            if label in {{ m2m.name }}_cache:
+                {{ m2m.name }}_ambiguous.add(label)
+            else:
+                {{ m2m.name }}_cache[label] = obj.id
+        {% endfor %}
 
         for idx, row in enumerate(rows, 1):
             try:
@@ -759,36 +804,22 @@ class {{ model.name }}Service:
                     stats["errors"].append(f"Row {idx}: Missing import key '{import_key}'")
                     continue
 
-                # Check if record exists
-                existing = await crud.get_by_{{ model.import_key }}(session, key_value)
-                is_update = existing is not None
-
                 # Build data object from row
                 obj_data = {}
-                {% for field in model.fields %}
-                {% if field.name != 'id' and 'c' in field.permissions %}
-                {% if field.name not in ['created_at', 'updated_at'] %}
-                if "{{ field.name }}" in row:
-                    value = row["{{ field.name }}"]
-                    {% if field.fk_info %}
+                {% for column in model.import_fields %}
+                {% set field = column.field %}
+                if "{{ column.column_name }}" in row:
+                    value = row["{{ column.column_name }}"]
+                    {% if column.kind == 'fk' %}
                     # FK field - resolve label to ID
                     if not value:
                         obj_data["{{ field.name }}"] = None
-                    elif value in {{ field.name }}_cache:
-                        obj_data["{{ field.name }}"] = {{ field.name }}_cache[value]
+                    elif value in {{ column.name }}_ambiguous:
+                        raise ValueError(f"Foreign key '{value}' is ambiguous for field '{{ column.name }}'")
+                    elif value in {{ column.name }}_cache:
+                        obj_data["{{ column.name }}"] = {{ column.name }}_cache[value]
                     else:
-                        # Try to find by searching
-                        from app.models.{{ field.fk_info.target_service }} import {{ field.fk_info.target_model }} as {{ field.fk_info.target_model }}_import
-                        stmt = select({{ field.fk_info.target_model }}_import).where(
-                            getattr({{ field.fk_info.target_model }}_import, "{{ field.fk_info.label_field }}") == value
-                        )
-                        fk_result = await session.exec(stmt)
-                        fk_obj = fk_result.first()
-                        if fk_obj:
-                            obj_data["{{ field.name }}"] = fk_obj.id
-                            {{ field.name }}_cache[value] = fk_obj.id
-                        else:
-                            raise ValueError(f"Foreign key '{value}' not found for field '{{ field.name }}'")
+                        raise ValueError(f"Foreign key '{value}' not found for field '{{ column.name }}'")
                     {% elif field.ui_type == 'int' %}
                     obj_data["{{ field.name }}"] = int(value) if value else None
                     {% elif field.ui_type == 'float' %}
@@ -804,9 +835,29 @@ class {{ model.name }}Service:
                     {% else %}
                     obj_data["{{ field.name }}"] = value
                     {% endif %}
-                {% endif %}
-                {% endif %}
                 {% endfor %}
+
+                {% for m2m in model.import_m2m %}
+                if "{{ m2m.column_name }}" in row:
+                    labels = [value.strip() for value in row["{{ m2m.column_name }}"].split(";") if value.strip()]
+                    missing = [value for value in labels if value not in {{ m2m.name }}_cache]
+                    ambiguous = [value for value in labels if value in {{ m2m.name }}_ambiguous]
+                    if ambiguous:
+                        raise ValueError("M2M values are ambiguous for '{{ m2m.column_name }}': " + ";".join(ambiguous))
+                    if missing:
+                        raise ValueError("M2M values not found for '{{ m2m.column_name }}': " + ";".join(missing))
+                    resolved_ids = [{{ m2m.name }}_cache[value] for value in labels]
+                    {% if m2m.editor == 'inline' %}
+                    obj_data["{{ m2m.write_name }}"] = [{"id": value} for value in resolved_ids]
+                    {% else %}
+                    obj_data["{{ m2m.write_name }}"] = resolved_ids
+                    {% endif %}
+                {% endfor %}
+
+                # Use the converted key value for numeric/enum import keys.
+                key_value = obj_data.get(import_key, key_value)
+                existing = await crud.get_by_{{ model.import_key }}(session, key_value)
+                is_update = existing is not None
 
                 if not dry_run:
                     if is_update:
@@ -819,10 +870,15 @@ class {{ model.name }}Service:
                         obj_in = {{ model.name }}Create(**obj_data)
                         await self.create(session, obj_in)
                         stats["created"] += 1
+                elif is_update:
+                    {{ model.name }}Update(**obj_data)
+                else:
+                    {{ model.name }}Create(**obj_data)
 
                 stats["success"] += 1
 
             except Exception as e:
+                await session.rollback()
                 stats["failed"] += 1
                 stats["errors"].append(f"Row {idx}: {str(e)}")
 
