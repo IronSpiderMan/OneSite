@@ -1,4 +1,5 @@
 import * as React from "react"
+import { Braces, LayoutList, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
 import { Button } from "./button"
 import { Input } from "./input"
@@ -21,6 +22,37 @@ export type JsonFieldSchema = {
 export type JsonModelSchema = {
   name: string
   fields: JsonFieldSchema[]
+}
+
+const EditorModeSwitch: React.FC<{
+  mode: "ui" | "json"
+  onChange: (mode: "ui" | "json") => void
+}> = ({ mode, onChange }) => {
+  const { t } = useTranslation()
+  return (
+    <div className="inline-flex rounded-lg border bg-muted/40 p-1">
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={cn("h-8 gap-1.5 px-3", mode === "ui" && "bg-background shadow-sm hover:bg-background")}
+        onClick={() => onChange("ui")}
+      >
+        <LayoutList className="h-3.5 w-3.5" />
+        {t("json_editor.form_mode")}
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="sm"
+        className={cn("h-8 gap-1.5 px-3", mode === "json" && "bg-background shadow-sm hover:bg-background")}
+        onClick={() => onChange("json")}
+      >
+        <Braces className="h-3.5 w-3.5" />
+        {t("json_editor.source_mode")}
+      </Button>
+    </div>
+  )
 }
 
 const buildDefaultValue = (schema: JsonModelSchema) => {
@@ -146,7 +178,8 @@ const JsonModelForm: React.FC<{
                     onChange(setPathValue(v, fieldPath.slice(path.length), arr))
                   }}
                 >
-                  Add
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  {t("json_editor.add_item")}
                 </Button>
               </div>
               <div className="space-y-3">
@@ -163,7 +196,8 @@ const JsonModelForm: React.FC<{
                         <div className="mb-2 flex items-center justify-between">
                           <div className="text-sm font-medium">{key}[{idx + 1}]</div>
                           <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={remove}>
-                            Remove
+                            <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                            {t("common.remove")}
                           </Button>
                         </div>
                         <JsonModelForm
@@ -189,7 +223,8 @@ const JsonModelForm: React.FC<{
                         }}
                       />
                       <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={remove}>
-                        Remove
+                        <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                        {t("common.remove")}
                       </Button>
                     </div>
                   )
@@ -238,19 +273,7 @@ export const JsonModelEditor: React.FC<{
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="flex items-center gap-2">
-        <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
-          UI
-        </Button>
-        <Button
-          type="button"
-          variant={mode === "json" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setMode("json")}
-        >
-          JSON
-        </Button>
-      </div>
+      <EditorModeSwitch mode={mode} onChange={setMode} />
       {mode === "ui" ? (
         <JsonModelForm schema={schema} value={objValue} onChange={onChange} />
       ) : (
@@ -270,6 +293,7 @@ export const JsonModelDictEditor: React.FC<{
   fixedKeys?: string[]
   lockKeys?: boolean
 }> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, fixedKeys, lockKeys }) => {
+  const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
 
   // Lazy-initialize locked keys from current dict value (captured once on first meaningful value)
@@ -321,19 +345,7 @@ export const JsonModelDictEditor: React.FC<{
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="flex items-center gap-2">
-        <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
-          UI
-        </Button>
-        <Button
-          type="button"
-          variant={mode === "json" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setMode("json")}
-        >
-          JSON
-        </Button>
-      </div>
+      <EditorModeSwitch mode={mode} onChange={setMode} />
       {mode === "ui" ? (
         <div className="space-y-3">
           {!isFixed && canAdd && (
@@ -343,7 +355,8 @@ export const JsonModelDictEditor: React.FC<{
               size="sm"
               onClick={() => onChange(toDict([...arrValue, { __key: makeNewKey(), ...buildDefaultValue(itemSchema) }]))}
             >
-              Add
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t("json_editor.add_entry")}
             </Button>
           </div>
           )}
@@ -369,7 +382,7 @@ export const JsonModelDictEditor: React.FC<{
             : arrValue.map((item, idx) => (
             <div key={idx} className="rounded-md border p-3">
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium">Entry {idx + 1}</div>
+                <div className="text-sm font-medium">{t("json_editor.entry", { index: idx + 1 })}</div>
                 {canRemove && (
                 <Button
                   type="button"
@@ -382,12 +395,13 @@ export const JsonModelDictEditor: React.FC<{
                     onChange(toDict(next))
                   }}
                 >
-                  Remove
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  {t("common.remove")}
                 </Button>
                 )}
               </div>
               <div className="mb-3 space-y-2">
-                <Label>Key</Label>
+                <Label>{t("json_editor.key")}</Label>
                 <Input
                   value={item.__key ?? ""}
                   onChange={(e) => {
@@ -395,7 +409,7 @@ export const JsonModelDictEditor: React.FC<{
                     next[idx] = { ...next[idx], __key: e.target.value }
                     onChange(toDict(next))
                   }}
-                  placeholder="Entry key"
+                  placeholder={t("json_editor.key_placeholder")}
                 />
               </div>
               <JsonModelForm
@@ -426,25 +440,14 @@ export const JsonModelArrayEditor: React.FC<{
   canRemove?: boolean
   showJsonMode?: boolean
 }> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, showJsonMode = true }) => {
+  const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
   const arrValue = Array.isArray(value) ? value : []
 
   return (
     <div className={cn("space-y-3", className)}>
       {showJsonMode && (
-      <div className="flex items-center gap-2">
-        <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
-          UI
-        </Button>
-        <Button
-          type="button"
-          variant={mode === "json" ? "default" : "outline"}
-          size="sm"
-          onClick={() => setMode("json")}
-        >
-          JSON
-        </Button>
-      </div>
+      <EditorModeSwitch mode={mode} onChange={setMode} />
       )}
       {!showJsonMode || mode === "ui" ? (
         <div className="space-y-3">
@@ -456,14 +459,15 @@ export const JsonModelArrayEditor: React.FC<{
               size="sm"
               onClick={() => onChange([...arrValue, buildDefaultValue(itemSchema)])}
             >
-              Add
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t("json_editor.add_item")}
             </Button>
           </div>
           )}
           {arrValue.map((item, idx) => (
             <div key={idx} className="rounded-md border p-3">
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium">Item {idx + 1}</div>
+                <div className="text-sm font-medium">{t("json_editor.item", { index: idx + 1 })}</div>
                 {canRemove && (
                 <Button
                   type="button"
@@ -476,7 +480,8 @@ export const JsonModelArrayEditor: React.FC<{
                     onChange(next)
                   }}
                 >
-                  Remove
+                  <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                  {t("common.remove")}
                 </Button>
                 )}
               </div>
@@ -519,24 +524,19 @@ export const JsonScalarArrayEditor: React.FC<{
   onChange: (v: string[]) => void
   className?: string
 }> = ({ itemKind, value, onChange, className }) => {
+  const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
   const arrayValue: string[] = Array.isArray(value) ? value.map((item) => String(item ?? "")) : []
 
   return (
     <div className={cn("space-y-3", className)}>
-      <div className="flex items-center gap-2">
-        <Button type="button" variant={mode === "ui" ? "default" : "outline"} size="sm" onClick={() => setMode("ui")}>
-          UI
-        </Button>
-        <Button type="button" variant={mode === "json" ? "default" : "outline"} size="sm" onClick={() => setMode("json")}>
-          JSON
-        </Button>
-      </div>
+      <EditorModeSwitch mode={mode} onChange={setMode} />
       {mode === "ui" ? (
         <div className="space-y-3">
           <div className="flex justify-end">
             <Button type="button" variant="outline" size="sm" onClick={() => onChange([...arrayValue, ""])}>
-              Add
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              {t("json_editor.add_item")}
             </Button>
           </div>
           {arrayValue.map((item, index) => (
@@ -557,7 +557,8 @@ export const JsonScalarArrayEditor: React.FC<{
                 className="text-destructive"
                 onClick={() => onChange(arrayValue.filter((_, itemIndex) => itemIndex !== index))}
               >
-                Remove
+                <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                {t("common.remove")}
               </Button>
             </div>
           ))}
