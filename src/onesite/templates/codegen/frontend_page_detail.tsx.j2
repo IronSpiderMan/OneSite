@@ -810,7 +810,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             </div>
             {% endif %}
 
-            <div className="{{ detail_grid_class | default('grid gap-6 md:grid-cols-2') }}" data-page-region="detail-grid">
+            <div className="{{ detail_grid_class | default('grid grid-cols-1 gap-6') }}" data-page-region="detail-grid">
                 {activeTab === 'detail' && (
                 <Card>
                     <CardHeader>
@@ -1160,7 +1160,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% if model.m2m_fields %}
                 {% for m2m in model.m2m_fields %}
                 {activeTab === 'm2m-{{ m2m.name }}' && (
-                <Card className="md:col-span-2">
+                <Card className="col-span-full">
                     <CardHeader>
                         <CardTitle>{t('models.{{ m2m.target_service }}.plural')}</CardTitle>
                     </CardHeader>
@@ -1312,7 +1312,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% for rel in model.reverse_m2m %}
                 {% if rel.display %}
                 {activeTab === 'reverse-m2m-{{ rel.name }}' && (
-                <Card className="md:col-span-2">
+                <Card className="col-span-full">
                     <CardHeader>
                         <CardTitle>{t('models.{{ rel.source_service }}.plural')}</CardTitle>
                     </CardHeader>
@@ -1415,7 +1415,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% for rfk in model.reverse_foreign_keys %}
                 {% if rfk.display %}
                 {activeTab === 'reverse-fk-{{ rfk.name }}' && (
-                <Card className="md:col-span-2">
+                <Card className="col-span-full">
                     <CardHeader>
                         <CardTitle>{t('models.{{ rfk.source_service }}.plural')}</CardTitle>
                     </CardHeader>
@@ -1696,7 +1696,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% for ts in model.reverse_timeseries %}
                 {activeTab === 'detail' && (<>
                 {/* Timeseries Realtime */}
-                <Card className="md:col-span-2">
+                <Card className="col-span-full">
                     <CardHeader>
                         <div className="flex items-center justify-between">
                             <CardTitle>{t('models.{{ ts.module_name }}.name')} &mdash; Realtime</CardTitle>
@@ -1826,7 +1826,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 </Card>
 
                 {/* Timeseries History */}
-                <Card className="md:col-span-2">
+                <Card className="col-span-full">
                     <CardHeader>
                         <div className="flex items-center justify-between">
                             <CardTitle>{t('models.{{ ts.module_name }}.name')} — History</CardTitle>
