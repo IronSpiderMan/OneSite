@@ -81,7 +81,7 @@ async def lifespan(app: FastAPI):
         {% if config.mqtt.callbacks %}
         register_mqtt_handlers()
         {% endif %}
-        await mqtt_manager.connect()
+        await mqtt_manager.start()
     {% endif %}
 
     {% if config.scheduled_tasks %}

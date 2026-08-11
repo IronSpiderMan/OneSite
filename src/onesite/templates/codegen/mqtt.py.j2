@@ -13,12 +13,19 @@ class MQTTManager:
         self.client: Optional[MQTTClient] = None
         self._handlers: Dict[str, List[Callable[[str, str], Awaitable[None]]]] = {}
         self._pending_subscriptions: List[tuple] = []
+        self._connect_task: Optional[asyncio.Task] = None
+        self._started = False
+        self._stopping = False
 
     def _on_connect(self, client, flags, rc, properties):
         """Callback when connected to MQTT broker."""
         if rc != 0:
             logger.error(f"Failed to connect to MQTT broker, rc={rc}")
             return
+
+        for topic, qos in self._pending_subscriptions:
+            client.subscribe(topic, qos=qos)
+        logger.info("Connected to MQTT broker")
 
     def _on_message(self, client, topic, payload, qos, properties):
         """Callback when message is received."""
@@ -38,47 +45,80 @@ class MQTTManager:
         """Callback when subscription is confirmed."""
         pass
 
+    async def start(self):
+        """Start MQTT connection management without blocking app startup."""
+        if self._started:
+            return
+
+        self._started = True
+        self._stopping = False
+        self._connect_task = asyncio.create_task(self._connect_with_retry())
+        logger.info(
+            "MQTT connection started in background; "
+            "backend will continue and retry if the broker is unavailable"
+        )
+
+    async def _connect_with_retry(self):
+        """Retry the initial connection until the manager is stopped."""
+        retry_delay = 1
+        while not self._stopping:
+            try:
+                await self.connect()
+                return
+            except asyncio.CancelledError:
+                raise
+            except Exception as e:
+                logger.warning(
+                    f"Failed to connect to MQTT broker: {e}; "
+                    f"backend will continue and retry in {retry_delay}s"
+                )
+                failed_client = self.client
+                self.client = None
+                if failed_client:
+                    try:
+                        await failed_client.disconnect()
+                    except Exception:
+                        pass
+
+            if not self._stopping:
+                await asyncio.sleep(retry_delay)
+                retry_delay = min(retry_delay * 2, 30)
+
     async def connect(self):
         """
         Connect to MQTT broker and start the message loop.
         """
-        try:
-            client_id = settings.MQTT_CLIENT_ID if hasattr(settings, 'MQTT_CLIENT_ID') else "onesite_backend"
+        client_id = settings.MQTT_CLIENT_ID if hasattr(settings, 'MQTT_CLIENT_ID') else "onesite_backend"
 
-            self.client = MQTTClient(client_id)
+        self.client = MQTTClient(client_id)
 
-            self.client.on_connect = self._on_connect
-            self.client.on_message = self._on_message
-            self.client.on_disconnect = self._on_disconnect
-            self.client.on_subscribe = self._on_subscribe
+        self.client.on_connect = self._on_connect
+        self.client.on_message = self._on_message
+        self.client.on_disconnect = self._on_disconnect
+        self.client.on_subscribe = self._on_subscribe
+        # gmqtt handles reconnects after the first successful connection.
+        self.client.set_config({"reconnect_retries": -1, "reconnect_delay": 6})
 
-            if hasattr(settings, 'MQTT_USERNAME') and settings.MQTT_USERNAME:
-                self.client.set_auth_credentials(
-                    settings.MQTT_USERNAME,
-                    settings.MQTT_PASSWORD if hasattr(settings, 'MQTT_PASSWORD') else None
-                )
+        if hasattr(settings, 'MQTT_USERNAME') and settings.MQTT_USERNAME:
+            self.client.set_auth_credentials(
+                settings.MQTT_USERNAME,
+                settings.MQTT_PASSWORD if hasattr(settings, 'MQTT_PASSWORD') else None
+            )
 
-            mqtt_url = settings.MQTT_URL
-            if "://" in mqtt_url:
-                host_part = mqtt_url.split("://")[1]
-                if ":" in host_part:
-                    host, port_str = host_part.rsplit(":", 1)
-                    port = int(port_str)
-                else:
-                    host = host_part
-                    port = 1883
+        mqtt_url = settings.MQTT_URL
+        if "://" in mqtt_url:
+            host_part = mqtt_url.split("://", 1)[1]
+            if ":" in host_part:
+                host, port_str = host_part.rsplit(":", 1)
+                port = int(port_str)
             else:
-                host = mqtt_url
                 port = 1883
+                host = host_part
+        else:
+            host = mqtt_url
+            port = 1883
 
-            await self.client.connect(host, port=port, keepalive=60)
-
-            for topic, qos in self._pending_subscriptions:
-                self.client.subscribe(topic, qos=qos)
-
-        except Exception as e:
-            logger.error(f"Failed to connect to MQTT broker: {e}")
-            raise
+        await self.client.connect(host, port=port, keepalive=60)
 
     def register_handler(self, topic: str, callback: Callable[[str, str], Awaitable[None]], qos: int = 1):
         """
@@ -148,13 +188,25 @@ class MQTTManager:
         """
         Gracefully disconnect from the MQTT broker.
         """
-        if self.client:
+        self._stopping = True
+        self._started = False
+
+        connect_task = self._connect_task
+        self._connect_task = None
+        if connect_task and not connect_task.done():
+            connect_task.cancel()
             try:
-                await self.client.disconnect()
+                await connect_task
+            except asyncio.CancelledError:
+                pass
+
+        client = self.client
+        self.client = None
+        if client:
+            try:
+                await client.disconnect()
             except Exception as e:
                 logger.error(f"Error disconnecting from MQTT: {e}")
-            finally:
-                self.client = None
 
 
 mqtt_manager = MQTTManager()

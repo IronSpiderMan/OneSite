@@ -331,6 +331,8 @@ async def read_{{ model.lower_name }}s(
     {{ field.name }}: Optional[List[str]] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
+    {% elif field.fk_info %}
+    {{ field.name }}: Optional[int] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
     {% endif %}
@@ -379,6 +381,8 @@ async def read_{{ model.lower_name }}s(
         {% elif field.ui_type == 'time' %}
         {{ field.name }}={{ field.name }},
         {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.fk_info %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'str' %}
         {{ field.name }}={{ field.name }},

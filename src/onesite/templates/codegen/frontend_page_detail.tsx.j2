@@ -14,16 +14,16 @@ import { FileUpload } from '../../components/ui/file-upload';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
+import { Input } from '../../components/ui/input';
+import { TimePicker } from '../../components/ui/time-picker';
+import { SearchableSelect } from '../../components/ui/searchable-select';
 {% if model.page_edit %}
 import { useForm, Controller } from 'react-hook-form';
-import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
 import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
-import { TimePicker } from '../../components/ui/time-picker';
 import { LocationInput } from '../../components/ui/location-input';
-import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
@@ -61,6 +61,11 @@ import { get{{ model.name }}{{ rel.source_model }}s } from '../../services/{{ mo
 {% if rfk.display or rfk.editor == 'inline' %}
 import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service }}';
 {% endif %}
+{% for field in rfk.source_search_fields %}
+{% if field.fk_info %}
+import * as {{ rfk.source_model }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}SearchService from '../../services/{{ field.fk_info.target_service }}';
+{% endif %}
+{% endfor %}
 {% endfor %}
 {% endif %}
 {% if model.reverse_timeseries %}
@@ -114,6 +119,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ m2m.name }}Data, set{{ m2m.target_model }}Data] = useState<any[]>([]);
     const [{{ m2m.name }}Total, set{{ m2m.target_model }}Total] = useState(0);
     const [{{ m2m.name }}Page, set{{ m2m.target_model }}Page] = useState(1);
+    const [{{ m2m.name }}Size, set{{ m2m.target_model }}Size] = useState(20);
     const [{{ m2m.name }}Loading, set{{ m2m.target_model }}Loading] = useState(false);
     {% endfor %}
     {% endif %}
@@ -125,6 +131,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ rel.name }}Data, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Data] = useState<any[]>([]);
     const [{{ rel.name }}Total, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Total] = useState(0);
     const [{{ rel.name }}Page, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Page] = useState(1);
+    const [{{ rel.name }}Size, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Size] = useState(20);
     const [{{ rel.name }}Loading, set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Loading] = useState(false);
     {% endif %}
     {% endfor %}
@@ -137,7 +144,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ rfk.name }}Data, set{{ rfk.source_model }}Data] = useState<any[]>([]);
     const [{{ rfk.name }}Total, set{{ rfk.source_model }}Total] = useState(0);
     const [{{ rfk.name }}Page, set{{ rfk.source_model }}Page] = useState(1);
+    const [{{ rfk.name }}Size, set{{ rfk.source_model }}Size] = useState(20);
     const [{{ rfk.name }}Loading, set{{ rfk.source_model }}Loading] = useState(false);
+    const [{{ rfk.name }}SearchValues, set{{ rfk.source_model }}SearchValues] = useState<Record<string, any>>({});
+    {% for field in rfk.source_search_fields %}
+    {% if field.fk_info %}
+    const [{{ rfk.name }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}SearchLabels, set{{ rfk.source_model }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}SearchLabels] = useState<Record<string, string>>({});
+    {% endif %}
+    {% endfor %}
     {% endif %}
     {% endfor %}
     {% endif %}
@@ -348,13 +362,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     {% if model.m2m_fields %}
     {% for m2m in model.m2m_fields %}
-    const fetch{{ m2m.target_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number) => {
+    const fetch{{ m2m.target_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number, size: number = {{ m2m.name }}Size) => {
         set{{ m2m.target_model }}Loading(true);
         try {
-            const result = await get{{ model.name }}{{ m2m.target_model }}s(itemId, page, 5); // Small page size for detail view
+            const result = await get{{ model.name }}{{ m2m.target_model }}s(itemId, page, size);
             set{{ m2m.target_model }}Data(result.items);
             set{{ m2m.target_model }}Total(result.total);
             set{{ m2m.target_model }}Page(result.page);
+            set{{ m2m.target_model }}Size(result.size);
         } catch (error) {
             console.error(error);
         } finally {
@@ -367,13 +382,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% if model.reverse_m2m %}
     {% for rel in model.reverse_m2m %}
     {% if rel.display %}
-    const fetch{{ model.name }}{{ rel.source_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number) => {
+    const fetch{{ model.name }}{{ rel.source_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number, size: number = {{ rel.name }}Size) => {
         set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Loading(true);
         try {
-            const result = await get{{ model.name }}{{ rel.source_model }}s(itemId, page, 5);
+            const result = await get{{ model.name }}{{ rel.source_model }}s(itemId, page, size);
             set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Data(result.items);
             set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Total(result.total);
             set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Page(result.page);
+            set{{ rel.name|replace('_', ' ')|title|replace(' ', '') }}Size(result.size);
         } catch (error) {
             console.error(error);
         } finally {
@@ -387,21 +403,65 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% if model.reverse_foreign_keys %}
     {% for rfk in model.reverse_foreign_keys %}
     {% if rfk.display %}
-    const fetch{{ rfk.source_model }}s = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}, page: number) => {
+    const build{{ rfk.source_model }}SearchFilters = (values: Record<string, any>) => {
+        const filters: Record<string, any> = {};
+        {% for field in rfk.source_search_fields %}
+        {% if field.ui_type == 'bool' %}
+        if (values['{{ field.name }}'] === 'true') filters['{{ field.name }}'] = true;
+        if (values['{{ field.name }}'] === 'false') filters['{{ field.name }}'] = false;
+        {% elif field.ui_type == 'datetime' %}
+        if (values['{{ field.name }}_from']) filters['{{ field.name }}_from'] = `${values['{{ field.name }}_from']}T00:00:00`;
+        if (values['{{ field.name }}_to']) filters['{{ field.name }}_to'] = `${values['{{ field.name }}_to']}T23:59:59`;
+        {% elif field.ui_type == 'time' %}
+        if (values['{{ field.name }}']) filters['{{ field.name }}'] = values['{{ field.name }}'];
+        {% elif field.is_enum and field.is_multi_select %}
+        if (Array.isArray(values['{{ field.name }}']) && values['{{ field.name }}'].length > 0) filters['{{ field.name }}'] = values['{{ field.name }}'];
+        {% elif field.is_enum %}
+        if (values['{{ field.name }}'] && values['{{ field.name }}'] !== '__all__') filters['{{ field.name }}'] = values['{{ field.name }}'];
+        {% elif field.fk_info %}
+        if (values['{{ field.name }}']) filters['{{ field.name }}'] = Number(values['{{ field.name }}']);
+        {% elif field.ui_type == 'str' %}
+        if (values['{{ field.name }}']) filters['{{ field.name }}'] = values['{{ field.name }}'];
+        {% endif %}
+        {% endfor %}
+        return filters;
+    };
+
+    const fetch{{ rfk.source_model }}s = async (
+        itemId: {{ 'string' if 'str' in model.id_type else 'number' }},
+        page: number,
+        size: number = {{ rfk.name }}Size,
+        searchValues: Record<string, any> = {{ rfk.name }}SearchValues
+    ) => {
         set{{ rfk.source_model }}Loading(true);
         try {
-            // Filter by foreign key
-            const filters = { {{ rfk.source_fk_field }}: itemId };
-            const result = await get{{ rfk.source_model }}s(page, 5, filters);
+            // Keep the parent relation fixed while applying the child model's list filters.
+            const filters = { {{ rfk.source_fk_field }}: itemId, ...build{{ rfk.source_model }}SearchFilters(searchValues) };
+            const result = await get{{ rfk.source_model }}s(page, size, filters);
             set{{ rfk.source_model }}Data(result.items);
             set{{ rfk.source_model }}Total(result.total);
             set{{ rfk.source_model }}Page(result.page);
+            set{{ rfk.source_model }}Size(result.size);
         } catch (error) {
             console.error(error);
         } finally {
             set{{ rfk.source_model }}Loading(false);
         }
     };
+
+    const {{ rfk.name }}SearchListenerReady = useRef(false);
+    useEffect(() => {
+        if (!{{ rfk.name }}SearchListenerReady.current) {
+            {{ rfk.name }}SearchListenerReady.current = true;
+            return;
+        }
+        if (!id) return;
+        const timer = setTimeout(() => {
+            fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %}, 1, {{ rfk.name }}Size, {{ rfk.name }}SearchValues);
+        }, 300);
+        return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [{{ rfk.name }}SearchValues]);
     {% endif %}
     {% endfor %}
     {% endif %}
@@ -761,8 +821,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <form id="detail-edit-form" className="space-y-4">
                             {% for field in model.fields %}
                             {% if not field.fk_info and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
-                            <div className="space-y-2">
-                                <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
+                            <div className="{% if field.ui_type == 'bool' %}flex min-h-14 items-center justify-between gap-4 rounded-md border px-4 py-3{% else %}space-y-2{% endif %}">
+                                <Label htmlFor="edit-{{ field.name }}"{% if field.ui_type == 'bool' %} className="cursor-pointer"{% endif %}>{t('{{ field.label_key }}')}</Label>
                                 {% if field.ui_type == 'bool' %}
                                 <Controller
                                     control={editControl}
@@ -1206,7 +1266,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 </TableBody>
                             </Table>
                         </div>
-                        <div className="mt-4 flex items-center justify-end space-x-2">
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground whitespace-nowrap">{t('common.page_size', 'Page size')}:</span>
+                                <Select
+                                    value={String({{ m2m.name }}Size)}
+                                    onValueChange={(value) => fetch{{ m2m.target_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, 1, Number(value))}
+                                >
+                                    <SelectTrigger className="h-8 w-[80px]"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {[10, 20, 50, 100].map((size) => <SelectItem key={size} value={String(size)}>{size}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex items-center gap-2">
                              <Button
                                 variant="outline"
                                 size="sm"
@@ -1216,16 +1289,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 Previous
                             </Button>
                             <span className="text-sm">
-                                Page { {{ m2m.name }}Page } of { Math.ceil({{ m2m.name }}Total / 5) || 1 }
+                                Page { {{ m2m.name }}Page } of { Math.ceil({{ m2m.name }}Total / {{ m2m.name }}Size) || 1 }
                             </span>
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => fetch{{ m2m.target_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ m2m.name }}Page + 1)}
-                                disabled={ {{ m2m.name }}Page >= Math.ceil({{ m2m.name }}Total / 5) || {{ m2m.name }}Loading}
+                                disabled={ {{ m2m.name }}Page >= Math.ceil({{ m2m.name }}Total / {{ m2m.name }}Size) || {{ m2m.name }}Loading}
                             >
                                 Next
                             </Button>
+                            </div>
                         </div>
                         {% if model.page_edit %}</>)}{% endif %}
                     </CardContent>
@@ -1295,7 +1369,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 </TableBody>
                             </Table>
                         </div>
-                        <div className="mt-4 flex items-center justify-end space-x-2">
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground whitespace-nowrap">{t('common.page_size', 'Page size')}:</span>
+                                <Select
+                                    value={String({{ rel.name }}Size)}
+                                    onValueChange={(value) => fetch{{ model.name }}{{ rel.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, 1, Number(value))}
+                                >
+                                    <SelectTrigger className="h-8 w-[80px]"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {[10, 20, 50, 100].map((size) => <SelectItem key={size} value={String(size)}>{size}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex items-center gap-2">
                              <Button
                                 variant="outline"
                                 size="sm"
@@ -1305,16 +1392,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 Previous
                             </Button>
                             <span className="text-sm">
-                                Page { {{ rel.name }}Page } of { Math.ceil({{ rel.name }}Total / 5) || 1 }
+                                Page { {{ rel.name }}Page } of { Math.ceil({{ rel.name }}Total / {{ rel.name }}Size) || 1 }
                             </span>
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => fetch{{ model.name }}{{ rel.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rel.name }}Page + 1)}
-                                disabled={ {{ rel.name }}Page >= Math.ceil({{ rel.name }}Total / 5) || {{ rel.name }}Loading}
+                                disabled={ {{ rel.name }}Page >= Math.ceil({{ rel.name }}Total / {{ rel.name }}Size) || {{ rel.name }}Loading}
                             >
                                 Next
                             </Button>
+                            </div>
                         </div>
                     </CardContent>
                 </Card>
@@ -1346,6 +1434,96 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             )}
                         />
                         ) : (<>{% endif %}
+                        {% if rfk.source_search_fields %}
+                        <div className="mb-4 rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40">
+                            <div className="flex items-center justify-between gap-3">
+                                <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
+                                <Button variant="outline" size="sm" type="button" onClick={() => set{{ rfk.source_model }}SearchValues({})}>{t('common.reset', 'Reset')}</Button>
+                            </div>
+                            <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+                            {% for field in rfk.source_search_fields %}
+                                <div className="space-y-2">
+                                    <Label>{t('{{ field.label_key }}')}</Label>
+                                    {% if field.ui_type == 'bool' %}
+                                    <Select
+                                        value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '__all__' }
+                                        onValueChange={(value) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }))}
+                                    >
+                                        <SelectTrigger className="h-9"><SelectValue placeholder={t('common.all', 'All')} /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
+                                            <SelectItem value="true">{t('common.yes', 'Yes')}</SelectItem>
+                                            <SelectItem value="false">{t('common.no', 'No')}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                    {% elif field.ui_type == 'datetime' %}
+                                    <div className="flex items-center gap-2">
+                                        <Input type="date" className="h-9" value={ {{ rfk.name }}SearchValues['{{ field.name }}_from'] || '' } onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}_from']: event.target.value }))} />
+                                        <span className="text-sm text-muted-foreground">-</span>
+                                        <Input type="date" className="h-9" value={ {{ rfk.name }}SearchValues['{{ field.name }}_to'] || '' } onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}_to']: event.target.value }))} />
+                                    </div>
+                                    {% elif field.ui_type == 'time' %}
+                                    <TimePicker
+                                        value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '' }
+                                        onChange={(value) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }))}
+                                        placeholder={t('common.select_time', 'Select time')}
+                                    />
+                                    {% elif field.is_enum and field.is_multi_select %}
+                                    <SearchableSelect
+                                        value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || [] }
+                                        onValueChange={(value) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }))}
+                                        multiple={true}
+                                        placeholder={t('common.all', 'All')}
+                                        searchPlaceholder={`${t('common.search')}...`}
+                                        loadOptions={async () => [
+                                            {% for enum_val in field.enum_values %}
+                                            { label: t('models.{{ rfk.source_service }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}'), value: '{{ enum_val }}' },
+                                            {% endfor %}
+                                        ]}
+                                    />
+                                    {% elif field.is_enum %}
+                                    <Select
+                                        value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '__all__' }
+                                        onValueChange={(value) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }))}
+                                    >
+                                        <SelectTrigger className="h-9"><SelectValue placeholder={t('common.all', 'All')} /></SelectTrigger>
+                                        <SelectContent>
+                                            <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
+                                            {% for enum_val in field.enum_values %}
+                                            <SelectItem value="{{ enum_val }}">{t('models.{{ rfk.source_service }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}')}</SelectItem>
+                                            {% endfor %}
+                                        </SelectContent>
+                                    </Select>
+                                    {% elif field.fk_info %}
+                                    <SearchableSelect
+                                        value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '' }
+                                        onValueChange={(value) => {
+                                            set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: value }));
+                                        }}
+                                        placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                                        searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
+                                        valueLabels={ {{ rfk.name }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}SearchLabels }
+                                        loadOptions={async (query) => {
+                                            const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                                            const response = await {{ rfk.source_model }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}SearchService.get{{ field.fk_info.target_model }}s(1, 20, filters);
+                                            const options = response.items.map((item: any) => ({ label: item.{{ field.fk_info.label_field }} || item.id, value: item.id }));
+                                            set{{ rfk.source_model }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}SearchLabels((current) => ({ ...current, ...Object.fromEntries(options.map((option: any) => [String(option.value), String(option.label)])) }));
+                                            return options;
+                                        }}
+                                    />
+                                    {% elif field.ui_type == 'str' %}
+                                    <Input
+                                        className="h-9"
+                                        value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '' }
+                                        onChange={(event) => set{{ rfk.source_model }}SearchValues((current) => ({ ...current, ['{{ field.name }}']: event.target.value }))}
+                                        placeholder={t('common.search')}
+                                    />
+                                    {% endif %}
+                                </div>
+                            {% endfor %}
+                            </div>
+                        </div>
+                        {% endif %}
                         <div className="rounded-md border overflow-x-auto">
                             <Table>
                                 <TableHeader>
@@ -1402,7 +1580,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 </TableBody>
                             </Table>
                         </div>
-                        <div className="mt-4 flex items-center justify-end space-x-2">
+                        <div className="mt-4 flex flex-wrap items-center justify-between gap-4">
+                            <div className="flex items-center gap-2">
+                                <span className="text-sm text-muted-foreground whitespace-nowrap">{t('common.page_size', 'Page size')}:</span>
+                                <Select
+                                    value={String({{ rfk.name }}Size)}
+                                    onValueChange={(value) => fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, 1, Number(value))}
+                                >
+                                    <SelectTrigger className="h-8 w-[80px]"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                        {[10, 20, 50, 100].map((size) => <SelectItem key={size} value={String(size)}>{size}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <div className="flex items-center gap-2">
                              <Button
                                 variant="outline"
                                 size="sm"
@@ -1412,16 +1603,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 Previous
                             </Button>
                             <span className="text-sm">
-                                Page { {{ rfk.name }}Page } of { Math.ceil({{ rfk.name }}Total / 5) || 1 }
+                                Page { {{ rfk.name }}Page } of { Math.ceil({{ rfk.name }}Total / {{ rfk.name }}Size) || 1 }
                             </span>
                             <Button
                                 variant="outline"
                                 size="sm"
                                 onClick={() => fetch{{ rfk.source_model }}s({% if 'str' in model.id_type %}id!{% else %}parseInt(id!){% endif %}, {{ rfk.name }}Page + 1)}
-                                disabled={ {{ rfk.name }}Page >= Math.ceil({{ rfk.name }}Total / 5) || {{ rfk.name }}Loading}
+                                disabled={ {{ rfk.name }}Page >= Math.ceil({{ rfk.name }}Total / {{ rfk.name }}Size) || {{ rfk.name }}Loading}
                             >
                                 Next
                             </Button>
+                            </div>
                         </div>
                         {% if model.page_edit and rfk.editor == 'inline' %}</>)}{% endif %}
                     </CardContent>

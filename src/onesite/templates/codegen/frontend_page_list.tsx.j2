@@ -566,17 +566,23 @@ const {{ model.name }}Page: React.FC = () => {
     setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels({});
     {% endif %}
     {% endfor %}
-    {% if model.is_tree %}
-    treeSearchFiltersRef.current = {};
-    loadRoots(1);
-    {% else %}
-    fetchData(1, use{{ model.name }}Store.getState().size, {});
-    {% endif %}
   };
+
+  // Apply filter changes automatically while avoiding a request on every keystroke.
+  const searchListenerReady = useRef(false);
+  useEffect(() => {
+    if (!searchListenerReady.current) {
+      searchListenerReady.current = true;
+      return;
+    }
+    const timer = setTimeout(applySearch, 300);
+    return () => clearTimeout(timer);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchValues]);
 
   return (
     <div
-      className="{{ page_shell_class | default('space-y-6') }}"
+      className="{{ page_shell_class | default('flex h-full min-h-0 flex-col gap-6') }}"
       data-codegen-theme="{{ codegen_theme | default('normal') }}"
       data-page-kind="list"
     >
@@ -687,7 +693,6 @@ const {{ model.name }}Page: React.FC = () => {
           <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button>
-            <Button size="sm" type="button" onClick={applySearch}>{t('common.search')}</Button>
           </div>
         </div>
         <div className="mt-4 max-h-[40vh] overflow-auto pr-2">
@@ -807,9 +812,9 @@ const {{ model.name }}Page: React.FC = () => {
       {% endif %}
 
 {% if not model.is_tree %}
-      <div className="border rounded-md border-t-2 border-t-accent/30">
+      <div className="flex-1 min-h-0 overflow-hidden border rounded-md border-t-2 border-t-accent/30 [&>[data-ui=table-container]]:h-full">
         <Table>
-          <TableHeader>
+          <TableHeader className="sticky top-0 z-20 bg-card shadow-sm">
             <TableRow>
               <TableHead className="w-[40px]">
                 <input
@@ -1019,7 +1024,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 
       {/* Pagination Controls */}
-      <div className="flex flex-wrap items-center justify-between gap-4">
+      <div className="shrink-0 flex flex-wrap items-center justify-between gap-4 bg-background">
         <div className="flex items-center gap-4">
           <div className="text-sm text-muted-foreground whitespace-nowrap">
             {t('common.page_info')} {use{{ model.name }}Store(state => state.page)} {t('common.of_page')} {Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || 1}
@@ -1104,7 +1109,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 {% else %}
       {/* Tree View — Lazy Loading */}
-      <div className="border rounded-md border-t-2 border-t-accent/30">
+      <div className="flex-1 min-h-0 overflow-auto border rounded-md border-t-2 border-t-accent/30">
         {rootLoading && rootItems.length === 0 ? (
           <div className="h-24 text-center py-8">
             <Loader2 className="h-6 w-6 animate-spin mx-auto" />
@@ -1214,7 +1219,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
       {/* Root-level pagination */}
       {!rootLoading && rootItems.length > 0 && (
-        <div className="flex flex-wrap items-center justify-between gap-4 mt-2 pt-4 border-t">
+        <div className="shrink-0 flex flex-wrap items-center justify-between gap-4 pt-4 border-t bg-background">
           <div className="flex items-center gap-4">
             <div className="text-sm text-muted-foreground whitespace-nowrap">
               {t('common.page_info')} {rootPage} {t('common.of_page')} {Math.ceil(rootTotal / rootSize) || 1}

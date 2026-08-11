@@ -219,6 +219,10 @@ def _resolve_fk_labels_and_reverse(
                 if "r" in f["permissions"]
                 and f["name"] != "password"
             ]
+            source_search_fields = [
+                f for f in source_readable_fields
+                if f.get("is_search_field") and f["name"] != fk["name"]
+            ]
 
             reverse_cfg = fk.get("reverse", {}) or {}
             editor = _normalise_editor(reverse_cfg)
@@ -259,6 +263,7 @@ def _resolve_fk_labels_and_reverse(
                 "inline_schema": inline_schema,
                 "role_permissions": model.get("role_permissions", {}),
                 "source_readable_fields": source_readable_fields,
+                "source_search_fields": source_search_fields,
             })
 
 

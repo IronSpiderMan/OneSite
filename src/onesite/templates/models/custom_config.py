@@ -12,9 +12,6 @@ class TimezoneEnum(str, Enum):
 class ThemeStyleEnum(str, Enum):
     NORMAL = "normal"
     INDUSTRIAL = "industrial"
-    ANIME = "anime"
-    CUTE = "cute"
-    EMQX = "emqx"
     NEURON = "neuron"
 
 class ThemeModeEnum(str, Enum):

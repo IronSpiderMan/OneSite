@@ -402,6 +402,8 @@ def _apply_filters(
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
+    {% elif field.fk_info %}
+    {{ field.name }}: Optional[int] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -450,6 +452,9 @@ def _apply_filters(
     {% elif field.is_enum %}
     if {{ field.name }}:
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
+    {% elif field.fk_info %}
+    if {{ field.name }} is not None:
+        statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
     {% elif field.ui_type == 'str' %}
     if {{ field.name }}:
         statement = statement.where(col({{ model.name }}.{{ field.name }}).ilike("%" + {{ field.name }} + "%"))
@@ -495,6 +500,8 @@ async def get_multi(
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
+    {% elif field.fk_info %}
+    {{ field.name }}: Optional[int] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -525,6 +532,8 @@ async def get_multi(
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.fk_info %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'str' %}
         {{ field.name }}={{ field.name }},
@@ -572,6 +581,8 @@ async def get_multi_with_fk_labels(
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
+    {% elif field.fk_info %}
+    {{ field.name }}: Optional[int] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -603,6 +614,8 @@ async def get_multi_with_fk_labels(
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.fk_info %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'str' %}
         {{ field.name }}={{ field.name }},
@@ -671,6 +684,8 @@ async def count(
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
+    {% elif field.fk_info %}
+    {{ field.name }}: Optional[int] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -699,6 +714,8 @@ async def count(
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.is_enum %}
+        {{ field.name }}={{ field.name }},
+        {% elif field.fk_info %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'str' %}
         {{ field.name }}={{ field.name }},

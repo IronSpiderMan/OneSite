@@ -105,6 +105,8 @@ class {{ model.name }}Service:
         {{ field.name }}: Optional[List[str]] = None,
         {% elif field.is_enum %}
         {{ field.name }}: Optional[str] = None,
+        {% elif field.fk_info %}
+        {{ field.name }}: Optional[int] = None,
         {% elif field.ui_type == 'str' %}
         {{ field.name }}: Optional[str] = None,
         {% endif %}
@@ -138,6 +140,8 @@ class {{ model.name }}Service:
             {{ field.name }}={{ field.name }},
             {% elif field.is_enum %}
             {{ field.name }}={{ field.name }},
+            {% elif field.fk_info %}
+            {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'str' %}
             {{ field.name }}={{ field.name }},
             {% endif %}
@@ -168,6 +172,8 @@ class {{ model.name }}Service:
             {% elif field.ui_type == 'time' %}
             {{ field.name }}={{ field.name }},
             {% elif field.is_enum %}
+            {{ field.name }}={{ field.name }},
+            {% elif field.fk_info %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'str' %}
             {{ field.name }}={{ field.name }},

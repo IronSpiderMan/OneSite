@@ -1,11 +1,11 @@
-export type ThemeStyle = "normal" | "industrial" | "anime" | "cute" | "emqx" | "neuron"
+export type ThemeStyle = "normal" | "industrial" | "neuron"
 export type ThemeMode = "system" | "light" | "dark"
 
 const STYLE_KEY = "theme_style"
 const MODE_KEY = "theme_mode"
 const LEGACY_KEY = "custom_config_theme"
 
-const ALL_STYLES: ThemeStyle[] = ["normal", "industrial", "anime", "cute", "emqx", "neuron"]
+const ALL_STYLES: ThemeStyle[] = ["normal", "industrial", "neuron"]
 
 const getSystemIsDark = () =>
   typeof window !== "undefined" &&

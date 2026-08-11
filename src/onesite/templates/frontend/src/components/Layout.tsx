@@ -8,7 +8,7 @@ import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
 import { NotificationBell } from './notification-bell';
 
-type ThemeStyle = 'normal' | 'industrial' | 'anime' | 'cute' | 'emqx' | 'neuron';
+type ThemeStyle = 'normal' | 'industrial' | 'neuron';
 
 function useThemeStyle(): ThemeStyle {
   const [style, setStyle] = useState<ThemeStyle>(
@@ -34,56 +34,38 @@ const MAIN_MARGIN_COLLAPSED = 'md:ml-16';
 const SIDEBAR_EXTRA: Record<ThemeStyle, string> = {
   normal: '',
   industrial: 'rounded-none',
-  emqx: '',
   neuron: 'rounded-none',
-  anime: 'rounded-r-2xl',
-  cute: 'rounded-r-3xl',
 };
 
 // Theme-specific active nav item
 const NAV_ACTIVE: Record<ThemeStyle, string> = {
   normal: 'bg-primary/10 text-primary font-medium border-r-[3px] border-primary pr-[calc(1rem-3px)]',
   industrial: 'bg-primary text-primary-foreground border-l-[3px] border-accent pl-[calc(1rem-3px)]',
-  emqx: 'bg-primary/10 text-primary font-semibold',
   neuron: 'bg-primary/10 text-primary font-semibold border-l-2 border-primary pl-[calc(1rem-2px)]',
-  anime: 'bg-primary text-primary-foreground rounded-xl',
-  cute: 'bg-primary/15 text-primary rounded-full',
 };
 const NAV_INACTIVE: Record<ThemeStyle, string> = {
   normal: 'text-foreground/75 hover:bg-muted hover:text-primary border-r-[3px] border-transparent',
   industrial: 'hover:bg-accent hover:text-accent-foreground border-l-[3px] border-transparent',
-  emqx: 'hover:bg-muted/70',
   neuron: 'hover:bg-muted hover:text-foreground border-l-2 border-transparent',
-  anime: 'hover:bg-accent hover:text-accent-foreground rounded-xl',
-  cute: 'hover:bg-accent/50 hover:text-accent-foreground rounded-full',
 };
 const NAV_ITEM_BASE: Record<ThemeStyle, string> = {
   normal: 'rounded-none',
   industrial: 'rounded-none',
-  emqx: 'rounded-md',
   neuron: 'rounded-none',
-  anime: 'rounded-xl',
-  cute: 'rounded-full',
 };
 
 // Theme-specific header classes
 const HEADER_EXTRA: Record<ThemeStyle, string> = {
   normal: 'border-b border-b-border shadow-[0_1px_4px_rgb(0_21_41_/_0.08)]',
   industrial: 'border-b-2 border-b-accent/30',
-  emqx: 'border-b border-b-border',
   neuron: 'border-b border-b-border',
-  anime: 'border-b-2 border-b-primary/15 rounded-bl-2xl',
-  cute: 'border-b-2 border-b-primary/10 rounded-bl-3xl',
 };
 
 // Theme-specific logo area
 const LOGO_AREA_EXTRA: Record<ThemeStyle, string> = {
   normal: 'border-b border-b-border',
   industrial: 'border-b-2 border-b-accent/40',
-  emqx: 'border-b border-b-border',
   neuron: 'border-b border-b-border',
-  anime: 'border-b-2 border-b-primary/15',
-  cute: 'border-b-2 border-b-primary/10',
 };
 
 const AppLayout: React.FC = () => {
@@ -153,7 +135,7 @@ const AppLayout: React.FC = () => {
       : t('common.dashboard', 'Dashboard');
 
   return (
-    <div className={cn("min-h-screen flex", isNormal && "ant-admin-shell")}>
+    <div className={cn("h-screen overflow-hidden flex", isNormal && "ant-admin-shell")}>
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -298,7 +280,7 @@ const AppLayout: React.FC = () => {
       </aside>
 
       {/* Main Content */}
-      <div className={cn("flex-1 flex flex-col min-w-0", mainMargin)}>
+      <div className={cn("flex-1 flex flex-col min-w-0 min-h-0", mainMargin)}>
         <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme], isNormal && "ant-admin-header", isNeuron && "neuron-header h-[72px] px-5 md:px-7")}>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
@@ -328,7 +310,7 @@ const AppLayout: React.FC = () => {
                 </Button>
             </div>
         </header>
-        <main className={cn("flex-1 p-6 overflow-auto", isNormal && "ant-admin-content", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7")}>
+        <main className={cn("flex-1 min-h-0 p-6 overflow-auto", isNormal && "ant-admin-content", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7")}>
             <Outlet />
         </main>
       </div>
