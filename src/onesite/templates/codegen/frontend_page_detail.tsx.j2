@@ -308,7 +308,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 if (item) {
                     // Fetch FK data
                     {% for fk in model.foreign_keys %}
-                    if (item.{{ fk.name.replace('_id', '') }}_id) {
+                    set{{ fk.target_model }}Data(null);
+                    if (item.{{ fk.name.replace('_id', '') }}_id !== null && item.{{ fk.name.replace('_id', '') }}_id !== undefined) {
                         get{{ fk.target_model }}(item.{{ fk.name.replace('_id', '') }}_id).then(res => {
                              if (res) {
                                  set{{ fk.target_model }}Data(res);
@@ -1141,10 +1142,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <div>
                             <div className="mb-2 flex items-center justify-between">
                                 <Label className="text-lg font-semibold">{t('models.{{ fk.target_service }}.name')}</Label>
-                                <Badge variant="outline">ID: {currentItem.{{ fk.name.replace('_id', '') }}_id}</Badge>
+                                <Badge variant="outline">ID: {String(currentItem.{{ fk.name.replace('_id', '') }}_id ?? '-')}</Badge>
                             </div>
                             <div className="rounded-md border p-4">
-                                { {{ fk.target_service }}Data ? (
+                                {currentItem.{{ fk.name.replace('_id', '') }}_id === null || currentItem.{{ fk.name.replace('_id', '') }}_id === undefined ? (
+                                    <span className="text-muted-foreground italic">{t('common.no_result')}</span>
+                                ) : {{ fk.target_service }}Data ? (
                                     <div className="space-y-2">
                                         <div className="grid grid-cols-2 gap-2 text-sm">
                                             {/* Show all readable fields for the target model */}
