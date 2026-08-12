@@ -20,8 +20,10 @@ export interface ExternalResourceBinding {
   updated_at: string;
 }
 
-export async function getExternalResources() {
-  return (await request.get<ExternalResourceBinding[]>('/external-resources')).data;
+export async function getExternalResources(includeDeleted = false) {
+  return (await request.get<ExternalResourceBinding[]>('/external-resources', {
+    params: { include_deleted: includeDeleted },
+  })).data;
 }
 
 export async function retryExternalResource(resourceType: string, entityId: string) {

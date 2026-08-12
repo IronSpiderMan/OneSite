@@ -22,6 +22,7 @@ async def list_bindings(
     provider: str | None = None,
     resource_type: str | None = None,
     status: str | None = None,
+    include_deleted: bool = False,
     session: AsyncSession = Depends(db.get_session),
 ) -> list[dict[str, Any]]:
     statement = select(ExternalResourceBinding).order_by(ExternalResourceBinding.updated_at.desc())
@@ -31,6 +32,8 @@ async def list_bindings(
         statement = statement.where(ExternalResourceBinding.resource_type == resource_type)
     if status:
         statement = statement.where(ExternalResourceBinding.status == status)
+    elif not include_deleted:
+        statement = statement.where(ExternalResourceBinding.status != "deleted")
     return jsonable_encoder((await session.exec(statement)).all())
 
 

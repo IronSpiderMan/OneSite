@@ -374,11 +374,18 @@ class ExternalResourceManager:
         if task.operation == "delete" or entity is None:
             binding.status = SyncStatus.deleting.value
             await provider.delete(task.resource_type, binding, task.snapshot)
+            empty_hash = _hash({})
             binding.status = SyncStatus.deleted.value
+            # Successful deletion converges on absence. Retain the binding as
+            # a tombstone, without comparing stale pre-delete desired state.
+            binding.desired_state = {}
             binding.observed_state = {}
-            binding.observed_hash = _hash({})
+            binding.desired_hash = empty_hash
+            binding.observed_hash = empty_hash
             binding.applied_revision = task.revision
             binding.last_error = None
+            binding.last_observed_at = _utcnow()
+            binding.last_synced_at = _utcnow()
             binding.updated_at = _utcnow()
             return
 
