@@ -1,0 +1,87 @@
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.encoders import jsonable_encoder
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.core.external_resources import (
+    ExternalResourceBinding,
+    ExternalResourceOutbox,
+    RESOURCE_CONFIGS,
+    enqueue_external_resource_change,
+    get_external_resource_provider,
+)
+
+router = APIRouter(dependencies=[Depends(deps.get_current_user)])
+
+
+@router.get("")
+async def list_bindings(
+    provider: str | None = None,
+    resource_type: str | None = None,
+    status: str | None = None,
+    session: AsyncSession = Depends(db.get_session),
+) -> list[dict[str, Any]]:
+    statement = select(ExternalResourceBinding).order_by(ExternalResourceBinding.updated_at.desc())
+    if provider:
+        statement = statement.where(ExternalResourceBinding.provider == provider)
+    if resource_type:
+        statement = statement.where(ExternalResourceBinding.resource_type == resource_type)
+    if status:
+        statement = statement.where(ExternalResourceBinding.status == status)
+    return jsonable_encoder((await session.exec(statement)).all())
+
+
+@router.get("/capabilities")
+async def capabilities() -> dict[str, Any]:
+    result: dict[str, Any] = {}
+    for name in sorted({item["provider"] for item in RESOURCE_CONFIGS}):
+        result[name] = await get_external_resource_provider(name).capabilities()
+    return result
+
+
+@router.get("/{resource_type}/{entity_id}")
+async def get_binding(
+    resource_type: str,
+    entity_id: str,
+    session: AsyncSession = Depends(db.get_session),
+) -> dict[str, Any]:
+    binding = (await session.exec(select(ExternalResourceBinding).where(
+        ExternalResourceBinding.resource_type == resource_type,
+        ExternalResourceBinding.entity_id == entity_id,
+    ))).first()
+    if binding is None:
+        raise HTTPException(status_code=404, detail="External resource binding not found")
+    outbox = (await session.exec(select(ExternalResourceOutbox).where(
+        ExternalResourceOutbox.provider == binding.provider,
+        ExternalResourceOutbox.resource_type == resource_type,
+        ExternalResourceOutbox.entity_id == entity_id,
+    ).order_by(ExternalResourceOutbox.id.desc()).limit(20))).all()
+    return {"binding": jsonable_encoder(binding), "recent_jobs": jsonable_encoder(outbox)}
+
+
+@router.post(
+    "/{resource_type}/{entity_id}/retry",
+    dependencies=[Depends(deps.get_current_active_admin)],
+)
+async def retry_binding(
+    resource_type: str,
+    entity_id: str,
+    session: AsyncSession = Depends(db.get_session),
+) -> dict[str, str]:
+    binding = (await session.exec(select(ExternalResourceBinding).where(
+        ExternalResourceBinding.resource_type == resource_type,
+        ExternalResourceBinding.entity_id == entity_id,
+    ))).first()
+    if binding is None:
+        raise HTTPException(status_code=404, detail="External resource binding not found")
+    await enqueue_external_resource_change(
+        session,
+        resource_type=resource_type,
+        entity_id=entity_id,
+        bump_revision=False,
+    )
+    await session.commit()
+    return {"status": "queued"}

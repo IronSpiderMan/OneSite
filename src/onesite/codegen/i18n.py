@@ -119,6 +119,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         },
         "menu": {
             "dashboard": "Dashboard",
+            "external_resources": "External Resources",
         },
         "dashboard": {
             "total": "total",
@@ -351,6 +352,7 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         },
         "menu": {
             "dashboard": "仪表盘",
+            "external_resources": "外部资源同步",
         },
         "dashboard": {
             "total": "总计",

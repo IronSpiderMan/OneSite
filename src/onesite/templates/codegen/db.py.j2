@@ -43,6 +43,9 @@ async def init_db():
     {% if background_execution_enabled %}
     import app.core.background_execution  # noqa: F401
     {% endif %}
+    {% if external_resources_enabled %}
+    import app.core.external_resources  # noqa: F401
+    {% endif %}
     # Ensure _latest table models are imported so SQLModel.metadata knows about them
     {% for module in latest_table_imports %}
     import {{ module }}  # noqa: F401

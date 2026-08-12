@@ -1,0 +1,33 @@
+import request from '../utils/request';
+
+export interface ExternalResourceBinding {
+  id: number;
+  provider: string;
+  resource_type: string;
+  entity_id: string;
+  external_id?: string;
+  status: string;
+  desired_revision: number;
+  applied_revision: number;
+  retry_count: number;
+  drift_count: number;
+  desired_hash?: string;
+  observed_hash?: string;
+  last_drift_at?: string;
+  last_observed_at?: string;
+  last_error?: string;
+  last_synced_at?: string;
+  updated_at: string;
+}
+
+export async function getExternalResources() {
+  return (await request.get<ExternalResourceBinding[]>('/external-resources')).data;
+}
+
+export async function retryExternalResource(resourceType: string, entityId: string) {
+  return (await request.post(`/external-resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(entityId)}/retry`)).data;
+}
+
+export async function getExternalResourceCapabilities() {
+  return (await request.get<Record<string, unknown>>('/external-resources/capabilities')).data;
+}

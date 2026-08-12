@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home{% for icon in used_icons %}{% if icon != 'Home' %}, {{ icon }}{% endif %}{% endfor %} } from 'lucide-react';
+import { Home{% if external_resources_enabled %}, RefreshCw{% endif %}{% for icon in used_icons %}{% if icon != 'Home' %}, {{ icon }}{% endif %}{% endfor %} } from 'lucide-react';
 
 export const GeneratedMenu = [
   {
@@ -8,6 +8,14 @@ export const GeneratedMenu = [
     label: 'menu.dashboard',
     minRole: 'user',
   },
+{% if external_resources_enabled %}
+  {
+    key: '/external-resources',
+    icon: <RefreshCw className="h-4 w-4" />,
+    label: 'menu.external_resources',
+    minRole: 'admin',
+  },
+{% endif %}
 {% for model in models %}
 {% if not model.is_singleton %}
   {

@@ -1,0 +1,58 @@
+import React, { useCallback, useEffect, useState } from 'react';
+import { RefreshCw, RotateCcw } from 'lucide-react';
+import { toast } from 'sonner';
+import {
+  ExternalResourceBinding,
+  getExternalResources,
+  retryExternalResource,
+} from '../services/external-resources';
+
+const statusColor: Record<string, string> = {
+  synced: 'bg-emerald-100 text-emerald-700',
+  error: 'bg-red-100 text-red-700',
+  retrying: 'bg-amber-100 text-amber-700',
+  drifted: 'bg-orange-100 text-orange-700',
+  deleted: 'bg-slate-100 text-slate-600',
+};
+
+export default function ExternalResourcesPage() {
+  const [rows, setRows] = useState<ExternalResourceBinding[]>([]);
+  const [loading, setLoading] = useState(true);
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { setRows(await getExternalResources()); }
+    finally { setLoading(false); }
+  }, []);
+
+  useEffect(() => { void load(); const id = window.setInterval(load, 5000); return () => window.clearInterval(id); }, [load]);
+
+  const retry = async (row: ExternalResourceBinding) => {
+    await retryExternalResource(row.resource_type, row.entity_id);
+    toast.success('同步任务已重新入队');
+    await load();
+  };
+
+  return <div className="space-y-5 p-6">
+    <div className="flex items-center justify-between">
+      <div><h1 className="text-2xl font-semibold">外部资源同步</h1><p className="text-sm text-muted-foreground">查看 Provider 绑定、漂移与重试状态</p></div>
+      <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新</button>
+    </div>
+    <div className="overflow-hidden rounded-lg border bg-card">
+      <table className="w-full text-sm"><thead className="border-b bg-muted/40 text-left"><tr>
+        <th className="p-3">Provider</th><th className="p-3">资源</th><th className="p-3">业务 ID</th><th className="p-3">状态</th><th className="p-3">版本</th><th className="p-3">当前一致性</th><th className="p-3">累计漂移</th><th className="p-3">最近检查</th><th className="p-3">操作</th>
+      </tr></thead><tbody>
+        {rows.map(row => <tr className="border-b last:border-0" key={`${row.provider}:${row.resource_type}:${row.entity_id}`}>
+          <td className="p-3 font-medium">{row.provider}</td><td className="p-3">{row.resource_type}</td><td className="p-3 font-mono text-xs">{row.entity_id}</td>
+          <td className="p-3"><span className={`rounded-full px-2 py-1 text-xs ${statusColor[row.status] || 'bg-blue-100 text-blue-700'}`}>{row.status}</span>{row.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={row.last_error}>{row.last_error}</div>}</td>
+          <td className="p-3" title="已应用版本 / 期望版本">{row.applied_revision}/{row.desired_revision}</td>
+          <td className="p-3">{!row.desired_hash || !row.observed_hash ? <span className="text-muted-foreground">待检查</span> : row.desired_hash === row.observed_hash ? <span className="text-emerald-600">一致</span> : <span className="text-orange-600">存在漂移</span>}</td>
+          <td className="p-3" title={row.last_drift_at ? `最近一次：${new Date(row.last_drift_at).toLocaleString()}` : '未发生过运行期漂移'}>{row.drift_count}</td>
+          <td className="p-3">{row.last_observed_at ? new Date(row.last_observed_at).toLocaleString() : '—'}</td>
+          <td className="p-3"><button className="inline-flex items-center gap-1 rounded border px-2 py-1" onClick={() => void retry(row)}><RotateCcw className="h-3 w-3" />重试</button></td>
+        </tr>)}
+        {!loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={9}>暂无外部资源绑定</td></tr>}
+        {loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={9}>加载中…</td></tr>}
+      </tbody></table>
+    </div>
+  </div>;
+}

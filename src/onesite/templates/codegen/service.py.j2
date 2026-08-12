@@ -10,6 +10,9 @@ from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
 from app.core.datetime import SYSTEM_TIMEZONE, to_utc
+{% if model.external_resource or model.external_resource_dependents %}
+from app.core.external_resources import enqueue_external_resource_change, enqueue_external_resource_dependents
+{% endif %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -37,6 +40,19 @@ class {{ model.name }}Service:
         )
         try:
             obj = await crud.create(session, obj_in)
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                resource_type="{{ model.external_resource.resource_type }}",
+                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
+                operation="reconcile",
+            )
+            {% endif %}
+            {% if model.external_resource_dependents %}
+            await enqueue_external_resource_dependents(
+                session, source_type="{{ model.module_name }}", source_id=str(getattr(obj, "id"))
+            )
+            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -307,6 +323,19 @@ class {{ model.name }}Service:
         {% endif %}
         try:
             obj = await crud.create(session, obj_in)
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                resource_type="{{ model.external_resource.resource_type }}",
+                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
+                operation="reconcile",
+            )
+            {% endif %}
+            {% if model.external_resource_dependents %}
+            await enqueue_external_resource_dependents(
+                session, source_type="{{ model.module_name }}", source_id=str(getattr(obj, "id"))
+            )
+            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -375,6 +404,20 @@ class {{ model.name }}Service:
 
         try:
             obj = await crud.update(session, db_obj, obj_in)
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                resource_type="{{ model.external_resource.resource_type }}",
+                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
+                operation="reconcile",
+                snapshot=old,
+            )
+            {% endif %}
+            {% if model.external_resource_dependents %}
+            await enqueue_external_resource_dependents(
+                session, source_type="{{ model.module_name }}", source_id=str(id)
+            )
+            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -419,6 +462,20 @@ class {{ model.name }}Service:
                 raise ValueError("{{ model.name }} not found")
             old = snapshot_model(db_obj)
             deleted_id = await crud.delete(session, id)
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                resource_type="{{ model.external_resource.resource_type }}",
+                entity_id=str(id),
+                operation="delete",
+                snapshot=old,
+            )
+            {% endif %}
+            {% if model.external_resource_dependents %}
+            await enqueue_external_resource_dependents(
+                session, source_type="{{ model.module_name }}", source_id=str(id)
+            )
+            {% endif %}
             await session.commit()
         except Exception:
             await session.rollback()

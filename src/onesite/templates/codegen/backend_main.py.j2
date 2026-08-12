@@ -43,6 +43,9 @@ except ImportError:
 
 # Import background task queue and handlers
 from app.core.task_queue import task_queue
+{% if config.external_resources_enabled %}
+from app.core.external_resources import external_resource_manager
+{% endif %}
 
 try:
     import app.handlers
@@ -103,9 +106,17 @@ async def lifespan(app: FastAPI):
     try:
         # Initialize application-owned resources
         await init_resources(app)
+        {% if config.external_resources_enabled %}
+        await external_resource_manager.start()
+        logger.info("External resource reconciler started")
+        {% endif %}
         yield
     finally:
         try:
+            {% if config.external_resources_enabled %}
+            await external_resource_manager.stop()
+            logger.info("External resource reconciler stopped")
+            {% endif %}
             # Release application-owned resources before infrastructure shutdown
             await destroy_resources(app)
         finally:

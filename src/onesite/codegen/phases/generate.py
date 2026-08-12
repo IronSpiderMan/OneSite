@@ -422,6 +422,57 @@ def phase_generate_per_model(
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
     theme_name = resolve_theme(site_config)[0]["id"]
 
+    # External resources are declared on the target model. Resolve the reverse
+    # dependency graph once so source-row changes can fan out reconciliation.
+    by_key = {
+        key: model
+        for model in models
+        for key in (model["name"], model["module_name"], model["table_name"])
+    }
+    for model in models:
+        external = model.get("site_props", {}).get("external_resource")
+        if external is None:
+            model["external_resource"] = None
+            continue
+        if not isinstance(external, dict):
+            raise ValueError(f"{model['name']} external_resource must be an object")
+        missing = {"provider", "resource_type"} - set(external)
+        if missing:
+            raise ValueError(
+                f"{model['name']} external_resource is missing: "
+                + ", ".join(sorted(missing))
+            )
+        dependencies = external.get("depends_on", [])
+        if not isinstance(dependencies, list):
+            raise ValueError(
+                f"{model['name']} external_resource.depends_on must be a list"
+            )
+        normalized = {**external, "depends_on": dependencies}
+        model["external_resource"] = normalized
+        for dependency in dependencies:
+            if (
+                not isinstance(dependency, dict)
+                or not dependency.get("source")
+                or not dependency.get("field")
+            ):
+                raise ValueError(
+                    f"{model['name']} external_resource dependencies require source and field"
+                )
+            source = by_key.get(str(dependency["source"]))
+            if source is None:
+                raise ValueError(
+                    f"{model['name']} external_resource dependency source "
+                    f"'{dependency['source']}' was not found"
+                )
+            source.setdefault("external_resource_dependents", []).append(
+                {
+                    "target_resource_type": normalized["resource_type"],
+                    "target_module": model["source_module"],
+                    "target_model": model["name"],
+                    "target_field": dependency["field"],
+                }
+            )
+
     # Resolve visualize filter paths for all models
     for model in models:
         _resolve_visualize_filters(model, model_lookup_global)
@@ -509,6 +560,20 @@ def phase_generate_aggregated(
     """Generate cross-cutting files: router, routes, menu, dashboard, i18n, etc."""
     frontend_path = get_project_paths(cwd).frontend
     theme_name = resolve_theme(site_config)[0]["id"]
+    external_models = [m for m in models if m.get("external_resource")]
+    external_resources_enabled = bool(external_models)
+    external_resource_configs = [
+        {
+            "provider": m["external_resource"]["provider"],
+            "resource_type": m["external_resource"]["resource_type"],
+            "module": m["source_module"],
+            "model": m["name"],
+            "id_field": m["external_resource"].get("identity_field", "id"),
+            "depends_on": m["external_resource"].get("depends_on", []),
+            "health": m["external_resource"].get("health"),
+        }
+        for m in external_models
+    ]
     # ── TimescaleDB: collect models and generate db.py ──
     timescaledb_models = [m for m in models if m.get("is_timescaledb")]
     has_timescaledb = bool(timescaledb_models)
@@ -526,6 +591,7 @@ def phase_generate_aggregated(
             "has_timescaledb": has_timescaledb,
             "timescaledb_models": timescaledb_models,
             "latest_table_imports": latest_table_imports,
+            "external_resources_enabled": external_resources_enabled,
         },
         backend_path / "app" / "core" / "db.py",
     )
@@ -541,6 +607,37 @@ def phase_generate_aggregated(
     # ── Task queue (always generated, needed if any model has async events) ──
     generate_file("task_queue.py.j2", {}, backend_path / "app" / "core" / "task_queue.py")
 
+    if external_resources_enabled:
+        external_context = {
+            "resources_json": json.dumps(external_resource_configs, ensure_ascii=False),
+        }
+        generate_file(
+            "external_resources.py.j2",
+            external_context,
+            backend_path / "app" / "core" / "external_resources.py",
+        )
+        generate_file(
+            "external_resources_api.py.j2",
+            {},
+            backend_path / "app" / "api" / "endpoints" / "external_resources.py",
+        )
+        generate_file(
+            "frontend_external_resources_service.ts.j2",
+            {},
+            frontend_path / "src" / "services" / "external-resources.ts",
+        )
+        generate_file(
+            "frontend_external_resources_page.tsx.j2",
+            {},
+            frontend_path / "src" / "pages" / "ExternalResources.tsx",
+        )
+
+    generate_file(
+        "backend_main.py.j2",
+        {"config": {**site_config, "external_resources_enabled": external_resources_enabled}},
+        backend_path / "app" / "main.py",
+    )
+
     # ── API router ──
     scheduled_tasks = site_config.get("scheduled_tasks", [])
     tools = site_config.get("tools", [])
@@ -549,6 +646,7 @@ def phase_generate_aggregated(
         backend_path / "app" / "api" / "api.py",
         scheduled_tasks,
         tools,
+        external_resources_enabled,
     )
 
     if tools or scheduled_tasks:
@@ -687,14 +785,14 @@ def phase_generate_aggregated(
     ]
     generate_file(
         "frontend_routes.tsx.j2",
-        {"models": frontend_models},
+        {"models": frontend_models, "external_resources_enabled": external_resources_enabled},
         frontend_path / "src" / "Routes.tsx",
     )
     # Collect unique icon names used across models (for dynamic import)
     used_icons = sorted({m.get("icon", "LayoutDashboard") for m in frontend_models})
     generate_file(
         "frontend_menu.tsx.j2",
-        {"models": frontend_models, "used_icons": used_icons},
+        {"models": frontend_models, "used_icons": used_icons, "external_resources_enabled": external_resources_enabled},
         frontend_path / "src" / "Menu.tsx",
     )
     site_logger_enabled = "site_logger" in site_config.get("plugins", [])

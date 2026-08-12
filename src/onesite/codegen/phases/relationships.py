@@ -688,6 +688,7 @@ def _resolve_property_config_relations(models: list[ModelDefinition]) -> None:
                 # Introspect the user-defined class at runtime
                 try:
                     import sys
+                    from enum import Enum
                     from pydantic_core import PydanticUndefined
                     # Search both entity and timeseries modules
                     candidate_modules = [
@@ -708,7 +709,10 @@ def _resolve_property_config_relations(models: list[ModelDefinition]) -> None:
                             anno = fi.annotation
                             anno_str = anno.__name__ if hasattr(anno, '__name__') else str(anno)
                             if fi.default is not PydanticUndefined and fi.default is not None:
-                                config_fields[fn] = f"{anno_str} = {repr(fi.default)}"
+                                default = fi.default
+                                if isinstance(default, Enum):
+                                    default = default.value
+                                config_fields[fn] = f"{anno_str} = {repr(default)}"
                             elif fi.default is not PydanticUndefined:
                                 config_fields[fn] = f"Optional[{anno_str}]"
                             else:
