@@ -1,7 +1,7 @@
 from typing import List, Any, Optional, Annotated
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.dashboard_metrics %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -255,6 +255,20 @@ async def send_notification(
         await service.create(session, obj_in)
         created_count = 1
     return {"sent": created_count}
+{% endif %}
+
+{% if model.dashboard_metrics %}
+@router.get("/dashboard-metrics")
+async def get_{{ model.lower_name }}_dashboard_metrics(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    """Get the Dashboard metrics visible to the current role."""
+    raw_role = getattr(current_user, "role", "user")
+    role = str(getattr(raw_role, "value", raw_role))
+    return await service.get_dashboard_metrics(session, role=role)
+
 {% endif %}
 
 {% if model.visualize %}

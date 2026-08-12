@@ -126,6 +126,8 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "no_visualizations": "No visualizations or tasks configured",
             "overview_description": "A clear overview of your key data and recent activity",
             "no_data": "No data available",
+            "metric_new": "New",
+            "vs_previous_period": "vs previous period",
             "period_day": "Daily",
             "period_week": "Weekly",
             "period_month": "Monthly",
@@ -356,6 +358,8 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
             "no_visualizations": "未配置可视化或定时任务",
             "overview_description": "清晰掌握关键数据与近期动态",
             "no_data": "暂无数据",
+            "metric_new": "新增",
+            "vs_previous_period": "较上一周期",
             "period_day": "按日",
             "period_week": "按周",
             "period_month": "按月",
@@ -537,7 +541,9 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
         model_name_en = model["name"]
         model_name_zh = model["name"]
 
-        model_translations = model.get("translations", {})
+        model_translations = model.get("translations")
+        if not isinstance(model_translations, dict):
+            model_translations = {}
         en_pack = model_translations.get("en")
         zh_pack = model_translations.get("zh")
         model_name_en = pick_model_name(en_pack, model_name_en)
@@ -617,6 +623,21 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
                                 or zh_field_defaults.get(filter_name, en_label))
                 set_by_path(en_translations, i18n_key, en_label)
                 set_by_path(zh_translations, i18n_key, zh_label)
+
+        # Dashboard KPI titles. A model translation can override the declared title:
+        # translations.{lang}.dashboard_metrics.{key}
+        for metric in model.get("dashboard_metrics", []):
+            key = metric["key"]
+            fallback = metric["title"]
+            en_metric_titles = en_pack.get("dashboard_metrics") if isinstance(en_pack, dict) else None
+            zh_metric_titles = zh_pack.get("dashboard_metrics") if isinstance(zh_pack, dict) else None
+            en_title = en_metric_titles.get(key, fallback) if isinstance(en_metric_titles, dict) else fallback
+            zh_title = zh_metric_titles.get(key, fallback) if isinstance(zh_metric_titles, dict) else fallback
+            metric_i18n_key = metric.get(
+                "i18n_key", f"dashboard.metrics.{model_name}.{key}"
+            )
+            set_by_path(en_translations, metric_i18n_key, en_title)
+            set_by_path(zh_translations, metric_i18n_key, zh_title)
 
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model

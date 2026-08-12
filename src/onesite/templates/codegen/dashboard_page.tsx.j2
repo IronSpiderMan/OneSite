@@ -1,6 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, ArrowDownRight, ArrowUpRight{% for icon in dashboard_metric_icons | default([]) %}{% if icon not in ['Activity', 'ArrowDownRight', 'ArrowUpRight'] %}, {{ icon }}{% endif %}{% endfor %}{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
@@ -21,6 +21,11 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Modal } from '../components/ui/modal';
 {% endif %}
+{% for model in dashboard_models | default(models) %}
+{% if model.dashboard_metrics %}
+import { get{{ model.name }}DashboardMetrics } from '../services/{{ model.module_name }}';
+{% endif %}
+{% endfor %}
 {% for model in models %}
 {% if model.visualize and model.visualize.get('show') %}
 import { get{{ model.name }}Stats{% if model.visualize.get('resolved_filters') %}, get{{ model.name }}StatsFilters, {{ model.name }}FilterOption{% endif %} } from '../services/{{ model.module_name }}';
@@ -41,6 +46,50 @@ interface ChartData {
     series?: ChartSeries[];
     title: string;
 }
+
+interface DashboardMetric {
+    key: string;
+    i18n_key: string;
+    title: string;
+    value: number | null;
+    previous_value: number | null;
+    change: number | null;
+    format: { type?: 'number' | 'currency' | 'percent'; currency?: string; decimals?: number };
+    icon: string;
+    color: string;
+    link?: string | null;
+}
+
+const formatMetricValue = (metric: DashboardMetric): string => {
+    if (metric.value === null || metric.value === undefined) return '—';
+    const decimals = metric.format?.decimals ?? (metric.format?.type === 'currency' ? 2 : 0);
+    if (metric.format?.type === 'currency') {
+        return new Intl.NumberFormat(undefined, {
+            style: 'currency', currency: metric.format.currency || 'CNY',
+            minimumFractionDigits: decimals, maximumFractionDigits: decimals,
+        }).format(metric.value);
+    }
+    if (metric.format?.type === 'percent') {
+        return `${metric.value.toLocaleString(undefined, { maximumFractionDigits: decimals })}%`;
+    }
+    return metric.value.toLocaleString(undefined, { maximumFractionDigits: decimals });
+};
+
+const metricIconStyle = (color: string): React.CSSProperties => ({
+    color,
+    backgroundColor: `${color}18`,
+});
+
+const metricAccentStyle = (color: string): React.CSSProperties => ({ backgroundColor: color });
+
+const METRIC_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+    Activity,
+    {% for icon in dashboard_metric_icons | default([]) %}
+    {% if icon != 'Activity' %}
+    {{ icon }},
+    {% endif %}
+    {% endfor %}
+};
 
 const CHART_COLORS = ['#6366f1', '#14b8a6', '#f59e0b', '#f43f5e', '#8b5cf6', '#0ea5e9', '#22c55e', '#f97316'];
 
@@ -167,6 +216,7 @@ const DashboardPage: React.FC = () => {
     const { t } = useTranslation();
     const { data: systemConfig, fetchData: fetchSystemConfig } = useSystemConfigStore();
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
+    const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetric[]>([]);
     const [loading, setLoading] = useState(true);
     const [chartPeriods, setChartPeriods] = useState<Record<string, { period: string; startTime: string; endTime: string }>>({});
     {% set ns = namespace(has_filters=false) %}
@@ -220,6 +270,18 @@ const DashboardPage: React.FC = () => {
         const fetchAllStats = async () => {
             setLoading(true);
             const results: Record<string, ChartData> = {};
+            const metricResults: DashboardMetric[] = [];
+
+            const metricRequests: Promise<{ metrics: DashboardMetric[] }>[] = [];
+                {% for model in dashboard_models | default(models) %}
+                {% if model.dashboard_metrics %}
+            metricRequests.push(get{{ model.name }}DashboardMetrics());
+                {% endif %}
+                {% endfor %}
+            const metricResponses = await Promise.allSettled(metricRequests);
+            metricResponses.forEach(response => {
+                if (response.status === 'fulfilled') metricResults.push(...response.value.metrics);
+            });
 
             {% for model in models %}
             {% if model.visualize and model.visualize.get('show') %}
@@ -236,6 +298,7 @@ const DashboardPage: React.FC = () => {
             {% endfor %}
 
             setChartsData(results);
+            setDashboardMetrics(metricResults);
             setLoading(false);
         };
 
@@ -429,7 +492,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0 {% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
+    if (chartModels.length === 0 && dashboardMetrics.length === 0 {% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -715,6 +778,50 @@ const DashboardPage: React.FC = () => {
                 </div>
             )}
             {% endif %}
+
+            {dashboardMetrics.length > 0 && (
+                <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+                    {dashboardMetrics.map((metric, index) => {
+                        const MetricIcon = METRIC_ICONS[metric.icon] || Activity;
+                        const accentColor = ({
+                            blue: '#3b82f6', green: '#10b981', red: '#f43f5e',
+                            amber: '#f59e0b', purple: '#8b5cf6', cyan: '#06b6d4',
+                        } as Record<string, string>)[metric.color] || metric.color || '#3b82f6';
+                        const content = (
+                            <div className="group relative overflow-hidden rounded-2xl border border-border/60 bg-card p-5 shadow-sm transition-all duration-300 hover:-translate-y-0.5 hover:shadow-lg">
+                                <div className="flex items-start justify-between gap-3">
+                                    <div className="min-w-0">
+                                        <p className="truncate text-sm font-medium text-muted-foreground">
+                                            {t(metric.i18n_key, metric.title)}
+                                        </p>
+                                        <p className="mt-2 truncate text-3xl font-bold tracking-tight tabular-nums">
+                                            {formatMetricValue(metric)}
+                                        </p>
+                                    </div>
+                                    <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={metricIconStyle(accentColor)}>
+                                        <MetricIcon className="h-5 w-5" />
+                                    </span>
+                                </div>
+                                {metric.previous_value !== null && (
+                                    <div className="mt-4 flex items-center gap-1.5 text-xs">
+                                        {metric.change === null ? (
+                                            <span className="font-medium text-primary">{t('dashboard.metric_new', 'New')}</span>
+                                        ) : (
+                                            <span className={`inline-flex items-center gap-0.5 font-semibold ${metric.change >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                                                {metric.change >= 0 ? <ArrowUpRight className="h-3.5 w-3.5" /> : <ArrowDownRight className="h-3.5 w-3.5" />}
+                                                {Math.abs(metric.change).toLocaleString(undefined, { maximumFractionDigits: 1 })}%
+                                            </span>
+                                        )}
+                                        <span className="text-muted-foreground">{t('dashboard.vs_previous_period', 'vs previous period')}</span>
+                                    </div>
+                                )}
+                                <div className="absolute inset-x-0 bottom-0 h-0.5 opacity-0 transition-opacity group-hover:opacity-100" style={metricAccentStyle(accentColor)} />
+                            </div>
+                        );
+                        return metric.link ? <a key={`${metric.key}-${index}`} href={metric.link}>{content}</a> : <React.Fragment key={`${metric.key}-${index}`}>{content}</React.Fragment>;
+                    })}
+                </div>
+            )}
 
             {chartModels.length > 0 && (
                 <div className="grid gap-5 md:grid-cols-2">

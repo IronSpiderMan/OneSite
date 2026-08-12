@@ -1,0 +1,95 @@
+async def get_dashboard_metrics(
+    self,
+    session: AsyncSession,
+    *,
+    role: str,
+) -> dict:
+    """Return the Dashboard KPI values visible to ``role``."""
+    import json
+    from datetime import timedelta
+    from sqlalchemy import func
+
+    model = {{ model.name }}
+    now_local = datetime.now(SYSTEM_TIMEZONE)
+
+    def _period_bounds(period: str):
+        if period == "today":
+            start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+        elif period == "this_week":
+            start = (now_local - timedelta(days=now_local.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+        elif period == "this_month":
+            start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        elif period == "last_7_days":
+            start = now_local - timedelta(days=7)
+        elif period == "last_30_days":
+            start = now_local - timedelta(days=30)
+        else:
+            return None, None
+        return to_utc(start), to_utc(now_local)
+
+    async def _aggregate(metric: dict, start: datetime | None, end: datetime | None):
+        aggregation = metric["aggregation"]
+        field_name = metric.get("field")
+        value_col = getattr(model, field_name) if field_name else None
+        if aggregation == "count":
+            expression = func.count()
+        elif aggregation == "distinct_count":
+            expression = func.count(func.distinct(value_col))
+        elif aggregation == "sum":
+            expression = func.coalesce(func.sum(value_col), 0)
+        elif aggregation == "avg":
+            expression = func.avg(value_col)
+        elif aggregation == "min":
+            expression = func.min(value_col)
+        else:
+            expression = func.max(value_col)
+
+        stmt = select(expression).select_from(model)
+        for field, value in metric.get("where", {}).items():
+            column = getattr(model, field)
+            if isinstance(value, list):
+                stmt = stmt.where(column.in_(value))
+            elif value is None:
+                stmt = stmt.where(column.is_(None))
+            else:
+                stmt = stmt.where(column == value)
+        if metric.get("time_field") and start is not None:
+            time_col = getattr(model, metric["time_field"])
+            stmt = stmt.where(time_col >= start)
+            if end is not None:
+                stmt = stmt.where(time_col < end)
+        result = await session.exec(stmt)
+        value = result.one()
+        return float(value) if value is not None else None
+
+    definitions = json.loads(r'''{{ model.dashboard_metrics | tojson }}''')
+    metrics = []
+    for metric in definitions:
+        if role not in metric.get("permitted_roles", []):
+            continue
+        start, end = _period_bounds(metric["period"])
+        value = await _aggregate(metric, start, end)
+        previous_value = None
+        change = None
+        if metric.get("compare") == "previous_period" and start and end:
+            span = end - start
+            previous_value = await _aggregate(metric, start - span, start)
+            if previous_value:
+                change = ((value or 0) - previous_value) / abs(previous_value) * 100
+            elif not value:
+                change = 0.0
+        metrics.append({
+            "key": metric["key"],
+            "i18n_key": metric["i18n_key"],
+            "title": metric["title"],
+            "value": value,
+            "previous_value": previous_value,
+            "change": change,
+            "format": metric["format"],
+            "icon": metric["icon"],
+            "color": metric["color"],
+            "link": metric.get("link"),
+        })
+    return {"metrics": metrics}

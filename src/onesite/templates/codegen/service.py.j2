@@ -9,7 +9,7 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not 
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
-from app.core.datetime import to_utc
+from app.core.datetime import SYSTEM_TIMEZONE, to_utc
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -79,6 +79,10 @@ class {{ model.name }}Service:
             end_time=end_time,
             limit=limit,
         )
+
+    {% if model.dashboard_metrics %}
+{% filter indent(4, true) %}{% include "dashboard_metrics_service.py.j2" %}{% endfilter %}
+    {% endif %}
 
     {% else %}
 
@@ -884,6 +888,10 @@ class {{ model.name }}Service:
 
         return stats
     {% endif %}
+    {% endif %}
+
+    {% if model.dashboard_metrics %}
+{% filter indent(4, true) %}{% include "dashboard_metrics_service.py.j2" %}{% endfilter %}
     {% endif %}
 
     {% if model.visualize %}

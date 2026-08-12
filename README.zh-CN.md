@@ -137,6 +137,32 @@ __onesite__ = {
 否则创建新记录。字段的 `site_props` 可设置 `importable=False` 或
 `exportable=False`，即使模型级 `fields` 包含该字段也会排除。
 - `refresh_interval`、`visualize`：自动刷新及统计图表。
+- `dashboard_metrics`：在 Dashboard 顶部生成模型聚合指标卡。支持 `count`、`sum`、`avg`、`min`、`max`、`distinct_count`，固定过滤、时间周期和上一周期环比：
+
+```python
+__onesite__ = {
+    "dashboard_metrics": [
+        {"key": "total_orders", "title": "订单总数", "aggregation": "count"},
+        {
+            "key": "paid_revenue_today",
+            "title": "今日成交额",
+            "field": "amount",
+            "aggregation": "sum",
+            "where": {"status": "paid"},
+            "time_field": "created_at",
+            "period": "today",
+            "compare": "previous_period",
+            "format": {"type": "currency", "currency": "CNY", "decimals": 2},
+            "visible": ["admin", "developer"],
+            "icon": "Wallet",
+            "color": "green",
+            "link": "/orders?status=paid",
+        },
+    ],
+}
+```
+
+`period` 支持 `today`、`this_week`、`this_month`、`last_7_days`、`last_30_days`、`all`。指标角色范围会和模型读取权限取交集，后端不会向无权限角色返回指标。
 - `is_notification_table`、`time_series_table`：通知/WebSocket 与时序表配置。
 
 权限分三层：模型级 `c/r/u/d`，字段级 `c/r/u`，以及 `visible` 菜单可见性。角色由低到高为 `user`、`admin`、`developer`。字段权限未配置时会继承模型权限（移除 `d`）；默认 `id` 隐藏、`created_at` 只读、`updated_at` 可读写。用字段 `site_props.permissions` 显式配置即可覆盖默认值。

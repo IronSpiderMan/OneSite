@@ -75,6 +75,27 @@ export const update{{ model.name }}PropertiesConfig = async (id: {{ 'string' if 
 };
 {% endif %}
 
+{% if model.dashboard_metrics %}
+export interface {{ model.name }}DashboardMetric {
+    key: string;
+    i18n_key: string;
+    title: string;
+    value: number | null;
+    previous_value: number | null;
+    change: number | null;
+    format: { type?: 'number' | 'currency' | 'percent'; currency?: string; decimals?: number };
+    icon: string;
+    color: string;
+    link?: string | null;
+}
+
+export const get{{ model.name }}DashboardMetrics = async () => {
+    const response = await request.get<{ metrics: {{ model.name }}DashboardMetric[] }>(`${API_URL}/dashboard-metrics`);
+    return response.data;
+};
+
+{% endif %}
+
 {% if model.visualize %}
 export interface {{ model.name }}StatsSeries {
     name: string;
@@ -254,4 +275,24 @@ export const get{{ model.name }}History = async (
     const response = await request.get(url);
     return response.data.data || [];
 };
+
+{% if model.dashboard_metrics %}
+export interface {{ model.name }}DashboardMetric {
+    key: string;
+    i18n_key: string;
+    title: string;
+    value: number | null;
+    previous_value: number | null;
+    change: number | null;
+    format: { type?: 'number' | 'currency' | 'percent'; currency?: string; decimals?: number };
+    icon: string;
+    color: string;
+    link?: string | null;
+}
+
+export const get{{ model.name }}DashboardMetrics = async () => {
+    const response = await request.get<{ metrics: {{ model.name }}DashboardMetric[] }>(`${API_URL}/dashboard-metrics`);
+    return response.data;
+};
+{% endif %}
 {% endif %}

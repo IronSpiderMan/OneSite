@@ -681,6 +681,10 @@ def phase_generate_aggregated(
         and not m.get("is_latest_table")
         and m.get("standalone", True)
     ]
+    dashboard_models = [
+        m for m in api_models
+        if not m.get("is_latest_table") and m.get("dashboard_metrics")
+    ]
     generate_file(
         "frontend_routes.tsx.j2",
         {"models": frontend_models},
@@ -702,14 +706,21 @@ def phase_generate_aggregated(
             for field in system_model["fields"]
         )
     )
+    dashboard_metric_icons = sorted({
+        metric.get("icon", "Activity")
+        for model in dashboard_models
+        for metric in model.get("dashboard_metrics", [])
+    })
     generate_theme_file(
         "dashboard_page.tsx.j2",
         {
             "models": frontend_models,
+            "dashboard_models": dashboard_models,
             "scheduled_tasks": scheduled_tasks,
             "site_logger": site_logger_enabled,
             "show_dashboard_announcement": show_dashboard_announcement,
             "tools": tools,
+            "dashboard_metric_icons": dashboard_metric_icons,
         },
         frontend_path / "src" / "pages" / "Dashboard.tsx",
         theme_name,
