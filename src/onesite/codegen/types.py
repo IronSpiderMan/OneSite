@@ -174,6 +174,7 @@ class ModelIntrospectResult:
     is_timescaledb: bool
     timescaledb_entity_field: str | None
     timescaledb_metric_field: str | None
+    timescaledb_time_field: str | None
     timescaledb_model_table: str | None
     property_config: dict | None
 

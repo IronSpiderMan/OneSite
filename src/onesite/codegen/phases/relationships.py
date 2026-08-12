@@ -607,14 +607,15 @@ def _resolve_timescaledb_metadata(models: list[ModelDefinition]) -> None:
         if not model.get("is_timescaledb"):
             continue
 
-        time_column = None
-        for f in model["fields"]:
-            if f["ui_type"] == "datetime":
-                if f["name"] in ("reported_at", "created_at"):
-                    time_column = f["name"]
-                    break
-                if time_column is None:
-                    time_column = f["name"]
+        time_column = model.get("timescaledb_time_field")
+        if not time_column:
+            for f in model["fields"]:
+                if f["ui_type"] == "datetime":
+                    if f["name"] in ("reported_at", "created_at"):
+                        time_column = f["name"]
+                        break
+                    if time_column is None:
+                        time_column = f["name"]
         model["timescaledb_time_column"] = time_column or "created_at"
         model["timescaledb_latest_table_name"] = f"{model['table_name']}_latest"
 

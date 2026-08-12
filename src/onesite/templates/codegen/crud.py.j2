@@ -256,6 +256,7 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
             VALUES (:entity, :metric, :value::jsonb, :time)
             ON CONFLICT ({{ model.timescaledb_entity_field }}, {{ model.timescaledb_metric_field }})
             DO UPDATE SET value = :value::jsonb, {{ model.timescaledb_time_column }} = :time
+            WHERE :time >= {{ model.timescaledb_latest_table_name }}.{{ model.timescaledb_time_column }}
         """),
         {"entity": entity_val, "metric": metric_val, "value": json_val, "time": time_val},
     )
@@ -267,6 +268,7 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create) -> {{ mo
             VALUES (:entity, :value::jsonb, :time)
             ON CONFLICT ({{ model.timescaledb_entity_field }})
             DO UPDATE SET value = :value::jsonb, {{ model.timescaledb_time_column }} = :time
+            WHERE :time >= {{ model.timescaledb_latest_table_name }}.{{ model.timescaledb_time_column }}
         """),
         {"entity": entity_val, "value": json_val, "time": time_val},
     )

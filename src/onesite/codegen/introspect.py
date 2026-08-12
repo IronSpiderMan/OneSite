@@ -272,12 +272,14 @@ def get_model_fields(
         is_timescaledb = True
         timescaledb_entity_field = ts_config.get("entity_field")
         timescaledb_metric_field = ts_config.get("metric_field")
+        timescaledb_time_field = ts_config.get("time_field")
         timescaledb_model_table = ts_config.get("model_table")
         property_config = ts_config.get("property_config")
     else:
         is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
         timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
         timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
+        timescaledb_time_field = model_site_props.get("timescaledb_time_field", None)
         timescaledb_model_table = model_site_props.get("timescaledb_model_table", None)
         property_config = None
 
@@ -704,6 +706,21 @@ def get_model_fields(
                 f"Model '{model_cls.__name__}': '{timescaledb_entity_field}' "
                 f"is not a foreign key"
             )
+        if timescaledb_time_field:
+            time_field = next(
+                (f for f in fields if f["name"] == timescaledb_time_field),
+                None,
+            )
+            if time_field is None:
+                raise ValueError(
+                    f"Model '{model_cls.__name__}': time_field "
+                    f"'{timescaledb_time_field}' does not exist"
+                )
+            if time_field["ui_type"] != "datetime":
+                raise ValueError(
+                    f"Model '{model_cls.__name__}': time_field "
+                    f"'{timescaledb_time_field}' must be a datetime field"
+                )
 
     return ModelIntrospectResult(
         fields=fields,
@@ -731,6 +748,7 @@ def get_model_fields(
         is_timescaledb=is_timescaledb,
         timescaledb_entity_field=timescaledb_entity_field,
         timescaledb_metric_field=timescaledb_metric_field,
+        timescaledb_time_field=timescaledb_time_field,
         timescaledb_model_table=timescaledb_model_table,
         property_config=property_config,
     )

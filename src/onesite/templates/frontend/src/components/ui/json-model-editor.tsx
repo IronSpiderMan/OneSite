@@ -8,6 +8,7 @@ import { Switch } from "./switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select"
 import { JsonInput } from "./json-input"
 import { LocationInput } from "./location-input"
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table"
 import { cn } from "../../lib/utils"
 
 export type JsonFieldSchema = {
@@ -283,6 +284,215 @@ export const JsonModelEditor: React.FC<{
   )
 }
 
+const JsonTableCellEditor: React.FC<{
+  field: JsonFieldSchema
+  value: any
+  onChange: (value: any) => void
+}> = ({ field, value, onChange }) => {
+  if (field.kind === "bool") {
+    return <Switch checked={Boolean(value)} onCheckedChange={onChange} />
+  }
+  if (field.kind === "enum") {
+    return (
+      <Select value={value == null ? "" : String(value)} onValueChange={onChange}>
+        <SelectTrigger className="min-w-[8rem]"><SelectValue /></SelectTrigger>
+        <SelectContent>
+          {(field.enumValues ?? []).map((option) => (
+            <SelectItem key={String(option)} value={String(option)}>{String(option)}</SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+    )
+  }
+  if (field.kind === "model" || field.kind === "array" || (value !== null && typeof value === "object")) {
+    return (
+      <JsonInput
+        value={value ?? (field.kind === "array" ? [] : {})}
+        onChange={onChange}
+        jsonKind={field.kind === "array" || Array.isArray(value) ? "array" : "object"}
+        className="min-w-[16rem]"
+      />
+    )
+  }
+  if (field.kind === "location") {
+    return <div className="min-w-[18rem]"><LocationInput value={value} onChange={onChange} /></div>
+  }
+  const type = field.kind === "int" || field.kind === "float" ? "number" : field.kind === "datetime" ? "datetime-local" : "text"
+  return (
+    <Input
+      type={type}
+      className="min-w-[8rem]"
+      value={value ?? ""}
+      onChange={(event) => {
+        const raw = event.target.value
+        onChange(field.kind === "int" ? (raw === "" ? "" : Number.parseInt(raw, 10)) : field.kind === "float" ? (raw === "" ? "" : Number.parseFloat(raw)) : raw)
+      }}
+    />
+  )
+}
+
+/** Compact inline-table editor used by JSON collection tabs on detail pages. */
+export const JsonModelTableEditor: React.FC<{
+  collectionKind: "array" | "dict"
+  itemSchema: JsonModelSchema
+  value: any
+  onChange: (value: any) => void
+  canAdd?: boolean
+  canRemove?: boolean
+  fixedKeys?: string[]
+  lockKeys?: boolean
+}> = ({ collectionKind, itemSchema, value, onChange, canAdd = true, canRemove = true, fixedKeys, lockKeys = false }) => {
+  const { t } = useTranslation()
+  const arrayValue = Array.isArray(value) ? value : []
+  const dictValue = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}
+  const keys = fixedKeys ?? Object.keys(dictValue)
+  const rows = collectionKind === "array"
+    ? arrayValue.map((item, index) => ({ key: String(index), item, index }))
+    : keys.map((key, index) => ({ key, item: dictValue[key] ?? buildDefaultValue(itemSchema), index }))
+
+  const updateItem = (rowIndex: number, next: any) => {
+    if (collectionKind === "array") {
+      const result = [...arrayValue]
+      result[rowIndex] = next
+      onChange(result)
+    } else {
+      onChange({ ...dictValue, [rows[rowIndex].key]: next })
+    }
+  }
+  const removeItem = (rowIndex: number) => {
+    if (collectionKind === "array") {
+      const result = [...arrayValue]
+      result.splice(rowIndex, 1)
+      onChange(result)
+    } else {
+      const result = { ...dictValue }
+      delete result[rows[rowIndex].key]
+      onChange(result)
+    }
+  }
+  const renameKey = (rowIndex: number, nextKey: string) => {
+    const oldKey = rows[rowIndex].key
+    if (!nextKey || nextKey === oldKey || nextKey in dictValue) return
+    const result: Record<string, any> = {}
+    for (const [key, item] of Object.entries(dictValue)) result[key === oldKey ? nextKey : key] = item
+    onChange(result)
+  }
+  const addItem = () => {
+    const next = buildDefaultValue(itemSchema)
+    if (collectionKind === "array") return onChange([...arrayValue, next])
+    let index = keys.length + 1
+    let key = `item_${index}`
+    while (key in dictValue) key = `item_${++index}`
+    onChange({ ...dictValue, [key]: next })
+  }
+
+  return (
+    <div className="space-y-4">
+      {canAdd && !(collectionKind === "dict" && (fixedKeys || lockKeys)) && (
+        <div className="flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={addItem}>
+            <Plus className="mr-1.5 h-3.5 w-3.5" />
+            {t(collectionKind === "dict" ? "json_editor.add_entry" : "json_editor.add_item")}
+          </Button>
+        </div>
+      )}
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader>
+            <TableRow>
+              {collectionKind === "dict" && <TableHead className="min-w-[10rem]">{t("json_editor.key")}</TableHead>}
+              {itemSchema.fields.map((field) => <TableHead key={field.name}>{t(field.labelKey || field.name || "")}</TableHead>)}
+              {canRemove && <TableHead className="w-[5rem]" />}
+            </TableRow>
+          </TableHeader>
+          <TableBody>
+            {rows.length ? rows.map((row, rowIndex) => (
+              <TableRow key={collectionKind === "dict" ? row.key : rowIndex}>
+                {collectionKind === "dict" && (
+                  <TableCell>
+                    <Input
+                      defaultValue={row.key}
+                      disabled={Boolean(fixedKeys) || lockKeys}
+                      onBlur={(event) => renameKey(rowIndex, event.target.value.trim())}
+                    />
+                  </TableCell>
+                )}
+                {itemSchema.fields.map((field) => (
+                  <TableCell key={field.name} className="align-top">
+                    <JsonTableCellEditor
+                      field={field}
+                      value={field.name ? row.item?.[field.name] : undefined}
+                      onChange={(next) => updateItem(rowIndex, field.name ? { ...row.item, [field.name]: next } : row.item)}
+                    />
+                  </TableCell>
+                ))}
+                {canRemove && (
+                  <TableCell className="text-right">
+                    <Button type="button" variant="ghost" size="icon" className="text-destructive" title={t("common.remove")} onClick={() => removeItem(rowIndex)} disabled={collectionKind === "dict" && (Boolean(fixedKeys) || lockKeys)}>
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </TableCell>
+                )}
+              </TableRow>
+            )) : (
+              <TableRow><TableCell colSpan={itemSchema.fields.length + (collectionKind === "dict" ? 1 : 0) + (canRemove ? 1 : 0)} className="h-24 text-center">{t("common.no_result")}</TableCell></TableRow>
+            )}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
+/** Table-shaped fallback for untyped List[JSON] and Dict[str, Any]. */
+export const JsonDynamicTableEditor: React.FC<{
+  collectionKind: "array" | "dict"
+  value: any
+  onChange: (value: any) => void
+}> = ({ collectionKind, value, onChange }) => {
+  const { t } = useTranslation()
+  const entries: Array<[string, any]> = collectionKind === "array"
+    ? (Array.isArray(value) ? value : []).map((item, index) => [String(index), item])
+    : Object.entries(value && typeof value === "object" && !Array.isArray(value) ? value : {})
+
+  const emit = (next: Array<[string, any]>) => onChange(collectionKind === "array" ? next.map(([, item]) => item) : Object.fromEntries(next))
+  const add = () => {
+    if (collectionKind === "array") return emit([...entries, [String(entries.length), {}]])
+    let index = entries.length + 1
+    let key = `item_${index}`
+    const used = new Set(entries.map(([entryKey]) => entryKey))
+    while (used.has(key)) key = `item_${++index}`
+    emit([...entries, [key, {}]])
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end">
+        <Button type="button" variant="outline" size="sm" onClick={add}>
+          <Plus className="mr-1.5 h-3.5 w-3.5" />
+          {t(collectionKind === "dict" ? "json_editor.add_entry" : "json_editor.add_item")}
+        </Button>
+      </div>
+      <div className="overflow-x-auto rounded-md border">
+        <Table>
+          <TableHeader><TableRow>{collectionKind === "dict" && <TableHead>{t("json_editor.key")}</TableHead>}<TableHead>{t("json_editor.object")}</TableHead><TableHead className="w-[5rem]" /></TableRow></TableHeader>
+          <TableBody>
+            {entries.length ? entries.map(([key, item], index) => (
+              <TableRow key={`${key}-${index}`}>
+                {collectionKind === "dict" && <TableCell><Input value={key} onChange={(event) => { const next = [...entries]; next[index] = [event.target.value, item]; emit(next) }} /></TableCell>}
+                <TableCell className="min-w-[20rem]">
+                  {item !== null && typeof item === "object" ? <JsonInput value={item} onChange={(nextValue) => { const next = [...entries]; next[index] = [key, nextValue]; emit(next) }} jsonKind={Array.isArray(item) ? "array" : "object"} /> : <Input value={item ?? ""} onChange={(event) => { const next = [...entries]; next[index] = [key, event.target.value]; emit(next) }} />}
+                </TableCell>
+                <TableCell className="text-right"><Button type="button" variant="ghost" size="icon" className="text-destructive" title={t("common.remove")} onClick={() => emit(entries.filter((_, entryIndex) => entryIndex !== index))}><Trash2 className="h-4 w-4" /></Button></TableCell>
+              </TableRow>
+            )) : <TableRow><TableCell colSpan={collectionKind === "dict" ? 3 : 2} className="h-24 text-center">{t("common.no_result")}</TableCell></TableRow>}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
+  )
+}
+
 export const JsonModelDictEditor: React.FC<{
   itemSchema: JsonModelSchema
   value: any
@@ -292,7 +502,8 @@ export const JsonModelDictEditor: React.FC<{
   canRemove?: boolean
   fixedKeys?: string[]
   lockKeys?: boolean
-}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, fixedKeys, lockKeys }) => {
+  showJsonMode?: boolean
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, fixedKeys, lockKeys, showJsonMode = true }) => {
   const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
 
@@ -345,8 +556,10 @@ export const JsonModelDictEditor: React.FC<{
 
   return (
     <div className={cn("space-y-3", className)}>
+      {showJsonMode && (
       <EditorModeSwitch mode={mode} onChange={setMode} />
-      {mode === "ui" ? (
+      )}
+      {!showJsonMode || mode === "ui" ? (
         <div className="space-y-3">
           {!isFixed && canAdd && (
           <div className="flex items-center justify-end">

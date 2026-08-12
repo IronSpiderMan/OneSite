@@ -48,11 +48,16 @@ def _scan_ts_configs_old(content: str) -> dict | None:
         r"""|"timescaledb_device_model"\s*:\s*"([^"]+)"|'timescaledb_device_model'\s*:\s*'([^']+)'""",
         content,
     )
+    tf = re.search(
+        r""""timescaledb_time_field"\s*:\s*"([^"]+)"|'timescaledb_time_field'\s*:\s*'([^']+)'""",
+        content,
+    )
     if not ef and not mt:
         return None
     return {
         "entity_field": ef.group(1) or ef.group(2) if ef else None,
         "metric_field": mf.group(1) or mf.group(2) if mf else None,
+        "time_field": tf.group(1) or tf.group(2) if tf else None,
         "model_table": mt.group(1) or mt.group(2) or mt.group(3) or mt.group(4) if mt else None,
     }
 

@@ -21,7 +21,9 @@ BEGIN
     ON CONFLICT ({{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %})
     DO UPDATE SET
         value = EXCLUDED.value,
-        {{ ts_model.timescaledb_time_column }} = EXCLUDED.{{ ts_model.timescaledb_time_column }};
+        {{ ts_model.timescaledb_time_column }} = EXCLUDED.{{ ts_model.timescaledb_time_column }}
+    WHERE EXCLUDED.{{ ts_model.timescaledb_time_column }} >=
+          {{ ts_model.timescaledb_latest_table_name }}.{{ ts_model.timescaledb_time_column }};
 
     RETURN NEW;
 END;

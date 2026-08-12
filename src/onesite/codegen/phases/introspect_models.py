@@ -103,6 +103,26 @@ def _build_model_dict(
     if id_type.startswith("Optional[") and id_type.endswith("]"):
         id_type = id_type[len("Optional["):-1]
 
+    # Object-like JSON arrays behave more like inline related records on the
+    # detail page than scalar fields.  Keep scalar date/time arrays in the
+    # basic-information form, where their dedicated editor remains useful.
+    json_array_fields = [
+        field
+        for field in result.fields
+        if field.ui_type == "json"
+        and field.json_kind == "array"
+        and not field.json_item_kind
+        and "r" in field.permissions
+    ]
+    json_dict_fields = [
+        field
+        for field in result.fields
+        if field.ui_type == "json"
+        and field.json_kind == "object"
+        and field.type.startswith("Dict[")
+        and "r" in field.permissions
+    ]
+
     # ── Tree view detection ──────────────────────────────────────────────
     tree_view_config = result.model_site_props.get("tree_view", "auto")
     is_tree = False
@@ -123,6 +143,8 @@ def _build_model_dict(
         lower_name=name.lower(),
         table_name=table_name,
         fields=result.fields,
+        json_array_fields=json_array_fields,
+        json_dict_fields=json_dict_fields,
         id_type=id_type,
         schema_imports=schema_imports,
         foreign_keys=result.foreign_keys,
@@ -153,6 +175,7 @@ def _build_model_dict(
         is_latest_table=result.model_site_props.get("is_latest_table", False),
         timescaledb_entity_field=result.timescaledb_entity_field,
         timescaledb_metric_field=result.timescaledb_metric_field,
+        timescaledb_time_field=result.timescaledb_time_field,
         timescaledb_model_table=result.timescaledb_model_table,
         property_config=result.property_config,
         is_tree=is_tree,
