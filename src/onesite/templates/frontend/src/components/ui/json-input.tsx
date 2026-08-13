@@ -7,6 +7,9 @@ import { cn } from "../../lib/utils"
 
 type JsonKind = "object" | "array"
 
+const MIN_EDITOR_HEIGHT = 120
+const MAX_EDITOR_HEIGHT = 384
+
 export type JsonInputProps = {
   value: any
   onChange: (value: any) => void
@@ -71,6 +74,28 @@ export const JsonInput: React.FC<JsonInputProps> = ({
   const [text, setText] = React.useState(() => formatJson(value))
   const [error, setError] = React.useState<string | null>(null)
   const [copied, setCopied] = React.useState(false)
+
+  const resizeTextarea = React.useCallback(() => {
+    const textarea = textareaRef.current
+    if (!textarea) return
+
+    textarea.style.height = "auto"
+    const nextHeight = Math.min(
+      Math.max(textarea.scrollHeight, MIN_EDITOR_HEIGHT),
+      MAX_EDITOR_HEIGHT,
+    )
+    textarea.style.height = `${nextHeight}px`
+    textarea.style.overflowY = textarea.scrollHeight > MAX_EDITOR_HEIGHT ? "auto" : "hidden"
+  }, [])
+
+  React.useLayoutEffect(() => {
+    resizeTextarea()
+  }, [text, resizeTextarea])
+
+  React.useEffect(() => {
+    window.addEventListener("resize", resizeTextarea)
+    return () => window.removeEventListener("resize", resizeTextarea)
+  }, [resizeTextarea])
 
   // Parent form updates are often a response to this editor's own onChange.
   // Preserve the draft in that case so formatting does not move the caret.
@@ -212,7 +237,7 @@ export const JsonInput: React.FC<JsonInputProps> = ({
         disabled={disabled}
         spellCheck={false}
         aria-invalid={Boolean(error)}
-        className="min-h-[180px] resize-y rounded-none border-0 bg-transparent font-mono text-[13px] leading-6 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+        className="min-h-[120px] max-h-96 resize-none overflow-y-auto rounded-none border-0 bg-transparent font-mono text-[13px] leading-6 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
       />
       <div className="flex min-h-9 items-center justify-between gap-3 border-t bg-muted/20 px-3 py-1.5 text-xs">
         <div className={cn("flex items-center gap-1.5", error ? "text-destructive" : "text-muted-foreground")}>

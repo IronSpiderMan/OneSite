@@ -33,11 +33,26 @@ from app.models.{{ rfk.source_module }} import {{ rfk.source_model }}
 {% set scalar_json_arrays = model.fields | selectattr('json_item_kind') | list %}
 {% set datetime_fields = model.fields | selectattr('ui_type', 'equalto', 'datetime') | list %}
 {% if datetime_fields %}
+def _datetime_column_uses_timezone(field_name: str) -> bool:
+    column = {{ model.name }}.__table__.columns.get(field_name)
+    return bool(column is not None and getattr(column.type, "timezone", False))
+
+
+def _normalize_datetime_for_storage(field_name: str, value: datetime) -> datetime:
+    """Store UTC using the awareness expected by the mapped SQL column."""
+    normalized = to_utc(value)
+    if not _datetime_column_uses_timezone(field_name):
+        return normalized.replace(tzinfo=None)
+    return normalized
+
+
 def _normalize_datetimes(data: dict) -> dict:
     """Interpret naive form values in the system timezone and persist UTC."""
     {% for field in datetime_fields %}
     if isinstance(data.get("{{ field.name }}"), datetime):
-        data["{{ field.name }}"] = to_utc(data["{{ field.name }}"])
+        data["{{ field.name }}"] = _normalize_datetime_for_storage(
+            "{{ field.name }}", data["{{ field.name }}"]
+        )
     {% endfor %}
     return data
 
@@ -47,7 +62,16 @@ def _normalize_model_datetimes(obj: Any) -> None:
     {% for field in datetime_fields %}
     value = getattr(obj, "{{ field.name }}", None)
     if isinstance(value, datetime):
-        setattr(obj, "{{ field.name }}", to_utc(value))
+        # PostgreSQL returns TIMESTAMP WITHOUT TIME ZONE as a naive datetime.
+        # It is already in the column's storage representation; interpreting it
+        # as a fresh local form value would shift it and mark an untouched field
+        # dirty during unrelated updates.
+        if value.tzinfo is not None or _datetime_column_uses_timezone("{{ field.name }}"):
+            setattr(
+                obj,
+                "{{ field.name }}",
+                _normalize_datetime_for_storage("{{ field.name }}", value),
+            )
     {% endfor %}
 
 {% endif %}
