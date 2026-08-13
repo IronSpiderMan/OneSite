@@ -22,6 +22,20 @@ const applySiteLogo = (value: unknown) => {
   const logo = typeof value === 'string' && value.trim() ? value.trim() : fallbackLogo;
   if (logo) localStorage.setItem('onesite_site_logo', logo);
   else localStorage.removeItem('onesite_site_logo');
+
+  let favicon = document.querySelector<HTMLLinkElement>('link[data-onesite-favicon]');
+  if (logo) {
+    if (!favicon) {
+      favicon = document.createElement('link');
+      favicon.rel = 'icon';
+      favicon.dataset.onesiteFavicon = 'true';
+      document.head.appendChild(favicon);
+    }
+    favicon.href = logo;
+  } else {
+    favicon?.remove();
+  }
+
   window.dispatchEvent(new CustomEvent('onesite:site_logo_updated', { detail: logo }));
 };
 
