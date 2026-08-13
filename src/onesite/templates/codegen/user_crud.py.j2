@@ -3,6 +3,7 @@ from datetime import datetime, timezone{% if model.fields | selectattr('ui_type'
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.datetime import to_utc
+from app.core.db import transactional_write
 from app.models.user import User
 from app.schemas.user import UserCreate, UserUpdate, UserUpdateMe
 {% if model.reverse_m2m %}
@@ -301,7 +302,8 @@ async def count(
     result = await session.exec(statement)
     return result.one()
 
-async def create(session: AsyncSession, obj_in: UserCreate) -> User:
+@transactional_write
+async def create(session: AsyncSession, obj_in: UserCreate, *, auto_commit: bool = True) -> User:
     # User creation logic is mainly handled in Service (password hashing)
 
     user_data = obj_in.dict()
@@ -319,7 +321,8 @@ async def create(session: AsyncSession, obj_in: UserCreate) -> User:
     await session.refresh(db_obj)
     return db_obj
 
-async def update(session: AsyncSession, db_obj: User, obj_in: Union[UserUpdate, UserUpdateMe]) -> User:
+@transactional_write
+async def update(session: AsyncSession, db_obj: User, obj_in: Union[UserUpdate, UserUpdateMe], *, auto_commit: bool = True) -> User:
     hero_data = obj_in.dict(exclude_unset=True)
     {% for field in model.fields | selectattr('json_item_kind') | list %}
     if isinstance(hero_data.get("{{ field.name }}"), list):
@@ -346,7 +349,8 @@ async def update(session: AsyncSession, db_obj: User, obj_in: Union[UserUpdate, 
     await session.refresh(db_obj)
     return db_obj
 
-async def delete(session: AsyncSession, id: int) -> User:
+@transactional_write
+async def delete(session: AsyncSession, id: int, *, auto_commit: bool = True) -> User:
     db_obj = await session.get(User, id)
     await session.delete(db_obj)
     await session.flush()

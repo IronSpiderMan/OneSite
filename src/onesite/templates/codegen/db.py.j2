@@ -1,4 +1,5 @@
-from typing import AsyncGenerator
+from functools import wraps
+from typing import AsyncGenerator, Awaitable, Callable, ParamSpec, TypeVar
 from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.engine import make_url
@@ -7,6 +8,30 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy import text
 from app.core.config import settings
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def transactional_write(
+    function: Callable[P, Awaitable[R]],
+) -> Callable[P, Awaitable[R]]:
+    """Commit a CRUD write by default while allowing caller-owned transactions."""
+    @wraps(function)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        auto_commit = kwargs.get("auto_commit", True)
+        session = kwargs["session"] if "session" in kwargs else args[0]
+        try:
+            result = await function(*args, **kwargs)
+            if auto_commit:
+                await session.commit()
+            return result
+        except Exception:
+            if auto_commit:
+                await session.rollback()
+            raise
+
+    return wrapper
 
 # Parse DATABASE_URI to determine async driver
 database_url = settings.DATABASE_URI
@@ -38,8 +63,12 @@ elif database_url.startswith("postgresql://"):
 engine = create_async_engine(database_url, future=True)
 
 async def init_db():
-    # Runtime-owned models are not part of app.models. Import them explicitly
-    # before create_all instead of relying on API/scheduler import side effects.
+    # Register every database model before create_all. Link/association tables
+    # may not have API endpoints, so endpoint imports alone are insufficient.
+    {% for module in model_imports %}
+    import {{ module }}  # noqa: F401
+    {% endfor %}
+    # Runtime-owned models are not part of the user's regular model set.
     {% if background_execution_enabled %}
     import app.core.background_execution  # noqa: F401
     {% endif %}
@@ -52,6 +81,12 @@ async def init_db():
     {% endfor %}
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
+        {% for index in generated_indexes %}
+        await conn.execute(text(
+            "CREATE INDEX IF NOT EXISTS {{ index.name }} ON {{ index.table }} "
+            "({{ index.columns | join(', ') }})"
+        ))
+        {% endfor %}
     {% if background_execution_enabled %}
     if settings.DATABASE_URI.startswith("postgresql"):
         # Older generated projects created these columns as timestamp without
@@ -93,8 +128,65 @@ async def init_db():
         {% for ts_model in timescaledb_models %}
         async with engine.begin() as conn:
             await conn.execute(
-                text("SELECT create_hypertable('{{ ts_model.table_name }}', '{{ ts_model.timescaledb_time_column }}', if_not_exists => TRUE)")
+                text("SELECT create_hypertable('{{ ts_model.table_name }}', '{{ ts_model.timescaledb_time_column }}', "
+                     "if_not_exists => TRUE{% if ts_model.timescaledb_lifecycle.chunk_interval %}, chunk_time_interval => INTERVAL '{{ ts_model.timescaledb_lifecycle.chunk_interval }}'{% endif %})")
             )
+            {% if ts_model.timescaledb_lifecycle.chunk_interval %}
+            await conn.execute(text(
+                "SELECT set_chunk_time_interval('{{ ts_model.table_name }}', "
+                "INTERVAL '{{ ts_model.timescaledb_lifecycle.chunk_interval }}')"
+            ))
+            {% endif %}
+        {% endfor %}
+
+        # ── TimescaleDB lifecycle policies ──
+        {% for ts_model in timescaledb_models %}
+        {% set lifecycle = ts_model.timescaledb_lifecycle %}
+        {% if lifecycle.compress_after %}
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                ALTER TABLE {{ ts_model.table_name }} SET (
+                    timescaledb.compress,
+                    timescaledb.compress_segmentby = '{{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},{{ ts_model.timescaledb_metric_field }}{% endif %}',
+                    timescaledb.compress_orderby = '{{ ts_model.timescaledb_time_column }} DESC'
+                )
+            """))
+            await conn.execute(text(
+                "SELECT add_compression_policy('{{ ts_model.table_name }}', "
+                "INTERVAL '{{ lifecycle.compress_after }}', if_not_exists => TRUE)"
+            ))
+        {% endif %}
+        {% if lifecycle.retention_after %}
+        async with engine.begin() as conn:
+            await conn.execute(text(
+                "SELECT add_retention_policy('{{ ts_model.table_name }}', "
+                "INTERVAL '{{ lifecycle.retention_after }}', if_not_exists => TRUE)"
+            ))
+        {% endif %}
+        {% if lifecycle.bucket_interval %}
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                CREATE MATERIALIZED VIEW IF NOT EXISTS {{ ts_model.timescaledb_continuous_aggregate_name }}
+                WITH (timescaledb.continuous) AS
+                SELECT
+                    time_bucket(INTERVAL '{{ lifecycle.bucket_interval }}', {{ ts_model.timescaledb_time_column }}) AS bucket,
+                    {{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
+                    {{ ts_model.timescaledb_metric_field }}{% endif %},
+                    COUNT(*)::BIGINT AS sample_count,
+                    first(value, {{ ts_model.timescaledb_time_column }}) AS first_value,
+                    last(value, {{ ts_model.timescaledb_time_column }}) AS last_value
+                FROM {{ ts_model.table_name }}
+                GROUP BY bucket, {{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %}
+                WITH NO DATA
+            """))
+            await conn.execute(text(
+                "SELECT add_continuous_aggregate_policy('{{ ts_model.timescaledb_continuous_aggregate_name }}', "
+                "start_offset => {% if lifecycle.refresh_start_offset %}INTERVAL '{{ lifecycle.refresh_start_offset }}'{% else %}NULL{% endif %}, "
+                "end_offset => INTERVAL '{{ lifecycle.refresh_end_offset }}', "
+                "schedule_interval => INTERVAL '{{ lifecycle.refresh_schedule_interval }}', "
+                "if_not_exists => TRUE)"
+            ))
+        {% endif %}
         {% endfor %}
 
         # ── TimescaleDB: create latest-data tables ──
@@ -132,7 +224,7 @@ async def init_db():
                     VALUES (
                         NEW.{{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
                         NEW.{{ ts_model.timescaledb_metric_field }}{% endif %},
-                        to_jsonb(NEW.*),
+                        NEW.value,
                         NEW.{{ ts_model.timescaledb_time_column }}
                     )
                     ON CONFLICT ({{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %})
@@ -141,6 +233,26 @@ async def init_db():
                         {{ ts_model.timescaledb_time_column }} = EXCLUDED.{{ ts_model.timescaledb_time_column }}
                     WHERE EXCLUDED.{{ ts_model.timescaledb_time_column }} >=
                           {{ ts_model.timescaledb_latest_table_name }}.{{ ts_model.timescaledb_time_column }};
+                    {% for projection in ts_model.get('health_projections', []) %}
+                    INSERT INTO onesite_external_resource_health (
+                        provider, resource_type, entity_id, last_seen_at, updated_at
+                    ) VALUES (
+                        '{{ projection.provider }}',
+                        '{{ projection.resource_type }}',
+                        NEW.{{ projection.entity_field }}::TEXT,
+                        NEW.{{ projection.time_field }},
+                        NOW()
+                    )
+                    ON CONFLICT (provider, resource_type, entity_id)
+                    DO UPDATE SET
+                        last_seen_at = GREATEST(
+                            onesite_external_resource_health.last_seen_at,
+                            EXCLUDED.last_seen_at
+                        ),
+                        updated_at = NOW()
+                    WHERE EXCLUDED.last_seen_at >
+                          onesite_external_resource_health.last_seen_at;
+                    {% endfor %}
                     RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
@@ -152,6 +264,73 @@ async def init_db():
                 EXECUTE FUNCTION fn_sync_{{ ts_model.table_name }}_latest()
             """))
         {% endfor %}
+
+        # Backfill health rows when upgrading projects that already contain
+        # latest telemetry. This is idempotent and timestamps never regress.
+        {% for ts_model in timescaledb_models %}
+        {% for projection in ts_model.get('health_projections', []) %}
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                INSERT INTO onesite_external_resource_health (
+                    provider, resource_type, entity_id, last_seen_at, updated_at
+                )
+                SELECT
+                    '{{ projection.provider }}',
+                    '{{ projection.resource_type }}',
+                    {{ projection.entity_field }}::TEXT,
+                    MAX({{ projection.time_field }}),
+                    NOW()
+                FROM {{ ts_model.timescaledb_latest_table_name }}
+                GROUP BY {{ projection.entity_field }}
+                ON CONFLICT (provider, resource_type, entity_id)
+                DO UPDATE SET
+                    last_seen_at = GREATEST(
+                        onesite_external_resource_health.last_seen_at,
+                        EXCLUDED.last_seen_at
+                    ),
+                    updated_at = NOW()
+                WHERE EXCLUDED.last_seen_at >
+                      onesite_external_resource_health.last_seen_at
+            """))
+        {% endfor %}
+        {% endfor %}
+    {% endif %}
+
+    {% if external_resources_enabled %}
+    if settings.DATABASE_URI.startswith("postgresql"):
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_external_binding_health
+                ON onesite_external_resource_binding
+                    (provider, resource_type, entity_id, status)
+            """))
+            await conn.execute(text("""
+                ALTER TABLE onesite_external_resource_binding
+                ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ
+            """))
+            await conn.execute(text("""
+                ALTER TABLE onesite_external_resource_binding
+                ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMPTZ
+            """))
+            await conn.execute(text("""
+                UPDATE onesite_external_resource_binding
+                SET next_check_at = COALESCE(next_check_at, NOW())
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_external_binding_next_check
+                ON onesite_external_resource_binding
+                    (next_check_at, id)
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_external_outbox_ready
+                ON onesite_external_resource_outbox
+                    (status, next_attempt_at, id)
+            """))
+            await conn.execute(text("""
+                CREATE INDEX IF NOT EXISTS ix_external_outbox_entity_status
+                ON onesite_external_resource_outbox
+                    (provider, resource_type, entity_id, status)
+            """))
     {% endif %}
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

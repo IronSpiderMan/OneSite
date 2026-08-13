@@ -15,7 +15,7 @@ BEGIN
     VALUES (
         NEW.{{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
         NEW.{{ ts_model.timescaledb_metric_field }}{% endif %},
-        to_jsonb(NEW.*),
+        NEW.value,
         NEW.{{ ts_model.timescaledb_time_column }}
     )
     ON CONFLICT ({{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %})

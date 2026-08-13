@@ -104,20 +104,20 @@ async def read_{{ model.lower_name }}_realtime(
     # Enrich with DeviceModel properties (filter unknown metrics)
     properties: dict[str, dict] = {}
     {% if model.timescaledb_model_table and model.timescaledb_model_class and model.timescaledb_entity_model %}
-    try:
-        eid = int(entity_id)
-    except (ValueError, TypeError):
-        eid = None
-    if eid is not None:
-        entity = await session.get({{ model.timescaledb_entity_model }}, eid)
-        fk_field = "{{ model.timescaledb_model_table }}_id"
-        dm_id = getattr(entity, fk_field, None) if entity else None
-        if dm_id is not None:
-            from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
-            dm = await session.get({{ model.timescaledb_model_class }}, dm_id)
-            if dm and dm.properties:
-                for k, p in dm.properties.items():
-                    properties[k] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
+    {% if model.timescaledb_entity_sql_type == "INTEGER" %}
+    typed_entity_id = int(entity_id)
+    {% else %}
+    typed_entity_id = entity_id
+    {% endif %}
+    entity = await session.get({{ model.timescaledb_entity_model }}, typed_entity_id)
+    fk_field = "{{ model.timescaledb_model_table }}_id"
+    dm_id = getattr(entity, fk_field, None) if entity else None
+    if dm_id is not None:
+        from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
+        dm = await session.get({{ model.timescaledb_model_class }}, dm_id)
+        if dm and dm.properties:
+            for k, p in dm.properties.items():
+                properties[k] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
 
     # Filter out metrics not defined in properties
     if properties:

@@ -208,7 +208,7 @@ class UserService:
                     setattr(obj_in, key, value)
             if new_password_hash is not None:
                 db_obj.hashed_password = changes.get("hashed_password", new_password_hash)
-            obj = await crud.update(session, db_obj, obj_in)
+            obj = await crud.update(session, db_obj, obj_in, auto_commit=False)
             await invoke_model_hook(
                 obj,
                 "on_after_update",
@@ -256,7 +256,7 @@ class UserService:
                 old=old,
                 context=hook_context,
             )
-            deleted = await crud.delete(session, id)
+            deleted = await crud.delete(session, id, auto_commit=False)
             await invoke_model_hook(
                 deleted,
                 "on_after_delete",

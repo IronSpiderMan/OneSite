@@ -2,6 +2,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
+from sqlalchemy import func
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -23,18 +24,37 @@ async def list_bindings(
     resource_type: str | None = None,
     status: str | None = None,
     include_deleted: bool = False,
+    offset: int = 0,
+    limit: int = 100,
     session: AsyncSession = Depends(db.get_session),
-) -> list[dict[str, Any]]:
-    statement = select(ExternalResourceBinding).order_by(ExternalResourceBinding.updated_at.desc())
+) -> dict[str, Any]:
+    offset = max(0, offset)
+    limit = min(500, max(1, limit))
+    summary_fields = (
+        "id", "provider", "resource_type", "entity_id", "external_id", "status",
+        "desired_revision", "applied_revision", "retry_count", "drift_count",
+        "last_error", "last_observed_at", "last_synced_at", "last_drift_at",
+        "last_checked_at", "next_check_at", "created_at", "updated_at",
+    )
+    summary_columns = [getattr(ExternalResourceBinding, name) for name in summary_fields]
+    statement = select(*summary_columns).order_by(ExternalResourceBinding.updated_at.desc())
+    count_statement = select(func.count()).select_from(ExternalResourceBinding)
     if provider:
         statement = statement.where(ExternalResourceBinding.provider == provider)
+        count_statement = count_statement.where(ExternalResourceBinding.provider == provider)
     if resource_type:
         statement = statement.where(ExternalResourceBinding.resource_type == resource_type)
+        count_statement = count_statement.where(ExternalResourceBinding.resource_type == resource_type)
     if status:
         statement = statement.where(ExternalResourceBinding.status == status)
+        count_statement = count_statement.where(ExternalResourceBinding.status == status)
     elif not include_deleted:
         statement = statement.where(ExternalResourceBinding.status != "deleted")
-    return jsonable_encoder((await session.exec(statement)).all())
+        count_statement = count_statement.where(ExternalResourceBinding.status != "deleted")
+    rows = (await session.exec(statement.offset(offset).limit(limit))).all()
+    total = (await session.exec(count_statement)).one()
+    items = [dict(zip(summary_fields, row, strict=True)) for row in rows]
+    return {"items": jsonable_encoder(items), "total": total, "offset": offset, "limit": limit}
 
 
 @router.get("/capabilities")

@@ -84,6 +84,8 @@ def _build_model_dict(
     module_name: str,
     source_module: str,
     result: ModelIntrospectResult,
+    *,
+    table_name: str | None = None,
 ) -> ModelDefinition:
     """Assemble the canonical model metadata from introspection results.
 
@@ -92,7 +94,7 @@ def _build_model_dict(
     pipeline phases.
     """
     schema_imports = sorted({imp for f in result.fields for imp in f.py_imports})
-    table_name = to_snake(name)
+    table_name = table_name or to_snake(name)
     # ``id`` is conventionally the primary key.  Keep its resolved type in
     # model metadata so generated schemas, routes and frontend clients also
     # work for business keys such as ``id: str``.
@@ -404,7 +406,11 @@ def _process_introspected_class(
             return None
 
     mdl = _build_model_dict(
-        name, module_name, module_name, result,
+        name,
+        module_name,
+        module_name,
+        result,
+        table_name=getattr(obj, "__tablename__", None),
     )
 
     # Attach low-level SQLAlchemy event listeners (on_orm_before_*/on_orm_after_*).

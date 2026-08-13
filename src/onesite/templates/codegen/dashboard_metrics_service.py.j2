@@ -32,6 +32,60 @@ async def get_dashboard_metrics(
     async def _aggregate(metric: dict, start: datetime | None, end: datetime | None):
         aggregation = metric["aggregation"]
         field_name = metric.get("field")
+        {% set ts_lifecycle = model.get('timescaledb_lifecycle', {}) %}
+        {% if model.is_timescaledb and ts_lifecycle.get('bucket_interval') %}
+        if (
+            aggregation == "count"
+            and field_name is None
+            and not metric.get("where")
+            and metric.get("time_field") == "{{ model.timescaledb_time_column }}"
+            and start is not None
+            and end is not None
+        ):
+            # Count the two partial edge buckets from raw rows and all complete
+            # interior buckets from the continuous aggregate. This remains
+            # exact for non-bucket-aligned ranges without scanning the period.
+            from sqlalchemy import text
+            result = await session.execute(text("""
+                WITH bounds AS (
+                    SELECT
+                        CAST(:start AS TIMESTAMPTZ) AS start_at,
+                        CAST(:end AS TIMESTAMPTZ) AS end_at,
+                        time_bucket(
+                            INTERVAL '{{ ts_lifecycle.bucket_interval }}',
+                            CAST(:start AS TIMESTAMPTZ)
+                        ) AS start_bucket,
+                        time_bucket(
+                            INTERVAL '{{ ts_lifecycle.bucket_interval }}',
+                            CAST(:end AS TIMESTAMPTZ)
+                        ) AS end_bucket
+                )
+                SELECT
+                    COALESCE((
+                        SELECT COUNT(*)
+                        FROM {{ model.table_name }}, bounds
+                        WHERE {{ model.timescaledb_time_column }} >= start_at
+                          AND {{ model.timescaledb_time_column }} < LEAST(
+                              end_at,
+                              start_bucket + INTERVAL '{{ ts_lifecycle.bucket_interval }}'
+                          )
+                    ), 0)
+                    + COALESCE((
+                        SELECT SUM(sample_count)
+                        FROM {{ model.timescaledb_continuous_aggregate_name }}, bounds
+                        WHERE bucket >= start_bucket + INTERVAL '{{ ts_lifecycle.bucket_interval }}'
+                          AND bucket < end_bucket
+                    ), 0)
+                    + COALESCE((
+                        SELECT COUNT(*)
+                        FROM {{ model.table_name }}, bounds
+                        WHERE end_bucket > start_bucket
+                          AND {{ model.timescaledb_time_column }} >= GREATEST(start_at, end_bucket)
+                          AND {{ model.timescaledb_time_column }} < end_at
+                    ), 0)
+            """), {"start": start, "end": end})
+            return float(result.scalar_one())
+        {% endif %}
         value_col = getattr(model, field_name) if field_name else None
         if aggregation == "count":
             expression = func.count()

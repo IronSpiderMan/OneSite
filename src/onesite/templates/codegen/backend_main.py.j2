@@ -107,15 +107,18 @@ async def lifespan(app: FastAPI):
         # Initialize application-owned resources
         await init_resources(app)
         {% if config.external_resources_enabled %}
-        await external_resource_manager.start()
-        logger.info("External resource reconciler started")
+        _inline_external_worker = bool(getattr(settings, "EXTERNAL_RESOURCE_INLINE_WORKER", True))
+        if _inline_external_worker:
+            await external_resource_manager.start()
+            logger.info("External resource reconciler started inline")
         {% endif %}
         yield
     finally:
         try:
             {% if config.external_resources_enabled %}
-            await external_resource_manager.stop()
-            logger.info("External resource reconciler stopped")
+            if _inline_external_worker:
+                await external_resource_manager.stop()
+                logger.info("External resource reconciler stopped")
             {% endif %}
             # Release application-owned resources before infrastructure shutdown
             await destroy_resources(app)

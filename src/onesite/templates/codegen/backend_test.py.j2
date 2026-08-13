@@ -34,7 +34,7 @@ async def override_get_current_user():
         return user
 
 
-app.dependency_overrides[deps.get_session] = override_get_session
+app.dependency_overrides[db.get_session] = override_get_session
 app.dependency_overrides[deps.get_current_user] = override_get_current_user
 
 

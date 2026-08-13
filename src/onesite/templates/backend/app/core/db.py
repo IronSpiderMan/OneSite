@@ -1,4 +1,5 @@
-from typing import AsyncGenerator
+from functools import wraps
+from typing import AsyncGenerator, Awaitable, Callable, ParamSpec, TypeVar
 from pathlib import Path
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.engine import make_url
@@ -6,6 +7,30 @@ from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
 from app.core.config import settings
+
+P = ParamSpec("P")
+R = TypeVar("R")
+
+
+def transactional_write(
+    function: Callable[P, Awaitable[R]],
+) -> Callable[P, Awaitable[R]]:
+    """Commit a CRUD write by default while allowing caller-owned transactions."""
+    @wraps(function)
+    async def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
+        auto_commit = kwargs.get("auto_commit", True)
+        session = kwargs["session"] if "session" in kwargs else args[0]
+        try:
+            result = await function(*args, **kwargs)
+            if auto_commit:
+                await session.commit()
+            return result
+        except Exception:
+            if auto_commit:
+                await session.rollback()
+            raise
+
+    return wrapper
 
 # Parse DATABASE_URI to determine async driver
 database_url = settings.DATABASE_URI

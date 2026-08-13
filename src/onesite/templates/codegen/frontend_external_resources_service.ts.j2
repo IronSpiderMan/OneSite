@@ -17,12 +17,21 @@ export interface ExternalResourceBinding {
   last_observed_at?: string;
   last_error?: string;
   last_synced_at?: string;
+  last_checked_at?: string;
+  next_check_at: string;
   updated_at: string;
 }
 
-export async function getExternalResources(includeDeleted = false) {
-  return (await request.get<ExternalResourceBinding[]>('/external-resources', {
-    params: { include_deleted: includeDeleted },
+export interface ExternalResourcePage {
+  items: ExternalResourceBinding[];
+  total: number;
+  offset: number;
+  limit: number;
+}
+
+export async function getExternalResources(includeDeleted = false, offset = 0, limit = 100) {
+  return (await request.get<ExternalResourcePage>('/external-resources', {
+    params: { include_deleted: includeDeleted, offset, limit },
   })).data;
 }
 

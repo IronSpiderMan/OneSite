@@ -21,7 +21,7 @@ export default function ExternalResourcesPage() {
   const [showDeleted, setShowDeleted] = useState(false);
   const load = useCallback(async () => {
     setLoading(true);
-    try { setRows(await getExternalResources(showDeleted)); }
+    try { setRows((await getExternalResources(showDeleted)).items); }
     finally { setLoading(false); }
   }, [showDeleted]);
 

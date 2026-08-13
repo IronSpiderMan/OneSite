@@ -9,6 +9,7 @@ Phase 7 — Aggregated / cross-cutting generation: API router, route tables,
 """
 
 import json
+import re
 from pathlib import Path
 from typing import Any
 
@@ -44,6 +45,161 @@ def _build_model_lookup(models: list[ModelDefinition]) -> dict[str, ModelDefinit
         lookup[m["name"]] = m
         lookup[m["table_name"]] = m
     return lookup
+
+
+def _field_names(model: ModelDefinition) -> set[str]:
+    return {str(field["name"]) for field in model.get("fields", [])}
+
+
+def _normalize_external_health(
+    model: ModelDefinition,
+    external: dict[str, Any],
+    models: list[ModelDefinition],
+) -> dict[str, Any] | None:
+    """Validate and enrich an external-resource health declaration.
+
+    Health projection is deliberately tied to a generated TimescaleDB latest
+    table.  This lets the runtime maintain one health row per external entity
+    instead of grouping every property row during each status scan.
+    """
+    raw = external.get("health")
+    if raw is None:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError(f"{model['name']} external_resource.health must be an object")
+
+    required = {"latest_table", "entity_field", "time_field"}
+    missing = required - set(raw)
+    if missing:
+        raise ValueError(
+            f"{model['name']} external_resource.health is missing: "
+            + ", ".join(sorted(missing))
+        )
+
+    health = {
+        **raw,
+        "enabled_field": raw.get("enabled_field", "is_enabled"),
+        "status_field": raw.get("status_field", "status"),
+        "last_seen_field": raw.get("last_seen_field", "last_online_at"),
+        "interval_field": raw.get("interval_field", "collection_interval_ms"),
+        "minimum_offline_seconds": raw.get("minimum_offline_seconds", 30),
+        "interval_multiplier": raw.get("interval_multiplier", 3),
+        "online_status": raw.get("online_status", "online"),
+        "offline_status": raw.get("offline_status", "offline"),
+        "disabled_status": raw.get("disabled_status", "disabled"),
+        "inactive_status": raw.get("inactive_status", "inactive"),
+        "error_status": raw.get("error_status", "inactive"),
+        "binding_resource_type": raw.get("binding_resource_type", external["resource_type"]),
+        "binding_entity_field": raw.get(
+            "binding_entity_field", external.get("identity_field", "id")
+        ),
+    }
+    identifier_keys = (
+        "latest_table", "entity_field", "time_field", "enabled_field",
+        "status_field", "last_seen_field", "interval_field", "binding_entity_field",
+    )
+    for key in identifier_keys:
+        value = health.get(key)
+        if not isinstance(value, str) or not value.isidentifier():
+            raise ValueError(
+                f"{model['name']} external_resource.health.{key} must be a valid identifier"
+            )
+
+    target_fields = _field_names(model)
+    identity_field = external.get("identity_field", "id")
+    if identity_field not in target_fields:
+        raise ValueError(
+            f"{model['name']} external_resource.identity_field references "
+            f"unknown field '{identity_field}'"
+        )
+    for key in ("enabled_field", "status_field", "last_seen_field", "interval_field"):
+        if health[key] not in target_fields:
+            raise ValueError(
+                f"{model['name']} external_resource.health.{key} "
+                f"references unknown field '{health[key]}'"
+            )
+    if health["binding_entity_field"] not in target_fields:
+        raise ValueError(
+            f"{model['name']} external_resource.health.binding_entity_field "
+            f"references unknown field '{health['binding_entity_field']}'"
+        )
+    try:
+        minimum = float(health["minimum_offline_seconds"])
+        multiplier = float(health["interval_multiplier"])
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            f"{model['name']} health thresholds must be numeric"
+        ) from exc
+    if minimum <= 0 or multiplier <= 0:
+        raise ValueError(f"{model['name']} health thresholds must be greater than zero")
+    health["minimum_offline_seconds"] = minimum
+    health["interval_multiplier"] = multiplier
+
+    source = next(
+        (
+            candidate
+            for candidate in models
+            if candidate.get("is_timescaledb")
+            and candidate.get("timescaledb_latest_table_name") == health["latest_table"]
+        ),
+        None,
+    )
+    if source is None:
+        raise ValueError(
+            f"{model['name']} health latest_table '{health['latest_table']}' "
+            "is not generated from a TimescaleDB model"
+        )
+    if source.get("timescaledb_entity_field") != health["entity_field"]:
+        raise ValueError(
+            f"{model['name']} health entity_field does not match "
+            f"{source['name']} time-series metadata"
+        )
+    if source.get("timescaledb_time_column") != health["time_field"]:
+        raise ValueError(
+            f"{model['name']} health time_field does not match "
+            f"{source['name']} time-series metadata"
+        )
+    target_table = source.get("timescaledb_entity_target_table")
+    if target_table and target_table != model["table_name"]:
+        raise ValueError(
+            f"{model['name']} health latest table belongs to '{target_table}', "
+            f"not '{model['table_name']}'"
+        )
+
+    status_field = next(
+        field for field in model["fields"] if field["name"] == health["status_field"]
+    )
+    if status_field.get("is_enum"):
+        allowed = set(status_field.get("enum_values", []))
+        configured = {
+            health[key]
+            for key in (
+                "online_status", "offline_status", "disabled_status",
+                "inactive_status", "error_status",
+            )
+        }
+        invalid = configured - allowed
+        if invalid:
+            raise ValueError(
+                f"{model['name']} health statuses are not valid enum values: "
+                + ", ".join(sorted(map(str, invalid)))
+            )
+
+    health.update({
+        "source_table": source["table_name"],
+        "source_module": source["source_module"],
+        "target_table": model["table_name"],
+        "target_id_field": identity_field,
+    })
+    source.setdefault("health_projections", []).append(
+        {
+            "provider": external["provider"],
+            "resource_type": external["resource_type"],
+            "entity_field": health["entity_field"],
+            "time_field": health["time_field"],
+        }
+    )
+    return health
 
 
 def _resolve_visualize_filters(
@@ -442,12 +598,32 @@ def phase_generate_per_model(
                 f"{model['name']} external_resource is missing: "
                 + ", ".join(sorted(missing))
             )
+        for key in ("provider", "resource_type"):
+            if not isinstance(external[key], str) or not re.fullmatch(
+                r"[A-Za-z0-9_.:-]+", external[key]
+            ):
+                raise ValueError(
+                    f"{model['name']} external_resource.{key} contains unsupported characters"
+                )
         dependencies = external.get("depends_on", [])
         if not isinstance(dependencies, list):
             raise ValueError(
                 f"{model['name']} external_resource.depends_on must be a list"
             )
         normalized = {**external, "depends_on": dependencies}
+        reconcile_via = normalized.get("reconcile_via")
+        if reconcile_via is not None:
+            if not isinstance(reconcile_via, dict) or not {
+                "resource_type", "field"
+            }.issubset(reconcile_via):
+                raise ValueError(
+                    f"{model['name']} external_resource.reconcile_via requires resource_type and field"
+                )
+            if reconcile_via["field"] not in _field_names(model):
+                raise ValueError(
+                    f"{model['name']} reconcile_via references unknown field '{reconcile_via['field']}'"
+                )
+        normalized["health"] = _normalize_external_health(model, normalized, models)
         model["external_resource"] = normalized
         for dependency in dependencies:
             if (
@@ -568,9 +744,11 @@ def phase_generate_aggregated(
             "resource_type": m["external_resource"]["resource_type"],
             "module": m["source_module"],
             "model": m["name"],
+            "table": m["table_name"],
             "id_field": m["external_resource"].get("identity_field", "id"),
             "depends_on": m["external_resource"].get("depends_on", []),
             "health": m["external_resource"].get("health"),
+            "reconcile_via": m["external_resource"].get("reconcile_via"),
         }
         for m in external_models
     ]
@@ -582,6 +760,47 @@ def phase_generate_aggregated(
         f"app.models.{m['source_module']}_latest"
         for m in timescaledb_models
     })
+    model_imports = sorted({
+        f"app.models.{m['source_module']}"
+        for m in models
+        if not m.get("frontend_only")
+    })
+    generated_indexes: list[dict[str, Any]] = []
+    seen_indexes: set[tuple[str, tuple[str, ...]]] = set()
+
+    def add_index(table: str, columns: list[str], suffix: str) -> None:
+        key = (table, tuple(columns))
+        if key in seen_indexes:
+            return
+        seen_indexes.add(key)
+        raw_name = f"ix_{table}_{suffix}"
+        if len(raw_name.encode("utf-8")) > 63:
+            import hashlib
+            digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:10]
+            raw_name = f"{raw_name[:52]}_{digest}"
+        generated_indexes.append(
+            {"name": raw_name, "table": table, "columns": columns}
+        )
+
+    for model in models:
+        for fk in model.get("foreign_keys", []):
+            columns = [fk["name"]]
+            if model.get("has_created_at"):
+                columns.append("created_at DESC")
+            add_index(model["table_name"], columns, f"{fk['name']}_page")
+    for model in timescaledb_models:
+        entity = model["timescaledb_entity_field"]
+        metric = model.get("timescaledb_metric_field")
+        time_column = model["timescaledb_time_column"]
+        add_index(
+            model["table_name"], [entity, f"{time_column} DESC"],
+            f"{entity}_{time_column}_desc",
+        )
+        if metric:
+            add_index(
+                model["table_name"], [entity, metric, f"{time_column} DESC"],
+                f"{entity}_{metric}_{time_column}_desc",
+            )
     generate_file(
         "db.py.j2",
         {
@@ -590,8 +809,10 @@ def phase_generate_aggregated(
             ),
             "has_timescaledb": has_timescaledb,
             "timescaledb_models": timescaledb_models,
+            "model_imports": model_imports,
             "latest_table_imports": latest_table_imports,
             "external_resources_enabled": external_resources_enabled,
+            "generated_indexes": generated_indexes,
         },
         backend_path / "app" / "core" / "db.py",
     )
@@ -615,6 +836,11 @@ def phase_generate_aggregated(
             "external_resources.py.j2",
             external_context,
             backend_path / "app" / "core" / "external_resources.py",
+        )
+        generate_file(
+            "external_resources_worker.py.j2",
+            {},
+            backend_path / "app" / "external_resources_worker.py",
         )
         generate_file(
             "external_resources_api.py.j2",

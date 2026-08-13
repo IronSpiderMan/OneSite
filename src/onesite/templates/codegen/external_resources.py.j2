@@ -11,14 +11,18 @@ import hashlib
 import importlib
 import json
 import logging
-import re
 from contextlib import suppress
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Any
 
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import Column, DateTime, JSON, String, UniqueConstraint, text
+from sqlalchemy import (
+    Column, DateTime, JSON, String, UniqueConstraint, case, cast, exists,
+    func, literal, or_, update,
+)
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Field, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -64,6 +68,8 @@ class ExternalResourceBinding(SQLModel, table=True):
     last_drift_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     last_observed_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
     last_synced_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    last_checked_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
+    next_check_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
 
@@ -83,6 +89,18 @@ class ExternalResourceOutbox(SQLModel, table=True):
     next_attempt_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
     last_error: str | None = None
     created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
+    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
+
+
+class ExternalResourceHealth(SQLModel, table=True):
+    """Latest observation per external entity, independent of property count."""
+
+    __tablename__ = "onesite_external_resource_health"
+
+    provider: str = Field(sa_column=Column(String(100), primary_key=True))
+    resource_type: str = Field(sa_column=Column(String(100), primary_key=True))
+    entity_id: str = Field(sa_column=Column(String(255), primary_key=True))
+    last_seen_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
     updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
 
 
@@ -170,6 +188,56 @@ async def _load_entity(session: AsyncSession, config: dict[str, Any], entity_id:
     return await session.get(model, _coerce_id(model, config.get("id_field", "id"), entity_id))
 
 
+async def record_external_resource_health(
+    session: AsyncSession,
+    *,
+    resource_type: str,
+    observations: dict[str, datetime],
+) -> int:
+    """Batch-advance last-seen timestamps inside the caller's transaction.
+
+    Telemetry consumers should collapse a batch to one timestamp per entity
+    before calling this function.  Timestamps never move backwards.
+    """
+    config = RESOURCE_BY_TYPE.get(resource_type)
+    if config is None or not config.get("health"):
+        raise ValueError(f"Resource type '{resource_type}' has no health projection")
+    if not observations:
+        return 0
+    now = _utcnow()
+    rows = [
+        {
+            "provider": config["provider"],
+            "resource_type": resource_type,
+            "entity_id": str(entity_id),
+            "last_seen_at": (
+                observed_at.replace(tzinfo=timezone.utc)
+                if observed_at.tzinfo is None
+                else observed_at.astimezone(timezone.utc)
+            ),
+            "updated_at": now,
+        }
+        for entity_id, observed_at in observations.items()
+    ]
+    dialect = session.bind.dialect.name if session.bind is not None else ""
+    insert_factory = postgresql_insert if dialect == "postgresql" else sqlite_insert
+    statement = insert_factory(ExternalResourceHealth).values(rows)
+    excluded = statement.excluded
+    statement = statement.on_conflict_do_update(
+        index_elements=["provider", "resource_type", "entity_id"],
+        set_={
+            "last_seen_at": case(
+                (excluded.last_seen_at > ExternalResourceHealth.last_seen_at, excluded.last_seen_at),
+                else_=ExternalResourceHealth.last_seen_at,
+            ),
+            "updated_at": excluded.updated_at,
+        },
+        where=excluded.last_seen_at > ExternalResourceHealth.last_seen_at,
+    )
+    await session.execute(statement)
+    return len(rows)
+
+
 async def enqueue_external_resource_change(
     session: AsyncSession,
     *,
@@ -238,14 +306,25 @@ async def enqueue_external_resource_dependents(
 
 
 class ExternalResourceManager:
-    def __init__(self, poll_seconds: float = 1.0, drift_seconds: float = 60.0) -> None:
+    def __init__(
+        self,
+        poll_seconds: float = 1.0,
+        drift_seconds: float = 1800.0,
+        health_seconds: float = 30.0,
+        worker_count: int = 4,
+        scan_batch_size: int = 500,
+    ) -> None:
         self.poll_seconds = poll_seconds
         self.drift_seconds = drift_seconds
-        self._task: asyncio.Task[None] | None = None
+        self.health_seconds = health_seconds
+        self.worker_count = max(1, worker_count)
+        self.scan_batch_size = max(1, scan_batch_size)
+        self._tasks: list[asyncio.Task[None]] = []
         self._last_drift_scan = _utcnow()
+        self._last_health_scan = _utcnow()
 
     async def start(self) -> None:
-        if self._task and not self._task.done():
+        if any(not task.done() for task in self._tasks):
             return
         from app.core.db import engine
 
@@ -257,49 +336,89 @@ class ExternalResourceManager:
                 item.next_attempt_at = _utcnow()
             await self._bootstrap(session)
             await session.commit()
-        self._task = asyncio.create_task(self._run(), name="onesite-external-resource-reconciler")
+        self._tasks = [
+            asyncio.create_task(self._run(), name="onesite-external-resource-scheduler"),
+            *[
+                asyncio.create_task(
+                    self._worker(), name=f"onesite-external-resource-worker-{index + 1}"
+                )
+                for index in range(self.worker_count)
+            ],
+        ]
 
     async def stop(self) -> None:
-        if self._task is None:
+        if not self._tasks:
             return
-        self._task.cancel()
-        with suppress(asyncio.CancelledError):
-            await self._task
-        self._task = None
+        for task in self._tasks:
+            task.cancel()
+        for task in self._tasks:
+            with suppress(asyncio.CancelledError):
+                await task
+        self._tasks = []
 
     async def _bootstrap(self, session: AsyncSession) -> None:
         for config in RESOURCE_CONFIGS:
+            if config.get("reconcile_via"):
+                continue
             model = _load_model(config)
-            entities = (await session.exec(select(model))).all()
-            for entity in entities:
-                entity_id = str(getattr(entity, config.get("id_field", "id")))
-                existing = (await session.exec(select(ExternalResourceBinding).where(
+            id_column = getattr(model, config.get("id_field", "id"))
+            entity_ids = {str(value) for value in (await session.exec(select(id_column))).all()}
+            existing_ids = {str(value) for value in (await session.exec(
+                select(ExternalResourceBinding.entity_id).where(
                     ExternalResourceBinding.provider == config["provider"],
                     ExternalResourceBinding.resource_type == config["resource_type"],
-                    ExternalResourceBinding.entity_id == entity_id,
-                ))).first()
-                if existing is None:
-                    await enqueue_external_resource_change(
-                        session, resource_type=config["resource_type"], entity_id=entity_id
+                )
+            )).all()}
+            for entity_id in sorted(entity_ids - existing_ids):
+                binding = ExternalResourceBinding(
+                    provider=config["provider"],
+                    resource_type=config["resource_type"],
+                    entity_id=entity_id,
+                    desired_revision=1,
+                )
+                session.add(binding)
+                session.add(
+                    ExternalResourceOutbox(
+                        provider=config["provider"],
+                        resource_type=config["resource_type"],
+                        entity_id=entity_id,
+                        operation="reconcile",
+                        revision=1,
                     )
+                )
 
     async def _run(self) -> None:
         while True:
             try:
-                worked = await self._process_one()
                 now = _utcnow()
                 if (now - self._last_drift_scan).total_seconds() >= self.drift_seconds:
-                    # Advance before running either operation so a health error
-                    # cannot turn the drift interval into a tight retry loop.
                     self._last_drift_scan = now
-                    await self._enqueue_drift_scan()
-                    await self._project_health()
-                if not worked:
-                    await asyncio.sleep(self.poll_seconds)
+                    try:
+                        await self._enqueue_drift_scan()
+                    except Exception:
+                        logger.exception("External resource drift scan failed")
+                if (now - self._last_health_scan).total_seconds() >= self.health_seconds:
+                    self._last_health_scan = now
+                    try:
+                        await self._project_health()
+                    except Exception:
+                        logger.exception("External resource health projection failed")
+                await asyncio.sleep(self.poll_seconds)
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("External resource worker iteration failed")
+                await asyncio.sleep(self.poll_seconds)
+
+    async def _worker(self) -> None:
+        while True:
+            try:
+                if not await self._process_one():
+                    await asyncio.sleep(self.poll_seconds)
+            except asyncio.CancelledError:
+                raise
+            except Exception:
+                logger.exception("External resource reconciliation failed")
                 await asyncio.sleep(self.poll_seconds)
 
     async def _process_one(self) -> bool:
@@ -385,6 +504,7 @@ class ExternalResourceManager:
             binding.applied_revision = task.revision
             binding.last_error = None
             binding.last_observed_at = _utcnow()
+            binding.last_checked_at = _utcnow()
             binding.last_synced_at = _utcnow()
             binding.updated_at = _utcnow()
             return
@@ -392,6 +512,7 @@ class ExternalResourceManager:
         binding.status = SyncStatus.syncing.value
         desired = await provider.build_desired(session, task.resource_type, entity, binding)
         observed = await provider.observe(task.resource_type, desired, binding)
+        binding.last_checked_at = _utcnow()
         comparable_desired = provider.comparable_state(desired)
         comparable_observed = provider.comparable_state(observed)
         desired_hash = _hash(comparable_desired)
@@ -408,6 +529,7 @@ class ExternalResourceManager:
             if external_id:
                 binding.external_id = external_id
             observed = await provider.observe(task.resource_type, desired, binding)
+            binding.last_checked_at = _utcnow()
             comparable_observed = provider.comparable_state(observed)
             observed_hash = _hash(comparable_observed)
             if desired_hash != observed_hash:
@@ -436,6 +558,7 @@ class ExternalResourceManager:
             binding.status = SyncStatus.error.value if permanent else SyncStatus.retrying.value
             binding.last_error = message
             binding.retry_count = task.attempts
+            binding.last_checked_at = _utcnow()
             binding.updated_at = _utcnow()
         except Exception:
             logger.exception("Could not update failed external resource binding")
@@ -445,24 +568,52 @@ class ExternalResourceManager:
 
         factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with factory() as session:
-            bindings = (await session.exec(select(ExternalResourceBinding).where(
-                ExternalResourceBinding.status.notin_([SyncStatus.deleting.value, SyncStatus.deleted.value])
-            ))).all()
-            for binding in bindings:
-                pending = (await session.exec(select(ExternalResourceOutbox).where(
-                    ExternalResourceOutbox.provider == binding.provider,
-                    ExternalResourceOutbox.resource_type == binding.resource_type,
-                    ExternalResourceOutbox.entity_id == binding.entity_id,
-                    ExternalResourceOutbox.status.in_(["pending", "processing", "retry"]),
-                ))).first()
-                if pending is None:
-                    await enqueue_external_resource_change(
-                        session,
-                        resource_type=binding.resource_type,
-                        entity_id=binding.entity_id,
-                        mark_pending=False,
-                        bump_revision=False,
+            active_job = exists().where(
+                ExternalResourceOutbox.provider == ExternalResourceBinding.provider,
+                ExternalResourceOutbox.resource_type == ExternalResourceBinding.resource_type,
+                ExternalResourceOutbox.entity_id == ExternalResourceBinding.entity_id,
+                ExternalResourceOutbox.status.in_(["pending", "processing", "retry"]),
+            )
+            statement = (
+                select(
+                    ExternalResourceBinding.id,
+                    ExternalResourceBinding.provider,
+                    ExternalResourceBinding.resource_type,
+                    ExternalResourceBinding.entity_id,
+                    ExternalResourceBinding.desired_revision,
+                )
+                .where(
+                    ExternalResourceBinding.status.notin_([
+                        SyncStatus.deleting.value, SyncStatus.deleted.value,
+                    ]),
+                    ExternalResourceBinding.next_check_at <= _utcnow(),
+                    ~active_job,
+                    ExternalResourceBinding.resource_type.notin_([
+                        item["resource_type"]
+                        for item in RESOURCE_CONFIGS
+                        if item.get("reconcile_via")
+                    ]),
+                )
+                .order_by(ExternalResourceBinding.next_check_at, ExternalResourceBinding.id)
+                .limit(self.scan_batch_size)
+            )
+            rows = (await session.exec(statement)).all()
+            next_check_at = _utcnow() + timedelta(seconds=self.drift_seconds)
+            for binding_id, provider, resource_type, entity_id, revision in rows:
+                session.add(
+                    ExternalResourceOutbox(
+                        provider=provider,
+                        resource_type=resource_type,
+                        entity_id=entity_id,
+                        operation="reconcile",
+                        revision=revision,
                     )
+                )
+                await session.execute(
+                    update(ExternalResourceBinding)
+                    .where(ExternalResourceBinding.id == binding_id)
+                    .values(next_check_at=next_check_at)
+                )
             await session.commit()
 
     async def _project_health(self) -> None:
@@ -474,45 +625,142 @@ class ExternalResourceManager:
                 health = config.get("health")
                 if not health:
                     continue
-                for identifier in (health["latest_table"], health["entity_field"], health["time_field"]):
-                    if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", identifier):
-                        raise ExternalResourcePermanentError(f"Unsafe health identifier: {identifier}")
-                bindings = (await session.exec(select(ExternalResourceBinding).where(
-                    ExternalResourceBinding.resource_type == config["resource_type"]
-                ))).all()
-                for binding in bindings:
-                    entity = await _load_entity(session, config, binding.entity_id)
-                    if entity is None:
-                        continue
-                    latest = (await session.execute(text(
-                        f'SELECT MAX("{health["time_field"]}") FROM "{health["latest_table"]}" '
-                        f'WHERE "{health["entity_field"]}" = :entity_id'
-                    ), {"entity_id": binding.entity_id})).scalar_one_or_none()
-                    enabled = bool(getattr(entity, health.get("enabled_field", "is_enabled"), True))
-                    if not enabled:
-                        status = "disabled"
-                    elif binding.status in {SyncStatus.error.value, SyncStatus.retrying.value}:
-                        status = health.get("error_status", "error")
-                    elif binding.status != SyncStatus.synced.value:
-                        status = "inactive"
-                    elif latest is None:
-                        status = "offline"
-                    else:
-                        interval_ms = int(getattr(entity, health.get("interval_field", "collection_interval_ms"), 1000))
-                        threshold = max(int(health.get("minimum_offline_seconds", 30)), interval_ms * 3 / 1000)
-                        comparable_latest = latest if latest.tzinfo else latest.replace(tzinfo=timezone.utc)
-                        status = "online" if (_utcnow() - comparable_latest).total_seconds() <= threshold else "offline"
-                    current = getattr(entity, health.get("status_field", "status"), None)
-                    if isinstance(current, Enum):
-                        status = type(current)(status)
-                    setattr(entity, health.get("status_field", "status"), status)
-                    last_seen_field = health.get("last_seen_field", "last_online_at")
-                    target_column = entity.__table__.columns.get(last_seen_field)
-                    stored_latest = latest
-                    if latest is not None and target_column is not None and not getattr(target_column.type, "timezone", False):
-                        stored_latest = latest.astimezone(timezone.utc).replace(tzinfo=None) if latest.tzinfo else latest
-                    setattr(entity, last_seen_field, stored_latest)
+                if engine.dialect.name == "postgresql":
+                    await self._project_health_postgresql(session, config, health)
+                else:
+                    await self._project_health_portable(session, config, health)
             await session.commit()
+
+    async def _project_health_postgresql(
+        self, session: AsyncSession, config: dict[str, Any], health: dict[str, Any]
+    ) -> None:
+        """Project every entity of one resource type with one UPDATE statement."""
+        model = _load_model(config)
+        id_column = getattr(model, config.get("id_field", "id"))
+        entity_key = cast(id_column, String)
+        binding_key = cast(getattr(model, health["binding_entity_field"]), String)
+        status_column = getattr(model, health["status_field"])
+        interval_column = getattr(model, health["interval_field"])
+        enabled_column = getattr(model, health["enabled_field"])
+        last_seen_column = getattr(model, health["last_seen_field"])
+        binding_status = (
+            select(ExternalResourceBinding.status)
+            .where(
+                ExternalResourceBinding.provider == config["provider"],
+                ExternalResourceBinding.resource_type == health["binding_resource_type"],
+                ExternalResourceBinding.entity_id == binding_key,
+            )
+            .scalar_subquery()
+        )
+        observed_at = (
+            select(ExternalResourceHealth.last_seen_at)
+            .where(
+                ExternalResourceHealth.provider == config["provider"],
+                ExternalResourceHealth.resource_type == config["resource_type"],
+                ExternalResourceHealth.entity_id == entity_key,
+            )
+            .scalar_subquery()
+        )
+        last_seen_type = last_seen_column.property.columns[0].type
+        stored_observed_at = (
+            observed_at
+            if getattr(last_seen_type, "timezone", False)
+            else func.timezone("UTC", observed_at)
+        )
+        active_binding = exists().where(
+            ExternalResourceBinding.provider == config["provider"],
+            ExternalResourceBinding.resource_type == health["binding_resource_type"],
+            ExternalResourceBinding.entity_id == binding_key,
+            ExternalResourceBinding.status.notin_([
+                SyncStatus.deleting.value, SyncStatus.deleted.value,
+            ]),
+        )
+        threshold = func.greatest(
+            health["minimum_offline_seconds"],
+            interval_column * health["interval_multiplier"] / 1000.0,
+        )
+        age_seconds = func.extract("epoch", _utcnow() - observed_at)
+        status_type = status_column.property.columns[0].type
+        typed_status = lambda value: literal(value, type_=status_type)
+        projected = case(
+            (~enabled_column, typed_status(health["disabled_status"])),
+            (
+                binding_status.in_([SyncStatus.error.value, SyncStatus.retrying.value]),
+                typed_status(health["error_status"]),
+            ),
+            (binding_status != SyncStatus.synced.value, typed_status(health["inactive_status"])),
+            (observed_at.is_(None), typed_status(health["offline_status"])),
+            (age_seconds <= threshold, typed_status(health["online_status"])),
+            else_=typed_status(health["offline_status"]),
+        )
+        statement = (
+            update(model)
+            .where(active_binding)
+            .where(or_(
+                status_column.is_distinct_from(projected),
+                last_seen_column.is_distinct_from(stored_observed_at),
+            ))
+            .values({
+                health["status_field"]: projected,
+                health["last_seen_field"]: stored_observed_at,
+            })
+        )
+        await session.execute(statement)
+
+    async def _project_health_portable(
+        self, session: AsyncSession, config: dict[str, Any], health: dict[str, Any]
+    ) -> None:
+        """Constant-query fallback for SQLite development and tests."""
+        model = _load_model(config)
+        entities = (await session.exec(select(model))).all()
+        bindings = (await session.exec(select(ExternalResourceBinding).where(
+            ExternalResourceBinding.provider == config["provider"],
+            ExternalResourceBinding.resource_type == health["binding_resource_type"],
+            ExternalResourceBinding.status.notin_([
+                SyncStatus.deleting.value, SyncStatus.deleted.value,
+            ]),
+        ))).all()
+        observations = (await session.exec(select(ExternalResourceHealth).where(
+            ExternalResourceHealth.provider == config["provider"],
+            ExternalResourceHealth.resource_type == config["resource_type"],
+        ))).all()
+        binding_by_id = {item.entity_id: item for item in bindings}
+        observed_by_id = {item.entity_id: item.last_seen_at for item in observations}
+        now = _utcnow()
+        for entity in entities:
+            entity_id = str(getattr(entity, config.get("id_field", "id")))
+            binding = binding_by_id.get(str(getattr(entity, health["binding_entity_field"])))
+            if binding is None:
+                continue
+            observed_at = observed_by_id.get(entity_id)
+            if not getattr(entity, health["enabled_field"]):
+                status = health["disabled_status"]
+            elif binding.status in {SyncStatus.error.value, SyncStatus.retrying.value}:
+                status = health["error_status"]
+            elif binding.status != SyncStatus.synced.value:
+                status = health["inactive_status"]
+            elif observed_at is None:
+                status = health["offline_status"]
+            else:
+                comparable = observed_at if observed_at.tzinfo else observed_at.replace(tzinfo=timezone.utc)
+                threshold = max(
+                    health["minimum_offline_seconds"],
+                    getattr(entity, health["interval_field"]) * health["interval_multiplier"] / 1000,
+                )
+                status = health["online_status"] if (now - comparable).total_seconds() <= threshold else health["offline_status"]
+            current = getattr(entity, health["status_field"])
+            if isinstance(current, Enum):
+                status = type(current)(status)
+            setattr(entity, health["status_field"], status)
+            target_type = entity.__table__.columns[health["last_seen_field"]].type
+            stored_observed_at = observed_at
+            if (
+                observed_at is not None
+                and not getattr(target_type, "timezone", False)
+                and observed_at.tzinfo is not None
+            ):
+                stored_observed_at = observed_at.astimezone(timezone.utc).replace(tzinfo=None)
+            setattr(entity, health["last_seen_field"], stored_observed_at)
 
 
 external_resource_manager = ExternalResourceManager()

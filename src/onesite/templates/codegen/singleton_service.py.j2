@@ -20,13 +20,7 @@ class {{ model.name }}Service:
             input_data=dict(changes),
             changed_fields=frozenset(changes),
         )
-        try:
-            obj = await crud.update(session, obj_in)
-            await session.commit()
-            await session.refresh(obj)
-        except Exception:
-            await session.rollback()
-            raise
+        obj = await crud.update(session, obj_in)
         try:
             await invoke_model_hook(
                 obj,

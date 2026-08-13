@@ -10,6 +10,7 @@ connections via link tables, and timeseries parent-child links.
    are consumed by the Jinja2 template rendering phases.
 """
 
+import re
 from typing import Any
 
 from ..types import ModelDefinition
@@ -618,6 +619,41 @@ def _resolve_timescaledb_metadata(models: list[ModelDefinition]) -> None:
                         time_column = f["name"]
         model["timescaledb_time_column"] = time_column or "created_at"
         model["timescaledb_latest_table_name"] = f"{model['table_name']}_latest"
+
+        raw_policy = (model.get("site_props", {}).get("time_series_table") or {}).get(
+            "lifecycle", {}
+        )
+        if raw_policy and not isinstance(raw_policy, dict):
+            raise ValueError(
+                f"{model['name']} time_series_table.lifecycle must be an object"
+            )
+
+        def _interval(name: str, default: str | None = None) -> str | None:
+            value = raw_policy.get(name, default)
+            if value is None:
+                return None
+            if not isinstance(value, str) or not re.fullmatch(
+                r"[1-9][0-9]*\s+(second|minute|hour|day|week|month|year)s?", value
+            ):
+                raise ValueError(
+                    f"{model['name']} time_series_table.lifecycle.{name} "
+                    "must be a positive PostgreSQL interval such as '7 days'"
+                )
+            return value
+
+        continuous = bool(raw_policy.get("continuous_aggregate", False))
+        model["timescaledb_lifecycle"] = {
+            "chunk_interval": _interval("chunk_interval"),
+            "compress_after": _interval("compress_after"),
+            "retention_after": _interval("retention_after"),
+            "bucket_interval": _interval("bucket_interval", "1 hour") if continuous else None,
+            "refresh_start_offset": _interval("refresh_start_offset"),
+            "refresh_end_offset": _interval("refresh_end_offset", "1 hour") if continuous else None,
+            "refresh_schedule_interval": _interval(
+                "refresh_schedule_interval", "1 hour"
+            ) if continuous else None,
+        }
+        model["timescaledb_continuous_aggregate_name"] = f"{model['table_name']}_hourly"
 
         entity_field = model.get("timescaledb_entity_field", "")
         for f in model["fields"]:

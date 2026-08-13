@@ -1,0 +1,35 @@
+"""Standalone external-resource reconciler process."""
+
+from __future__ import annotations
+
+import asyncio
+import signal
+
+from fastapi import FastAPI
+
+from app.core.db import init_db
+from app.core.external_resources import external_resource_manager
+from app.initial_data import init_data
+from app.resources import destroy_resources, init_resources
+
+
+async def run() -> None:
+    app = FastAPI()
+    stopped = asyncio.Event()
+    loop = asyncio.get_running_loop()
+    for name in ("SIGINT", "SIGTERM"):
+        if hasattr(signal, name):
+            loop.add_signal_handler(getattr(signal, name), stopped.set)
+    await init_db()
+    await init_data()
+    await init_resources(app)
+    try:
+        await external_resource_manager.start()
+        await stopped.wait()
+    finally:
+        await external_resource_manager.stop()
+        await destroy_resources(app)
+
+
+if __name__ == "__main__":
+    asyncio.run(run())
