@@ -19,7 +19,7 @@ from .base import console
 
 
 def phase_load_config(cwd: Path) -> tuple[dict, Path]:
-    """Load site_config.json, set defaults, sync .env files.
+    """Load project configuration, set defaults, sync .env files.
 
     Returns (site_config, backend_path).
     """

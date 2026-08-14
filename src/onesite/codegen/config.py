@@ -1,12 +1,15 @@
 import keyword
 import re
+import sys
+import uuid
+from importlib.util import module_from_spec, spec_from_file_location
 from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import urlparse
 
 
 class SiteConfigError(ValueError):
-    """Raised when ``site_config.json`` exists but cannot be parsed."""
+    """Raised when a project configuration cannot be loaded or validated."""
 
 
 _TOOL_INPUT_TYPE_ALIASES = {
@@ -611,19 +614,65 @@ def load_site_config(cwd: Path) -> Dict[str, Any]:
     the wrong settings, which is much harder to recover from than a clear
     error at the configuration boundary.
     """
-    config_path = cwd / "site_config.json"
-    if config_path.exists():
+    python_config_path = cwd / "site_config.py"
+    json_config_path = cwd / "site_config.json"
+    likely_misnamed_python_config = cwd / "site_sync.py"
+    if python_config_path.exists() and json_config_path.exists():
+        raise SiteConfigError(
+            f"Both {python_config_path.name} and {json_config_path.name} exist. "
+            "Keep only one project configuration file."
+        )
+    if python_config_path.exists():
+        return _load_python_site_config(python_config_path)
+    if json_config_path.exists():
         import json
 
         try:
-            config = json.loads(config_path.read_text(encoding="utf-8"))
+            config = json.loads(json_config_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
             raise SiteConfigError(
-                f"Unable to parse {config_path}: {exc}"
+                f"Unable to parse {json_config_path}: {exc}"
             ) from exc
         if not isinstance(config, dict):
             raise SiteConfigError(
-                f"{config_path} must contain a JSON object at its top level."
+                f"{json_config_path} must contain a JSON object at its top level."
             )
         return config
+    if likely_misnamed_python_config.exists():
+        raise SiteConfigError(
+            f"Found {likely_misnamed_python_config.name}, but the project configuration "
+            f"file must be named {python_config_path.name}. Rename the file and run "
+            "`site sync` again."
+        )
     return {}
+
+
+def _load_python_site_config(config_path: Path) -> Dict[str, Any]:
+    """Execute a trusted ``site_config.py`` and return its normalized data."""
+    from onesite.config import SiteConfig
+
+    module_name = f"_onesite_project_config_{uuid.uuid4().hex}"
+    spec = spec_from_file_location(module_name, config_path)
+    if spec is None or spec.loader is None:
+        raise SiteConfigError(f"Unable to load Python configuration from {config_path}.")
+    module = module_from_spec(spec)
+    original_path = list(sys.path)
+    sys.modules[module_name] = module
+    sys.path.insert(0, str(config_path.parent))
+    try:
+        spec.loader.exec_module(module)
+    except Exception as exc:
+        raise SiteConfigError(
+            f"Unable to load {config_path}: {exc.__class__.__name__}: {exc}"
+        ) from exc
+    finally:
+        sys.modules.pop(module_name, None)
+        sys.path[:] = original_path
+
+    config = getattr(module, "config", None)
+    if not isinstance(config, SiteConfig):
+        raise SiteConfigError(
+            f"{config_path} must export `config = SiteConfig(...)`; "
+            f"got {type(config).__name__}."
+        )
+    return config.model_dump(mode="json", exclude_none=True)

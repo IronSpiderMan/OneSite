@@ -18,7 +18,7 @@ def _sync_models_assets(site_config: dict, cwd: Path) -> None:
     """Copy assets from the model source into the generated frontend.
 
     Users can place static files (e.g. logo, images) in ``app/models/assets/``
-    and reference them in site_config.json (e.g. ``"logo": "logo.png"``).
+    and reference them in site_config.py (e.g. ``logo="logo.png"``).
     During sync these files are copied into ``generated/frontend/public/`` so they
     are served by Vite's dev server and the production build.
     """

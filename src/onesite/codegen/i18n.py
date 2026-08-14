@@ -147,10 +147,10 @@ def generate_locale_files(
         "menu": {
             "dashboard": "Dashboard",
             "external_resources": "External Resources",
-            "reports": "Data Reports",
+            "reports": "Data Explorer",
         },
         "reports": {
-            "title": "Data Reports", "description": "Query, aggregate, chart, and export time-series data",
+            "title": "Data Explorer", "description": "Explore, aggregate, visualize, and export time-series data",
             "export_csv": "Export CSV", "filters": "Filters", "report": "Report", "entities": "Devices",
             "metrics": "Metrics", "start_time": "Start", "end_time": "End", "bucket": "Interval",
             "aggregation": "Aggregation", "query": "Query", "trend": "Trend", "results": "Results",
@@ -421,10 +421,10 @@ def generate_locale_files(
         "menu": {
             "dashboard": "仪表盘",
             "external_resources": "外部资源同步",
-            "reports": "数据报表",
+            "reports": "数据探索",
         },
         "reports": {
-            "title": "数据报表", "description": "查询、聚合、展示和导出时序数据",
+            "title": "数据探索", "description": "探索、聚合、可视化和导出时序数据",
             "export_csv": "导出 CSV", "filters": "筛选条件", "report": "报表", "entities": "设备",
             "metrics": "点位", "start_time": "开始时间", "end_time": "结束时间", "bucket": "统计周期",
             "aggregation": "聚合方式", "query": "查询", "trend": "趋势", "results": "查询结果",

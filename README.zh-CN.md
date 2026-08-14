@@ -212,7 +212,7 @@ dashboard_metrics = [
 
 相对时间范围支持 `today`、`yesterday`、`this_week`、`last_week`、`this_month`、`last_month`、`last_7_days`、`last_30_days`。指标角色范围会和模型读取权限取交集，后端不会向无权限角色返回指标。旧的 `time_field + period` 与 `__onesite__.dashboard_metrics` 暂时兼容；后者会在 `site sync` 时提示迁移。
 - `is_notification_table`、`time_series_table`：通知/WebSocket 与时序表配置。
-- `data_reports`：为时序模型生成通用报表。最简配置为 `"data_reports": True`；
+- `data_reports`：为时序模型生成通用数据探索器。最简配置为 `"data_reports": True`；
   OneSite 会从 `time_series_table` 推导实体、指标、时间和值字段，并从相关模型表推导
   指标名称、单位、数据类型、枚举和量程。单报表可用对象覆盖标题等少量行为：
 
@@ -225,14 +225,14 @@ __onesite__ = {
         "model_table": "device_model",
     },
     "data_reports": {
-        "title": "设备数据报表",
+        "title": "设备数据探索",
         "entity_label": "设备",
         "views": "auto",
     },
 }
 ```
 
-  `views="auto"` 会按指标语义开放适用图表，包括折线、面积、分组/堆叠柱状、
+  数据探索器与 Dashboard 共用 ECharts 图表运行时。`views="auto"` 会按指标语义开放适用图表，包括折线、面积、分组/堆叠柱状、
   环形、散点、直方、热力和状态图。`bucket="auto"` 会按时间跨度自动控制点数；
   查询响应会显式返回截断状态，避免把部分数据误认为完整结果。只有需要多个报表或
   明确限制视图、权限、时间跨度时才需要使用列表和更多覆盖项。

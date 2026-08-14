@@ -118,6 +118,15 @@ def _desktop_config_defaults(project_name: str) -> dict[str, object]:
     }
 
 
+def _write_python_site_config(target: Path, project_name: str) -> None:
+    """Write the typed project configuration template with project defaults."""
+    desktop = _desktop_config_defaults(project_name)
+    content = (TEMPLATE_DIR / "site_config.py").read_text(encoding="utf-8")
+    content = content.replace("__PROJECT_NAME__", repr(project_name))
+    content = content.replace("__DESKTOP_IDENTIFIER__", repr(desktop["identifier"]))
+    target.write_text(content, encoding="utf-8")
+
+
 def _ensure_deploy_files(base_dir: Path) -> Path:
     """Create the deployment directory without overwriting user environment files."""
     deploy_dir = get_project_paths(base_dir).deploy
@@ -133,7 +142,7 @@ def _ensure_deploy_files(base_dir: Path) -> Path:
 @app.command()
 def init():
     """
-    Initialize site_config.json and base models in an existing project.
+    Initialize site_config.py and base models in an existing project.
     Ensures necessary models (User, SystemConfig, CustomConfig) exist.
     """
     base_dir = get_cwd_safely()
@@ -148,7 +157,9 @@ def init():
 
     # Check current state
     has_models = paths.models.exists()
-    has_site_config = (base_dir / "site_config.json").exists()
+    has_site_config = any(
+        (base_dir / name).exists() for name in ("site_config.py", "site_config.json")
+    )
     has_backend = paths.backend.exists()
     has_frontend = paths.frontend.exists()
 
@@ -160,36 +171,15 @@ def init():
 
     template_models_dir = Path(__file__).parent / "templates" / "models"
     models_dir = paths.models
-    site_config_file = base_dir / "site_config.json"
+    site_config_file = base_dir / "site_config.py"
 
-    # Create site_config.json if not exists
+    # Create the typed Python configuration if no supported configuration exists.
     if not has_site_config:
-        import json
         project_name = base_dir.name.lower().replace("-", "_")
-        site_config = {
-            "project_name": project_name,
-            "database_url": "sqlite:///./app.db",
-            "upload_dir": "uploads",
-            "secret_key": "changeme",
-            "access_token_expire_minutes": 11520,
-            "extra": {
-                "TIMEZONE": "Asia/Shanghai",
-            },
-            "allowed_origins": [
-                "http://localhost:5173",
-                "http://localhost:3000",
-                "http://127.0.0.1:5173",
-                "http://127.0.0.1:3000",
-                "tauri://localhost",
-                "http://tauri.localhost",
-            ],
-            "desktop": _desktop_config_defaults(project_name),
-            "logo": "",
-        }
-        site_config_file.write_text(json.dumps(site_config, indent=4), encoding="utf-8")
-        console.print(f"[green]Created site_config.json[/green]")
+        _write_python_site_config(site_config_file, project_name)
+        console.print(f"[green]Created site_config.py[/green]")
     else:
-        console.print(f"[blue]site_config.json already exists[/blue]")
+        console.print("[blue]Project configuration already exists[/blue]")
 
     # Create models directory if not exists
     if not has_models:
@@ -302,28 +292,7 @@ def create(
         content = content.replace("{{ project_name }}", project_name)
         index_html.write_text(content, encoding="utf-8")
 
-    # Generate site_config.json
-    import json
-    site_config = {
-        "project_name": project_name,
-        "database_url": "sqlite:///./app.db",
-        "upload_dir": "uploads",
-        "secret_key": "changeme",
-        "access_token_expire_minutes": 11520,
-        "extra": {
-            "TIMEZONE": "Asia/Shanghai",
-        },
-        "allowed_origins": [
-            "http://localhost:5173",
-            "http://localhost:3000",
-            "tauri://localhost",
-            "http://tauri.localhost",
-        ],
-        "desktop": _desktop_config_defaults(project_name),
-    }
-    (target_dir / "site_config.json").write_text(
-        json.dumps(site_config, indent=4), encoding="utf-8"
-    )
+    _write_python_site_config(target_dir / "site_config.py", project_name)
 
     console.print(f"[bold green]Project {project_name} created successfully![/bold green]")
     console.print(f"cd {project_name} && site sync")
@@ -717,19 +686,17 @@ def build(
     # Generate deploy/docker-compose.yml with correct images and ports
     console.print("[blue]Generating deploy/docker-compose.yml...[/blue]")
 
-    # Check for PG usage
-    use_pg = False
-    site_config = {}
-    site_config_file = base_dir / "site_config.json"
-    if site_config_file.exists():
-        import json
-        try:
-            site_config = json.loads(site_config_file.read_text(encoding="utf-8"))
-            db_url = site_config.get("database_url", "")
-            if db_url.startswith("postgresql"):
-                use_pg = True
-        except:
-            site_config = {}
+    # Load through the common boundary so Python and legacy JSON projects
+    # produce the same deployment artifacts.
+    from onesite.codegen.config import SiteConfigError, load_site_config
+
+    try:
+        site_config = load_site_config(base_dir)
+    except SiteConfigError as exc:
+        console.print(f"[bold red]Configuration error:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+    db_url = site_config.get("database_url", "")
+    use_pg = isinstance(db_url, str) and db_url.startswith("postgresql")
 
     context = {
         "project_name": project_name,

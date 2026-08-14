@@ -37,7 +37,7 @@ The frontend is available at `http://localhost:5173`; FastAPI documentation is a
 The normal edit/generate loop is:
 
 ```text
-edit app/models/, app/integrations/, app/utils/, app/resources.py or site_config.json → site sync → test /docs and the frontend
+edit app/models/, app/integrations/, app/utils/, app/resources.py or site_config.py → site sync → test /docs and the frontend
 ```
 
 Do not treat `generated/backend/app/models/` as the model source of truth: it is synced from `app/models/`. Everything under `generated/` is replaceable output. Keep durable business customizations in `app/`, not solely in generated files. Existing projects with top-level `models/`, `backend/`, and `frontend/` remain supported without an automatic directory migration.
@@ -46,7 +46,7 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
 
 | Command | Purpose |
 | --- | --- |
-| `site init` | Initialize `site_config.json`, base models and icon reference in the current directory. |
+| `site init` | Initialize `site_config.py`, base models and icon reference in the current directory. |
 | `site create <project_name>` | Create a new full-stack project. |
 | `site sync` | Copy application source and regenerate `generated/backend` and `generated/frontend`. |
 | `site sync --install` / `-i` | Regenerate, then install backend and frontend dependencies. |
@@ -73,44 +73,46 @@ platform are skipped. Regular `site sync` does not build command projects.
 
 ## Project configuration
 
-`site_config.json` is created with sensible defaults. Common settings are:
+`site_config.py` is created with sensible defaults. It uses typed configuration
+objects, so VS Code, PyCharm, and other Python-aware editors can complete keys
+and validate nested values while you edit:
 
-```json
-{
-  "project_name": "Inventory",
-  "database_url": "sqlite:///./app.db",
-  "upload_dir": "uploads",
-  "secret_key": "replace-with-a-random-production-secret",
-  "access_token_expire_minutes": 11520,
-  "extra": {
-    "TIMEZONE": "Asia/Shanghai"
-  },
-  "allowed_origins": ["http://localhost:5173", "http://localhost:3000"],
-  "desktop": {
-    "identifier": "com.example.inventory",
-    "version": "1.0.0",
-    "api_url": "https://api.example.com/api/v1",
-    "width": 1280,
-    "height": 800
-  },
-  "style": "normal",
-  "radius": 1.0,
-  "navigation": [
-    { "type": "builtin", "key": "dashboard" },
-    {
-      "type": "group",
-      "key": "catalog",
-      "label": { "zh": "商品管理", "en": "Catalog" },
-      "icon": "Package",
-      "default_open": true,
-      "children": [
-        { "type": "model", "model": "category" },
-        { "type": "model", "model": "product" }
-      ]
-    }
-  ]
-}
+```python
+from onesite.config import DesktopConfig, NavBuiltin, NavGroup, NavModel, SiteConfig, Theme
+
+config = SiteConfig(
+    project_name="Inventory",
+    database_url="sqlite:///./app.db",
+    secret_key="replace-with-a-random-production-secret",
+    extra={"TIMEZONE": "Asia/Shanghai"},
+    allowed_origins=["http://localhost:5173", "http://localhost:3000"],
+    style=Theme.NORMAL,
+    radius=1.0,
+    desktop=DesktopConfig(
+        identifier="com.example.inventory",
+        version="1.0.0",
+        api_url="https://api.example.com/api/v1",
+        width=1280,
+        height=800,
+    ),
+    navigation=[
+        NavBuiltin.dashboard(),
+        NavGroup(
+            key="catalog",
+            label={"zh": "商品管理", "en": "Catalog"},
+            icon="Package",
+            default_open=True,
+            children=[NavModel(model="category"), NavModel(model="product")],
+        ),
+    ],
+)
 ```
+
+`site_config.json` remains supported for existing projects. Do not keep both
+files in one project: `site sync` stops with a clear error rather than choosing
+one implicitly. A Python configuration is trusted project code and is executed
+by `site sync`; use `env("SECRET_KEY")` from `onesite.config` for production
+secrets rather than committing them to the file.
 
 Supported themes are `normal`, `industrial`, and `neuron`. The `style` value is a build-time structural theme: `site sync` selects that theme's list, detail, create, dashboard, settings, profile, singleton, and CSS templates. Theme templates live under `src/onesite/templates/codegen/themes/<style>/` and fall back to the shared codegen templates when an override is absent. The `normal` theme uses Ant Design 6 through generated compatibility adapters and only adds the `antd` dependency to normal builds. Light/dark/system mode remains a browser-side runtime preference and is synchronized with Ant Design's theme algorithm. The `neuron` theme is a dark telemetry-console style with a graphite grid and signal-green accents. Use a production database URL and a strong, private `secret_key` outside local development.
 
@@ -160,7 +162,7 @@ origins to the generated backend CORS configuration.
 
 ### MQTT callbacks
 
-Keep broker settings and topic bindings in `site_config.json`:
+Keep broker settings and topic bindings in `site_config.py` (the JSON shape below is also accepted by legacy `site_config.json` projects):
 
 ```json
 {
@@ -696,7 +698,7 @@ written under `generated/frontend/src-tauri/target/release/bundle/`.
 
 ```text
 project/
-├── site_config.json
+├── site_config.py
 ├── app/                       # developer-owned source
 │   ├── models/                # SQLModel source of truth
 │   ├── integrations/
@@ -721,7 +723,7 @@ project/
 │   ├── .env.example
 │   ├── .env                   # optional, developer-created and gitignored
 │   └── docker-compose.yml     # generated by site build
-└── site_config.json
+└── site_config.py
 ```
 
 See the [Chinese training guide](docs/onesite-training-guide.md) and `examples/` for end-to-end model examples, including permissions and IoT/time-series scenarios.

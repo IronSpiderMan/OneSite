@@ -909,6 +909,7 @@ def phase_generate_aggregated(
     frontend_path = get_project_paths(cwd).frontend
     theme_name = resolve_theme(site_config)[0]["id"]
     visualizations = site_config.get("_visualizations", [])
+    report_explorer_enabled = any(model.get("data_reports") for model in api_models)
     external_models = [m for m in models if m.get("external_resource")]
     external_resources_enabled = bool(external_models)
     external_resource_configs = [
@@ -1045,6 +1046,11 @@ def phase_generate_aggregated(
             visualization_context,
             backend_path / "app" / "api" / "endpoints" / "visualizations.py",
         )
+    # The explorer uses the same ECharts canvas and option builders as
+    # configured dashboard visualizations.  It must be generated even when a
+    # project only declares ``data_reports`` and no fixed visualizations.
+    if visualizations or report_explorer_enabled:
+        visualization_context = {"visualizations": visualizations}
         generate_file(
             "frontend_visualization_service.ts.j2",
             visualization_context,
@@ -1052,9 +1058,16 @@ def phase_generate_aggregated(
         )
         generate_file(
             "frontend_visualization_chart.tsx.j2",
-            visualization_context,
+            {
+                "visualizations": visualizations,
+                "report_explorer_enabled": report_explorer_enabled,
+            },
             frontend_path / "src" / "components" / "visualization-chart.tsx",
         )
+    # ``report-charts.tsx`` belonged to the retired Recharts implementation.
+    # It is generated output, so safely remove it on the next sync rather than
+    # leaving an unused second chart stack in existing projects.
+    (frontend_path / "src" / "components" / "report-charts.tsx").unlink(missing_ok=True)
 
     generate_file(
         "backend_main.py.j2",
@@ -1280,11 +1293,6 @@ def phase_generate_aggregated(
             "report_runtime.py.j2",
             {},
             backend_path / "app" / "core" / "reports.py",
-        )
-        generate_file(
-            "report_charts.tsx.j2",
-            {},
-            frontend_path / "src" / "components" / "report-charts.tsx",
         )
         generate_file(
             "report_page.tsx.j2",
