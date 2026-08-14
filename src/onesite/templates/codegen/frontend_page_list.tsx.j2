@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown{% endif %} } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -1184,17 +1184,26 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 {% else %}
       {/* Tree View — Lazy Loading */}
-      <div className="flex-1 min-h-0 overflow-auto border rounded-md border-t-2 border-t-accent/30">
+      <div className="flex-1 min-h-0 overflow-auto rounded-md border border-t-2 border-t-accent/30 bg-card shadow-sm">
+        <div className="sticky top-0 z-10 flex items-center justify-between border-b bg-card/95 px-4 py-2.5 backdrop-blur supports-[backdrop-filter]:bg-card/80">
+          <div className="flex min-w-0 items-center gap-2">
+            <FolderOpen className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+            <span className="truncate text-sm font-medium">{t('models.{{ model.module_name }}.name')}</span>
+            {!rootLoading && <Badge variant="secondary" className="shrink-0 font-normal">{rootTotal}</Badge>}
+          </div>
+          <span className="text-xs text-muted-foreground">{t('common.page_info')} {rootPage} {t('common.of_page')} {Math.ceil(rootTotal / rootSize) || 1}</span>
+        </div>
         {rootLoading && rootItems.length === 0 ? (
-          <div className="h-24 text-center py-8">
+          <div className="flex h-32 items-center justify-center">
             <Loader2 className="h-6 w-6 animate-spin mx-auto" />
           </div>
         ) : !rootLoading && rootItems.length === 0 ? (
-          <div className="h-24 text-center py-8">
-            {t('common.no_result')}
+          <div className="flex h-32 flex-col items-center justify-center gap-2 text-center text-sm text-muted-foreground">
+            <Folder className="h-7 w-7 opacity-50" aria-hidden="true" />
+            <span>{t('common.no_result')}</span>
           </div>
         ) : (
-          <div className="py-2">
+          <div className="min-w-max py-2">
             {(() => {
               const renderNodes = (nodes: any[], depth: number): React.ReactNode[] => {
                 const elements: React.ReactNode[] = [];
@@ -1205,18 +1214,39 @@ const {{ model.name }}Page: React.FC = () => {
                   const childPageNum = childrenPage[node.id] || 1;
                   const isLoading = loadingChildren[node.id];
                   const hasMore = children.length > 0 && children.length < childTotal;
-                  const isLeaf = !isLoading && !hasMore && children.length === 0 && childTotal === 0;
+                  // An absent entry means this node has not been expanded yet.
+                  // Only disable the expander after a completed child request confirms
+                  // that the node has no children.
+                  const hasLoadedChildren = Object.prototype.hasOwnProperty.call(childrenMap, node.id);
+                  const isLeaf = hasLoadedChildren && !isLoading && !hasMore && children.length === 0 && childTotal === 0;
+                  const label = node.{{ model.search_field }} || `#${node.id}`;
 
                   elements.push(
                     <div
                       key={node.id}
-                      className="flex items-center gap-2 py-2 px-2 hover:bg-accent/50 rounded-md"
+                      className="group relative mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 transition-colors hover:bg-accent/60 focus-within:bg-accent/60"
                       style={% raw %}{{ paddingLeft: `${depth * 28 + 8}px` }}{% endraw %}
                     >
+                      {depth > 0 && (
+                        <>
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
+                            style={% raw %}{{ left: `${(depth - 1) * 28 + 21}px` }}{% endraw %}
+                          />
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute top-1/2 h-px w-3.5 bg-border"
+                            style={% raw %}{{ left: `${(depth - 1) * 28 + 21}px` }}{% endraw %}
+                          />
+                        </>
+                      )}
                       <button
                         type="button"
-                        className="h-4 w-4 flex items-center justify-center shrink-0"
+                        className="relative z-[1] flex h-6 w-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-background hover:text-foreground focus:outline-none focus:ring-2 focus:ring-ring disabled:cursor-default disabled:hover:bg-transparent"
                         onClick={() => handleToggleExpand(node.id)}
+                        disabled={isLeaf}
+                        aria-label={isExpanded ? 'Collapse node' : 'Expand node'}
                       >
                         {isLoading ? (
                           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
@@ -1224,33 +1254,43 @@ const {{ model.name }}Page: React.FC = () => {
                           children.length > 0 ? (
                             <ChevronDown className="h-4 w-4 text-muted-foreground" />
                           ) : (
-                            <span className="h-4 w-4" />
+                            <span className="h-4 w-4" aria-hidden="true" />
                           )
-                        ) : (
+                        ) : !isLeaf ? (
                           <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                        )}
+                        ) : null}
                       </button>
-                      <span className="flex-1 truncate text-sm">
-                        {node.{{ model.search_field }} || `#${node.id}`}
-                      </span>
-                      <div className="flex items-center gap-1 shrink-0">
+                      {isExpanded ? (
+                        <FolderOpen className="h-4 w-4 shrink-0 text-accent" aria-hidden="true" />
+                      ) : (
+                        <Folder className="h-4 w-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+                      )}
+                      <div className="flex min-w-0 flex-1 items-center gap-2">
+                        <span className="truncate text-sm font-medium" title={String(label)}>{label}</span>
+                        {childTotal > 0 && (
+                          <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-medium">
+                            {childTotal}
+                          </Badge>
+                        )}
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1 rounded-md bg-background/80 p-0.5 opacity-80 shadow-sm transition-opacity group-hover:opacity-100 group-focus-within:opacity-100">
                         {hasPermission('c') && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleCreateChild(node)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleCreateChild(node)} aria-label="Add child">
                             <Plus className="h-3.5 w-3.5" />
                           </Button>
                         )}
                         {hasPermission('r') && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/{{ model.module_name }}s/${node.id}`)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => navigate(`/{{ model.module_name }}s/${node.id}`)} aria-label="View node">
                             <Eye className="h-3.5 w-3.5" />
                           </Button>
                         )}
                         {hasPermission('u') && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEdit(node)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => handleEdit(node)} aria-label="Edit node">
                             <Pencil className="h-3.5 w-3.5" />
                           </Button>
                         )}
                         {hasPermission('d') && (
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive" onClick={() => requestDelete(node.id)}>
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => requestDelete(node.id)} aria-label="Delete node">
                             <Trash2 className="h-3.5 w-3.5" />
                           </Button>
                         )}
@@ -1269,13 +1309,14 @@ const {{ model.name }}Page: React.FC = () => {
                       elements.push(
                         <div
                           key={`${node.id}-more`}
-                          className="flex items-center justify-center py-1"
+                          className="flex items-center gap-2 py-1.5 text-muted-foreground"
                           style={% raw %}{{ paddingLeft: `${(depth + 1) * 28 + 8}px` }}{% endraw %}
                         >
+                          <CornerDownRight className="h-3.5 w-3.5" aria-hidden="true" />
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="h-7 text-xs"
+                            className="h-7 px-2 text-xs"
                             onClick={() => loadChildren(node.id, childPageNum + 1)}
                           >
                             {t('common.load_more', 'Load more')}...
