@@ -1,79 +1,105 @@
 import React from 'react';
-import { Home{% if reports_enabled %}, FileBarChart{% endif %}{% if external_resources_enabled %}, RefreshCw{% endif %}{% for icon in used_icons %}{% if icon != 'Home' %}, {{ icon }}{% endif %}{% endfor %} } from 'lucide-react';
+import { {% for icon in used_icons %}{{ icon }}{% if not loop.last %}, {% endif %}{% endfor %} } from 'lucide-react';
 
-export const GeneratedMenu = [
-  {
-    key: '/dashboard',
-    icon: <Home className="h-4 w-4" />,
-    label: 'menu.dashboard',
-    minRole: 'user',
-  },
-{% if reports_enabled %}
-  {
-    key: '/reports',
-    icon: <FileBarChart className="h-4 w-4" />,
-    label: 'menu.reports',
-    visible: {{ reports_role_visible | tojson }},
-    minRole: '{% if reports_role_visible.get("user") %}user{% elif reports_role_visible.get("admin") %}admin{% else %}developer{% endif %}',
-  },
-{% endif %}
-{% if external_resources_enabled %}
-  {
-    key: '/external-resources',
-    icon: <RefreshCw className="h-4 w-4" />,
-    label: 'menu.external_resources',
-    minRole: 'admin',
-  },
-{% endif %}
-{% for model in models %}
-{% if not model.is_singleton %}
-  {
-    key: '/{{ model.module_name }}s',
-    icon: <{{ model.get("icon", "LayoutDashboard") }} className="h-4 w-4" />,
-    label: 'models.{{ model.module_name }}.name',
-    {% if model.owner_field %}
-    myLabel: 'models.{{ model.module_name }}.my_name',
-    {% endif %}
-    visible: {{ model.role_visible | tojson }},
-    minRole: '{% if model.role_visible.get("user", True) %}user{% elif model.role_visible.get("admin", True) %}admin{% else %}developer{% endif %}',
-  },
-{% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
-  {
-    key: '/{{ model.module_name }}',
-    icon: <{{ model.get("icon", "LayoutDashboard") }} className="h-4 w-4" />,
-    label: 'models.{{ model.module_name }}.name',
-    {% if model.owner_field %}
-    myLabel: 'models.{{ model.module_name }}.my_name',
-    {% endif %}
-    visible: {{ model.role_visible | tojson }},
-    minRole: '{% if model.role_visible.get("user", True) %}user{% elif model.role_visible.get("admin", True) %}admin{% else %}developer{% endif %}',
-  },
-{% endif %}
-{% endfor %}
-];
+type RoleVisibility = Record<string, boolean>;
 
-// Role hierarchy for filtering
-const ROLE_HIERARCHY: Record<string, number> = {
-  'user': 0,
-  'admin': 1,
-  'developer': 2,
+export type GeneratedMenuItem = {
+  type: 'item';
+  key: string;
+  icon: React.ReactNode;
+  label: string;
+  myLabel?: string;
+  visible: RoleVisibility;
 };
 
-export function filterMenuByRole(menu: typeof GeneratedMenu, userRole: string): typeof GeneratedMenu {
-  const userLevel = ROLE_HIERARCHY[userRole] ?? 0;
-  return menu.filter(item => {
-    // Check if item has explicit visible config
-    if ('visible' in item && item.visible) {
-      const itemVisible = item.visible as Record<string, boolean>;
-      return itemVisible[userRole] ?? false;
+export type GeneratedMenuGroup = {
+  type: 'group';
+  key: string;
+  icon: React.ReactNode;
+  label: string;
+  visible: RoleVisibility;
+  defaultOpen: boolean;
+  children: GeneratedMenuNode[];
+};
+
+export type GeneratedMenuNode = GeneratedMenuItem | GeneratedMenuGroup;
+
+{% macro render_node(node) -%}
+{% if node.type == 'group' -%}
+{
+  type: 'group',
+  key: {{ node.key | tojson }},
+  icon: <{{ node.icon }} className="h-4 w-4" />,
+  label: {{ node.label | tojson }},
+  visible: {{ node.visible | tojson }},
+  defaultOpen: {{ node.default_open | tojson }},
+  children: [
+    {% for child in node.children %}{{ render_node(child) | indent(4, true) }}{% if not loop.last %},{% endif %}
+    {% endfor %}
+  ],
+}
+{% else -%}
+{
+  type: 'item',
+  key: {{ node.key | tojson }},
+  icon: <{{ node.icon }} className="h-4 w-4" />,
+  label: {{ node.label | tojson }},{% if node.my_label %}
+  myLabel: {{ node.my_label | tojson }},{% endif %}
+  visible: {{ node.visible | tojson }},
+}
+{% endif -%}
+{%- endmacro %}
+
+export const GeneratedMenu: GeneratedMenuNode[] = [
+{% for node in navigation %}  {{ render_node(node) | indent(2, true) }}{% if not loop.last %},{% endif %}
+{% endfor %}];
+
+function isVisible(visible: RoleVisibility, userRole: string): boolean {
+  return visible[userRole] ?? false;
+}
+
+export function filterMenuByRole(
+  menu: GeneratedMenuNode[],
+  userRole: string,
+): GeneratedMenuNode[] {
+  return menu.flatMap<GeneratedMenuNode>((node): GeneratedMenuNode[] => {
+    if (!isVisible(node.visible, userRole)) return [];
+    if (node.type === 'item') {
+      return [
+        userRole === 'user' && node.myLabel
+          ? { ...node, label: node.myLabel }
+          : node,
+      ];
     }
-    // Fall back to minRole check
-    return (ROLE_HIERARCHY[item.minRole] ?? 0) <= userLevel;
-  }).map(item => {
-    // Use myLabel for user role when available (owner-scoped models)
-    if (userRole === 'user' && 'myLabel' in item) {
-      return { ...item, label: item.myLabel as string };
-    }
-    return item;
+    const children = filterMenuByRole(node.children, userRole);
+    return children.length ? [{ ...node, children }] : [];
   });
+}
+
+export function findMenuItem(
+  menu: GeneratedMenuNode[],
+  pathname: string,
+): GeneratedMenuItem | undefined {
+  for (const node of menu) {
+    if (node.type === 'item' && node.key === pathname) return node;
+    if (node.type === 'group') {
+      const item = findMenuItem(node.children, pathname);
+      if (item) return item;
+    }
+  }
+  return undefined;
+}
+
+export function findMenuPath(
+  menu: GeneratedMenuNode[],
+  pathname: string,
+): GeneratedMenuNode[] {
+  for (const node of menu) {
+    if (node.type === 'item' && node.key === pathname) return [node];
+    if (node.type === 'group') {
+      const childPath = findMenuPath(node.children, pathname);
+      if (childPath.length) return [node, ...childPath];
+    }
+  }
+  return [];
 }

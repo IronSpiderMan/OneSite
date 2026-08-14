@@ -1,8 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { LayoutDashboard, Menu as MenuIcon, X, LogOut, Settings, ChevronLeft, ChevronRight } from 'lucide-react';
+import { Menu as MenuIcon, X, LogOut, Settings, ChevronLeft, ChevronRight, ChevronDown } from 'lucide-react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import { GeneratedMenu, filterMenuByRole } from '../Menu';
+import { GeneratedMenu, filterMenuByRole, findMenuItem, findMenuPath } from '../Menu';
 import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
@@ -72,6 +72,7 @@ const AppLayout: React.FC = () => {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
+  const [openMenuGroups, setOpenMenuGroups] = useState<Record<string, boolean>>({});
   const location = useLocation();
   const navigate = useNavigate();
   const theme = useThemeStyle();
@@ -163,7 +164,14 @@ const AppLayout: React.FC = () => {
   const logoLink = window.__ENV__?.LOGO_LINK || import.meta.env.VITE_LOGO_LINK || '/dashboard';
 
   const menuItems = filterMenuByRole(GeneratedMenu, userRole);
-  const activeMenuItem = menuItems.find((item: any) => location.pathname === item.key);
+  const activeMenuItem = findMenuItem(menuItems, location.pathname);
+  const activeMenuPath = findMenuPath(menuItems, location.pathname);
+  const groupContainsActiveItem = (item: any): boolean =>
+    item.type === 'group' && item.children.some((child: any) =>
+      child.type === 'item'
+        ? child.key === location.pathname
+        : groupContainsActiveItem(child)
+    );
   const activePageName = activeMenuItem
     ? t(activeMenuItem.label)
     : location.pathname === '/settings'
@@ -250,27 +258,84 @@ const AppLayout: React.FC = () => {
           )}
 
           <div className={cn("space-y-1", isNormal && "space-y-0")}>
-            {menuItems.map((item: any) => (
-              <Link
-                key={item.key}
-                to={item.key}
-                title={isCollapsed ? t(item.label) : undefined}
-                className={cn(
-                  "flex items-center transition-all duration-150",
-                  isNeuron && "neuron-nav-item",
-                  NAV_ITEM_BASE[theme],
-                  isCollapsed
-                    ? "justify-center py-2.5 px-0"
-                    : "space-x-2 px-4 py-2",
-                  location.pathname === item.key
-                    ? NAV_ACTIVE[theme]
-                    : NAV_INACTIVE[theme]
-                )}
-              >
-                {item.icon}
-                {!isCollapsed && <span className="text-sm font-medium">{t(item.label)}</span>}
-              </Link>
-            ))}
+            {menuItems.map((item: any) => {
+              if (item.type === 'group') {
+                const containsActiveItem = groupContainsActiveItem(item);
+                const isOpen = openMenuGroups[item.key] ?? (item.defaultOpen || containsActiveItem);
+                return (
+                  <div key={item.key}>
+                    <button
+                      type="button"
+                      title={isCollapsed ? t(item.label) : undefined}
+                      aria-expanded={!isCollapsed && isOpen}
+                      onClick={() => {
+                        if (isCollapsed) {
+                          localStorage.setItem('sidebar_collapsed', 'false');
+                          setCollapsed(false);
+                          setOpenMenuGroups(groups => ({ ...groups, [item.key]: true }));
+                          return;
+                        }
+                        setOpenMenuGroups(groups => ({ ...groups, [item.key]: !isOpen }));
+                      }}
+                      className={cn(
+                        "w-full flex items-center transition-all duration-150",
+                        isNeuron && "neuron-nav-item",
+                        NAV_ITEM_BASE[theme],
+                        isCollapsed
+                          ? "justify-center py-2.5 px-0"
+                          : "space-x-2 px-4 py-2",
+                        containsActiveItem ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
+                      )}
+                    >
+                      {item.icon}
+                      {!isCollapsed && <>
+                        <span className="flex-1 text-left text-sm font-medium">{t(item.label)}</span>
+                        <ChevronDown className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")} />
+                      </>}
+                    </button>
+                    {!isCollapsed && isOpen && (
+                      <div className="ml-4 border-l border-border/60 py-1">
+                        {item.children.map((child: any) => (
+                          <Link
+                            key={child.key}
+                            to={child.key}
+                            className={cn(
+                              "flex items-center gap-2 py-2 pl-5 pr-4 text-sm transition-all duration-150",
+                              isNeuron && "neuron-nav-item",
+                              location.pathname === child.key ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
+                            )}
+                          >
+                            {child.icon}
+                            <span className="font-medium">{t(child.label)}</span>
+                          </Link>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                );
+              }
+              return (
+                <Link
+                  key={item.key}
+                  to={item.key}
+                  title={isCollapsed ? t(item.label) : undefined}
+                  className={cn(
+                    "flex items-center transition-all duration-150",
+                    isNeuron && "neuron-nav-item",
+                    NAV_ITEM_BASE[theme],
+                    isCollapsed
+                      ? "justify-center py-2.5 px-0"
+                      : "space-x-2 px-4 py-2",
+                    location.pathname === item.key
+                      ? NAV_ACTIVE[theme]
+                      : NAV_INACTIVE[theme]
+                  )}
+                >
+                  {item.icon}
+                  {!isCollapsed && <span className="text-sm font-medium">{t(item.label)}</span>}
+                </Link>
+              );
+            })}
           </div>
 
           {/* System section */}
@@ -330,8 +395,17 @@ const AppLayout: React.FC = () => {
               {isNeuron && (
                 <div className="neuron-breadcrumbs hidden sm:flex">
                   <span>{projectName.toUpperCase()}</span>
-                  <i>/</i>
-                  <b>{activePageName}</b>
+                  {activeMenuPath.length > 0 ? activeMenuPath.map((item, index) => (
+                    <React.Fragment key={item.key}>
+                      <i>/</i>
+                      {index === activeMenuPath.length - 1
+                        ? <b>{t(item.label)}</b>
+                        : <span>{t(item.label)}</span>}
+                    </React.Fragment>
+                  )) : <>
+                    <i>/</i>
+                    <b>{activePageName}</b>
+                  </>}
                 </div>
               )}
             </div>

@@ -5,7 +5,11 @@ from typing import Any, Dict, List, Optional
 from .file_utils import write_file_with_status
 
 
-def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
+def generate_locale_files(
+    models: List[Dict[str, Any]],
+    locale_dir: Path,
+    navigation_groups: List[Dict[str, Any]] | None = None,
+):
 
     zh_field_defaults: Dict[str, str] = {
         "language": "语言",
@@ -576,6 +580,12 @@ def generate_locale_files(models: List[Dict[str, Any]], locale_dir: Path):
                 cur[p] = nxt
             cur = nxt
         cur[parts[-1]] = value
+
+    for group in navigation_groups or []:
+        key = group["key"].removeprefix("group:")
+        labels = group.get("translations", {})
+        set_by_path(en_translations, f"menu.groups.{key}", labels.get("en", key))
+        set_by_path(zh_translations, f"menu.groups.{key}", labels.get("zh", key))
 
     def pick_model_name(pack: Any, fallback: str) -> str:
         if isinstance(pack, str):

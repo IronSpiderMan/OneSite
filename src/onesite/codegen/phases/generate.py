@@ -574,19 +574,165 @@ def _generate_export_handlers(model: ModelDefinition, backend_path: Path) -> Non
     )
 
 
-def _sort_api_models(
-    api_models: list[ModelDefinition], site_config: dict
-) -> list[ModelDefinition]:
-    """Apply ``nav_order`` sorting from *site_config*, falling back to alphabetical."""
-    nav_order = site_config.get("nav_order", [])
-    if isinstance(nav_order, list) and nav_order:
-        order_map = {str(x): i for i, x in enumerate(nav_order)}
-        api_models.sort(
-            key=lambda m: (order_map.get(m["module_name"], 10_000), m["module_name"])
-        )
-    else:
-        api_models.sort(key=lambda m: m["module_name"])
+def _sort_api_models(api_models: list[ModelDefinition]) -> list[ModelDefinition]:
+    """Keep generated API files deterministic without coupling them to navigation."""
+    api_models.sort(key=lambda m: m["module_name"])
     return api_models
+
+
+def _navigation_visibility(raw: Any) -> dict[str, bool]:
+    """Normalize an optional navigation-group visibility declaration."""
+    roles = ("user", "admin", "developer")
+    if isinstance(raw, list):
+        return {role: role in raw for role in roles}
+    if isinstance(raw, dict):
+        return {role: bool(raw.get(role, False)) for role in roles}
+    return {role: True for role in roles}
+
+
+def _is_menu_model(model: ModelDefinition) -> bool:
+    """Exclude configuration records that have dedicated system UI."""
+    return not (
+        model.get("module_name") in {"system_config", "custom_config"}
+        and model.get("is_singleton")
+    )
+
+
+def _model_menu_node(model: ModelDefinition) -> dict[str, Any]:
+    route = f"/{model['module_name']}" if model.get("is_singleton") else f"/{model['module_name']}s"
+    return {
+        "type": "item",
+        "key": route,
+        "icon": model.get("icon", "LayoutDashboard"),
+        "label": f"models.{model['module_name']}.name",
+        "my_label": (
+            f"models.{model['module_name']}.my_name"
+            if model.get("owner_field")
+            else None
+        ),
+        "visible": model["role_visible"],
+    }
+
+
+def _builtin_menu_node(
+    key: str,
+    *,
+    reports_enabled: bool,
+    reports_role_visible: dict[str, bool],
+    external_resources_enabled: bool,
+) -> dict[str, Any] | None:
+    builtins = {
+        "dashboard": {
+            "key": "/dashboard",
+            "icon": "Home",
+            "label": "menu.dashboard",
+            "visible": {"user": True, "admin": True, "developer": True},
+        },
+        "reports": {
+            "key": "/reports",
+            "icon": "FileBarChart",
+            "label": "menu.reports",
+            "visible": reports_role_visible,
+        },
+        "external-resources": {
+            "key": "/external-resources",
+            "icon": "RefreshCw",
+            "label": "menu.external_resources",
+            "visible": {"user": False, "admin": True, "developer": True},
+        },
+    }
+    if key == "reports" and not reports_enabled:
+        return None
+    if key == "external-resources" and not external_resources_enabled:
+        return None
+    node = builtins[key]
+    return {"type": "item", **node}
+
+
+def _build_navigation(
+    navigation: Any,
+    frontend_models: list[ModelDefinition],
+    *,
+    reports_enabled: bool,
+    reports_role_visible: dict[str, bool],
+    external_resources_enabled: bool,
+) -> list[dict[str, Any]]:
+    """Build the generated menu tree from ``site_config.navigation``.
+
+    When the setting is absent, preserve the historical flat menu shape. When
+    it is present, navigation ordering comes exclusively from the tree's array
+    order.
+    """
+    model_by_module = {
+        model["module_name"]: model
+        for model in frontend_models
+        if _is_menu_model(model)
+    }
+
+    def build_node(declaration: dict[str, Any], path: str) -> dict[str, Any] | None:
+        node_type = declaration["type"]
+        if node_type == "model":
+            module_name = declaration["model"]
+            model = model_by_module.get(module_name)
+            if model is None:
+                available = ", ".join(sorted(model_by_module)) or "(none)"
+                raise ValueError(
+                    f"site_config.navigation {path} references model '{module_name}', "
+                    f"but its module name is not menu-eligible. Available models: {available}."
+                )
+            return _model_menu_node(model)
+        if node_type == "builtin":
+            return _builtin_menu_node(
+                declaration["key"],
+                reports_enabled=reports_enabled,
+                reports_role_visible=reports_role_visible,
+                external_resources_enabled=external_resources_enabled,
+            )
+
+        children = [
+            built
+            for index, child in enumerate(declaration["children"])
+            if (built := build_node(child, f"{path}.children[{index}]")) is not None
+        ]
+        if not children:
+            return None
+        return {
+            "type": "group",
+            "key": f"group:{declaration['key']}",
+            "label": f"menu.groups.{declaration['key']}",
+            "icon": declaration.get("icon", "Folder"),
+            "visible": _navigation_visibility(declaration.get("visible")),
+            "default_open": bool(declaration.get("default_open", False)),
+            "children": children,
+            "translations": declaration["label"],
+        }
+
+    if navigation is None:
+        default_nodes: list[dict[str, Any]] = [
+            _builtin_menu_node(
+                "dashboard",
+                reports_enabled=reports_enabled,
+                reports_role_visible=reports_role_visible,
+                external_resources_enabled=external_resources_enabled,
+            )
+        ]
+        default_nodes.extend(_model_menu_node(model) for model in model_by_module.values())
+        for key in ("reports", "external-resources"):
+            node = _builtin_menu_node(
+                key,
+                reports_enabled=reports_enabled,
+                reports_role_visible=reports_role_visible,
+                external_resources_enabled=external_resources_enabled,
+            )
+            if node is not None:
+                default_nodes.append(node)
+        return default_nodes
+
+    return [
+        built
+        for index, declaration in enumerate(navigation)
+        if (built := build_node(declaration, f"navigation[{index}]")) is not None
+    ]
 
 
 def phase_generate_per_model(
@@ -719,7 +865,7 @@ def phase_generate_per_model(
         and not m.get("is_latest_table")
         and (not m["is_link_table"] or (m.get("is_association_table") and m.get("show_in_menu")))
     ]
-    return _sort_api_models(api_models, site_config)
+    return _sort_api_models(api_models)
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -1074,16 +1220,30 @@ def phase_generate_aggregated(
         )
         for role in ("user", "admin", "developer")
     }
+    navigation = _build_navigation(
+        site_config.get("navigation"),
+        frontend_models,
+        reports_enabled=bool(report_models),
+        reports_role_visible=reports_role_visible,
+        external_resources_enabled=external_resources_enabled,
+    )
     generate_file(
         "frontend_routes.tsx.j2",
         {"models": frontend_models, "external_resources_enabled": external_resources_enabled, "reports_enabled": bool(report_models)},
         frontend_path / "src" / "Routes.tsx",
     )
-    # Collect unique icon names used across models (for dynamic import)
-    used_icons = sorted({m.get("icon", "LayoutDashboard") for m in frontend_models})
+    # Collect icons from both model items and declared navigation groups.
+    def collect_navigation_icons(nodes: list[dict[str, Any]]) -> set[str]:
+        icons: set[str] = set()
+        for node in nodes:
+            icons.add(node["icon"])
+            icons.update(collect_navigation_icons(node.get("children", [])))
+        return icons
+
+    used_icons = sorted(collect_navigation_icons(navigation))
     generate_file(
         "frontend_menu.tsx.j2",
-        {"models": frontend_models, "used_icons": used_icons, "external_resources_enabled": external_resources_enabled, "reports_enabled": bool(report_models), "reports_role_visible": reports_role_visible},
+        {"navigation": navigation, "used_icons": used_icons},
         frontend_path / "src" / "Menu.tsx",
     )
     site_logger_enabled = "site_logger" in site_config.get("plugins", [])
@@ -1166,7 +1326,8 @@ def phase_generate_aggregated(
         )
 
     # ── Locale files ──
-    generate_locale_files(models, frontend_path / "src" / "locales")
+    navigation_groups = [node for node in navigation if node["type"] == "group"]
+    generate_locale_files(models, frontend_path / "src" / "locales", navigation_groups)
 
     # ── Event listeners __init__.py (imports all model event modules) ──
     event_models = [m for m in models if m.get("event_listeners")]

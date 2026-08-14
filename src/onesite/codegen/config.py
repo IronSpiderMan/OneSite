@@ -38,6 +38,10 @@ _SCHEDULED_PARAM_TYPE_ALIASES = {
     "json": "json",
 }
 _TOOL_ROLES = {"user", "admin", "developer"}
+_NAVIGATION_TYPES = {"model", "group", "builtin"}
+_NAVIGATION_BUILTINS = {"dashboard", "reports", "external-resources"}
+_NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
+_MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
 def _default_desktop_identifier(project_name: str) -> str:
@@ -102,6 +106,98 @@ def validate_desktop_config(config: Dict[str, Any]) -> None:
                 f"site_config.json field 'desktop.{key}' must be an integer of at least 400."
             )
 
+
+def validate_navigation_config(config: Dict[str, Any]) -> None:
+    """Validate the declarative frontend navigation tree.
+
+    Model references are checked later, after model introspection.  Keeping the
+    structural validation here makes malformed ``site_config.json`` fail before
+    it can write generated files or environment configuration.
+    """
+    if "nav_order" in config:
+        raise SiteConfigError(
+            "site_config.json field 'nav_order' is no longer supported; "
+            "configure the ordered navigation tree with 'navigation' instead."
+        )
+
+    navigation = config.get("navigation")
+    if navigation is None:
+        return
+    if not isinstance(navigation, list):
+        raise SiteConfigError("site_config.json field 'navigation' must be an array.")
+
+    seen_models: set[str] = set()
+    seen_groups: set[str] = set()
+    seen_builtins: set[str] = set()
+
+    def fail(path: str, message: str) -> None:
+        raise SiteConfigError(f"site_config.json field '{path}' {message}.")
+
+    def validate_visible(value: Any, path: str) -> None:
+        if value is None:
+            return
+        if isinstance(value, list) and all(role in _TOOL_ROLES for role in value):
+            return
+        if isinstance(value, dict) and all(
+            role in _TOOL_ROLES and isinstance(allowed, bool)
+            for role, allowed in value.items()
+        ):
+            return
+        fail(path, "must be a role list or a role-to-boolean object")
+
+    def validate_node(node: Any, path: str, *, in_group: bool = False) -> None:
+        if not isinstance(node, dict):
+            fail(path, "must be an object")
+        node_type = node.get("type")
+        if node_type not in _NAVIGATION_TYPES:
+            fail(path + ".type", "must be model, group, or builtin")
+
+        if node_type == "model":
+            model = node.get("model")
+            if not isinstance(model, str) or not _MODULE_NAME_RE.fullmatch(model):
+                fail(path + ".model", "must be a non-empty model module name")
+            if model in seen_models:
+                fail(path + ".model", f"references duplicate model '{model}'")
+            seen_models.add(model)
+            return
+
+        if node_type == "builtin":
+            key = node.get("key")
+            if key not in _NAVIGATION_BUILTINS:
+                fail(path + ".key", "must be dashboard, reports, or external-resources")
+            if key in seen_builtins:
+                fail(path + ".key", f"references duplicate builtin '{key}'")
+            seen_builtins.add(key)
+            return
+
+        if in_group:
+            fail(path, "cannot contain nested groups; only two menu levels are supported")
+        key = node.get("key")
+        if not isinstance(key, str) or not _NAVIGATION_KEY_RE.fullmatch(key):
+            fail(path + ".key", "must be a non-empty group key")
+        if key in seen_groups:
+            fail(path + ".key", f"references duplicate group '{key}'")
+        seen_groups.add(key)
+        label = node.get("label")
+        if (
+            not isinstance(label, dict)
+            or not all(isinstance(label.get(language), str) and label[language] for language in ("zh", "en"))
+        ):
+            fail(path + ".label", "must provide non-empty zh and en labels")
+        icon = node.get("icon", "Folder")
+        if not isinstance(icon, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", icon):
+            fail(path + ".icon", "must be a valid Lucide component name")
+        if "default_open" in node and not isinstance(node["default_open"], bool):
+            fail(path + ".default_open", "must be a boolean")
+        validate_visible(node.get("visible"), path + ".visible")
+        children = node.get("children")
+        if not isinstance(children, list) or not children:
+            fail(path + ".children", "must be a non-empty array")
+        for index, child in enumerate(children):
+            validate_node(child, f"{path}.children[{index}]", in_group=True)
+
+    for index, node in enumerate(navigation):
+        validate_node(node, f"navigation[{index}]")
 
 def validate_tools_config(config: Dict[str, Any]) -> None:
     """Validate and normalize Dashboard tool definitions."""
