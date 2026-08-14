@@ -1075,7 +1075,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 ))}
                                 </div>
                                 {% elif field.is_enum %}
-                                <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${currentItem.{{ field.name }}}`, currentItem.{{ field.name }}))}</Badge>
+                                {currentItem.{{ field.name }} != null ? (
+                                    <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${currentItem.{{ field.name }}}`, currentItem.{{ field.name }}))}</Badge>
+                                ) : '-'}
                                 {% elif field.ui_type == 'image' %}
                                 {currentItem.{{ field.name }} ? (
                                     <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
@@ -1485,7 +1487,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% elif field.ui_type == 'bool' %}
                                                     {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
-                                                    <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ m2m.target_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                                                    {item.{{ field.name }} != null ? (
+                                                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ m2m.target_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                                                    ) : '-'}
                                                     {% elif field.ui_type == 'datetime' %}
                                                     {formatDateTime(item.{{ field.name }}, timeZone)}
                                                     {% else %}
@@ -1588,7 +1592,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% elif field.ui_type == 'bool' %}
                                                     {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
-                                                    <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rel.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                                                    {item.{{ field.name }} != null ? (
+                                                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rel.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                                                    ) : '-'}
                                                     {% elif field.ui_type == 'datetime' %}
                                                     {formatDateTime(item.{{ field.name }}, timeZone)}
                                                     {% else %}
@@ -1798,7 +1804,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% elif field.ui_type == 'bool' %}
                                                     {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
-                                                    <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rfk.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                                                    {item.{{ field.name }} != null ? (
+                                                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rfk.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                                                    ) : '-'}
                                                     {% elif field.ui_type == 'datetime' %}
                                                     {formatDateTime(item.{{ field.name }}, timeZone)}
                                                     {% else %}

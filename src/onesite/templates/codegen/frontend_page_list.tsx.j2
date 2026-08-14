@@ -951,7 +951,9 @@ const {{ model.name }}Page: React.FC = () => {
                         ))}
                         </div>
                         {% elif field.is_enum %}
-                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                        {item.{{ field.name }} != null ? (
+                            <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
+                        ) : '-'}
                         {% elif field.ui_type == 'datetime' %}
                         <span className="text-muted-foreground">{formatDateTime(item.{{ field.name }}, timeZone)}</span>
                         {% elif field.ui_type == 'time' %}
