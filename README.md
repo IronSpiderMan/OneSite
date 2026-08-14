@@ -95,7 +95,20 @@ platform are skipped. Regular `site sync` does not build command projects.
   },
   "style": "normal",
   "radius": 1.0,
-  "nav_order": ["user", "category", "product"]
+  "navigation": [
+    { "type": "builtin", "key": "dashboard" },
+    {
+      "type": "group",
+      "key": "catalog",
+      "label": { "zh": "商品管理", "en": "Catalog" },
+      "icon": "Package",
+      "default_open": true,
+      "children": [
+        { "type": "model", "model": "category" },
+        { "type": "model", "model": "product" }
+      ]
+    }
+  ]
 }
 ```
 
@@ -105,6 +118,17 @@ Every key under `extra` is synchronized to the backend `.env`. `TIMEZONE`
 accepts an IANA timezone name, defaults to `Asia/Shanghai`, controls the
 default frontend display timezone and APScheduler cron timezone, while
 datetimes are normalized to UTC before database persistence.
+
+### Navigation
+
+`navigation` is the ordered, declarative sidebar tree. A `model` entry refers
+to the model's `module_name`; a `group` is a non-routable, collapsible second-
+level container; and `builtin` supports `dashboard`, `reports`, and
+`external-resources`. Group labels require `zh` and `en` translations. Model
+permissions and `visible` settings still control whether each child is shown;
+empty groups are hidden automatically. Models omitted from an explicitly
+configured tree remain reachable by route and API but are not shown in the
+sidebar.
 
 ### Application resources
 
