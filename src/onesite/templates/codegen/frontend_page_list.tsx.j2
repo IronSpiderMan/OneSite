@@ -40,6 +40,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
 import { FileUpload } from '../../components/ui/file-upload';
+import { VideoStreamInput } from '../../components/ui/video-stream-input';
 import { FileInput } from '../../components/ui/file-input';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
@@ -937,6 +938,12 @@ const {{ model.name }}Page: React.FC = () => {
                         ) : (
                             <span className="text-muted-foreground">-</span>
                         )}
+                        {% elif field.ui_type == 'video_stream' %}
+                        {item.{{ field.name }} ? (
+                            <Badge variant="secondary" title={item.{{ field.name }}} className="max-w-[180px] truncate">
+                                {t('video_stream.stream')}
+                            </Badge>
+                        ) : '-'}
                         {% elif field.is_enum and field.is_multi_select %}
                         <div className="flex flex-wrap gap-1">
                         {Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.map((v: string) => (
@@ -1383,6 +1390,14 @@ const {{ model.name }}Page: React.FC = () => {
                                     onChange={onChange}
                                     allowDownload={ {{ "true" if field.allow_download else "false" }} }
                                 />
+                            )}
+                        />
+                        {% elif field.ui_type == 'video_stream' %}
+                        <Controller
+                            control={control}
+                            name="{{ field.name }}"
+                            render={({ field: { onChange, value } }) => (
+                                <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
                             )}
                         />
                         {% elif field.is_enum and field.is_multi_select %}

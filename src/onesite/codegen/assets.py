@@ -28,6 +28,30 @@ def _sync_frontend_theme_assets(
     """Overlay build-time theme assets and add their npm dependencies."""
     theme_name = resolve_theme(site_config)[0]["id"]
     theme_root = template_root / "themes" / theme_name
+    selected_paths = {
+        source.relative_to(theme_root)
+        for source in theme_root.rglob("*")
+        if source.is_file()
+    } if theme_root.is_dir() else set()
+
+    # Remove files owned exclusively by another theme. Shared files have just
+    # been restored from the base template and must remain in place.
+    themes_root = template_root / "themes"
+    if themes_root.is_dir():
+        for other_root in themes_root.iterdir():
+            if not other_root.is_dir() or other_root == theme_root:
+                continue
+            for source in other_root.rglob("*"):
+                if not source.is_file():
+                    continue
+                relative = source.relative_to(other_root)
+                if relative in selected_paths or (template_root / relative).exists():
+                    continue
+                stale = target_frontend_root / relative
+                if stale.exists():
+                    stale.unlink()
+                    console.print(f"[yellow]Removed stale theme asset {stale}[/yellow]")
+
     if theme_root.is_dir():
         for source in theme_root.rglob("*"):
             if source.is_file():
@@ -37,11 +61,16 @@ def _sync_frontend_theme_assets(
                 )
 
     dependencies = THEME_FRONTEND_DEPENDENCIES.get(theme_name, {})
-    if not dependencies:
-        return
     package_path = target_frontend_root / "package.json"
     package_data = json.loads(package_path.read_text(encoding="utf-8"))
     package_dependencies = package_data.setdefault("dependencies", {})
+    theme_owned_dependencies = {
+        name
+        for values in THEME_FRONTEND_DEPENDENCIES.values()
+        for name in values
+    }
+    for dependency in theme_owned_dependencies - set(dependencies):
+        package_dependencies.pop(dependency, None)
     package_dependencies.update(dependencies)
     package_data["dependencies"] = dict(sorted(package_dependencies.items()))
     write_file_with_status(
@@ -454,6 +483,8 @@ def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):
         "src/components/ui/images-upload.tsx",
         "src/components/ui/file-upload.tsx",
         "src/components/ui/file-preview.tsx",
+        "src/components/ui/video-stream-input.tsx",
+        "src/components/ui/video-stream-player.tsx",
         "src/components/Layout.tsx",
         "src/utils/request.ts",
         "src/pages/Login.tsx",
@@ -557,6 +588,11 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     if template_endpoints_dir.exists():
         target_endpoints_dir.mkdir(parents=True, exist_ok=True)
         generate_file("backend_api_upload.py.j2", {"config": site_config}, target_endpoints_dir / "upload.py")
+        generate_file(
+            "video_streams_api.py.j2",
+            {"config": site_config},
+            target_endpoints_dir / "video_streams.py",
+        )
         login_py = template_endpoints_dir / "login.py"
         if login_py.exists():
             copy_file_with_status(login_py, target_endpoints_dir / "login.py")

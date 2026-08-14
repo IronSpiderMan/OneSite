@@ -10,6 +10,7 @@ import { Switch } from '../components/ui/switch';
 import { ImageUpload } from '../components/ui/image-upload';
 import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
+import { VideoStreamInput } from '../components/ui/video-stream-input';
 import { JsonInput } from '../components/ui/json-input';
 import request from '../utils/request';
 
@@ -200,6 +201,15 @@ export default function RegisterPage() {
                     rules={ { required: true } }
                     render={({ field: { onChange, value } }) => (
                       <FileUpload value={value} onChange={onChange} />
+                    )}
+                  />
+{% elif field.ui_type == 'video_stream' %}
+                  <Controller
+                    control={control}
+                    name="{{ field.name }}"
+                    rules={ { required: true } }
+                    render={({ field: { onChange, value } }) => (
+                      <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
                     )}
                   />
 {% elif field.ui_type == 'json' %}

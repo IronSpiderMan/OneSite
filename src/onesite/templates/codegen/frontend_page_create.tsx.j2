@@ -16,6 +16,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
 import { FileUpload } from '../../components/ui/file-upload';
+import { VideoStreamInput } from '../../components/ui/video-stream-input';
 import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { TimePicker } from '../../components/ui/time-picker';
@@ -144,6 +145,14 @@ const Create{{ model.name }}Page: React.FC = () => {
                     onChange={onChange}
                     allowDownload={ {{ "true" if field.allow_download else "false" }} }
                   />
+                )}
+              />
+              {% elif field.ui_type == 'video_stream' %}
+              <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                  <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
                 )}
               />
               {% elif field.is_enum and field.is_multi_select %}

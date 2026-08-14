@@ -1,0 +1,115 @@
+import hashlib
+import hmac
+import ipaddress
+from urllib.parse import urlsplit
+
+import httpx
+from fastapi import APIRouter, Depends, HTTPException
+from pydantic import BaseModel
+
+from app.core import deps
+from app.core.config import settings
+
+
+router = APIRouter(dependencies=[Depends(deps.get_current_user)])
+
+
+class VideoStreamPreviewRequest(BaseModel):
+    source_url: str
+
+
+class VideoStreamPreviewResponse(BaseModel):
+    hls_url: str
+    stream_id: str
+
+
+def _host_is_allowed(hostname: str) -> bool:
+    candidate = hostname.lower().rstrip(".")
+    try:
+        candidate_ip = ipaddress.ip_address(candidate)
+    except ValueError:
+        candidate_ip = None
+
+    for raw_rule in settings.RTSP_ALLOWED_HOSTS:
+        rule = raw_rule.strip().lower().rstrip(".")
+        if rule == "*" or rule == candidate:
+            return True
+        try:
+            network = ipaddress.ip_network(rule, strict=False)
+        except ValueError:
+            continue
+        if candidate_ip is not None and candidate_ip in network:
+            return True
+    return False
+
+
+def _validate_source_url(source_url: str) -> str:
+    value = source_url.strip()
+    if not value or any(ord(character) < 32 for character in value):
+        raise HTTPException(status_code=400, detail="Invalid RTSP source URL")
+    try:
+        parsed = urlsplit(value)
+        port = parsed.port
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid RTSP source URL") from exc
+    if parsed.scheme.lower() not in {"rtsp", "rtsps"}:
+        raise HTTPException(status_code=400, detail="Only RTSP and RTSPS sources are supported")
+    if not parsed.hostname or not _host_is_allowed(parsed.hostname):
+        raise HTTPException(status_code=403, detail="RTSP source host is not allowed")
+    if port is not None and not 1 <= port <= 65535:
+        raise HTTPException(status_code=400, detail="Invalid RTSP source port")
+    return value
+
+
+@router.post("/preview", response_model=VideoStreamPreviewResponse)
+async def create_preview(payload: VideoStreamPreviewRequest) -> VideoStreamPreviewResponse:
+    if not settings.RTSP_PREVIEW_ENABLED:
+        raise HTTPException(status_code=503, detail="RTSP preview is not enabled")
+
+    source_url = _validate_source_url(payload.source_url)
+    stream_id = "preview_" + hmac.new(
+        settings.SECRET_KEY.encode("utf-8"),
+        source_url.encode("utf-8"),
+        hashlib.sha256,
+    ).hexdigest()[:24]
+    api_root = settings.MEDIA_MTX_API_URL.rstrip("/")
+    paths_url = f"{api_root}/v3/config/paths/list"
+    add_url = f"{api_root}/v3/config/paths/add/{stream_id}"
+
+    try:
+        # The MediaMTX control API is an internal service.  Do not inherit
+        # HTTP_PROXY/HTTPS_PROXY/ALL_PROXY from the application environment,
+        # otherwise even loopback or Docker-network requests can be sent to a
+        # corporate proxy and fail with a misleading 502 response.
+        async with httpx.AsyncClient(
+            timeout=settings.RTSP_CONNECT_TIMEOUT_SECONDS,
+            trust_env=False,
+        ) as client:
+            configured = await client.get(
+                paths_url,
+                params={"itemsPerPage": 10000},
+            )
+            configured.raise_for_status()
+            items = configured.json().get("items", [])
+            path_exists = any(
+                isinstance(item, dict) and item.get("name") == stream_id
+                for item in items
+            )
+            if not path_exists:
+                created = await client.post(
+                    add_url,
+                    json={
+                        "source": source_url,
+                        "sourceOnDemand": True,
+                        "rtspTransport": "tcp",
+                    },
+                )
+                created.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail="Media gateway is unavailable") from exc
+
+    prefix = settings.MEDIA_HLS_PUBLIC_PREFIX.rstrip("/")
+    return VideoStreamPreviewResponse(
+        hls_url=f"{prefix}/{stream_id}/index.m3u8",
+        stream_id=stream_id,
+    )

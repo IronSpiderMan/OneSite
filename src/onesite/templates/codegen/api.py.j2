@@ -1,7 +1,7 @@
 from typing import List, Any, Optional, Annotated
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.dashboard_metrics %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.dashboard_metrics or model.data_reports %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table %}
@@ -11,7 +11,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
 {% if model.is_timescaledb %}
-from app.schemas.{{ model.module_name }} import {{ model.name }}Create
+from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if model.data_reports %}, {{ model.name }}ReportQuery{% endif %}
 {% else %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.module_name == "user" and model.name == "User" %}, UserUpdateMe{% endif %}{% if model.is_notification_table %}, {{ model.name }}Send{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 {% endif %}
@@ -270,6 +270,36 @@ async def get_{{ model.lower_name }}_dashboard_metrics(
     return await service.get_dashboard_metrics(session, role=role)
 
 {% endif %}
+
+{% if model.data_reports -%}
+@router.get("/reports/{report_key}/options")
+async def get_{{ model.lower_name }}_report_options(
+    report_key: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    raw_role = getattr(current_user, "role", "user")
+    role = str(getattr(raw_role, "value", raw_role))
+    return await service.get_report_options(
+        session, report_key=report_key, role=role, user_id=getattr(current_user, "id", None)
+    )
+
+
+@router.post("/reports/{report_key}/query")
+async def query_{{ model.lower_name }}_report(
+    report_key: str,
+    payload: {{ model.name }}ReportQuery,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    raw_role = getattr(current_user, "role", "user")
+    role = str(getattr(raw_role, "value", raw_role))
+    return await service.query_report(
+        session, report_key=report_key, role=role, payload=payload,
+        user_id=getattr(current_user, "id", None),
+    )
+
+{% endif -%}
 
 {% if model.visualize %}
 @router.get("/stats")

@@ -5,6 +5,19 @@ from pydantic import model_validator
 from sqlmodel import SQLModel, Field
 from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
 
+{% if model.data_reports %}
+class {{ model.name }}ReportQuery(SQLModel):
+    entity_ids: List[str | int] = Field(min_length=1, max_length=50)
+    metric_ids: List[str | int] = Field(min_length=1, max_length=100)
+    start_time: datetime
+    end_time: datetime
+    bucket: str = "auto"
+    aggregation: str = "avg"
+    target_points: int = Field(default=1000, ge=100, le=5000)
+    limit: int = Field(default=5000, ge=1, le=10000)
+
+{% endif %}
+
 {% macro py_default(v) -%}
 {%- if v is sameas true -%}True
 {%- elif v is sameas false -%}False

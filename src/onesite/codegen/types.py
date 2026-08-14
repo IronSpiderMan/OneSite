@@ -83,6 +83,11 @@ class FieldDefinition:
     is_search_field: bool = False
     fk_info: ForeignKeyInfo | None = None
     allow_download: bool = True
+    stream_protocol: str = "auto"
+    stream_autoplay: bool = False
+    stream_muted: bool = True
+    stream_controls: bool = True
+    stream_reconnect: bool = True
     label_key: str = ""
     translations: dict = field(default_factory=dict)
     is_unique: bool = False

@@ -10,6 +10,7 @@ from ..config import (
     validate_desktop_config,
     validate_scheduled_tasks_config,
     validate_tools_config,
+    validate_video_stream_config,
 )
 from ..envsync import sync_env_files
 from ...project_paths import get_project_paths
@@ -70,6 +71,7 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
     validate_mqtt_config(site_config)
     validate_tools_config(site_config)
     validate_scheduled_tasks_config(site_config)
+    validate_video_stream_config(site_config)
 
     paths = get_project_paths(cwd)
     backend_path = paths.backend

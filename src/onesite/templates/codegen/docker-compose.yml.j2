@@ -11,6 +11,11 @@ services:
       - PROJECT_NAME={{ project_name }}
       - TIMEZONE={{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-{{ config.allowed_origins | tojson }}}
+      {% if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %}
+      - RTSP_PREVIEW_ENABLED=true
+      - MEDIA_MTX_API_URL=http://mediamtx:9997
+      - MEDIA_HLS_PUBLIC_PREFIX=/media-hls
+      {% endif %}
       # If using PG, override DATABASE_URI
       {% if use_pg %}
       - DATABASE_URI=postgresql+asyncpg://postgres:postgres@db:5432/app
@@ -24,9 +29,14 @@ services:
       {% endif %}
     networks:
       - {{ project_name }}-network
-    {% if use_pg %}
+    {% if use_pg or config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %}
     depends_on:
+      {% if use_pg %}
       - db
+      {% endif %}
+      {% if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %}
+      - mediamtx
+      {% endif %}
     {% endif %}
 
   frontend:
@@ -39,8 +49,29 @@ services:
       - API_URL=http://localhost:{{ frontend_port }}/api/v1
     depends_on:
       - backend
+      {% if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %}
+      - mediamtx
+      {% endif %}
     networks:
       - {{ project_name }}-network
+
+{% if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %}
+  mediamtx:
+    image: bluenviron/mediamtx:1.19.3
+    container_name: {{ project_name }}-mediamtx
+    restart: always
+    environment:
+      - MTX_API=yes
+      - MTX_APIADDRESS=:9997
+      - MTX_HLS=yes
+      - MTX_HLSADDRESS=:8888
+      - MTX_HLSALLOWORIGINS=*
+      - MTX_HLSVARIANT=fmp4
+    ports:
+      - "127.0.0.1:8888:8888"
+    networks:
+      - {{ project_name }}-network
+{% endif %}
 
 {% if use_pg %}
   db:

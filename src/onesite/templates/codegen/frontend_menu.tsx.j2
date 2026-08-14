@@ -1,5 +1,5 @@
 import React from 'react';
-import { Home{% if external_resources_enabled %}, RefreshCw{% endif %}{% for icon in used_icons %}{% if icon != 'Home' %}, {{ icon }}{% endif %}{% endfor %} } from 'lucide-react';
+import { Home{% if reports_enabled %}, FileBarChart{% endif %}{% if external_resources_enabled %}, RefreshCw{% endif %}{% for icon in used_icons %}{% if icon != 'Home' %}, {{ icon }}{% endif %}{% endfor %} } from 'lucide-react';
 
 export const GeneratedMenu = [
   {
@@ -8,6 +8,15 @@ export const GeneratedMenu = [
     label: 'menu.dashboard',
     minRole: 'user',
   },
+{% if reports_enabled %}
+  {
+    key: '/reports',
+    icon: <FileBarChart className="h-4 w-4" />,
+    label: 'menu.reports',
+    visible: {{ reports_role_visible | tojson }},
+    minRole: '{% if reports_role_visible.get("user") %}user{% elif reports_role_visible.get("admin") %}admin{% else %}developer{% endif %}',
+  },
+{% endif %}
 {% if external_resources_enabled %}
   {
     key: '/external-resources',

@@ -7,6 +7,8 @@ import { Label } from '../components/ui/label';
 import { ImageUpload } from '../components/ui/image-upload';
 import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
+import { VideoStreamInput } from '../components/ui/video-stream-input';
+import { VideoStreamPlayer } from '../components/ui/video-stream-player';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { LocationInput } from '../components/ui/location-input';
@@ -163,6 +165,12 @@ export default function ProfilePage() {
                   value={me.{{ field.name }} || ''}
                   onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
                 />
+      {% elif field.ui_type == 'video_stream' %}
+                <VideoStreamInput
+                  value={me.{{ field.name }} || ''}
+                  onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
+                  protocol="{{ field.stream_protocol }}"
+                />
       {% elif field.ui_type == 'bool' %}
                 <div className="flex items-center space-x-2">
                   <Switch
@@ -258,6 +266,18 @@ export default function ProfilePage() {
                     ))}
                   </div>
                 ) : <span className="text-muted-foreground italic">No images</span>}
+      {% elif field.ui_type == 'video_stream' %}
+                {me.{{ field.name }} ? (
+                  <VideoStreamPlayer
+                    src={me.{{ field.name }}}
+                    protocol="{{ field.stream_protocol }}"
+                    autoPlay={ {{ "true" if field.stream_autoplay else "false" }} }
+                    muted={ {{ "true" if field.stream_muted else "false" }} }
+                    controls={ {{ "true" if field.stream_controls else "false" }} }
+                    reconnect={ {{ "true" if field.stream_reconnect else "false" }} }
+                    className="max-w-3xl"
+                  />
+                ) : <span className="text-muted-foreground italic">{t('video_stream.empty')}</span>}
       {% elif field.is_enum %}
                 <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}
@@ -301,6 +321,18 @@ export default function ProfilePage() {
                     ))}
                   </div>
                 ) : <span className="text-muted-foreground italic">No images</span>}
+      {% elif field.ui_type == 'video_stream' %}
+                {me.{{ field.name }} ? (
+                  <VideoStreamPlayer
+                    src={me.{{ field.name }}}
+                    protocol="{{ field.stream_protocol }}"
+                    autoPlay={ {{ "true" if field.stream_autoplay else "false" }} }
+                    muted={ {{ "true" if field.stream_muted else "false" }} }
+                    controls={ {{ "true" if field.stream_controls else "false" }} }
+                    reconnect={ {{ "true" if field.stream_reconnect else "false" }} }
+                    className="max-w-3xl"
+                  />
+                ) : <span className="text-muted-foreground italic">{t('video_stream.empty')}</span>}
       {% elif field.is_enum %}
                 <div className="font-medium">{me.{{ field.name }} ? t(`models.{{ model.module_name }}.enums.{{ field.name }}.${me.{{ field.name }}}`, me.{{ field.name }}) : '-'}</div>
       {% elif field.ui_type == 'datetime' %}

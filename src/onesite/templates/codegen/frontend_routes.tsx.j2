@@ -1,6 +1,9 @@
 import React from 'react';
 import SettingsPage from './pages/Settings';
 import DashboardPage from './pages/Dashboard';
+{% if reports_enabled %}
+import ReportsPage from './pages/Reports';
+{% endif %}
 {% if external_resources_enabled %}
 import ExternalResourcesPage from './pages/ExternalResources';
 {% endif %}
@@ -25,6 +28,12 @@ export const GeneratedRoutes = [
     path: '/settings',
     element: <SettingsPage />,
   },
+{% if reports_enabled %}
+  {
+    path: '/reports',
+    element: <ReportsPage />,
+  },
+{% endif %}
 {% if external_resources_enabled %}
   {
     path: '/external-resources',

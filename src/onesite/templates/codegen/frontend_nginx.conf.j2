@@ -58,4 +58,19 @@ server {
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
     }
+
+    {% if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %}
+    # Browser-compatible HLS output generated from RTSP sources by MediaMTX.
+    location /media-hls/ {
+        proxy_pass http://mediamtx:8888/;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_redirect / /media-hls/;
+        proxy_buffering off;
+        proxy_read_timeout 60s;
+    }
+    {% endif %}
 }

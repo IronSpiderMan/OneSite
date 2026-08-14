@@ -17,6 +17,13 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "{{ config.upload_dir }}"
     TIMEZONE: str = "{{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}"
 
+    # Optional RTSP-to-HLS preview through MediaMTX
+    RTSP_PREVIEW_ENABLED: bool = {{ "True" if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) else "False" }}
+    RTSP_ALLOWED_HOSTS: List[str] = {{ config.get('video_stream', {}).get('rtsp', {}).get('allowed_hosts', []) | tojson }}
+    RTSP_CONNECT_TIMEOUT_SECONDS: float = {{ config.get('video_stream', {}).get('rtsp', {}).get('connect_timeout_seconds', 10) }}
+    MEDIA_MTX_API_URL: str = "{{ config.get('video_stream', {}).get('rtsp', {}).get('media_api_url', 'http://127.0.0.1:9997') }}"
+    MEDIA_HLS_PUBLIC_PREFIX: str = "{{ config.get('video_stream', {}).get('rtsp', {}).get('hls_public_prefix', '/media-hls') }}"
+
     # Global Resources
     {% if config.redis %}
     REDIS_URL: str = "{{ config.redis.url or 'redis://localhost:6379/0' }}"

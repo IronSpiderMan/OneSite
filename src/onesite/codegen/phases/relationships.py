@@ -826,6 +826,23 @@ def _resolve_timeseries_relations(models: list[ModelDefinition]) -> None:
         target_model_name = fk_info["target_model"]
         for model in models:
             if model["name"] == target_model_name:
+                ts_model["timescaledb_entity_source_module"] = model["source_module"]
+                ts_model["timescaledb_entity_label_field"] = model.get("search_field") or "id"
+                ts_model["timescaledb_entity_id_field"] = "id"
+                blueprint = next(
+                    (
+                        candidate for candidate in models
+                        if candidate["table_name"] == ts_model.get("timescaledb_model_table")
+                    ),
+                    None,
+                )
+                if blueprint is not None:
+                    ts_model["timescaledb_model_source_module"] = blueprint["source_module"]
+                    ts_model["timescaledb_model_id_field"] = "id"
+                    ts_model["timescaledb_model_properties_field"] = "properties"
+                    ts_model["timescaledb_entity_model_field"] = (
+                        f"{ts_model['timescaledb_model_table']}_id"
+                    )
                 model.setdefault("reverse_timeseries", [])
                 model["reverse_timeseries"].append({
                     "model_name": ts_model["name"],

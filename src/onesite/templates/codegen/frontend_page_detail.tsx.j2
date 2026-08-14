@@ -11,6 +11,7 @@ import { Label } from '../../components/ui/label';
 import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime';
 import { Separator } from '../../components/ui/separator';
 import { FileUpload } from '../../components/ui/file-upload';
+import { VideoStreamPlayer } from '../../components/ui/video-stream-player';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
@@ -24,6 +25,7 @@ import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonModelTa
 import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
 import { LocationInput } from '../../components/ui/location-input';
+import { VideoStreamInput } from '../../components/ui/video-stream-input';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
@@ -889,6 +891,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         />
                                     )}
                                 />
+                                {% elif field.ui_type == 'video_stream' %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
+                                    )}
+                                />
                                 {% elif field.is_enum and field.is_multi_select %}
                                 <Controller
                                     control={editControl}
@@ -1100,6 +1110,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     />
                                 ) : (
                                     <span className="text-muted-foreground italic">No file</span>
+                                )}
+                                {% elif field.ui_type == 'video_stream' %}
+                                {currentItem.{{ field.name }} ? (
+                                    <VideoStreamPlayer
+                                        src={currentItem.{{ field.name }}}
+                                        protocol="{{ field.stream_protocol }}"
+                                        autoPlay={ {{ "true" if field.stream_autoplay else "false" }} }
+                                        muted={ {{ "true" if field.stream_muted else "false" }} }
+                                        controls={ {{ "true" if field.stream_controls else "false" }} }
+                                        reconnect={ {{ "true" if field.stream_reconnect else "false" }} }
+                                        className="max-w-3xl"
+                                    />
+                                ) : (
+                                    <span className="text-muted-foreground italic">{t('video_stream.empty')}</span>
                                 )}
                                 {% elif field.ui_type == 'location' %}
                                 <span className="text-muted-foreground">

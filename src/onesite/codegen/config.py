@@ -470,6 +470,43 @@ def validate_mqtt_config(config: Dict[str, Any]) -> None:
         seen.add(registration)
 
 
+def validate_video_stream_config(config: Dict[str, Any]) -> None:
+    """Validate optional RTSP-to-HLS preview infrastructure settings."""
+    video_stream = config.setdefault("video_stream", {})
+    if not isinstance(video_stream, dict):
+        raise SiteConfigError(
+            "site_config.json field 'video_stream' must be a JSON object."
+        )
+    rtsp = video_stream.setdefault("rtsp", {})
+    if not isinstance(rtsp, dict):
+        raise SiteConfigError(
+            "site_config.json field 'video_stream.rtsp' must be a JSON object."
+        )
+    enabled = rtsp.setdefault("enabled", False)
+    if not isinstance(enabled, bool):
+        raise SiteConfigError(
+            "site_config.json field 'video_stream.rtsp.enabled' must be a boolean."
+        )
+    allowed_hosts = rtsp.setdefault("allowed_hosts", [])
+    if not isinstance(allowed_hosts, list) or any(
+        not isinstance(host, str) or not host.strip() for host in allowed_hosts
+    ):
+        raise SiteConfigError(
+            "site_config.json field 'video_stream.rtsp.allowed_hosts' must be an array of non-empty strings."
+        )
+    if enabled and not allowed_hosts:
+        raise SiteConfigError(
+            "site_config.json field 'video_stream.rtsp.allowed_hosts' must contain at least one host or CIDR when RTSP preview is enabled."
+        )
+    timeout = rtsp.setdefault("connect_timeout_seconds", 10)
+    if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise SiteConfigError(
+            "site_config.json field 'video_stream.rtsp.connect_timeout_seconds' must be a positive number."
+        )
+    rtsp.setdefault("media_api_url", "http://127.0.0.1:9997")
+    rtsp.setdefault("hls_public_prefix", "/media-hls")
+
+
 def load_site_config(cwd: Path) -> Dict[str, Any]:
     """Load the project configuration without silently discarding bad input.
 

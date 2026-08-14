@@ -1,0 +1,116 @@
+import React, { useMemo } from 'react';
+import {
+  Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, ComposedChart,
+  Legend, Line, LineChart, Pie, PieChart, ReferenceArea, ResponsiveContainer,
+  Scatter, ScatterChart, Tooltip, XAxis, YAxis, ZAxis,
+} from 'recharts';
+
+export type ReportRow = { entity_id: string | number; metric_id: string; time: string; value: unknown };
+export type ReportMeasure = {
+  id: string | number; label: string; data_type?: string; unit?: string | null;
+  enum_values?: Array<string | number | boolean>; min?: number | null; max?: number | null;
+};
+export type ReportChartType = 'line' | 'area' | 'bar' | 'stacked_bar' | 'pie' | 'scatter' | 'histogram' | 'heatmap' | 'status';
+
+const colors = ['#6366f1', '#06b6d4', '#f59e0b', '#f43f5e', '#8b5cf6', '#10b981', '#f97316', '#3b82f6'];
+const numeric = (value: unknown) => typeof value === 'number' ? value : Number(value);
+const asNumber = (value: unknown) => Number.isFinite(numeric(value)) ? numeric(value) : null;
+const toDate = (value: unknown) => {
+  // Recharts passes numeric axes as epoch milliseconds. Converting that value
+  // to a string first makes Date parse it as date text and yields Invalid Date.
+  const normalized = typeof value === 'number'
+    ? value
+    : typeof value === 'string' && /^\d+$/.test(value)
+      ? Number(value)
+      : String(value);
+  return new Date(normalized);
+};
+const timeLabel = (value: unknown) => {
+  const date = toDate(value);
+  return Number.isNaN(date.getTime())
+    ? '—'
+    : date.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
+};
+
+const buildSeries = (rows: ReportRow[], measures: ReportMeasure[]) => {
+  const labels = new Map(measures.map((item) => [String(item.id), item.label]));
+  const byTime = new Map<string, Record<string, unknown>>();
+  const series = new Set<string>();
+  for (const row of rows) {
+    const value = asNumber(row.value); if (value === null) continue;
+    const key = `${row.entity_id} · ${labels.get(String(row.metric_id)) || row.metric_id}`;
+    series.add(key); const point = byTime.get(String(row.time)) || { time: String(row.time) };
+    point[key] = value; byTime.set(String(row.time), point);
+  }
+  return { data: Array.from(byTime.values()), series: Array.from(series) };
+};
+
+const axes = <><CartesianGrid strokeDasharray="3 3" vertical={false} opacity={0.3} /><XAxis dataKey="time" tickFormatter={timeLabel} minTickGap={30} /><YAxis width={60} /><Tooltip labelFormatter={timeLabel} /><Legend /></>;
+
+const TimeSeriesChart: React.FC<{ type: 'line' | 'area' | 'bar' | 'stacked_bar'; rows: ReportRow[]; measures: ReportMeasure[] }> = ({ type, rows, measures }) => {
+  const chart = useMemo(() => buildSeries(rows, measures), [rows, measures]);
+  const series = chart.series.map((key, index) => {
+    if (type === 'area') return <Area key={key} type="monotone" dataKey={key} stroke={colors[index % colors.length]} fill={colors[index % colors.length]} fillOpacity={0.15} connectNulls />;
+    if (type === 'bar' || type === 'stacked_bar') return <Bar key={key} dataKey={key} stackId={type === 'stacked_bar' ? 'value' : undefined} fill={colors[index % colors.length]} maxBarSize={42} />;
+    return <Line key={key} type="monotone" dataKey={key} stroke={colors[index % colors.length]} dot={false} connectNulls />;
+  });
+  const content = type === 'line' ? <LineChart data={chart.data}>{axes}{series}</LineChart> : type === 'area' ? <AreaChart data={chart.data}>{axes}{series}</AreaChart> : <BarChart data={chart.data}>{axes}{series}</BarChart>;
+  return <ResponsiveContainer width="100%" height="100%">{content}</ResponsiveContainer>;
+};
+
+const PieReportChart: React.FC<{ rows: ReportRow[]; measures: ReportMeasure[] }> = ({ rows, measures }) => {
+  const labels = new Map(measures.map((item) => [String(item.id), item.label]));
+  const totals = new Map<string, number>();
+  rows.forEach((row) => { const value = asNumber(row.value); if (value !== null) { const key = labels.get(String(row.metric_id)) || String(row.metric_id); totals.set(key, (totals.get(key) || 0) + value); } });
+  const data = Array.from(totals, ([name, value]) => ({ name, value }));
+  return <ResponsiveContainer width="100%" height="100%"><PieChart><Pie data={data} dataKey="value" nameKey="name" innerRadius="45%" outerRadius="76%" label>{data.map((_, index) => <Cell key={index} fill={colors[index % colors.length]} />)}</Pie><Tooltip /><Legend /></PieChart></ResponsiveContainer>;
+};
+
+const ScatterReportChart: React.FC<{ rows: ReportRow[]; measures: ReportMeasure[] }> = ({ rows, measures }) => {
+  const selected = new Set(rows.map((row) => String(row.metric_id)));
+  const activeMeasures = measures.filter((item) => selected.has(String(item.id)));
+  const ids = activeMeasures.map((item) => String(item.id)).slice(0, 2); const points = new Map<string, Record<string, number>>();
+  rows.forEach((row) => { const value = asNumber(row.value); if (value === null || !ids.includes(String(row.metric_id))) return; const key = `${row.entity_id}:${row.time}`; const point = points.get(key) || {}; point[String(row.metric_id)] = value; points.set(key, point); });
+  const data = Array.from(points.values()).filter((item) => ids.every((id) => id in item)).map((item) => ({ x: item[ids[0]], y: item[ids[1]] }));
+  return <ResponsiveContainer width="100%" height="100%"><ScatterChart><CartesianGrid /><XAxis type="number" dataKey="x" name={activeMeasures[0]?.label} /><YAxis type="number" dataKey="y" name={activeMeasures[1]?.label} /><ZAxis range={[40, 40]} /><Tooltip cursor={ { strokeDasharray: '3 3' } } /><Scatter data={data} fill={colors[0]} /></ScatterChart></ResponsiveContainer>;
+};
+
+const HistogramReportChart: React.FC<{ rows: ReportRow[] }> = ({ rows }) => {
+  const values = rows.map((row) => asNumber(row.value)).filter((value): value is number => value !== null);
+  const min = Math.min(...values), max = Math.max(...values), count = Math.max(5, Math.min(24, Math.ceil(Math.sqrt(values.length)))); const width = (max - min || 1) / count;
+  const bins = Array.from({ length: count }, (_, index) => ({ label: `${(min + index * width).toPrecision(3)}`, count: 0 }));
+  values.forEach((value) => { bins[Math.min(Math.floor((value - min) / width), count - 1)].count += 1; });
+  return <ResponsiveContainer width="100%" height="100%"><BarChart data={bins}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="label" /><YAxis /><Tooltip /><Bar dataKey="count" fill={colors[0]} /></BarChart></ResponsiveContainer>;
+};
+
+const HeatmapReportChart: React.FC<{ rows: ReportRow[] }> = ({ rows }) => {
+  const cells = rows.map((row) => ({ x: new Date(row.time).getTime(), y: String(row.entity_id), z: asNumber(row.value) || 0 }));
+  const max = Math.max(...cells.map((cell) => Math.abs(cell.z)), 1);
+  return <ResponsiveContainer width="100%" height="100%"><ScatterChart><XAxis type="number" dataKey="x" domain={['dataMin', 'dataMax']} tickFormatter={timeLabel} /><YAxis type="category" dataKey="y" width={90} /><ZAxis type="number" dataKey="z" range={[80, 900]} /><Tooltip cursor={ { strokeDasharray: '3 3' } } labelFormatter={timeLabel} /><Scatter data={cells}>{cells.map((cell, index) => <Cell key={index} fill={`hsl(245 75% ${Math.max(30, 90 - Math.abs(cell.z) / max * 55)}%)`} />)}</Scatter></ScatterChart></ResponsiveContainer>;
+};
+
+const StatusReportChart: React.FC<{ rows: ReportRow[] }> = ({ rows }) => {
+  const categories = Array.from(new Set(rows.map((row) => String(row.value))));
+  const data = rows.map((row) => ({ time: row.time, value: categories.indexOf(String(row.value)), status: String(row.value) }));
+  return <ResponsiveContainer width="100%" height="100%"><ComposedChart data={data}><CartesianGrid strokeDasharray="3 3" vertical={false} /><XAxis dataKey="time" tickFormatter={timeLabel} /><YAxis ticks={categories.map((_, i) => i)} tickFormatter={(value) => categories[value] || ''} /><Tooltip labelFormatter={timeLabel} formatter={(_, __, item) => item.payload.status} /><Line type="stepAfter" dataKey="value" stroke={colors[0]} strokeWidth={3} dot={false} /></ComposedChart></ResponsiveContainer>;
+};
+
+export const supportedReportCharts = (measures: ReportMeasure[], rows: ReportRow[]): ReportChartType[] => {
+  const selected = new Set(rows.map((row) => String(row.metric_id))); const active = measures.filter((item) => selected.has(String(item.id)));
+  const numericMeasures = active.filter((item) => !item.data_type || ['number', 'float', 'int'].includes(item.data_type));
+  const categorical = active.some((item) => ['boolean', 'bool', 'enum', 'category', 'string'].includes(item.data_type || ''));
+  const result: ReportChartType[] = [];
+  if (numericMeasures.length) result.push('line', 'area', 'bar', 'stacked_bar', 'pie', 'histogram', 'heatmap');
+  if (numericMeasures.length >= 2) result.push('scatter');
+  if (categorical) result.push('status');
+  return result;
+};
+
+export const ReportChart: React.FC<{ type: ReportChartType; rows: ReportRow[]; measures: ReportMeasure[] }> = ({ type, rows, measures }) => {
+  if (['line', 'area', 'bar', 'stacked_bar'].includes(type)) return <TimeSeriesChart type={type as 'line' | 'area' | 'bar' | 'stacked_bar'} rows={rows} measures={measures} />;
+  if (type === 'pie') return <PieReportChart rows={rows} measures={measures} />;
+  if (type === 'scatter') return <ScatterReportChart rows={rows} measures={measures} />;
+  if (type === 'histogram') return <HistogramReportChart rows={rows} />;
+  if (type === 'heatmap') return <HeatmapReportChart rows={rows} />;
+  return <StatusReportChart rows={rows} />;
+};

@@ -20,6 +20,11 @@ def update_api_router(
     imports.append("from app.api.endpoints import login")
     routers.append('api_router.include_router(login.router, tags=["login"])')
 
+    imports.append("from app.api.endpoints import video_streams")
+    routers.append(
+        'api_router.include_router(video_streams.router, prefix="/video-streams", tags=["video-streams"])'
+    )
+
     # WebSocket endpoint (always available for online status tracking)
     imports.append("from app.api.endpoints import ws")
     routers.append('api_router.include_router(ws.router, prefix="/ws", tags=["websocket"])')

@@ -10,6 +10,15 @@ from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
 from app.core.datetime import SYSTEM_TIMEZONE, to_utc
+{% if model.data_reports %}
+from app.core.reports import get_report_options as build_report_options, query_report as execute_report
+{% if model.timescaledb_entity_model and model.timescaledb_entity_source_module %}
+from app.models.{{ model.timescaledb_entity_source_module }} import {{ model.timescaledb_entity_model }}
+{% endif %}
+{% if model.timescaledb_model_class and model.timescaledb_model_source_module %}
+from app.models.{{ model.timescaledb_model_source_module }} import {{ model.timescaledb_model_class }}
+{% endif %}
+{% endif %}
 {% if model.external_resource or model.external_resource_dependents %}
 from app.core.external_resources import enqueue_external_resource_change, enqueue_external_resource_dependents
 {% endif %}
@@ -115,7 +124,61 @@ class {{ model.name }}Service:
 {% filter indent(4, true) %}{% include "dashboard_metrics_service.py.j2" %}{% endfilter %}
     {% endif %}
 
-    {% else %}
+    {% if model.data_reports %}
+    async def _get_report_config(self, report_key: str, role: str) -> dict:
+        from fastapi import HTTPException
+        reports = {{ model.data_reports }}
+        report = next((item for item in reports if item["key"] == report_key), None)
+        if report is None:
+            raise HTTPException(status_code=404, detail="Report not found")
+        if role not in report.get("permitted_roles", []):
+            raise HTTPException(status_code=403, detail="Report is not available for this role")
+        return report
+
+    async def get_report_options(self, session: AsyncSession, *, report_key: str, role: str, user_id: Any = None) -> dict:
+        report = await self._get_report_config(report_key, role)
+        return await build_report_options(
+            session,
+            source_model={{ model.name }},
+            report=report,
+{% if model.timescaledb_entity_model and model.timescaledb_entity_source_module %}
+            entity_model={{ model.timescaledb_entity_model }},
+            entity_id_field="{{ model.timescaledb_entity_id_field | default('id') }}",
+            entity_label_field="{{ model.timescaledb_entity_label_field | default('id') }}",
+{% endif %}
+{% if model.timescaledb_model_class and model.timescaledb_model_source_module %}
+            blueprint_model={{ model.timescaledb_model_class }},
+            entity_blueprint_field="{{ model.timescaledb_entity_model_field }}",
+            blueprint_id_field="{{ model.timescaledb_model_id_field | default('id') }}",
+            blueprint_properties_field="{{ model.timescaledb_model_properties_field | default('properties') }}",
+{% endif %}
+{% if model.property_config %}
+            entity_properties_field="{{ model.property_config.get('field_name', 'properties_config') }}",
+{% endif %}
+{% if model.owner_field %}
+            scope_filters={"{{ model.owner_field }}": user_id},
+{% endif %}
+        )
+
+    async def query_report(
+        self,
+        session: AsyncSession,
+        *,
+        report_key: str,
+        role: str,
+        payload: Any,
+        user_id: Any = None,
+    ) -> dict:
+        report = await self._get_report_config(report_key, role)
+        return await execute_report(
+            session, source_model={{ model.name }}, report=report, payload=payload,
+{% if model.owner_field %}
+            scope_filters={"{{ model.owner_field }}": user_id},
+{% endif %}
+        )
+{% endif %}
+
+{% else %}
 
     async def get(self, session: AsyncSession, id: {{ model.id_type }}) -> Optional[{{ model.name }}Read]:
         obj = await crud.get(session, id)

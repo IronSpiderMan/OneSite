@@ -102,6 +102,105 @@ DASHBOARD_METRIC_PERIODS = {
     "today", "this_week", "this_month", "last_7_days", "last_30_days", "all",
 }
 
+DATA_REPORT_BUCKETS = {"raw", "auto", "1m", "5m", "15m", "1h", "6h", "1d", "1w"}
+DATA_REPORT_AGGREGATIONS = {"avg", "min", "max", "sum", "count"}
+DATA_REPORT_VIEWS = {
+    "auto", "line", "area", "bar", "stacked_bar", "pie", "scatter",
+    "histogram", "heatmap", "status",
+}
+
+
+def _normalize_data_reports(
+    raw: Any,
+    *,
+    model_name: str,
+    fields: list[FieldDefinition],
+    role_permissions: dict[str, str],
+    timeseries_config: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
+    """Validate report declarations and resolve their time-series fields."""
+    if raw in (None, False):
+        return []
+    if not timeseries_config:
+        raise ValueError(f"Model '{model_name}': data_reports currently require time_series_table")
+
+    # The common case is intentionally one line: ``data_reports = True``.
+    # A dict customises the inferred report; a list remains available for
+    # models that expose more than one report.
+    if raw is True:
+        raw = [{}]
+    elif isinstance(raw, dict):
+        raw = [raw]
+    elif not isinstance(raw, list):
+        raise ValueError(f"Model '{model_name}': data_reports must be true, an object, or a list")
+
+    field_map = {field.name: field for field in fields}
+    readable_roles = {role for role, perms in role_permissions.items() if "r" in perms}
+    seen_keys: set[str] = set()
+    normalized: list[dict[str, Any]] = []
+    for index, item in enumerate(raw):
+        prefix = f"Model '{model_name}': data_reports[{index}]"
+        if not isinstance(item, dict):
+            raise ValueError(f"{prefix} must be an object")
+        report = dict(item)
+        key = report.get("key", _to_snake(model_name))
+        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+            raise ValueError(f"{prefix}.key must be a valid identifier")
+        if key in seen_keys:
+            raise ValueError(f"{prefix}.key duplicates '{key}'")
+        seen_keys.add(key)
+        title = report.get("title", model_name)
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError(f"{prefix}.title must be a non-empty string")
+
+        resolved_fields = {
+            "entity_field": report.get("entity_field", timeseries_config.get("entity_field")),
+            "metric_field": report.get("metric_field", timeseries_config.get("metric_field")),
+            "time_field": report.get("time_field", timeseries_config.get("time_field")),
+            "value_field": report.get("value_field", "value"),
+        }
+        for name, field_name in resolved_fields.items():
+            if not isinstance(field_name, str) or field_name not in field_map:
+                raise ValueError(f"{prefix}.{name} references unknown field '{field_name}'")
+        if field_map[resolved_fields["time_field"]].ui_type != "datetime":
+            raise ValueError(f"{prefix}.time_field must reference a datetime field")
+
+        value_path = report.get("value_path", "value")
+        if not isinstance(value_path, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value_path):
+            raise ValueError(f"{prefix}.value_path must be a simple JSON key")
+        buckets = report.get("buckets", ["raw", "auto", "5m", "1h", "1d"])
+        aggregations = report.get("aggregations", ["avg", "min", "max", "count"])
+        if not isinstance(buckets, list) or not buckets or any(v not in DATA_REPORT_BUCKETS for v in buckets):
+            raise ValueError(f"{prefix}.buckets contains an unsupported bucket")
+        if not isinstance(aggregations, list) or not aggregations or any(v not in DATA_REPORT_AGGREGATIONS for v in aggregations):
+            raise ValueError(f"{prefix}.aggregations contains an unsupported aggregation")
+        views = report.get("views", "auto")
+        if isinstance(views, str):
+            views = [views]
+        if not isinstance(views, list) or not views or any(v not in DATA_REPORT_VIEWS for v in views):
+            raise ValueError(f"{prefix}.views contains an unsupported report view")
+        visible = report.get("visible", sorted(readable_roles, key=ROLE_ORDER.index))
+        if not isinstance(visible, list) or any(role not in ROLE_ORDER for role in visible):
+            raise ValueError(f"{prefix}.visible must contain only user, admin, or developer")
+        permitted_roles = [role for role in ROLE_ORDER if role in visible and role in readable_roles]
+        max_span_days = report.get("max_span_days", 90)
+        if isinstance(max_span_days, bool) or not isinstance(max_span_days, int) or max_span_days <= 0:
+            raise ValueError(f"{prefix}.max_span_days must be a positive integer")
+        report.update(
+            key=key,
+            title=title,
+            **resolved_fields,
+            value_path=value_path,
+            buckets=buckets,
+            aggregations=aggregations,
+            views=views,
+            visible=visible,
+            permitted_roles=permitted_roles,
+            max_span_days=max_span_days,
+        )
+        normalized.append(report)
+    return normalized
+
 
 def _normalize_dashboard_metrics(
     raw: Any,
@@ -482,6 +581,9 @@ def get_model_fields(
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
         allow_download = site_props.get("allow_download", True)
+        stream_config = site_props.get("stream", {}) or {}
+        if not isinstance(stream_config, dict):
+            raise ValueError(f"{model_cls.__name__}.{name} site_props.stream must be an object")
 
         # ── Layer 2: Field-level CRU permissions ──────────────────────────
         # Config formats:
@@ -627,6 +729,13 @@ def get_model_fields(
             ui_type = "images"
         elif site_props.get("component") == "file":
             ui_type = "file"
+        elif site_props.get("component") == "video_stream":
+            if ui_type != "str":
+                raise ValueError(
+                    f"{model_cls.__name__}.{name} uses component='video_stream' but "
+                    "is not a string field. Store the stream URL in a string field."
+                )
+            ui_type = "video_stream"
         elif site_props.get("component") == "location":
             if json_kind != "object":
                 raise ValueError(
@@ -750,6 +859,28 @@ def get_model_fields(
         json_fixed_keys = site_props.get("fixed_keys")
         json_lock_keys = bool(site_props.get("lock_keys", False))
 
+        stream_protocol = str(stream_config.get("protocol", "auto")).lower()
+        supported_stream_protocols = {"auto", "native", "hls", "rtsp"}
+        if ui_type == "video_stream" and stream_protocol not in supported_stream_protocols:
+            raise ValueError(
+                f"{model_cls.__name__}.{name} stream.protocol must be one of: "
+                f"{', '.join(sorted(supported_stream_protocols))}"
+            )
+
+        stream_boolean_options = {}
+        for option, default in {
+            "autoplay": False,
+            "muted": True,
+            "controls": True,
+            "reconnect": True,
+        }.items():
+            value = stream_config.get(option, default)
+            if ui_type == "video_stream" and not isinstance(value, bool):
+                raise ValueError(
+                    f"{model_cls.__name__}.{name} stream.{option} must be a boolean"
+                )
+            stream_boolean_options[option] = value
+
         default_value = None if field.default is PydanticUndefined else field.default
         if is_enum and default_value is not None and hasattr(default_value, "value"):
             default_value = default_value.value
@@ -788,6 +919,11 @@ def get_model_fields(
                 is_search_field=is_search_field,
                 fk_info=fk_info,
                 allow_download=allow_download,
+                stream_protocol=stream_protocol,
+                stream_autoplay=stream_boolean_options["autoplay"],
+                stream_muted=stream_boolean_options["muted"],
+                stream_controls=stream_boolean_options["controls"],
+                stream_reconnect=stream_boolean_options["reconnect"],
                 label_key=label_key,
                 translations=translations,
                 is_unique=is_unique,
@@ -856,6 +992,13 @@ def get_model_fields(
         model_name=model_cls.__name__,
         fields=fields,
         role_permissions=role_permissions,
+    )
+    model_site_props["data_reports"] = _normalize_data_reports(
+        model_site_props.get("data_reports"),
+        model_name=model_cls.__name__,
+        fields=fields,
+        role_permissions=role_permissions,
+        timeseries_config=ts_config,
     )
 
     return ModelIntrospectResult(

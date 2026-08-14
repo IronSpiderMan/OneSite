@@ -1,0 +1,206 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+  BarChart3, CalendarRange, Check, ChevronsUpDown, Download, FileBarChart,
+  Loader2, Play, RotateCcw, Search, SlidersHorizontal, X,
+} from 'lucide-react';
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Card, CardContent } from '../components/ui/card';
+import { Input } from '../components/ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../components/ui/table';
+import { cn } from '../lib/utils';
+import { ReportChart, ReportChartType, ReportMeasure, ReportRow, supportedReportCharts } from '../components/report-charts';
+{% for model in report_models %}
+import { get{{ model.name }}ReportOptions, query{{ model.name }}Report } from '../services/{{ model.module_name }}';
+{% endfor %}
+
+type Option = { id: string | number; label: string };
+type ReportOptions = {
+  report: { key: string; title: string; buckets: string[]; aggregations: string[]; views: string[]; default_range?: string };
+  dimensions: Array<{ key: string; label: string; data_type: string }>;
+  measures: ReportMeasure[];
+  entities: Option[];
+  metrics: ReportMeasure[];
+  metric_entities: Record<string, Array<string | number>>;
+};
+type ReportMeta = { bucket: string; requested_bucket: string; truncated: boolean; limit: number; timezone: string };
+
+const reports = [
+{% for model in report_models %}{% for report in model.data_reports %}
+  {
+    id: '{{ model.module_name }}:{{ report.key }}', title: '{{ report.title }}', key: '{{ report.key }}',
+    getOptions: () => get{{ model.name }}ReportOptions('{{ report.key }}'),
+    query: (payload: Record<string, any>) => query{{ model.name }}Report('{{ report.key }}', payload),
+  },
+{% endfor %}{% endfor %}
+];
+
+const bucketLabels: Record<string, string> = { raw: 'Raw', auto: 'Auto', '1m': '1 min', '5m': '5 min', '15m': '15 min', '1h': '1 hour', '6h': '6 hours', '1d': '1 day', '1w': '1 week' };
+const aggregationLabels: Record<string, string> = { avg: 'Average', min: 'Minimum', max: 'Maximum', sum: 'Sum', count: 'Count' };
+const chartLabels: Record<ReportChartType, string> = { line: 'Line', area: 'Area', bar: 'Bar', stacked_bar: 'Stacked', pie: 'Donut', scatter: 'Scatter', histogram: 'Distribution', heatmap: 'Heatmap', status: 'Status' };
+const toLocalInput = (date: Date) => {
+  const local = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+};
+
+const MultiPicker: React.FC<{
+  label: string; options: Option[]; values: string[]; onChange: (values: string[]) => void; loading?: boolean;
+}> = ({ label, options, values, onChange, loading }) => {
+  const { t } = useTranslation();
+  const [open, setOpen] = useState(false);
+  const [search, setSearch] = useState('');
+  const filtered = options.filter((option) => `${option.label} ${option.id}`.toLowerCase().includes(search.toLowerCase()));
+  const selected = options.filter((option) => values.includes(String(option.id)));
+  const toggle = (value: string) => onChange(values.includes(value) ? values.filter((item) => item !== value) : [...values, value]);
+
+  return <div className="space-y-2">
+    <div className="flex items-center justify-between">
+      <label className="text-xs font-medium text-muted-foreground">{label}</label>
+      {!!values.length && <button type="button" className="text-[11px] text-primary hover:underline" onClick={() => onChange([])}>{t('reports.clear', 'Clear')}</button>}
+    </div>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
+        <Button variant="outline" role="combobox" className="h-10 w-full justify-between bg-background/50 px-3 font-normal">
+          <span className="truncate">{loading ? t('common.loading', 'Loading...') : !values.length ? t('reports.select', { label }) : values.length === options.length ? t('reports.all', { label }) : t('reports.selected', { count: values.length })}</span>
+          <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[var(--radix-popover-trigger-width)] p-0">
+        <div className="flex items-center border-b px-3"><Search className="mr-2 h-4 w-4 text-muted-foreground" /><input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} placeholder={String(t('reports.search', { label }))} className="h-10 w-full bg-transparent text-sm outline-none" /></div>
+        <div className="flex justify-between border-b px-3 py-2 text-xs"><button type="button" className="text-primary" onClick={() => onChange(options.map((item) => String(item.id)))}>{t('reports.select_all', 'Select all')}</button><span className="text-muted-foreground">{values.length}/{options.length}</span></div>
+        <div className="max-h-60 overflow-y-auto p-1">
+          {!filtered.length ? <div className="py-8 text-center text-sm text-muted-foreground">{t('reports.no_match', 'No matching options')}</div> : filtered.map((option) => {
+            const value = String(option.id); const checked = values.includes(value);
+            return <button type="button" key={value} onClick={() => toggle(value)} className="flex w-full items-center rounded-md px-2 py-2 text-left text-sm hover:bg-accent">
+              <span className={cn('mr-2 flex h-4 w-4 items-center justify-center rounded border', checked && 'border-primary bg-primary text-primary-foreground')}>{checked && <Check className="h-3 w-3" />}</span>
+              <span className="truncate">{option.label}</span>
+            </button>;
+          })}
+        </div>
+      </PopoverContent>
+    </Popover>
+    {!!selected.length && <div className="flex flex-wrap gap-1.5">
+      {selected.slice(0, 2).map((option) => <Badge key={option.id} variant="secondary" className="max-w-[125px] gap-1 font-normal"><span className="truncate">{option.label}</span><button type="button" onClick={() => toggle(String(option.id))}><X className="h-3 w-3" /></button></Badge>)}
+      {selected.length > 2 && <Badge variant="outline" className="font-normal">+{selected.length - 2}</Badge>}
+    </div>}
+  </div>;
+};
+
+const ReportsPage: React.FC = () => {
+  const { t } = useTranslation();
+  const [reportId, setReportId] = useState(reports[0]?.id || '');
+  const [options, setOptions] = useState<ReportOptions | null>(null);
+  const [entityIds, setEntityIds] = useState<string[]>([]);
+  const [metricIds, setMetricIds] = useState<string[]>([]);
+  const [startTime, setStartTime] = useState(() => toLocalInput(new Date(Date.now() - 24 * 3600_000)));
+  const [endTime, setEndTime] = useState(() => toLocalInput(new Date()));
+  const [bucket, setBucket] = useState('auto');
+  const [aggregation, setAggregation] = useState('avg');
+  const [chartType, setChartType] = useState<ReportChartType>('line');
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [meta, setMeta] = useState<ReportMeta | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [optionsLoading, setOptionsLoading] = useState(false);
+  const [error, setError] = useState('');
+  const activeReport = reports.find((report) => report.id === reportId) || reports[0];
+  const applyRange = (hours: number) => { const end = new Date(); setEndTime(toLocalInput(end)); setStartTime(toLocalInput(new Date(end.getTime() - hours * 3600_000))); };
+
+  useEffect(() => {
+    if (!activeReport) return;
+    setOptionsLoading(true); setError(''); setRows([]);
+    activeReport.getOptions().then((result) => {
+      setOptions(result); setEntityIds([]); setMetricIds([]);
+      setBucket(result.report.buckets.includes('auto') ? 'auto' : result.report.buckets[0]);
+      setAggregation(result.report.aggregations.includes('avg') ? 'avg' : result.report.aggregations[0]);
+    }).catch((reason) => setError(reason?.response?.data?.detail || (reason?.response ? reason?.message : String(t('reports.connect_error', 'Unable to connect to the service'))))).finally(() => setOptionsLoading(false));
+  }, [reportId]);
+
+  const availableMetrics = useMemo(() => {
+    if (!options || !entityIds.length) return [];
+    const selectedEntities = new Set(entityIds);
+    return options.metrics.filter((metric) =>
+      (options.metric_entities[String(metric.id)] || []).some((entityId) => selectedEntities.has(String(entityId)))
+    );
+  }, [options, entityIds]);
+
+  useEffect(() => {
+    const availableIds = new Set(availableMetrics.map((metric) => String(metric.id)));
+    setMetricIds((current) => current.filter((metricId) => availableIds.has(metricId)));
+  }, [availableMetrics]);
+
+  const selectedMeasures = useMemo(() => {
+    const selected = new Set(metricIds);
+    return (options?.measures || options?.metrics || []).filter((item) => selected.has(String(item.id)));
+  }, [options, metricIds]);
+
+  const runReport = async () => {
+    if (!activeReport) return;
+    if (!entityIds.length || !metricIds.length) { setError(String(t('reports.selection_required', 'Select at least one entity and one metric'))); return; }
+    setLoading(true); setError('');
+    try {
+      const hasCategorical = selectedMeasures.some((item) => item.data_type && !['number', 'float', 'int'].includes(item.data_type));
+      const queryBucket = hasCategorical ? 'raw' : bucket;
+      const result = await activeReport.query({ entity_ids: entityIds, metric_ids: metricIds,
+        start_time: new Date(startTime).toISOString(), end_time: new Date(endTime).toISOString(), bucket: queryBucket, aggregation, target_points: 1000, limit: 5000 });
+      setRows(result.rows); setMeta(result.meta);
+    } catch (reason: any) { setError(reason?.response?.data?.detail || (reason?.response ? reason?.message : String(t('reports.connect_error', 'Unable to connect to the service')))); }
+    finally { setLoading(false); }
+  };
+
+  const chartTypes = useMemo(() => {
+    const inferred = supportedReportCharts(options?.measures || options?.metrics || [], rows);
+    const configured = options?.report.views || ['auto'];
+    return configured.includes('auto') ? inferred : inferred.filter((type) => configured.includes(type));
+  }, [options, rows]);
+  useEffect(() => { if (chartTypes.length && !chartTypes.includes(chartType)) setChartType(chartTypes[0]); }, [chartTypes, chartType]);
+  const numeric = rows.map((row) => typeof row.value === 'number' ? row.value : Number(row.value)).filter(Number.isFinite);
+  const stats = numeric.length ? [Math.min(...numeric), numeric.reduce((sum, value) => sum + value, 0) / numeric.length, Math.max(...numeric)] : [];
+  const entityLabel = options?.dimensions?.find((item) => item.key === 'entity_id')?.label || String(t('reports.entity', 'Entity'));
+  const metricLabel = String(t('reports.metric', 'Metric'));
+  const entityLabels = new Map((options?.entities || []).map((item) => [String(item.id), item.label]));
+  const measureLabels = new Map((options?.measures || options?.metrics || []).map((item) => [String(item.id), item.label]));
+
+  const exportCsv = () => {
+    const safe = (value: unknown) => { let text = value == null ? '' : String(value); if (/^[=+\-@]/.test(text)) text = `'${text}`; return `"${text.replace(/"/g, '""')}"`; };
+    const csv = ['entity_id,metric_id,time,value', ...rows.map((row) => [row.entity_id, row.metric_id, row.time, row.value].map(safe).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' })); const link = document.createElement('a'); link.href = url; link.download = `${activeReport?.key || 'report'}-${new Date().toISOString().slice(0, 10)}.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+
+  return <div className="mx-auto w-full max-w-[1720px] space-y-5" data-page-kind="reports">
+    <header className="flex flex-wrap items-end justify-between gap-4">
+      <div><div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary"><FileBarChart className="h-4 w-4" />{t('reports.explorer', 'Data explorer')}</div><h1 className="text-3xl font-bold tracking-tight">{t('reports.title', 'Data Reports')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('reports.description', 'Query, aggregate, chart, and export time-series data')}</p></div>
+      <Button variant="outline" onClick={exportCsv} disabled={!rows.length}><Download className="mr-2 h-4 w-4" />{t('reports.export_csv', 'Export CSV')}</Button>
+    </header>
+
+    <div className="grid items-start gap-5 xl:grid-cols-[320px_minmax(0,1fr)]">
+      <aside className="rounded-xl border border-border/70 bg-card/70 p-4 shadow-sm xl:sticky xl:top-4">
+        <div className="mb-5 flex items-center gap-2"><div className="rounded-lg bg-primary/10 p-2 text-primary"><SlidersHorizontal className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{t('reports.settings', 'Analysis settings')}</h2><p className="text-xs text-muted-foreground">{t('reports.settings_hint', 'Select a range and run the query')}</p></div></div>
+        <div className="space-y-5">
+          <div className="space-y-2"><label className="text-xs font-medium text-muted-foreground">{t('reports.report', 'Report')}</label><select className="h-10 w-full rounded-md border bg-background/50 px-3 text-sm" value={reportId} onChange={(event) => setReportId(event.target.value)}>{reports.map((report) => <option key={report.id} value={report.id}>{report.title}</option>)}</select></div>
+          <MultiPicker label={entityLabel} options={options?.entities || []} values={entityIds} onChange={setEntityIds} loading={optionsLoading} />
+          <MultiPicker label={metricLabel} options={availableMetrics} values={metricIds} onChange={setMetricIds} loading={optionsLoading} />
+          <div className="space-y-3 border-t pt-4"><div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground"><CalendarRange className="h-3.5 w-3.5" />{t('reports.range', 'Time range')}</div><Input type="datetime-local" value={startTime} onChange={(event) => setStartTime(event.target.value)} /><Input type="datetime-local" value={endTime} onChange={(event) => setEndTime(event.target.value)} /><div className="grid grid-cols-4 gap-1">{[[1, '1h'], [6, '6h'], [24, '24h'], [168, '7d']].map(([hours, label]) => <button type="button" key={String(label)} onClick={() => applyRange(Number(hours))} className="rounded-md border py-1.5 text-xs text-muted-foreground transition hover:border-primary hover:text-primary">{label}</button>)}</div></div>
+          <div className="grid grid-cols-2 gap-3 border-t pt-4"><div className="space-y-2"><label className="text-xs font-medium text-muted-foreground">{t('reports.bucket', 'Interval')}</label><select className="h-10 w-full rounded-md border bg-background/50 px-2 text-sm" value={bucket} onChange={(event) => setBucket(event.target.value)}>{options?.report.buckets.map((item) => <option key={item} value={item}>{bucketLabels[item] || item}</option>)}</select></div><div className="space-y-2"><label className="text-xs font-medium text-muted-foreground">{t('reports.aggregation', 'Aggregation')}</label><select disabled={bucket === 'raw'} className="h-10 w-full rounded-md border bg-background/50 px-2 text-sm disabled:opacity-40" value={aggregation} onChange={(event) => setAggregation(event.target.value)}>{options?.report.aggregations.map((item) => <option key={item} value={item}>{aggregationLabels[item] || item}</option>)}</select></div></div>
+          <Button className="h-11 w-full" onClick={runReport} disabled={loading || optionsLoading}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{t('reports.run', 'Run analysis')}</Button>
+          <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={() => { setEntityIds([]); setMetricIds([]); setRows([]); setError(''); applyRange(24); }}><RotateCcw className="mr-2 h-3.5 w-3.5" />{t('reports.reset', 'Reset filters')}</Button>
+        </div>
+      </aside>
+
+      <main className="min-w-0 space-y-5">
+        {error && <div className="flex items-center justify-between rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive"><span>{error}</span><button type="button" onClick={() => setError('')}><X className="h-4 w-4" /></button></div>}
+        {!rows.length ? <section className="relative flex min-h-[560px] overflow-hidden rounded-xl border border-dashed border-border/80 bg-card/30">
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_50%_25%,hsl(var(--primary)/0.08),transparent_38%)]" />
+          <div className="relative m-auto max-w-md px-8 text-center"><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm"><BarChart3 className="h-7 w-7" /></div><h2 className="text-xl font-semibold">{t('reports.empty_title', 'Start exploring your data')}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t('reports.empty_hint', 'Select dimensions and measures, then choose a time range to produce charts and detailed results.')}</p><div className="mt-6 flex justify-center gap-2 text-xs text-muted-foreground"><Badge variant="outline">{t('reports.select_data', 'Select data')}</Badge><span className="pt-1">→</span><Badge variant="outline">{t('reports.run_analysis', 'Run analysis')}</Badge><span className="pt-1">→</span><Badge variant="outline">{t('reports.export_result', 'Export result')}</Badge></div></div>
+        </section> : <>
+          <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{[[t('reports.points', 'Data points'), rows.length], [t('reports.minimum', 'Minimum'), stats[0]], [t('reports.average', 'Average'), stats[1]], [t('reports.maximum', 'Maximum'), stats[2]]].map(([label, value], index) => <Card key={String(label)} className="overflow-hidden border-border/60"><CardContent className="relative p-4"><div className={cn('absolute inset-y-0 left-0 w-1', ['bg-primary', 'bg-sky-500', 'bg-amber-500', 'bg-rose-500'][index])} /><div className="text-xs text-muted-foreground">{label}</div><div className="mt-2 truncate text-2xl font-semibold tabular-nums">{typeof value === 'number' ? value.toLocaleString(undefined, { maximumFractionDigits: 3 }) : '—'}</div></CardContent></Card>)}</section>
+          {chartTypes.length > 0 && <section className="rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="flex flex-wrap items-center justify-between gap-3 border-b px-5 py-4"><div><h2 className="text-sm font-semibold">{t('reports.view', 'Data view')}</h2><p className="mt-1 text-xs text-muted-foreground">{bucketLabels[meta?.bucket || bucket]} · {aggregationLabels[aggregation]}</p></div><div className="flex flex-wrap rounded-md border bg-background/60 p-1">{chartTypes.map((type) => <button key={type} type="button" aria-pressed={chartType === type} onClick={() => setChartType(type)} className={cn('h-7 rounded px-2 text-xs transition', chartType === type ? 'bg-primary text-primary-foreground shadow-sm' : 'text-muted-foreground hover:bg-accent hover:text-foreground')}>{chartLabels[type]}</button>)}</div></div>{meta?.truncated && <div className="border-b border-amber-300/50 bg-amber-50 px-5 py-2 text-xs text-amber-800 dark:bg-amber-950/30 dark:text-amber-200">{t('reports.truncated', { limit: meta.limit.toLocaleString() })}</div>}<div className="h-[390px] p-4"><ReportChart type={chartType} rows={rows} measures={options?.measures || options?.metrics || []} /></div></section>}
+          <section className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="text-sm font-semibold">{t('reports.details', 'Data details')}</h2><p className="mt-1 text-xs text-muted-foreground">{t('reports.row_count', { count: rows.length })}</p></div><Badge variant="outline">{bucket === 'raw' ? t('reports.raw', 'Raw') : t('reports.aggregate', 'Aggregated')}</Badge></div><div className="max-h-[520px] overflow-auto"><Table><TableHeader className="sticky top-0 z-10 bg-muted/95 backdrop-blur"><TableRow><TableHead>{entityLabel}</TableHead><TableHead>{metricLabel}</TableHead><TableHead>{t('reports.time', 'Time')}</TableHead><TableHead className="text-right">{t('reports.value', 'Value')}</TableHead></TableRow></TableHeader><TableBody>{rows.map((row, index) => <TableRow key={`${row.entity_id}-${row.metric_id}-${row.time}-${index}`}><TableCell className="font-medium">{entityLabels.get(String(row.entity_id)) || row.entity_id}</TableCell><TableCell><Badge variant="outline" className="font-mono font-normal">{measureLabels.get(String(row.metric_id)) || row.metric_id}</Badge></TableCell><TableCell className="text-muted-foreground">{new Date(row.time).toLocaleString()}</TableCell><TableCell className="text-right font-mono font-semibold tabular-nums">{row.value == null ? '—' : String(row.value)}</TableCell></TableRow>)}</TableBody></Table></div></section>
+        </>}
+      </main>
+    </div>
+  </div>;
+};
+
+export default ReportsPage;

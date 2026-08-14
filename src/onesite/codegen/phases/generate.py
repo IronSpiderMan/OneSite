@@ -1009,16 +1009,28 @@ def phase_generate_aggregated(
         m for m in api_models
         if not m.get("is_latest_table") and m.get("dashboard_metrics")
     ]
+    report_models = [
+        m for m in api_models
+        if not m.get("is_latest_table") and m.get("data_reports")
+    ]
+    reports_role_visible = {
+        role: any(
+            role in report.get("permitted_roles", [])
+            for model in report_models
+            for report in model.get("data_reports", [])
+        )
+        for role in ("user", "admin", "developer")
+    }
     generate_file(
         "frontend_routes.tsx.j2",
-        {"models": frontend_models, "external_resources_enabled": external_resources_enabled},
+        {"models": frontend_models, "external_resources_enabled": external_resources_enabled, "reports_enabled": bool(report_models)},
         frontend_path / "src" / "Routes.tsx",
     )
     # Collect unique icon names used across models (for dynamic import)
     used_icons = sorted({m.get("icon", "LayoutDashboard") for m in frontend_models})
     generate_file(
         "frontend_menu.tsx.j2",
-        {"models": frontend_models, "used_icons": used_icons, "external_resources_enabled": external_resources_enabled},
+        {"models": frontend_models, "used_icons": used_icons, "external_resources_enabled": external_resources_enabled, "reports_enabled": bool(report_models), "reports_role_visible": reports_role_visible},
         frontend_path / "src" / "Menu.tsx",
     )
     site_logger_enabled = "site_logger" in site_config.get("plugins", [])
@@ -1049,6 +1061,22 @@ def phase_generate_aggregated(
         frontend_path / "src" / "pages" / "Dashboard.tsx",
         theme_name,
     )
+    if report_models:
+        generate_file(
+            "report_runtime.py.j2",
+            {},
+            backend_path / "app" / "core" / "reports.py",
+        )
+        generate_file(
+            "report_charts.tsx.j2",
+            {},
+            frontend_path / "src" / "components" / "report-charts.tsx",
+        )
+        generate_file(
+            "report_page.tsx.j2",
+            {"report_models": report_models},
+            frontend_path / "src" / "pages" / "Reports.tsx",
+        )
 
     # ── Feature flags ──
     generate_file(

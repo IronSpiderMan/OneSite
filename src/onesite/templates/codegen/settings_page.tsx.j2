@@ -13,6 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { ImageUpload } from '../components/ui/image-upload';
 import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
+import { VideoStreamInput } from '../components/ui/video-stream-input';
 import { TimePicker } from '../components/ui/time-picker';
 import { MarkdownEditor } from '../components/ui/markdown-editor';
 import { LocationInput } from '../components/ui/location-input';
@@ -288,6 +289,14 @@ const SettingsPage: React.FC = () => {
                           <FileUpload value={value} onChange={onChange} />
                         )}
                       />
+                      {% elif field.ui_type == 'video_stream' %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        render={({ field: { onChange, value } }) => (
+                          <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
+                        )}
+                      />
                       {% elif field.ui_type == 'location' %}
                       <Controller
                         name="{{ field.name }}"
@@ -440,6 +449,14 @@ const SettingsPage: React.FC = () => {
                 control={control}
                 render={({ field: { onChange, value } }) => (
                   <FileUpload value={value} onChange={onChange} />
+                )}
+              />
+              {% elif field.ui_type == 'video_stream' %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                render={({ field: { onChange, value } }) => (
+                  <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
                 )}
               />
               {% elif field.ui_type == 'location' %}
