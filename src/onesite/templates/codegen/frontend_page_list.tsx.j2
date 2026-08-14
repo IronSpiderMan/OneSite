@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown{% endif %} } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +30,7 @@ import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
 import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
+import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 {% if not model.page_edit or model.importable %}
 import { Modal } from '../../components/ui/modal';
 {% endif %}
@@ -61,6 +62,53 @@ import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service
 import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service }}';
 {% endif %}
 {% endfor %}
+
+const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
+  if (value === undefined || value === null) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  let parsedValue = value;
+  if (typeof value === 'string') {
+    try {
+      parsedValue = JSON.parse(value);
+    } catch {
+      return <span className="block max-w-[250px] truncate" title={value}>{value}</span>;
+    }
+  }
+
+  if (parsedValue === undefined || parsedValue === null) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  if (typeof parsedValue !== 'object') {
+    return <span>{String(parsedValue)}</span>;
+  }
+
+  const summary = Array.isArray(parsedValue)
+    ? `[ ] ${parsedValue.length}`
+    : `{ } ${Object.keys(parsedValue as Record<string, unknown>).length}`;
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          title="View JSON"
+        >
+          <Braces className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
+          <span className="truncate">{summary}</span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-0">
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
+          {JSON.stringify(parsedValue, null, 2)}
+        </pre>
+      </PopoverContent>
+    </Popover>
+  );
+};
 
 const {{ model.name }}Page: React.FC = () => {
   const { t } = useTranslation();
@@ -965,11 +1013,7 @@ const {{ model.name }}Page: React.FC = () => {
                           : '-'}
                         </span>
                         {% elif field.ui_type == 'json' %}
-                        <span className="block max-w-[250px] truncate" title={item.{{ field.name }} !== undefined && item.{{ field.name }} !== null ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }})) : '-'}>
-                        {item.{{ field.name }} !== undefined && item.{{ field.name }} !== null
-                          ? (typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }}))
-                          : '-'}
-                        </span>
+                        <JsonPreview value={item.{{ field.name }}} />
                         {% else %}
                         <span className="block max-w-[250px] truncate" title={String(item.{{ field.name }})}>
                         {String(item.{{ field.name }})}
