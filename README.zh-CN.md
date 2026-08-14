@@ -164,6 +164,30 @@ __onesite__ = {
 
 `period` 支持 `today`、`this_week`、`this_month`、`last_7_days`、`last_30_days`、`all`。指标角色范围会和模型读取权限取交集，后端不会向无权限角色返回指标。
 - `is_notification_table`、`time_series_table`：通知/WebSocket 与时序表配置。
+- `data_reports`：为时序模型生成通用报表。最简配置为 `"data_reports": True`；
+  OneSite 会从 `time_series_table` 推导实体、指标、时间和值字段，并从相关模型表推导
+  指标名称、单位、数据类型、枚举和量程。单报表可用对象覆盖标题等少量行为：
+
+```python
+__onesite__ = {
+    "time_series_table": {
+        "entity_field": "device_id",
+        "metric_field": "metric",
+        "time_field": "reported_at",
+        "model_table": "device_model",
+    },
+    "data_reports": {
+        "title": "设备数据报表",
+        "entity_label": "设备",
+        "views": "auto",
+    },
+}
+```
+
+  `views="auto"` 会按指标语义开放适用图表，包括折线、面积、分组/堆叠柱状、
+  环形、散点、直方、热力和状态图。`bucket="auto"` 会按时间跨度自动控制点数；
+  查询响应会显式返回截断状态，避免把部分数据误认为完整结果。只有需要多个报表或
+  明确限制视图、权限、时间跨度时才需要使用列表和更多覆盖项。
 
 权限分三层：模型级 `c/r/u/d`，字段级 `c/r/u`，以及 `visible` 菜单可见性。角色由低到高为 `user`、`admin`、`developer`。字段权限未配置时会继承模型权限（移除 `d`）；默认 `id` 隐藏、`created_at` 只读、`updated_at` 可读写。用字段 `site_props.permissions` 显式配置即可覆盖默认值。
 
