@@ -10,6 +10,7 @@ from rich.console import Console
 from sqlmodel import SQLModel
 
 from .types import FieldDefinition, ForeignKeyInfo, ModelIntrospectResult
+from .time_filters import RELATIVE_TIME_PERIODS
 
 console = Console()
 
@@ -98,9 +99,7 @@ ROLE_LEVELS = {"user": 0, "admin": 1, "developer": 2}
 DASHBOARD_METRIC_AGGREGATIONS = {
     "count", "sum", "avg", "min", "max", "distinct_count",
 }
-DASHBOARD_METRIC_PERIODS = {
-    "today", "this_week", "this_month", "last_7_days", "last_30_days", "all",
-}
+DASHBOARD_METRIC_PERIODS = {*RELATIVE_TIME_PERIODS, "all"}
 
 DATA_REPORT_BUCKETS = {"raw", "auto", "1m", "5m", "15m", "1h", "6h", "1d", "1w"}
 DATA_REPORT_AGGREGATIONS = {"avg", "min", "max", "sum", "count"}
@@ -254,6 +253,9 @@ def _normalize_dashboard_metrics(
         ):
             raise ValueError(f"{prefix}.field '{field_name}' must be numeric for {aggregation}")
 
+        # ``time_field`` + ``period`` is the legacy KPI form. Normalize it
+        # into the same relative-time ``where`` predicate used by charts so
+        # there is one public vocabulary for fixed time filters.
         time_field = metric.get("time_field")
         if time_field and time_field not in field_map:
             raise ValueError(f"{prefix}.time_field '{time_field}' does not exist")
@@ -267,20 +269,46 @@ def _normalize_dashboard_metrics(
         if period != "all" and not time_field:
             raise ValueError(f"{prefix}.time_field is required when period is '{period}'")
 
-        compare = metric.get("compare")
-        if compare not in (None, "previous_period"):
-            raise ValueError(f"{prefix}.compare currently only supports 'previous_period'")
-        if compare and period == "all":
-            raise ValueError(f"{prefix}.compare requires a bounded period")
-
         where = metric.get("where", {})
         if not isinstance(where, dict):
             raise ValueError(f"{prefix}.where must be an object")
+        where = dict(where)
+        if time_field and period != "all":
+            existing_time_filter = where.get(time_field)
+            relative_filter = {"period": period}
+            if existing_time_filter is not None and existing_time_filter != relative_filter:
+                raise ValueError(
+                    f"{prefix}.time_field conflicts with where.{time_field}"
+                )
+            where[time_field] = relative_filter
+
+        relative_time_fields: list[str] = []
         for filter_field, value in where.items():
             if filter_field not in field_map:
                 raise ValueError(f"{prefix}.where field '{filter_field}' does not exist")
-            if isinstance(value, (dict, tuple, set)):
+            if isinstance(value, dict):
+                if set(value) != {"period"} or value["period"] not in RELATIVE_TIME_PERIODS:
+                    supported = ", ".join(sorted(RELATIVE_TIME_PERIODS))
+                    raise ValueError(
+                        f"{prefix}.where.{filter_field} must be a scalar, list, or "
+                        f"{{'period': <period>}} where period is one of: {supported}"
+                    )
+                if field_map[filter_field].ui_type not in ("date", "datetime"):
+                    raise ValueError(
+                        f"{prefix}.where.{filter_field} relative time filters require "
+                        "a date or datetime field"
+                    )
+                relative_time_fields.append(filter_field)
+            elif isinstance(value, (tuple, set)):
                 raise ValueError(f"{prefix}.where.{filter_field} must be a scalar or list")
+        if len(relative_time_fields) > 1:
+            raise ValueError(f"{prefix}.where supports at most one relative time filter")
+
+        compare = metric.get("compare")
+        if compare not in (None, "previous_period"):
+            raise ValueError(f"{prefix}.compare currently only supports 'previous_period'")
+        if compare and not relative_time_fields:
+            raise ValueError(f"{prefix}.compare requires a bounded relative time filter")
 
         visible = metric.get("visible", sorted(readable_roles, key=ROLE_ORDER.index))
         if not isinstance(visible, list) or any(role not in ROLE_ORDER for role in visible):
@@ -307,7 +335,6 @@ def _normalize_dashboard_metrics(
 
         metric.update(
             aggregation=aggregation,
-            period=period,
             where=where,
             visible=visible,
             permitted_roles=permitted_roles,
@@ -317,6 +344,8 @@ def _normalize_dashboard_metrics(
             order=order,
             i18n_key=f"dashboard.metrics.{_to_snake(model_name)}.{key}",
         )
+        metric.pop("time_field", None)
+        metric.pop("period", None)
         normalized.append(metric)
 
     normalized.sort(key=lambda metric: (metric["order"], metric["key"]))

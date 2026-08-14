@@ -533,11 +533,57 @@ updates the existing row; otherwise a new row is created. Set field-level
 `site_props` `importable=False` or `exportable=False` to exclude a field even
 when it appears in a model-level field list.
 | `refresh_interval` | Enables periodic list refresh. |
-| `visualize` | Adds generated dashboard statistics/charts. |
+| `visualize` | Legacy model-level chart configuration; use project-level `visualizations.py` for new charts. |
+| `dashboard_metrics` | Legacy model-level Dashboard KPI configuration; use project-level `visualizations.py` for new KPIs. |
 | `is_notification_table` | Enables notification-center behavior and realtime push. |
 | `time_series_table` | Configures TimescaleDB/time-series generation. |
 
 Useful field-level `site_props` are `permissions`, `is_search_field`, `component`, `create_optional`, `update_optional`, `is_foreign_key`, `reverse_display`, `allow_download`, `group`, `fixed_keys` and `lock_keys`.
+
+Project-level charts and Dashboard KPIs are declared independently from SQLModel
+classes:
+
+```python
+from onesite.visualization import (
+    chart, count, dashboard_metric, dim, line, metric, pie,
+)
+
+visualizations = [
+    chart(
+        "daily_sales", title="Daily sales", preset=line.smooth, model="Order",
+        x=dim("created_at", bucket="day"),
+        y=metric("amount", aggregate="sum"),
+    ),
+    chart(
+        "orders_by_status", title="Orders by status",
+        preset=pie.rounded_donut, model="Order",
+        category=dim("status"), value=count(),
+    ),
+]
+
+dashboard_metrics = [
+    dashboard_metric(
+        "order_count", model="Order", title="Orders",
+        aggregation="count",
+        where={"created_at": {"period": "today"}},
+        icon="ShoppingCart", color="blue", order=1,
+    ),
+]
+```
+
+Preset constants are grouped by chart type for editor completion, such as
+`line.smooth`, `line.stacked_area_gradient`, and `pie.rounded_donut`. Existing
+string presets remain supported.
+
+OneSite validates each preset's semantic inputs and generates a shared query API
+plus an ECharts dashboard runtime. Related fields can use paths such as
+`category.name`. See `docs/visualization-redesign.md` for the contracts and
+migration design. KPIs keep using their source model's generated endpoint, so
+the existing field validation and role-permission checks still apply. The old
+`__onesite__.dashboard_metrics` configuration remains temporarily compatible
+and emits a deprecation warning during `site sync`. KPI time windows use the
+same relative-time `where` form as charts; the older `time_field` + `period`
+pair remains temporarily compatible.
 
 ## Permissions and visibility
 

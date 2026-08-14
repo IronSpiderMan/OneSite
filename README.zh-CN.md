@@ -136,33 +136,81 @@ __onesite__ = {
 `标签一;标签二`；导入时执行反向查找。`import_key` 命中已有记录时覆盖，
 否则创建新记录。字段的 `site_props` 可设置 `importable=False` 或
 `exportable=False`，即使模型级 `fields` 包含该字段也会排除。
-- `refresh_interval`、`visualize`：自动刷新及统计图表。
-- `dashboard_metrics`：在 Dashboard 顶部生成模型聚合指标卡。支持 `count`、`sum`、`avg`、`min`、`max`、`distinct_count`，固定过滤、时间周期和上一周期环比：
+- `refresh_interval`：自动刷新。模型内的 `visualize` 已弃用，旧配置暂时兼容；
+  新图表统一写在项目根目录的 `visualizations.py`：
 
 ```python
-__onesite__ = {
-    "dashboard_metrics": [
-        {"key": "total_orders", "title": "订单总数", "aggregation": "count"},
-        {
-            "key": "paid_revenue_today",
-            "title": "今日成交额",
-            "field": "amount",
-            "aggregation": "sum",
-            "where": {"status": "paid"},
-            "time_field": "created_at",
-            "period": "today",
-            "compare": "previous_period",
-            "format": {"type": "currency", "currency": "CNY", "decimals": 2},
-            "visible": ["admin", "developer"],
-            "icon": "Wallet",
-            "color": "green",
-            "link": "/orders?status=paid",
-        },
-    ],
-}
+from onesite.visualization import chart, count, dim, line, metric, pie
+
+visualizations = [
+    chart(
+        "sales_by_channel",
+        title="各渠道销售趋势",
+        preset=line.stacked_area_gradient,
+        model="Order",
+        x=dim("created_at", bucket="day"),
+        series=dim("channel"),
+        y=metric("amount", aggregate="sum", label="销售额"),
+    ),
+    chart(
+        "orders_by_status",
+        title="订单状态分布",
+        preset=pie.rounded_donut,
+        model="Order",
+        category=dim("status"),
+        value=count(),
+    ),
+]
 ```
 
-`period` 支持 `today`、`this_week`、`this_month`、`last_7_days`、`last_30_days`、`all`。指标角色范围会和模型读取权限取交集，后端不会向无权限角色返回指标。
+预设按图表类型提供可自动补全的常量，例如 `line.smooth`、
+`line.stacked_area_gradient` 和 `pie.rounded_donut`；原有字符串写法继续兼容。
+
+图表固定条件可使用相对时间范围。例如仅统计今日告警：
+
+```python
+where={"created_at": {"period": "today"}}
+```
+
+支持 `today`、`yesterday`、`this_week`、`last_week`、`this_month`、`last_month`。
+该条件只能用于 `date` 或 `datetime` 字段，按系统时区计算。
+
+  同一输入契约可以切换不同预设。当前支持折线/面积/堆叠面积、基础与分类散点、
+  饼/环/半环、热力、雷达、树/矩形树/旭日和桑基图。字段路径如
+  `category.name` 会沿外键自动关联；同步时会检查输入完整性、字段类型、聚合、
+  权限和布局。完整设计见 `docs/visualization-redesign.md`。
+- `dashboard_metrics`：在 Dashboard 顶部生成聚合指标卡。和图表一样，KPI
+  声明放在项目根目录的 `visualizations.py`，并通过 `model` 指定数据来源。
+  支持 `count`、`sum`、`avg`、`min`、`max`、`distinct_count`，固定过滤、时间周期和上一周期环比：
+
+```python
+from onesite.visualization import dashboard_metric
+
+dashboard_metrics = [
+    dashboard_metric(
+        "total_orders",
+        model="Order",
+        title="订单总数",
+        aggregation="count",
+    ),
+    dashboard_metric(
+        "paid_revenue_today",
+        model="Order",
+        title="今日成交额",
+        field="amount",
+        aggregation="sum",
+        where={"status": "paid", "created_at": {"period": "today"}},
+        compare="previous_period",
+        format={"type": "currency", "currency": "CNY", "decimals": 2},
+        visible=["admin", "developer"],
+        icon="Wallet",
+        color="green",
+        link="/orders?status=paid",
+    ),
+]
+```
+
+相对时间范围支持 `today`、`yesterday`、`this_week`、`last_week`、`this_month`、`last_month`、`last_7_days`、`last_30_days`。指标角色范围会和模型读取权限取交集，后端不会向无权限角色返回指标。旧的 `time_field + period` 与 `__onesite__.dashboard_metrics` 暂时兼容；后者会在 `site sync` 时提示迁移。
 - `is_notification_table`、`time_series_table`：通知/WebSocket 与时序表配置。
 - `data_reports`：为时序模型生成通用报表。最简配置为 `"data_reports": True`；
   OneSite 会从 `time_series_table` 推导实体、指标、时间和值字段，并从相关模型表推导

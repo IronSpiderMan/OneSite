@@ -1,0 +1,46 @@
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.core.visualizations import (
+    list_visualizations,
+    query_visualization,
+    visualization_options,
+)
+from app.models.user import User
+
+
+router = APIRouter()
+
+
+@router.get("")
+async def list_available_visualizations(
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    return {"visualizations": list_visualizations(current_user)}
+
+
+@router.get("/{key}/options")
+async def get_visualization_options(
+    key: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    return await visualization_options(session, key=key, user=current_user)
+
+
+@router.post("/{key}/query")
+async def query_visualization_data(
+    key: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> Any:
+    return await query_visualization(
+        session,
+        key=key,
+        user=current_user,
+        payload=payload,
+    )

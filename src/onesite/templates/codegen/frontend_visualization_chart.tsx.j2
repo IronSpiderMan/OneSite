@@ -1,0 +1,275 @@
+import React, { useEffect, useMemo, useRef } from 'react';
+import * as echarts from 'echarts/core';
+import type { EChartsCoreOption } from 'echarts/core';
+{% set renderers = visualizations | map(attribute='renderer') | list %}
+import {
+  {% if 'heatmap' in renderers %}HeatmapChart,{% endif %}
+  {% if 'line' in renderers %}LineChart,{% endif %}
+  {% if 'pie' in renderers %}PieChart,{% endif %}
+  {% if 'radar' in renderers %}RadarChart,{% endif %}
+  {% if 'sankey' in renderers %}SankeyChart,{% endif %}
+  {% if 'scatter' in renderers %}ScatterChart,{% endif %}
+  {% if 'sunburst' in renderers %}SunburstChart,{% endif %}
+  {% if 'tree' in renderers %}TreeChart,{% endif %}
+  {% if 'treemap' in renderers %}TreemapChart,{% endif %}
+} from 'echarts/charts';
+import {
+  {% if 'line' in renderers or 'scatter' in renderers or 'heatmap' in renderers %}GridComponent,{% endif %}
+  {% if 'line' in renderers or 'scatter' in renderers or 'pie' in renderers or 'radar' in renderers %}LegendComponent,{% endif %}
+  {% if 'radar' in renderers %}RadarComponent,{% endif %}
+  TooltipComponent,
+  {% if 'heatmap' in renderers %}VisualMapComponent,{% endif %}
+} from 'echarts/components';
+import { LabelLayout, UniversalTransition } from 'echarts/features';
+import { CanvasRenderer } from 'echarts/renderers';
+
+import type { VisualizationData, VisualizationSpec } from '../services/visualizations';
+
+echarts.use([
+  {% if 'line' in renderers %}LineChart,{% endif %}
+  {% if 'scatter' in renderers %}ScatterChart,{% endif %}
+  {% if 'pie' in renderers %}PieChart,{% endif %}
+  {% if 'heatmap' in renderers %}HeatmapChart,{% endif %}
+  {% if 'radar' in renderers %}RadarChart,{% endif %}
+  {% if 'tree' in renderers %}TreeChart,{% endif %}
+  {% if 'treemap' in renderers %}TreemapChart,{% endif %}
+  {% if 'sunburst' in renderers %}SunburstChart,{% endif %}
+  {% if 'sankey' in renderers %}SankeyChart,{% endif %}
+  {% if 'line' in renderers or 'scatter' in renderers or 'heatmap' in renderers %}GridComponent,{% endif %}
+  {% if 'line' in renderers or 'scatter' in renderers or 'pie' in renderers or 'radar' in renderers %}LegendComponent,{% endif %}
+  {% if 'radar' in renderers %}RadarComponent,{% endif %}
+  TooltipComponent,
+  {% if 'heatmap' in renderers %}VisualMapComponent,{% endif %}
+  LabelLayout, UniversalTransition, CanvasRenderer,
+]);
+
+const COLORS = ['#6366f1', '#06b6d4', '#f59e0b', '#f43f5e', '#8b5cf6', '#10b981', '#f97316', '#3b82f6'];
+
+const unique = (values: any[]) => Array.from(new Set(values.map((value) => String(value))));
+
+const cartesianBase = (xValues: any[]): EChartsCoreOption => ({
+  animationDuration: 450,
+  color: COLORS,
+  tooltip: { trigger: 'axis' },
+  legend: { type: 'scroll', bottom: 0 },
+  grid: { left: 48, right: 24, top: 24, bottom: 56, containLabel: true },
+  xAxis: { type: 'category', data: xValues, boundaryGap: false },
+  yAxis: { type: 'value', scale: true },
+});
+
+const lineOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
+  const xValues = unique(data.rows.map((row) => row.x));
+  const seriesNames = data.contract === 'xy_series'
+    ? unique(data.rows.map((row) => row.series))
+    : [String((spec.inputs.y as any)?.label || spec.title)];
+  const smooth = spec.preset === 'line.smooth';
+  const area = spec.preset.includes('area');
+  const stacked = spec.preset.includes('stacked');
+  const gradient = spec.preset.includes('gradient');
+  const series = seriesNames.map((name, index) => {
+    const rows = data.contract === 'xy_series'
+      ? data.rows.filter((row) => String(row.series) === name)
+      : data.rows;
+    const values = new Map(rows.map((row) => [String(row.x), row.y]));
+    const color = COLORS[index % COLORS.length];
+    return {
+      name,
+      type: 'line',
+      smooth,
+      stack: stacked ? 'total' : undefined,
+      showSymbol: xValues.length < 30,
+      connectNulls: true,
+      emphasis: { focus: 'series' },
+      lineStyle: { width: 2 },
+      areaStyle: area ? {
+        opacity: gradient ? 0.45 : 0.16,
+        color: gradient ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+          { offset: 0, color },
+          { offset: 1, color: `${color}08` },
+        ]) : color,
+      } : undefined,
+      data: xValues.map((x) => values.get(x) ?? null),
+    };
+  });
+  return { ...cartesianBase(xValues), series };
+};
+
+const scatterOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
+  const seriesNames = data.contract === 'xy_series' ? unique(data.rows.map((row) => row.series)) : [spec.title];
+  return {
+    color: COLORS,
+    tooltip: { trigger: 'item' },
+    legend: data.contract === 'xy_series' ? { type: 'scroll', bottom: 0 } : undefined,
+    grid: { left: 48, right: 24, top: 24, bottom: 48, containLabel: true },
+    xAxis: { type: 'value', scale: true, name: (spec.inputs.x as any)?.label },
+    yAxis: { type: 'value', scale: true, name: (spec.inputs.y as any)?.label },
+    series: seriesNames.map((name) => ({
+      name,
+      type: 'scatter',
+      symbolSize: 10,
+      emphasis: { focus: 'series' },
+      data: data.rows
+        .filter((row) => data.contract !== 'xy_series' || String(row.series) === name)
+        .map((row) => [row.x, row.y]),
+    })),
+  };
+};
+
+const pieOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
+  const half = spec.preset === 'pie.half_donut';
+  return {
+    color: COLORS,
+    tooltip: { trigger: 'item' },
+    legend: { type: 'scroll', bottom: 0 },
+    series: [{
+      name: spec.title,
+      type: 'pie',
+      radius: ['48%', '72%'],
+      center: half ? ['50%', '68%'] : ['50%', '48%'],
+      startAngle: half ? 180 : 90,
+      endAngle: half ? 360 : 'auto',
+      padAngle: spec.preset === 'pie.rounded_donut' ? 2 : 0,
+      itemStyle: { borderRadius: spec.preset === 'pie.rounded_donut' ? 8 : 0, borderColor: 'transparent' },
+      label: { formatter: '{b}: {d}%' },
+      data: data.rows.map((row) => ({ name: String(row.category), value: row.value })),
+    }],
+  };
+};
+
+const heatmapOption = (data: VisualizationData): EChartsCoreOption => {
+  const xValues = unique(data.rows.map((row) => row.x));
+  const yValues = unique(data.rows.map((row) => row.y));
+  const values = data.rows.map((row) => Number(row.value)).filter(Number.isFinite);
+  return {
+    tooltip: { position: 'top' },
+    grid: { left: 72, right: 32, top: 24, bottom: 72, containLabel: true },
+    xAxis: { type: 'category', data: xValues, splitArea: { show: true } },
+    yAxis: { type: 'category', data: yValues, splitArea: { show: true } },
+    visualMap: {
+      min: values.length ? Math.min(...values) : 0,
+      max: values.length ? Math.max(...values) : 1,
+      calculable: true,
+      orient: 'horizontal',
+      left: 'center',
+      bottom: 0,
+    },
+    series: [{
+      type: 'heatmap',
+      data: data.rows.map((row) => [xValues.indexOf(String(row.x)), yValues.indexOf(String(row.y)), row.value]),
+      emphasis: { itemStyle: { shadowBlur: 10, shadowColor: 'rgba(0,0,0,.35)' } },
+    }],
+  };
+};
+
+type HierarchyNode = { id: string; name: string; value?: number; children?: HierarchyNode[] };
+
+const hierarchyData = (rows: Array<Record<string, any>>): HierarchyNode[] => {
+  const nodes = new Map<string, HierarchyNode>();
+  rows.forEach((row) => nodes.set(String(row.id), {
+    id: String(row.id), name: String(row.name),
+    ...(row.value != null ? { value: Number(row.value) } : {}), children: [],
+  }));
+  const roots: HierarchyNode[] = [];
+  rows.forEach((row) => {
+    const node = nodes.get(String(row.id))!;
+    const parent = row.parent == null ? null : nodes.get(String(row.parent));
+    if (parent && parent !== node) parent.children!.push(node); else roots.push(node);
+  });
+  nodes.forEach((node) => { if (!node.children?.length) delete node.children; });
+  return roots;
+};
+
+const hierarchyOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
+  const roots = hierarchyData(data.rows);
+  if (spec.renderer === 'treemap' || spec.renderer === 'sunburst') {
+    return {
+      color: COLORS,
+      tooltip: { trigger: 'item' },
+      series: [{
+        type: spec.renderer,
+        data: roots,
+        radius: spec.renderer === 'sunburst' ? ['12%', '88%'] : undefined,
+        label: { rotate: spec.renderer === 'sunburst' ? 'radial' : 0 },
+      }],
+    };
+  }
+  return {
+    tooltip: { trigger: 'item', triggerOn: 'mousemove' },
+    series: [{
+      type: 'tree', data: roots, top: '5%', left: '8%', bottom: '5%', right: '22%',
+      symbolSize: 9, orient: 'LR', expandAndCollapse: true, initialTreeDepth: 3,
+      label: { position: 'left', verticalAlign: 'middle', align: 'right' },
+      leaves: { label: { position: 'right', verticalAlign: 'middle', align: 'left' } },
+    }],
+  };
+};
+
+const sankeyOption = (data: VisualizationData): EChartsCoreOption => {
+  const names = unique(data.rows.flatMap((row) => [row.source, row.target]));
+  return {
+    color: COLORS,
+    tooltip: { trigger: 'item', triggerOn: 'mousemove' },
+    series: [{
+      type: 'sankey',
+      data: names.map((name) => ({ name })),
+      links: data.rows.map((row) => ({ source: String(row.source), target: String(row.target), value: row.value })),
+      emphasis: { focus: 'adjacency' },
+      lineStyle: { color: 'gradient', curveness: 0.5 },
+    }],
+  };
+};
+
+const radarOption = (data: VisualizationData): EChartsCoreOption => {
+  const indicators = unique(data.rows.map((row) => row.indicator));
+  const seriesNames = unique(data.rows.map((row) => row.series));
+  const maximums = new Map<string, number>();
+  data.rows.forEach((row) => maximums.set(String(row.indicator), Math.max(maximums.get(String(row.indicator)) || 0, Number(row.max ?? row.value) || 0)));
+  return {
+    color: COLORS,
+    tooltip: {},
+    legend: { data: seriesNames, bottom: 0 },
+    radar: { indicator: indicators.map((name) => ({ name, max: Math.max(maximums.get(name) || 1, 1) })) },
+    series: [{
+      type: 'radar',
+      data: seriesNames.map((name) => ({
+        name,
+        value: indicators.map((indicator) => data.rows.find((row) => String(row.series) === name && String(row.indicator) === indicator)?.value ?? 0),
+      })),
+    }],
+  };
+};
+
+export const buildVisualizationOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
+  let option: EChartsCoreOption;
+  if (spec.renderer === 'line') option = lineOption(spec, data);
+  else if (spec.renderer === 'scatter') option = scatterOption(spec, data);
+  else if (spec.renderer === 'pie') option = pieOption(spec, data);
+  else if (spec.renderer === 'heatmap') option = heatmapOption(data);
+  else if (['tree', 'treemap', 'sunburst'].includes(spec.renderer)) option = hierarchyOption(spec, data);
+  else if (spec.renderer === 'sankey') option = sankeyOption(data);
+  else if (spec.renderer === 'radar') option = radarOption(data);
+  else option = {};
+  return { ...option, ...spec.options };
+};
+
+export const VisualizationChart: React.FC<{
+  spec: VisualizationSpec;
+  data: VisualizationData;
+  className?: string;
+}> = ({ spec, data, className }) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+  const option = useMemo(() => buildVisualizationOption(spec, data), [spec, data]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+    const instance = echarts.init(containerRef.current, undefined, { renderer: 'canvas' });
+    instance.setOption(option, { notMerge: true });
+    const resizeObserver = new ResizeObserver(() => instance.resize());
+    resizeObserver.observe(containerRef.current);
+    return () => { resizeObserver.disconnect(); instance.dispose(); };
+  }, [option]);
+
+  return <div ref={containerRef} className={className || 'h-[340px] w-full'} role="img" aria-label={spec.title} />;
+};
+
+export default VisualizationChart;

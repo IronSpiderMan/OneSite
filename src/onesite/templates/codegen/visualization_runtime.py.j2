@@ -1,0 +1,525 @@
+"""Generated project-level visualization query runtime."""
+
+from __future__ import annotations
+
+import importlib
+import json
+from datetime import date, datetime, timedelta
+from decimal import Decimal
+from enum import Enum
+from typing import Any
+
+from fastapi import HTTPException
+from sqlalchemy import Integer, cast, func
+from sqlmodel import select
+
+
+VISUALIZATIONS: list[dict[str, Any]] = json.loads(r'''{{ visualizations_json }}''')
+VISUALIZATION_MAP = {item["key"]: item for item in VISUALIZATIONS}
+
+
+def _load_model(module: str, name: str):
+    return getattr(importlib.import_module(f"app.models.{module}"), name)
+
+
+def _role_value(user: Any) -> str:
+    role = getattr(user, "role", "user")
+    return str(getattr(role, "value", role))
+
+
+def _require_spec(key: str, role: str) -> dict[str, Any]:
+    spec = VISUALIZATION_MAP.get(key)
+    if spec is None:
+        raise HTTPException(status_code=404, detail="Visualization not found")
+    if role not in spec["permitted_roles"]:
+        raise HTTPException(status_code=403, detail="Visualization is not available for this role")
+    return spec
+
+
+def _public_binding(binding: dict[str, Any]) -> dict[str, Any]:
+    return {
+        name: binding.get(name)
+        for name in ("kind", "label", "field_type", "unit", "bucket", "extract", "aggregate")
+        if binding.get(name) is not None
+    }
+
+
+def _public_spec(spec: dict[str, Any]) -> dict[str, Any]:
+    inputs = {
+        name: [_public_binding(item) for item in binding]
+        if isinstance(binding, list) else _public_binding(binding)
+        for name, binding in spec["inputs"].items()
+    }
+    return {
+        "key": spec["key"],
+        "title": spec["title"],
+        "preset": spec["preset"],
+        "renderer": spec["renderer"],
+        "contract": spec["contract"],
+        "inputs": inputs,
+        "filters": [
+            {
+                name: item[name]
+                for name in ("key", "label", "type", "option_i18n_key")
+                if name in item
+            }
+            for item in spec["filters"]
+        ],
+        "placement": spec["placement"],
+        "options": spec["options"],
+    }
+
+
+def list_visualizations(user: Any) -> list[dict[str, Any]]:
+    role = _role_value(user)
+    return [_public_spec(spec) for spec in VISUALIZATIONS if role in spec["permitted_roles"]]
+
+
+def _walk_bindings(spec: dict[str, Any], active_filter_keys: set[str] | None = None):
+    for binding in spec["inputs"].values():
+        if isinstance(binding, list):
+            yield from binding
+        else:
+            yield binding
+    for item in spec["where"]:
+        yield item["binding"]
+    for item in spec["filters"]:
+        if active_filter_keys and item["key"] in active_filter_keys:
+            yield item["binding"]
+
+
+def _all_joins(spec: dict[str, Any], active_filter_keys: set[str] | None = None) -> list[dict[str, Any]]:
+    joins: list[dict[str, Any]] = []
+    seen: set[tuple[str, str, str, str]] = set()
+    for binding in _walk_bindings(spec, active_filter_keys):
+        for join in binding.get("joins", []):
+            key = (join["left_model"], join["left_field"], join["right_model"], join["right_field"])
+            if key not in seen:
+                seen.add(key)
+                joins.append(join)
+    return joins
+
+
+def _join_condition(join: dict[str, Any]):
+    left_model = _load_model(join["left_module"], join["left_model"])
+    right_model = _load_model(join["right_module"], join["right_model"])
+    left_field = join["left_field"]
+    right_field = join["right_field"]
+    # Respect FKs that target a non-standard primary/business key. SQLModel's
+    # mapped column retains the target column key after all models are imported.
+    try:
+        fk_attr = getattr(left_model, left_field) if join["direction"] == "forward" else getattr(right_model, right_field)
+        foreign_keys = list(fk_attr.property.columns[0].foreign_keys)
+        if foreign_keys:
+            target_key = foreign_keys[0].column.key
+            if join["direction"] == "forward":
+                right_field = target_key
+            else:
+                left_field = target_key
+    except (AttributeError, IndexError, LookupError):
+        pass
+    return right_model, getattr(left_model, left_field) == getattr(right_model, right_field)
+
+
+def _apply_joins(statement, spec: dict[str, Any], active_filter_keys: set[str] | None = None):
+    for join in _all_joins(spec, active_filter_keys):
+        target, condition = _join_condition(join)
+        statement = statement.join(target, condition)
+    return statement
+
+
+def _column(binding: dict[str, Any]):
+    if binding.get("field") is None:
+        return None
+    model = _load_model(binding["module"], binding["model"])
+    return getattr(model, binding["field"])
+
+
+def _dimension_expression(binding: dict[str, Any], dialect: str):
+    column = _column(binding)
+    bucket = binding.get("bucket")
+    extract = binding.get("extract")
+    if extract:
+        if extract == "weekday":
+            return func.extract("dow", column) if dialect == "postgresql" else func.strftime("%w", column)
+        return func.extract(extract, column)
+    if not bucket:
+        return column
+    normalized = {"1m": "minute", "1h": "hour", "1d": "day"}.get(bucket, bucket)
+    if dialect == "postgresql":
+        if bucket in {"5m", "15m"}:
+            seconds = 300 if bucket == "5m" else 900
+            return func.to_timestamp(func.floor(func.extract("epoch", column) / seconds) * seconds)
+        return func.date_trunc(normalized, column)
+    if bucket == "5m":
+        return func.printf(
+            "%s%02d",
+            func.strftime("%Y-%m-%d %H:", column),
+            (cast(func.strftime("%M", column), Integer) / 5) * 5,
+        )
+    if bucket == "15m":
+        return func.printf(
+            "%s%02d",
+            func.strftime("%Y-%m-%d %H:", column),
+            (cast(func.strftime("%M", column), Integer) / 15) * 15,
+        )
+    formats = {
+        "minute": "%Y-%m-%d %H:%M",
+        "hour": "%Y-%m-%d %H:00",
+        "day": "%Y-%m-%d",
+        "week": "%Y-%W",
+        "month": "%Y-%m",
+        "year": "%Y",
+    }
+    return func.strftime(formats[normalized], column)
+
+
+def _metric_expression(binding: dict[str, Any]):
+    column = _column(binding)
+    aggregate = binding["aggregate"]
+    if aggregate == "count":
+        return func.count(column) if column is not None else func.count()
+    if aggregate == "distinct_count":
+        return func.count(func.distinct(column))
+    if aggregate == "sum":
+        return func.coalesce(func.sum(column), 0)
+    if aggregate == "avg":
+        return func.avg(column)
+    if aggregate == "min":
+        return func.min(column)
+    if aggregate == "max":
+        return func.max(column)
+    raise HTTPException(status_code=500, detail="Unsupported visualization aggregate")
+
+
+def _coerce(column: Any, value: Any) -> Any:
+    try:
+        python_type = column.property.columns[0].type.python_type
+        if python_type is datetime and isinstance(value, str):
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        if python_type is date and isinstance(value, str):
+            return date.fromisoformat(value[:10])
+        if not isinstance(value, python_type):
+            return python_type(value)
+    except (AttributeError, LookupError, NotImplementedError, TypeError, ValueError):
+        pass
+    return value
+
+
+def _relative_time_bounds(period: str) -> tuple[datetime, datetime]:
+    """Return a half-open local-time range for a supported calendar period."""
+    # Import lazily so the generated module remains importable in tooling that
+    # does not load the complete generated application package.
+    from app.core.datetime import SYSTEM_TIMEZONE
+
+    now = datetime.now(SYSTEM_TIMEZONE)
+    today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    if period == "today":
+        return today, today + timedelta(days=1)
+    if period == "yesterday":
+        return today - timedelta(days=1), today
+    week_start = today - timedelta(days=today.weekday())
+    if period == "this_week":
+        return week_start, week_start + timedelta(days=7)
+    if period == "last_week":
+        return week_start - timedelta(days=7), week_start
+    month_start = today.replace(day=1)
+    if period == "this_month":
+        if month_start.month == 12:
+            return month_start, month_start.replace(year=month_start.year + 1, month=1)
+        return month_start, month_start.replace(month=month_start.month + 1)
+    if period == "last_month":
+        if month_start.month == 1:
+            previous_month = month_start.replace(year=month_start.year - 1, month=12)
+        else:
+            previous_month = month_start.replace(month=month_start.month - 1)
+        return previous_month, month_start
+    if period == "last_7_days":
+        return now - timedelta(days=7), now
+    if period == "last_30_days":
+        return now - timedelta(days=30), now
+    raise HTTPException(status_code=500, detail=f"Unsupported relative time period: {period}")
+
+
+def _apply_relative_time_predicate(statement, binding: dict[str, Any], period: str):
+    column = _column(binding)
+    start, end = _relative_time_bounds(period)
+    try:
+        python_type = column.property.columns[0].type.python_type
+    except (AttributeError, LookupError, NotImplementedError):
+        raise HTTPException(status_code=500, detail=f"Unable to determine type for {binding['path']}")
+    if python_type is datetime:
+        from app.core.datetime import to_utc
+
+        start, end = to_utc(start), to_utc(end)
+    elif python_type is date:
+        start, end = start.date(), end.date()
+    else:
+        raise HTTPException(status_code=500, detail=f"Relative time filter requires a date field: {binding['path']}")
+    return statement.where(column >= start).where(column < end)
+
+
+def _apply_predicate(statement, binding: dict[str, Any], value: Any, filter_type: str = "select"):
+    column = _column(binding)
+    if filter_type == "relative_time":
+        return _apply_relative_time_predicate(statement, binding, value["period"])
+    if filter_type == "date_range" or filter_type == "number_range":
+        if isinstance(value, dict):
+            lower, upper = value.get("start", value.get("min")), value.get("end", value.get("max"))
+        elif isinstance(value, (list, tuple)) and len(value) == 2:
+            lower, upper = value
+        else:
+            raise HTTPException(status_code=422, detail=f"Filter range for {binding['path']} must contain two values")
+        if lower not in (None, ""):
+            statement = statement.where(column >= _coerce(column, lower))
+        if upper not in (None, ""):
+            statement = statement.where(column <= _coerce(column, upper))
+        return statement
+    if isinstance(value, (list, tuple, set)):
+        return statement.where(column.in_([_coerce(column, item) for item in value]))
+    return statement.where(column == _coerce(column, value))
+
+
+def _serialize(value: Any) -> Any:
+    if isinstance(value, Enum):
+        return value.value
+    if value is None or isinstance(value, (str, int, float, bool)):
+        return value
+    if isinstance(value, (datetime, date)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return float(value)
+    return str(value)
+
+
+def _dialect_name(session: Any) -> str:
+    bind = getattr(session, "bind", None)
+    dialect = getattr(bind, "dialect", None)
+    return getattr(dialect, "name", "sqlite")
+
+
+def _query_parts(spec: dict[str, Any], dialect: str):
+    parts: list[tuple[str, dict[str, Any], Any]] = []
+    for name, binding in spec["inputs"].items():
+        bindings = binding if isinstance(binding, list) else [binding]
+        for item in bindings:
+            expression = _metric_expression(item) if item["kind"] == "metric" else _dimension_expression(item, dialect)
+            parts.append((name, item, expression))
+    return parts
+
+
+def _response_dimensions(spec: dict[str, Any]) -> list[dict[str, Any]]:
+    if isinstance(spec["inputs"].get("y"), list):
+        x = spec["inputs"]["x"]
+        y_items = spec["inputs"]["y"]
+        dimensions = [
+            {"name": "x", "type": x.get("field_type", "any"), "label": x.get("label", "x")},
+            {"name": "series", "type": "category", "label": "Series"},
+            {"name": "y", "type": "number", "label": "Value", "unit": next((item.get("unit") for item in y_items if item.get("unit")), None)},
+        ]
+        for name, binding in spec["inputs"].items():
+            if name not in {"x", "y"} and not isinstance(binding, list):
+                dimensions.append({
+                    "name": name,
+                    "type": "number" if binding["kind"] == "metric" else binding.get("field_type", "any"),
+                    "label": binding.get("label", name),
+                })
+        return dimensions
+    return [
+        {
+            "name": name,
+            "type": "number" if binding["kind"] == "metric" else binding.get("field_type", "any"),
+            "label": binding.get("label", name),
+            **({"unit": binding["unit"]} if binding.get("unit") else {}),
+        }
+        for name, binding in spec["inputs"].items()
+        if not isinstance(binding, list)
+    ]
+
+
+def _hierarchy_node_id(kind: str, value: Any) -> str:
+    """Namespace IDs so records from separate hierarchy models cannot collide."""
+
+    return f"{kind}:{_serialize(value)}"
+
+
+async def _query_hierarchy_leaf_rows(
+    session: Any,
+    *,
+    spec: dict[str, Any],
+    user: Any,
+    role: str,
+    dialect: str,
+    parent_ids: set[str],
+    limit: int,
+) -> tuple[list[dict[str, Any]], bool]:
+    """Load records from a configured leaf model below visible hierarchy nodes."""
+
+    if limit <= 0 or not parent_ids:
+        return [], False
+    leaf = spec["leaf"]
+    leaf_model = _load_model(leaf["model"]["module"], leaf["model"]["name"])
+    expressions = [
+        _dimension_expression(binding, dialect)
+        for binding in leaf["inputs"].values()
+    ]
+    statement = select(*expressions).select_from(leaf_model)
+    owner_field = leaf["model"].get("owner_field")
+    if owner_field and role == "user":
+        statement = statement.where(getattr(leaf_model, owner_field) == getattr(user, "id"))
+    result = await session.exec(statement.limit(limit + 1))
+    raw_rows = result.all()
+    truncated = len(raw_rows) > limit
+    rows: list[dict[str, Any]] = []
+    input_names = list(leaf["inputs"])
+    for row in raw_rows[:limit]:
+        values = tuple(row) if hasattr(row, "__iter__") and not isinstance(row, (str, bytes)) else (row,)
+        item = {name: _serialize(values[index]) for index, name in enumerate(input_names)}
+        parent_id = item.get("parent")
+        if parent_id is None or str(parent_id) not in parent_ids:
+            continue
+        item["id"] = _hierarchy_node_id("leaf", item["id"])
+        item["parent"] = _hierarchy_node_id("base", parent_id)
+        rows.append(item)
+    return rows, truncated
+
+
+async def query_visualization(
+    session: Any,
+    *,
+    key: str,
+    user: Any,
+    payload: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    payload = payload or {}
+    role = _role_value(user)
+    spec = _require_spec(key, role)
+    dialect = _dialect_name(session)
+    source_model = _load_model(spec["model"]["module"], spec["model"]["name"])
+    configured_filters = {item["key"]: item for item in spec["filters"]}
+    filters = payload.get("filters") or {}
+    if not isinstance(filters, dict):
+        raise HTTPException(status_code=422, detail="filters must be an object")
+    for filter_key in filters:
+        if filter_key not in configured_filters:
+            raise HTTPException(status_code=422, detail=f"Unknown visualization filter: {filter_key}")
+    active_filter_keys = {
+        filter_key for filter_key, value in filters.items()
+        if value not in (None, "", [])
+    }
+    parts = _query_parts(spec, dialect)
+    expressions = [part[2] for part in parts]
+    statement = select(*expressions).select_from(source_model)
+    statement = _apply_joins(statement, spec, active_filter_keys)
+
+    for predicate in spec["where"]:
+        value = predicate["value"]
+        filter_type = "relative_time" if isinstance(value, dict) and "period" in value else "select"
+        statement = _apply_predicate(statement, predicate["binding"], value, filter_type)
+    for filter_key, value in filters.items():
+        configured = configured_filters.get(filter_key)
+        if value not in (None, "", []):
+            statement = _apply_predicate(statement, configured["binding"], value, configured["type"])
+
+    owner_field = spec["model"].get("owner_field")
+    if owner_field and role == "user":
+        statement = statement.where(getattr(source_model, owner_field) == getattr(user, "id"))
+
+    has_aggregate = any(part[1]["kind"] == "metric" for part in parts)
+    dimensions = [part[2] for part in parts if part[1]["kind"] == "dimension"]
+    if has_aggregate and dimensions:
+        statement = statement.group_by(*dimensions)
+
+    expression_by_name: dict[str, Any] = {}
+    for name, _, expression in parts:
+        expression_by_name.setdefault(name, expression)
+    order_by = spec["order_by"] or (["x"] if "x" in expression_by_name else [])
+    for order in order_by:
+        descending = str(order).startswith("-")
+        expression = expression_by_name[str(order).removeprefix("-")]
+        statement = statement.order_by(expression.desc() if descending else expression.asc())
+
+    requested_limit = payload.get("limit", spec["limit"])
+    if isinstance(requested_limit, bool) or not isinstance(requested_limit, int):
+        raise HTTPException(status_code=422, detail="limit must be an integer")
+    limit = min(max(requested_limit, 1), spec["limit"], 5000)
+    result = await session.exec(statement.limit(limit + 1))
+    raw_rows = result.all()
+    truncated = len(raw_rows) > limit
+    raw_rows = raw_rows[:limit]
+
+    rows: list[dict[str, Any]] = []
+    multi_y = spec["inputs"].get("y")
+    if isinstance(multi_y, list):
+        base_indexes = [(name, index) for index, (name, _, _) in enumerate(parts) if name != "y"]
+        y_indexes = [index for index, part in enumerate(parts) if part[0] == "y"]
+        for row in raw_rows:
+            values = tuple(row) if hasattr(row, "__iter__") and not isinstance(row, (str, bytes)) else (row,)
+            for binding, index in zip(multi_y, y_indexes):
+                item = {name: _serialize(values[base_index]) for name, base_index in base_indexes}
+                item.update({
+                    "series": binding.get("label", binding.get("path", "Value")),
+                    "y": _serialize(values[index]),
+                })
+                rows.append(item)
+    else:
+        for row in raw_rows:
+            values = tuple(row) if hasattr(row, "__iter__") and not isinstance(row, (str, bytes)) else (row,)
+            rows.append({name: _serialize(values[index]) for index, (name, _, _) in enumerate(parts)})
+
+    if "leaf" in spec:
+        parent_ids = {str(row["id"]) for row in rows if row.get("id") is not None}
+        for row in rows:
+            raw_id = row.get("id")
+            raw_parent = row.get("parent")
+            row["id"] = _hierarchy_node_id("base", raw_id)
+            row["parent"] = (
+                _hierarchy_node_id("base", raw_parent)
+                if raw_parent is not None else None
+            )
+        leaf_rows, leaf_truncated = await _query_hierarchy_leaf_rows(
+            session,
+            spec=spec,
+            user=user,
+            role=role,
+            dialect=dialect,
+            parent_ids=parent_ids,
+            limit=max(limit - len(rows), 0),
+        )
+        rows.extend(leaf_rows)
+        truncated = truncated or leaf_truncated
+
+    return {
+        "visualization": key,
+        "contract": spec["contract"],
+        "dimensions": _response_dimensions(spec),
+        "rows": rows,
+        "meta": {"truncated": truncated, "limit": limit},
+    }
+
+
+async def visualization_options(session: Any, *, key: str, user: Any) -> dict[str, Any]:
+    role = _role_value(user)
+    spec = _require_spec(key, role)
+    source_model = _load_model(spec["model"]["module"], spec["model"]["name"])
+    result: dict[str, Any] = {"filters": {}}
+    for configured in spec["filters"]:
+        if configured["type"] not in {"select", "multi_select"}:
+            continue
+        column = _column(configured["binding"])
+        statement = select(column).select_from(source_model)
+        statement = _apply_joins(statement, spec, {configured["key"]})
+        for predicate in spec["where"]:
+            value = predicate["value"]
+            filter_type = "relative_time" if isinstance(value, dict) and "period" in value else "select"
+            statement = _apply_predicate(statement, predicate["binding"], value, filter_type)
+        statement = statement.distinct().order_by(column).limit(200)
+        owner_field = spec["model"].get("owner_field")
+        if owner_field and role == "user":
+            statement = statement.where(getattr(source_model, owner_field) == getattr(user, "id"))
+        values = (await session.exec(statement)).all()
+        result["filters"][configured["key"]] = [
+            {"label": str(_serialize(value)), "value": _serialize(value)}
+            for value in values if value is not None
+        ]
+    return result

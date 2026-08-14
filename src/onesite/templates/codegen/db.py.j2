@@ -82,10 +82,7 @@ async def init_db():
     async with engine.begin() as conn:
         await conn.run_sync(SQLModel.metadata.create_all)
         {% for index in generated_indexes %}
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS {{ index.name }} ON {{ index.table }} "
-            "({{ index.columns | join(', ') }})"
-        ))
+        await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}
     {% if background_execution_enabled %}
     if settings.DATABASE_URI.startswith("postgresql"):

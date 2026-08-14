@@ -13,32 +13,67 @@ async def get_dashboard_metrics(
     now_local = datetime.now(SYSTEM_TIMEZONE)
 
     def _period_bounds(period: str):
+        today = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
         if period == "today":
-            start = now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+            start, end = today, today + timedelta(days=1)
+        elif period == "yesterday":
+            start, end = today - timedelta(days=1), today
         elif period == "this_week":
             start = (now_local - timedelta(days=now_local.weekday())).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )
+            end = start + timedelta(days=7)
+        elif period == "last_week":
+            end = (now_local - timedelta(days=now_local.weekday())).replace(
+                hour=0, minute=0, second=0, microsecond=0
+            )
+            start = end - timedelta(days=7)
         elif period == "this_month":
             start = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if start.month == 12:
+                end = start.replace(year=start.year + 1, month=1)
+            else:
+                end = start.replace(month=start.month + 1)
+        elif period == "last_month":
+            end = now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            if end.month == 1:
+                start = end.replace(year=end.year - 1, month=12)
+            else:
+                start = end.replace(month=end.month - 1)
         elif period == "last_7_days":
-            start = now_local - timedelta(days=7)
+            start, end = now_local - timedelta(days=7), now_local
         elif period == "last_30_days":
-            start = now_local - timedelta(days=30)
+            start, end = now_local - timedelta(days=30), now_local
         else:
             return None, None
-        return to_utc(start), to_utc(now_local)
+        return to_utc(start), to_utc(end)
 
-    async def _aggregate(metric: dict, start: datetime | None, end: datetime | None):
+    def _relative_time_filter(metric: dict) -> tuple[str | None, str | None]:
+        for field_name, value in metric.get("where", {}).items():
+            if isinstance(value, dict) and "period" in value:
+                return field_name, value["period"]
+        return None, None
+
+    async def _aggregate(
+        metric: dict,
+        start: datetime | None,
+        end: datetime | None,
+        time_field: str | None,
+    ):
         aggregation = metric["aggregation"]
         field_name = metric.get("field")
+        regular_where = {
+            field: value
+            for field, value in metric.get("where", {}).items()
+            if not isinstance(value, dict)
+        }
         {% set ts_lifecycle = model.get('timescaledb_lifecycle', {}) %}
         {% if model.is_timescaledb and ts_lifecycle.get('bucket_interval') %}
         if (
             aggregation == "count"
             and field_name is None
-            and not metric.get("where")
-            and metric.get("time_field") == "{{ model.timescaledb_time_column }}"
+            and not regular_where
+            and time_field == "{{ model.timescaledb_time_column }}"
             and start is not None
             and end is not None
         ):
@@ -101,7 +136,7 @@ async def get_dashboard_metrics(
             expression = func.max(value_col)
 
         stmt = select(expression).select_from(model)
-        for field, value in metric.get("where", {}).items():
+        for field, value in regular_where.items():
             column = getattr(model, field)
             if isinstance(value, list):
                 stmt = stmt.where(column.in_(value))
@@ -109,8 +144,8 @@ async def get_dashboard_metrics(
                 stmt = stmt.where(column.is_(None))
             else:
                 stmt = stmt.where(column == value)
-        if metric.get("time_field") and start is not None:
-            time_col = getattr(model, metric["time_field"])
+        if time_field and start is not None:
+            time_col = getattr(model, time_field)
             stmt = stmt.where(time_col >= start)
             if end is not None:
                 stmt = stmt.where(time_col < end)
@@ -123,13 +158,14 @@ async def get_dashboard_metrics(
     for metric in definitions:
         if role not in metric.get("permitted_roles", []):
             continue
-        start, end = _period_bounds(metric["period"])
-        value = await _aggregate(metric, start, end)
+        time_field, period = _relative_time_filter(metric)
+        start, end = _period_bounds(period) if period else (None, None)
+        value = await _aggregate(metric, start, end, time_field)
         previous_value = None
         change = None
         if metric.get("compare") == "previous_period" and start and end:
             span = end - start
-            previous_value = await _aggregate(metric, start - span, start)
+            previous_value = await _aggregate(metric, start - span, start, time_field)
             if previous_value:
                 change = ((value or 0) - previous_value) / abs(previous_value) * 100
             elif not value:

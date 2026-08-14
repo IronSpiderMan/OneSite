@@ -8,6 +8,13 @@ import { Button } from '../components/ui/button';
 import { SearchableSelect } from '../components/ui/searchable-select';
 import { useSystemConfigStore } from '../stores/useSystemConfigStore';
 import Markdown from 'react-markdown';
+{% if visualizations | default([]) %}
+import VisualizationChart from '../components/visualization-chart';
+import {
+    getVisualizationOptions, getVisualizations, queryVisualization,
+    VisualizationData, VisualizationOptions, VisualizationSpec,
+} from '../services/visualizations';
+{% endif %}
 {% if tools %}
 import { DashboardTools } from '../components/dashboard-tools';
 {% endif %}
@@ -218,6 +225,13 @@ const DashboardPage: React.FC = () => {
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
     const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetric[]>([]);
     const [loading, setLoading] = useState(true);
+    {% if visualizations | default([]) %}
+    const [visualizationSpecs, setVisualizationSpecs] = useState<VisualizationSpec[]>([]);
+    const [visualizationData, setVisualizationData] = useState<Record<string, VisualizationData>>({});
+    const [visualizationErrors, setVisualizationErrors] = useState<Record<string, string>>({});
+    const [visualizationOptions, setVisualizationOptions] = useState<Record<string, VisualizationOptions>>({});
+    const [visualizationFilters, setVisualizationFilters] = useState<Record<string, Record<string, any>>>({});
+    {% endif %}
     const [chartPeriods, setChartPeriods] = useState<Record<string, { period: string; startTime: string; endTime: string }>>({});
     {% set ns = namespace(has_filters=false) %}
     {% for _m in models %}
@@ -271,6 +285,37 @@ const DashboardPage: React.FC = () => {
             setLoading(true);
             const results: Record<string, ChartData> = {};
             const metricResults: DashboardMetric[] = [];
+            {% if visualizations | default([]) %}
+            const nextVisualizationData: Record<string, VisualizationData> = {};
+            const nextVisualizationErrors: Record<string, string> = {};
+            try {
+                const specs = await getVisualizations();
+                setVisualizationSpecs(specs);
+                const responses = await Promise.allSettled(specs.map(async (spec) => {
+                    const data = await queryVisualization(spec.key, { filters: visualizationFilters[spec.key] || {} });
+                    return { key: spec.key, data };
+                }));
+                responses.forEach((response, index) => {
+                    const key = specs[index].key;
+                    if (response.status === 'fulfilled') nextVisualizationData[key] = response.value.data;
+                    else nextVisualizationErrors[key] = response.reason?.response?.data?.detail || response.reason?.message || 'Unable to load visualization';
+                });
+                setVisualizationData(nextVisualizationData);
+                setVisualizationErrors(nextVisualizationErrors);
+                const optionResponses = await Promise.allSettled(specs.filter((spec) => spec.filters.length).map(async (spec) => ({
+                    key: spec.key, options: await getVisualizationOptions(spec.key),
+                })));
+                setVisualizationOptions((current) => {
+                    const next = { ...current };
+                    optionResponses.forEach((response) => {
+                        if (response.status === 'fulfilled') next[response.value.key] = response.value.options;
+                    });
+                    return next;
+                });
+            } catch (error: any) {
+                console.error('Failed to load project visualizations:', error);
+            }
+            {% endif %}
 
             const metricRequests: Promise<{ metrics: DashboardMetric[] }>[] = [];
                 {% for model in dashboard_models | default(models) %}
@@ -303,7 +348,7 @@ const DashboardPage: React.FC = () => {
         };
 
         fetchAllStats();
-    }, [chartPeriods{% if ns.has_filters %}, filterValues{% endif %}]);
+    }, [chartPeriods{% if ns.has_filters %}, filterValues{% endif %}{% if visualizations | default([]) %}, visualizationFilters{% endif %}]);
 
     {% if site_logger %}
     const loadLogs = async (page: number, append = false) => {
@@ -492,7 +537,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0 && dashboardMetrics.length === 0 {% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
+    if (chartModels.length === 0 && dashboardMetrics.length === 0 {% if visualizations | default([]) %}&& visualizationSpecs.length === 0{% endif %}{% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -822,6 +867,78 @@ const DashboardPage: React.FC = () => {
                     })}
                 </div>
             )}
+
+            {% if visualizations | default([]) %}
+            {visualizationSpecs.length > 0 && (
+                <div className="grid grid-cols-12 gap-5">
+                    {visualizationSpecs.map((spec) => {
+                        const data = visualizationData[spec.key];
+                        const error = visualizationErrors[spec.key];
+                        const filters = visualizationFilters[spec.key] || {};
+                        const options = visualizationOptions[spec.key]?.filters || {};
+                        const spanClass = spec.placement.span === 4 ? 'xl:col-span-4'
+                            : spec.placement.span === 6 ? 'xl:col-span-6'
+                            : spec.placement.span === 8 ? 'xl:col-span-8'
+                            : 'xl:col-span-12';
+                        const updateFilter = (key: string, value: any) => setVisualizationFilters((current) => ({
+                            ...current,
+                            [spec.key]: { ...(current[spec.key] || {}), [key]: value },
+                        }));
+                        return (
+                            <section key={spec.key} className={`col-span-12 overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm ${spanClass}`}>
+                                <div className="flex flex-wrap items-start justify-between gap-3 border-b border-border/60 px-5 py-4">
+                                    <div className="min-w-0">
+                                        <h2 className="truncate text-base font-semibold">{spec.title}</h2>
+                                        <p className="mt-1 text-xs text-muted-foreground">{spec.preset}</p>
+                                    </div>
+                                    {spec.filters.length > 0 && (
+                                        <div className="flex max-w-full flex-wrap justify-end gap-2">
+                                            {spec.filters.map((filter) => {
+                                                const available = options[filter.key] || [];
+                                                const optionLabel = (option: { label: string; value: any }) => filter.option_i18n_key
+                                                    ? t(`${filter.option_i18n_key}.${String(option.value)}`, option.label)
+                                                    : option.label;
+                                                if (filter.type === 'date_range' || filter.type === 'number_range') {
+                                                    const range = filters[filter.key] || {};
+                                                    const inputType = filter.type === 'date_range' ? 'datetime-local' : 'number';
+                                                    return <div key={filter.key} className="flex items-center gap-1 rounded-lg border bg-background/60 px-2 py-1">
+                                                        <span className="mr-1 text-[11px] text-muted-foreground">{filter.label}</span>
+                                                        <input type={inputType} value={range.start ?? range.min ?? ''} onChange={(event) => updateFilter(filter.key, { ...range, [filter.type === 'date_range' ? 'start' : 'min']: event.target.value })} className="w-32 bg-transparent text-xs outline-none" />
+                                                        <span className="text-muted-foreground">–</span>
+                                                        <input type={inputType} value={range.end ?? range.max ?? ''} onChange={(event) => updateFilter(filter.key, { ...range, [filter.type === 'date_range' ? 'end' : 'max']: event.target.value })} className="w-32 bg-transparent text-xs outline-none" />
+                                                    </div>;
+                                                }
+                                                if (filter.type === 'multi_select') {
+                                                    return <select key={filter.key} multiple value={filters[filter.key] || []} onChange={(event) => updateFilter(filter.key, Array.from(event.currentTarget.selectedOptions, (option) => option.value))} className="min-h-9 max-w-44 rounded-lg border bg-background/60 px-2 text-xs">
+                                                        {available.map((option) => <option key={String(option.value)} value={String(option.value)}>{optionLabel(option)}</option>)}
+                                                    </select>;
+                                                }
+                                                return <select key={filter.key} value={filters[filter.key] ?? ''} onChange={(event) => updateFilter(filter.key, event.target.value)} className="h-9 max-w-44 rounded-lg border bg-background/60 px-2 text-xs">
+                                                    <option value="">{filter.label}</option>
+                                                    {available.map((option) => <option key={String(option.value)} value={String(option.value)}>{optionLabel(option)}</option>)}
+                                                </select>;
+                                            })}
+                                        </div>
+                                    )}
+                                </div>
+                                <div className="p-4">
+                                    {error ? (
+                                        <div className="flex h-[340px] items-center justify-center text-sm text-destructive">{error}</div>
+                                    ) : !data ? (
+                                        <div className="flex h-[340px] items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-primary" /></div>
+                                    ) : data.rows.length === 0 ? (
+                                        <div className="flex h-[340px] items-center justify-center text-sm text-muted-foreground">{t('dashboard.no_data', 'No data available')}</div>
+                                    ) : (
+                                        <VisualizationChart spec={spec} data={data} />
+                                    )}
+                                    {data?.meta.truncated && <p className="mt-2 text-center text-xs text-amber-600">{t('dashboard.visualization_truncated', 'Result was truncated to the configured limit')}</p>}
+                                </div>
+                            </section>
+                        );
+                    })}
+                </div>
+            )}
+            {% endif %}
 
             {chartModels.length > 0 && (
                 <div className="grid gap-5 md:grid-cols-2">

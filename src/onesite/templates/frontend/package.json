@@ -45,7 +45,8 @@
     "remark-parse": "^10.0.2",
     "remark-rehype": "^10.1.0",
     "unified": "^10.1.2",
-    "recharts": "^2.10.0"
+    "recharts": "^2.10.0",
+    "echarts": "^6.1.0"
   },
   "devDependencies": {
     "@tauri-apps/cli": "^2.0.0",

@@ -38,6 +38,32 @@ def _quote_col(ref: str) -> str:
     return ref
 
 
+def _quote_ddl_identifier(identifier: str) -> str:
+    """Quote a SQLite/PostgreSQL identifier used in generated DDL."""
+    return f'"{identifier.replace(chr(34), chr(34) * 2)}"'
+
+
+def _render_create_index_sql(
+    name: str,
+    table: str,
+    columns: list[str],
+) -> str:
+    """Render portable index DDL, including optional ASC/DESC modifiers."""
+    rendered_columns: list[str] = []
+    for column in columns:
+        column_name, separator, order = column.rpartition(" ")
+        if separator and order.upper() in {"ASC", "DESC"}:
+            rendered_columns.append(
+                f"{_quote_ddl_identifier(column_name)} {order.upper()}"
+            )
+        else:
+            rendered_columns.append(_quote_ddl_identifier(column))
+    return (
+        f"CREATE INDEX IF NOT EXISTS {_quote_ddl_identifier(name)} "
+        f"ON {_quote_ddl_identifier(table)} ({', '.join(rendered_columns)})"
+    )
+
+
 def _build_model_lookup(models: list[ModelDefinition]) -> dict[str, ModelDefinition]:
     """Build a dict mapping model names and table names to ModelDefinitions."""
     lookup: dict[str, ModelDefinition] = {}
@@ -736,6 +762,7 @@ def phase_generate_aggregated(
     """Generate cross-cutting files: router, routes, menu, dashboard, i18n, etc."""
     frontend_path = get_project_paths(cwd).frontend
     theme_name = resolve_theme(site_config)[0]["id"]
+    visualizations = site_config.get("_visualizations", [])
     external_models = [m for m in models if m.get("external_resource")]
     external_resources_enabled = bool(external_models)
     external_resource_configs = [
@@ -778,9 +805,8 @@ def phase_generate_aggregated(
             import hashlib
             digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:10]
             raw_name = f"{raw_name[:52]}_{digest}"
-        generated_indexes.append(
-            {"name": raw_name, "table": table, "columns": columns}
-        )
+        sql = _render_create_index_sql(raw_name, table, columns)
+        generated_indexes.append({"sql_literal": repr(sql)})
 
     for model in models:
         for fk in model.get("foreign_keys", []):
@@ -858,6 +884,32 @@ def phase_generate_aggregated(
             frontend_path / "src" / "pages" / "ExternalResources.tsx",
         )
 
+    if visualizations:
+        visualization_context = {
+            "visualizations": visualizations,
+            "visualizations_json": json.dumps(visualizations, ensure_ascii=False),
+        }
+        generate_file(
+            "visualization_runtime.py.j2",
+            visualization_context,
+            backend_path / "app" / "core" / "visualizations.py",
+        )
+        generate_file(
+            "visualizations_api.py.j2",
+            visualization_context,
+            backend_path / "app" / "api" / "endpoints" / "visualizations.py",
+        )
+        generate_file(
+            "frontend_visualization_service.ts.j2",
+            visualization_context,
+            frontend_path / "src" / "services" / "visualizations.ts",
+        )
+        generate_file(
+            "frontend_visualization_chart.tsx.j2",
+            visualization_context,
+            frontend_path / "src" / "components" / "visualization-chart.tsx",
+        )
+
     generate_file(
         "backend_main.py.j2",
         {"config": {**site_config, "external_resources_enabled": external_resources_enabled}},
@@ -873,6 +925,7 @@ def phase_generate_aggregated(
         scheduled_tasks,
         tools,
         external_resources_enabled,
+        bool(visualizations),
     )
 
     if tools or scheduled_tasks:
@@ -1057,6 +1110,7 @@ def phase_generate_aggregated(
             "show_dashboard_announcement": show_dashboard_announcement,
             "tools": tools,
             "dashboard_metric_icons": dashboard_metric_icons,
+            "visualizations": visualizations,
         },
         frontend_path / "src" / "pages" / "Dashboard.tsx",
         theme_name,

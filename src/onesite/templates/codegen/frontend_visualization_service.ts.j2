@@ -1,0 +1,53 @@
+import request from '../utils/request';
+
+export type VisualizationBinding = {
+  kind: 'dimension' | 'metric';
+  label?: string;
+  field_type?: string;
+  unit?: string;
+  bucket?: string;
+  extract?: string;
+  aggregate?: string;
+};
+
+export type VisualizationSpec = {
+  key: string;
+  title: string;
+  preset: string;
+  renderer: string;
+  contract: string;
+  inputs: Record<string, VisualizationBinding | VisualizationBinding[]>;
+  filters: Array<{ key: string; label: string; type: string; option_i18n_key?: string }>;
+  placement: { page: string; span: number; order: number };
+  options: Record<string, any>;
+};
+
+export type VisualizationData = {
+  visualization: string;
+  contract: string;
+  dimensions: Array<{ name: string; type: string; label: string; unit?: string }>;
+  rows: Array<Record<string, any>>;
+  meta: { truncated: boolean; limit: number };
+};
+
+export type VisualizationOptions = {
+  filters: Record<string, Array<{ label: string; value: any }>>;
+};
+
+export const getVisualizations = async (): Promise<VisualizationSpec[]> => {
+  const response = await request.get<{ visualizations: VisualizationSpec[] }>('/visualizations');
+  return response.data.visualizations;
+};
+
+export const queryVisualization = async (
+  key: string,
+  payload: { filters?: Record<string, any>; limit?: number } = {},
+): Promise<VisualizationData> => {
+  const response = await request.post<VisualizationData>(`/visualizations/${encodeURIComponent(key)}/query`, payload);
+  return response.data;
+};
+
+export const getVisualizationOptions = async (key: string): Promise<VisualizationOptions> => {
+  const response = await request.get<VisualizationOptions>(`/visualizations/${encodeURIComponent(key)}/options`);
+  return response.data;
+};

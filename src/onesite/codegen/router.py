@@ -10,6 +10,7 @@ def update_api_router(
     scheduled_tasks: List[Dict[str, Any]] | None = None,
     tools: List[Dict[str, Any]] | None = None,
     external_resources_enabled: bool = False,
+    visualizations_enabled: bool = False,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -44,6 +45,12 @@ def update_api_router(
         imports.append("from app.api.endpoints import external_resources")
         routers.append(
             'api_router.include_router(external_resources.router, prefix="/external-resources", tags=["external-resources"])'
+        )
+
+    if visualizations_enabled:
+        imports.append("from app.api.endpoints import visualizations")
+        routers.append(
+            'api_router.include_router(visualizations.router, prefix="/visualizations", tags=["visualizations"])'
         )
 
     for model in models:

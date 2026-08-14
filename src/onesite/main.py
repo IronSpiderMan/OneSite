@@ -221,6 +221,11 @@ def init():
         console.print("[green]Created utils/__init__.py[/green]")
     _ensure_resource_hooks(paths.source)
 
+    visualization_file = base_dir / "visualizations.py"
+    if not visualization_file.exists():
+        shutil.copy2(Path(__file__).parent / "templates" / "visualizations.py", visualization_file)
+        console.print("[green]Created visualizations.py from template[/green]")
+
     _ensure_deploy_files(base_dir)
 
     for filename in (".gitignore", "icon-reference.html"):
@@ -277,6 +282,7 @@ def create(
         source = TEMPLATE_DIR / filename
         if source.exists():
             shutil.copy2(source, target_dir / filename)
+    shutil.copy2(TEMPLATE_DIR / "visualizations.py", target_dir / "visualizations.py")
 
     # Render templates (e.g. .env, config.py)
     # Walk through the directory and render files ending with .py or .env or others if needed
