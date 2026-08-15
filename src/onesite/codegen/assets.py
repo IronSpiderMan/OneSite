@@ -4,6 +4,7 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List
 
+from jinja2 import Template
 from rich.console import Console
 
 from ..project_paths import get_project_paths
@@ -18,6 +19,40 @@ console = Console()
 THEME_FRONTEND_DEPENDENCIES: Dict[str, Dict[str, str]] = {
     "normal": {"antd": "^6.5.1"},
 }
+
+INTEGRATION_BACKEND_DEPENDENCIES: Dict[str, List[str]] = {
+    "mqtt": ["gmqtt"],
+    "kafka": ["aiokafka", "python-snappy"],
+}
+
+
+def _sync_integration_requirements(
+    requirements_path: Path,
+    site_config: Dict[str, Any],
+) -> None:
+    """Append client libraries required by enabled backend integrations."""
+    requirements = requirements_path.read_text(encoding="utf-8").splitlines()
+    enabled_dependencies = [
+        dependency
+        for integration, dependencies in INTEGRATION_BACKEND_DEPENDENCIES.items()
+        if site_config.get(integration)
+        for dependency in dependencies
+    ]
+    existing_dependencies = {
+        re.split(r"[\s\[<>=!~;]", requirement, maxsplit=1)[0].lower()
+        for requirement in requirements
+        if requirement and not requirement.startswith("#")
+    }
+    missing_dependencies = [
+        dependency
+        for dependency in enabled_dependencies
+        if dependency.lower() not in existing_dependencies
+    ]
+    if missing_dependencies:
+        write_file_with_status(
+            requirements_path,
+            "\n".join([*requirements, *missing_dependencies]) + "\n",
+        )
 
 
 def _sync_frontend_theme_assets(
@@ -318,6 +353,46 @@ def _sync_mqtt_callbacks(
             "handlers": sorted({callback["handler"] for callback in callbacks}),
         },
         backend_path / "app" / "core" / "mqtt_bindings.py",
+    )
+
+
+def _sync_kafka_callbacks(
+    cwd: Path,
+    backend_path: Path,
+    callbacks: List[Dict[str, Any]],
+) -> None:
+    """Scaffold project Kafka handlers and mirror them into the backend."""
+    source_integrations = get_project_paths(cwd).integrations
+    source_kafka = source_integrations / "kafka"
+    target_integrations = backend_path / "app" / "integrations"
+    target_kafka = target_integrations / "kafka"
+
+    _ensure_init_py(source_integrations)
+    _ensure_init_py(source_kafka)
+
+    for callback in callbacks:
+        handler_name = callback["handler"]
+        source_file = source_kafka / f"{handler_name}.py"
+        if not source_file.exists():
+            generate_file("kafka_callback.py.j2", {"callback": callback}, source_file)
+        _validate_async_function_signature(
+            source_file,
+            handler_name,
+            {"topic", "payload"},
+        )
+
+    copy_file_with_status(
+        source_integrations / "__init__.py",
+        target_integrations / "__init__.py",
+    )
+    _mirror_python_tree(source_kafka, target_kafka)
+    generate_file(
+        "kafka_bindings.py.j2",
+        {
+            "callbacks": callbacks,
+            "handlers": sorted({callback["handler"] for callback in callbacks}),
+        },
+        backend_path / "app" / "core" / "kafka_bindings.py",
     )
 
 
@@ -628,6 +703,17 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         if callbacks:
             _sync_mqtt_callbacks(cwd, backend_path, callbacks)
 
+    if site_config.get("kafka"):
+        kafka_config = site_config["kafka"]
+        generate_file(
+            "kafka.py.j2",
+            {"kafka": kafka_config},
+            backend_path / "app" / "core" / "kafka.py",
+        )
+        callbacks = kafka_config.get("callbacks", [])
+        if callbacks:
+            _sync_kafka_callbacks(cwd, backend_path, callbacks)
+
     for name in ["logger.py", "security.py", "deps.py", "tablenames.py", "model_hooks.py"]:
         src = template_backend_root / "app" / "core" / name
         dst = backend_path / "app" / "core" / name
@@ -655,11 +741,16 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     target_requirements = backend_path / "requirements.txt"
     if template_requirements.exists():
         copy_file_with_status(template_requirements, target_requirements)
+        _sync_integration_requirements(target_requirements, site_config)
 
     template_backend_dockerfile = template_backend_root / "Dockerfile"
     target_backend_dockerfile = backend_path / "Dockerfile"
     if template_backend_dockerfile.exists():
-        copy_file_with_status(template_backend_dockerfile, target_backend_dockerfile)
+        dockerfile_template = template_backend_dockerfile.read_text(encoding="utf-8")
+        write_file_with_status(
+            target_backend_dockerfile,
+            Template(dockerfile_template).render(kafka=bool(site_config.get("kafka"))),
+        )
 
     nuitka_entrypoint_src = template_backend_root / "nuitka_entrypoint.py"
     nuitka_entrypoint_dst = backend_path / "nuitka_entrypoint.py"

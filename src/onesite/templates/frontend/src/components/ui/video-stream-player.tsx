@@ -4,7 +4,6 @@ import { AlertCircle, Loader2, RefreshCw, VideoOff } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button } from './button';
 import { cn } from '../../lib/utils';
-import request from '../../utils/request';
 
 export type VideoStreamProtocol = 'auto' | 'native' | 'hls' | 'rtsp';
 export type DetectedVideoStreamType =
@@ -77,43 +76,12 @@ export const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [errorKey, setErrorKey] = useState<string | null>(null);
     const [retryVersion, setRetryVersion] = useState(0);
-    const [resolvedRtspSource, setResolvedRtspSource] = useState<string | null>(null);
     const streamType = useMemo(
         () => detectVideoStreamType(src || '', protocol),
         [src, protocol],
     );
-    const playbackSource = streamType === 'rtsp' ? resolvedRtspSource : src;
-    const playableType = streamType === 'rtsp' && resolvedRtspSource
-        ? 'hls'
-        : streamType === 'unknown'
-          ? 'native'
-          : streamType;
-
-    useEffect(() => {
-        let disposed = false;
-        if (streamType !== 'rtsp' || !src?.trim()) {
-            setResolvedRtspSource(null);
-            return;
-        }
-
-        setStatus('loading');
-        setErrorKey(null);
-        setResolvedRtspSource(null);
-        request.post('/video-streams/preview', { source_url: src.trim() })
-            .then((response) => {
-                if (!disposed) setResolvedRtspSource(response.data.hls_url);
-            })
-            .catch(() => {
-                if (!disposed) {
-                    setStatus('error');
-                    setErrorKey('video_stream.rtsp_gateway_error');
-                }
-            });
-
-        return () => {
-            disposed = true;
-        };
-    }, [src, streamType, retryVersion]);
+    const playbackSource = src;
+    const playableType = streamType === 'unknown' ? 'native' : streamType;
 
     useEffect(() => {
         const video = videoRef.current;
@@ -214,40 +182,16 @@ export const VideoStreamPlayer: React.FC<VideoStreamPlayerProps> = ({
         );
     }
 
-    if (['rtmp', 'srt'].includes(streamType)) {
+    // Browsers cannot play RTSP directly.  MediaMTX remains an optional
+    // deployment service for consumers that use its HLS endpoint, but this
+    // generated UI deliberately does not turn an RTSP URL into a preview.
+    if (['rtsp', 'rtmp', 'srt'].includes(streamType)) {
         return (
             <div className={cn('flex aspect-video w-full items-center justify-center rounded-lg border border-amber-500/30 bg-amber-500/5 p-6 text-center', className)}>
                 <div className="flex max-w-lg flex-col items-center gap-3 text-sm">
                     <AlertCircle className="h-8 w-8 text-amber-600" />
                     <span>{t('video_stream.unsupported_protocol', { type: streamType.toUpperCase() })}</span>
                 </div>
-            </div>
-        );
-    }
-
-    if (streamType === 'rtsp' && !resolvedRtspSource) {
-        return (
-            <div className={cn('relative flex aspect-video w-full items-center justify-center overflow-hidden rounded-lg border bg-black p-6 text-center text-white', className)}>
-                {status === 'error' ? (
-                    <div className="flex max-w-lg flex-col items-center gap-3 text-sm">
-                        <AlertCircle className="h-7 w-7 text-destructive" />
-                        <span>{t(errorKey || 'video_stream.rtsp_gateway_error')}</span>
-                        <Button
-                            type="button"
-                            size="sm"
-                            variant="secondary"
-                            onClick={() => setRetryVersion((version) => version + 1)}
-                        >
-                            <RefreshCw className="mr-2 h-4 w-4" />
-                            {t('video_stream.retry')}
-                        </Button>
-                    </div>
-                ) : (
-                    <div className="flex items-center gap-2 text-sm">
-                        <Loader2 className="h-5 w-5 animate-spin" />
-                        {t('video_stream.rtsp_converting')}
-                    </div>
-                )}
             </div>
         );
     }

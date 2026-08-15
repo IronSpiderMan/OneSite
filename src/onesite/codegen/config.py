@@ -569,8 +569,66 @@ def validate_mqtt_config(config: Dict[str, Any]) -> None:
         seen.add(registration)
 
 
+def validate_kafka_config(config: Dict[str, Any]) -> None:
+    """Validate and normalize the Kafka section used by code generation."""
+    kafka = config.get("kafka")
+    if kafka is None:
+        return
+    if not isinstance(kafka, dict):
+        raise SiteConfigError("site_config.json field 'kafka' must be a JSON object.")
+
+    brokers = kafka.get("brokers")
+    if (
+        not isinstance(brokers, list)
+        or not brokers
+        or any(not isinstance(broker, str) or not broker.strip() for broker in brokers)
+    ):
+        raise SiteConfigError(
+            "site_config.json field 'kafka.brokers' must be a non-empty JSON array of strings."
+        )
+
+    callbacks = kafka.get("callbacks", [])
+    if not isinstance(callbacks, list):
+        raise SiteConfigError(
+            "site_config.json field 'kafka.callbacks' must be a JSON array."
+        )
+
+    seen: set[tuple[str, str, str]] = set()
+    for index, callback in enumerate(callbacks):
+        field = f"site_config.json field 'kafka.callbacks[{index}]'"
+        if not isinstance(callback, dict):
+            raise SiteConfigError(f"{field} must be a JSON object.")
+
+        topic = callback.get("topic")
+        if not isinstance(topic, str) or not topic.strip():
+            raise SiteConfigError(f"{field}.topic must be a non-empty string.")
+
+        handler = callback.get("handler")
+        if (
+            not isinstance(handler, str)
+            or not handler.isidentifier()
+            or keyword.iskeyword(handler)
+            or handler == "__init__"
+        ):
+            raise SiteConfigError(
+                f"{field}.handler must be a valid Python identifier."
+            )
+
+        group_id = callback.setdefault("group_id", "onesite_backend")
+        if not isinstance(group_id, str) or not group_id.strip():
+            raise SiteConfigError(f"{field}.group_id must be a non-empty string.")
+
+        registration = (topic, group_id, handler)
+        if registration in seen:
+            raise SiteConfigError(
+                f"{field} duplicates Kafka callback {topic!r} -> {handler!r} "
+                f"for group {group_id!r}."
+            )
+        seen.add(registration)
+
+
 def validate_video_stream_config(config: Dict[str, Any]) -> None:
-    """Validate optional RTSP-to-HLS preview infrastructure settings."""
+    """Validate optional external RTSP media-gateway settings."""
     video_stream = config.setdefault("video_stream", {})
     if not isinstance(video_stream, dict):
         raise SiteConfigError(

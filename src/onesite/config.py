@@ -61,6 +61,17 @@ class MqttConfig(_ConfigModel):
     callbacks: list[MqttCallback] = Field(default_factory=list)
 
 
+class KafkaCallback(_ConfigModel):
+    topic: str
+    handler: str
+    group_id: str = "onesite_backend"
+
+
+class KafkaConfig(_ConfigModel):
+    brokers: list[str] = Field(default_factory=lambda: ["localhost:9092"])
+    callbacks: list[KafkaCallback] = Field(default_factory=list)
+
+
 class RTSPConfig(_ConfigModel):
     enabled: bool = False
     allowed_hosts: list[str] = Field(default_factory=list)
@@ -215,6 +226,7 @@ class SiteConfig(_ConfigModel):
     redis: RedisConfig | None = None
     rabbitmq: RabbitMQConfig | None = None
     mqtt: MqttConfig | None = None
+    kafka: KafkaConfig | None = None
     video_stream: VideoStreamConfig | None = None
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)

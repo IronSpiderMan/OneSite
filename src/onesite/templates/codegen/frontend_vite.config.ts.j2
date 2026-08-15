@@ -26,21 +26,7 @@ export default defineConfig({
       '/uploads': {
         target: 'http://127.0.0.1:8000',
         changeOrigin: true,
-      }{% if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) %},
-      '/media-hls': {
-        target: 'http://127.0.0.1:8888',
-        changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/media-hls/, ''),
-        configure: (proxy) => {
-          proxy.on('proxyRes', (proxyRes) => {
-            const location = proxyRes.headers.location
-            if (location?.startsWith('/')) {
-              proxyRes.headers.location = `/media-hls${location}`
-            }
-          })
-        },
       }
-      {% endif %}
     }
   }
 })

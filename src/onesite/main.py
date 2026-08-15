@@ -354,7 +354,6 @@ def run(
     if component not in {"backend", "frontend", "all"}:
         raise typer.BadParameter("--component must be backend, frontend, or all")
 
-    media_runtime = None
     if component in {"backend", "all"}:
         from onesite.codegen.config import (
             SiteConfigError,
@@ -368,21 +367,6 @@ def run(
         except SiteConfigError as exc:
             console.print(f"[bold red]Error:[/bold red] {exc}")
             raise typer.Exit(code=1) from exc
-        rtsp_config = site_config.get("video_stream", {}).get("rtsp", {})
-        if isinstance(rtsp_config, dict) and rtsp_config.get("enabled") is True:
-            from onesite.mediamtx_runtime import MediaMTXError, start_mediamtx
-
-            console.print("[blue]Preparing MediaMTX for RTSP previews...[/blue]")
-            try:
-                media_runtime = start_mediamtx()
-            except MediaMTXError as exc:
-                console.print(f"[bold red]MediaMTX failed to start:[/bold red] {exc}")
-                raise typer.Exit(code=1) from exc
-            if media_runtime.owned:
-                console.print("[green]MediaMTX is running at http://127.0.0.1:9997[/green]")
-            else:
-                console.print("[green]Using the MediaMTX instance already running on port 9997.[/green]")
-
     def run_backend():
         if not backend_dir.exists():
              console.print(f"[red]Backend directory not found at {backend_dir}![/red]")
@@ -424,23 +408,19 @@ def run(
             console.print("[blue]Starting Frontend...[/blue]")
             console.print("[yellow]Frontend runner not fully implemented without package.json, skipping...[/yellow]")
 
-    try:
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            futures = []
-            if component in ["backend", "all"]:
-                futures.append(executor.submit(run_backend))
-            if component in ["frontend", "all"]:
-                futures.append(executor.submit(run_frontend))
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        futures = []
+        if component in ["backend", "all"]:
+            futures.append(executor.submit(run_backend))
+        if component in ["frontend", "all"]:
+            futures.append(executor.submit(run_frontend))
 
-            for future in concurrent.futures.as_completed(futures):
-                try:
-                    future.result()
-                except Exception as e:
-                    console.print(f"[red]Error: {e}[/red]")
-    finally:
-        if media_runtime is not None and media_runtime.owned:
-            console.print("[blue]Stopping MediaMTX...[/blue]")
-            media_runtime.stop()
+        for future in concurrent.futures.as_completed(futures):
+            try:
+                future.result()
+            except Exception as e:
+                console.print(f"[red]Error: {e}[/red]")
+
 
 @app.command()
 def build(

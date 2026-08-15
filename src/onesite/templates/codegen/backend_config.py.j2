@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     UPLOAD_DIR: str = "{{ config.upload_dir }}"
     TIMEZONE: str = "{{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}"
 
-    # Optional RTSP-to-HLS preview through MediaMTX
+    # Optional external RTSP-to-HLS gateway; OneSite does not manage MediaMTX.
     RTSP_PREVIEW_ENABLED: bool = {{ "True" if config.get('video_stream', {}).get('rtsp', {}).get('enabled', False) else "False" }}
     RTSP_ALLOWED_HOSTS: List[str] = {{ config.get('video_stream', {}).get('rtsp', {}).get('allowed_hosts', []) | tojson }}
     RTSP_CONNECT_TIMEOUT_SECONDS: float = {{ config.get('video_stream', {}).get('rtsp', {}).get('connect_timeout_seconds', 10) }}
@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     MQTT_USERNAME: Optional[str] = "{{ config.mqtt.username or '' }}"
     MQTT_PASSWORD: Optional[str] = "{{ config.mqtt.password or '' }}"
     MQTT_CLIENT_ID: str = "{{ config.mqtt.client_id or 'onesite_backend' }}"
+    {% endif %}
+    {% if config.kafka %}
+    KAFKA_BROKERS: List[str] = {{ config.kafka.brokers | tojson }}
     {% endif %}
 
     {% if config.extra %}

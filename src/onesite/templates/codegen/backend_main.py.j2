@@ -35,6 +35,12 @@ from app.core.mqtt import mqtt_manager
 from app.core.mqtt_bindings import register_mqtt_handlers
 {% endif %}
 {% endif %}
+{% if config.kafka %}
+from app.core.kafka import kafka_manager
+{% if config.kafka.callbacks %}
+from app.core.kafka_bindings import register_kafka_handlers
+{% endif %}
+{% endif %}
 # Import event listeners to register them with SQLAlchemy
 try:
     import app.events
@@ -85,6 +91,14 @@ async def lifespan(app: FastAPI):
         register_mqtt_handlers()
         {% endif %}
         await mqtt_manager.start()
+    {% endif %}
+
+    {% if config.kafka %}
+    # Initialize Kafka consumers
+    {% if config.kafka.callbacks %}
+    register_kafka_handlers()
+    {% endif %}
+    await kafka_manager.start()
     {% endif %}
 
     {% if config.scheduled_tasks %}
@@ -143,6 +157,10 @@ async def lifespan(app: FastAPI):
             # Disconnect MQTT
             if mqtt_manager:
                 await mqtt_manager.disconnect()
+            {% endif %}
+
+            {% if config.kafka %}
+            await kafka_manager.stop()
             {% endif %}
 
 app = FastAPI(

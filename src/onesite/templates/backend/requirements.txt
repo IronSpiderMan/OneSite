@@ -15,6 +15,5 @@ asyncpg
 greenlet
 redis
 aio-pika
-gmqtt
 apscheduler
 tzdata

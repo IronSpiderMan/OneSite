@@ -165,6 +165,16 @@ def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
+def _liveness_timestamp(observed_at: datetime, now: datetime | None = None) -> datetime:
+    """Normalize an observation and prevent a future producer clock pinning health."""
+    normalized = (
+        observed_at.replace(tzinfo=timezone.utc)
+        if observed_at.tzinfo is None
+        else observed_at.astimezone(timezone.utc)
+    )
+    return min(normalized, now or _utcnow())
+
+
 def _hash(value: Any) -> str:
     encoded = json.dumps(jsonable_encoder(value), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
@@ -210,11 +220,7 @@ async def record_external_resource_health(
             "provider": config["provider"],
             "resource_type": resource_type,
             "entity_id": str(entity_id),
-            "last_seen_at": (
-                observed_at.replace(tzinfo=timezone.utc)
-                if observed_at.tzinfo is None
-                else observed_at.astimezone(timezone.utc)
-            ),
+            "last_seen_at": _liveness_timestamp(observed_at, now),
             "updated_at": now,
         }
         for entity_id, observed_at in observations.items()
@@ -310,7 +316,7 @@ class ExternalResourceManager:
         self,
         poll_seconds: float = 1.0,
         drift_seconds: float = 1800.0,
-        health_seconds: float = 30.0,
+        health_seconds: float = 5.0,
         worker_count: int = 4,
         scan_batch_size: int = 500,
     ) -> None:
@@ -336,6 +342,10 @@ class ExternalResourceManager:
                 item.next_attempt_at = _utcnow()
             await self._bootstrap(session)
             await session.commit()
+        try:
+            await self._project_health()
+        except Exception:
+            logger.exception("Initial external resource health projection failed")
         self._tasks = [
             asyncio.create_task(self._run(), name="onesite-external-resource-scheduler"),
             *[
@@ -616,19 +626,43 @@ class ExternalResourceManager:
                 )
             await session.commit()
 
+    async def project_health(
+        self,
+        session: AsyncSession,
+        *,
+        resource_types: set[str] | None = None,
+    ) -> None:
+        """Project persisted observations in the caller's transaction.
+
+        Ingestion callbacks can invoke this immediately after recording a
+        successful observation.  The periodic scanner uses the same method to
+        transition stale resources offline.
+        """
+        from app.core.db import engine
+
+        now = _utcnow()
+        await session.execute(
+            update(ExternalResourceHealth)
+            .where(ExternalResourceHealth.last_seen_at > now)
+            .values(last_seen_at=now, updated_at=now)
+        )
+        for config in RESOURCE_CONFIGS:
+            if resource_types is not None and config["resource_type"] not in resource_types:
+                continue
+            health = config.get("health")
+            if not health:
+                continue
+            if engine.dialect.name == "postgresql":
+                await self._project_health_postgresql(session, config, health)
+            else:
+                await self._project_health_portable(session, config, health)
+
     async def _project_health(self) -> None:
         from app.core.db import engine
 
         factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with factory() as session:
-            for config in RESOURCE_CONFIGS:
-                health = config.get("health")
-                if not health:
-                    continue
-                if engine.dialect.name == "postgresql":
-                    await self._project_health_postgresql(session, config, health)
-                else:
-                    await self._project_health_portable(session, config, health)
+            await self.project_health(session)
             await session.commit()
 
     async def _project_health_postgresql(
@@ -684,6 +718,7 @@ class ExternalResourceManager:
         typed_status = lambda value: literal(value, type_=status_type)
         projected = case(
             (~enabled_column, typed_status(health["disabled_status"])),
+            (~active_binding, typed_status(health["inactive_status"])),
             (
                 binding_status.in_([SyncStatus.error.value, SyncStatus.retrying.value]),
                 typed_status(health["error_status"]),
@@ -695,7 +730,6 @@ class ExternalResourceManager:
         )
         statement = (
             update(model)
-            .where(active_binding)
             .where(or_(
                 status_column.is_distinct_from(projected),
                 last_seen_column.is_distinct_from(stored_observed_at),
@@ -730,11 +764,11 @@ class ExternalResourceManager:
         for entity in entities:
             entity_id = str(getattr(entity, config.get("id_field", "id")))
             binding = binding_by_id.get(str(getattr(entity, health["binding_entity_field"])))
-            if binding is None:
-                continue
             observed_at = observed_by_id.get(entity_id)
             if not getattr(entity, health["enabled_field"]):
                 status = health["disabled_status"]
+            elif binding is None:
+                status = health["inactive_status"]
             elif binding.status in {SyncStatus.error.value, SyncStatus.retrying.value}:
                 status = health["error_status"]
             elif binding.status != SyncStatus.synced.value:

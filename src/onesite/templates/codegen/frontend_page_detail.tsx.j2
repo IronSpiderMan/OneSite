@@ -341,14 +341,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     useEffect(() => {
         let interval: ReturnType<typeof setInterval>;
-        if (autoRefresh && id) {
+        if (autoRefresh && id{% if model.page_edit %} && !isEditing{% endif %}) {
             interval = setInterval(() => {
                 const itemId = {% if 'str' in model.id_type %}id{% else %}parseInt(id){% endif %};
                 fetchItem(itemId);
             }, refreshInterval);
         }
         return () => clearInterval(interval);
-    }, [autoRefresh, refreshInterval, id, fetchItem]);
+    }, [autoRefresh, refreshInterval, id, fetchItem{% if model.page_edit %}, isEditing{% endif %}]);
     {% endif %}
 
     useEffect(() => {
@@ -716,6 +716,33 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')} {t('common.details')}</h1>
               </div>
 
+              <div className="flex min-w-0 flex-wrap items-center justify-end gap-3" data-page-region="page-controls">
+                {% if model.refresh_interval %}
+                {% if model.page_edit %}
+                {!isEditing && (
+                {% endif %}
+                <div className="flex shrink-0 items-center gap-2" data-page-region="auto-refresh-controls">
+                   <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
+                   <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
+                   {autoRefresh && (
+                      <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
+                          <SelectTrigger className="h-8 w-[100px]">
+                              <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                              <SelectItem value="1000">1s</SelectItem>
+                              <SelectItem value="5000">5s</SelectItem>
+                              <SelectItem value="10000">10s</SelectItem>
+                              <SelectItem value="30000">30s</SelectItem>
+                          </SelectContent>
+                      </Select>
+                   )}
+                </div>
+                {% if model.page_edit %}
+                )}
+                {% endif %}
+                {% endif %}
+
               <div className="flex min-w-0 flex-wrap items-center justify-end gap-2" data-page-region="page-actions">
                 {% if model.actions %}
                 {% for action_name, action_config in model.actions.items() %}
@@ -784,26 +811,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 )}
                 {% endif %}
               </div>
-
-              {% if model.refresh_interval %}
-              <div className="flex items-center gap-2">
-                 <span className="text-sm text-muted-foreground">{t('common.auto_refresh')}</span>
-                 <Switch checked={autoRefresh} onCheckedChange={setAutoRefresh} />
-                 {autoRefresh && (
-                    <Select value={String(refreshInterval)} onValueChange={(v) => setRefreshInterval(Number(v))}>
-                        <SelectTrigger className="w-[100px] h-8">
-                            <SelectValue />
-                        </SelectTrigger>
-                        <SelectContent>
-                            <SelectItem value="1000">1s</SelectItem>
-                            <SelectItem value="5000">5s</SelectItem>
-                            <SelectItem value="10000">10s</SelectItem>
-                            <SelectItem value="30000">30s</SelectItem>
-                        </SelectContent>
-                    </Select>
-                 )}
               </div>
-              {% endif %}
             </div>
 
             {% if model.m2m_fields or model.reverse_m2m or model.reverse_foreign_keys or model.json_array_fields or model.json_dict_fields %}

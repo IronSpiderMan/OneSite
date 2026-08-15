@@ -237,7 +237,7 @@ async def init_db():
                         '{{ projection.provider }}',
                         '{{ projection.resource_type }}',
                         NEW.{{ projection.entity_field }}::TEXT,
-                        NEW.{{ projection.time_field }},
+                        LEAST(NEW.{{ projection.time_field }}, NOW()),
                         NOW()
                     )
                     ON CONFLICT (provider, resource_type, entity_id)
@@ -275,7 +275,7 @@ async def init_db():
                     '{{ projection.provider }}',
                     '{{ projection.resource_type }}',
                     {{ projection.entity_field }}::TEXT,
-                    MAX({{ projection.time_field }}),
+                    LEAST(MAX({{ projection.time_field }}), NOW()),
                     NOW()
                 FROM {{ ts_model.timescaledb_latest_table_name }}
                 GROUP BY {{ projection.entity_field }}
@@ -294,6 +294,14 @@ async def init_db():
     {% endif %}
 
     {% if external_resources_enabled %}
+    if settings.DATABASE_URI.startswith("postgresql"):
+        async with engine.begin() as conn:
+            await conn.execute(text("""
+                UPDATE onesite_external_resource_health
+                SET last_seen_at = NOW(), updated_at = NOW()
+                WHERE last_seen_at > NOW()
+            """))
+
     if settings.DATABASE_URI.startswith("postgresql"):
         async with engine.begin() as conn:
             await conn.execute(text("""

@@ -1,4 +1,7 @@
-"""Download and supervise the MediaMTX process used by local ``site run``."""
+"""Optional helpers for callers that manage a local MediaMTX process themselves.
+
+The ``site run`` command deliberately does not invoke these helpers.
+"""
 
 from __future__ import annotations
 

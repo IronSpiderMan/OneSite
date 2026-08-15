@@ -7,6 +7,7 @@ from ..config import (
     SiteConfigError,
     load_site_config,
     validate_mqtt_config,
+    validate_kafka_config,
     validate_navigation_config,
     validate_desktop_config,
     validate_scheduled_tasks_config,
@@ -70,6 +71,7 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
             allowed_origins.append(desktop_origin)
 
     validate_mqtt_config(site_config)
+    validate_kafka_config(site_config)
     validate_navigation_config(site_config)
     validate_tools_config(site_config)
     validate_scheduled_tasks_config(site_config)

@@ -1,0 +1,7 @@
+# Kafka callback for topic: {{ callback.topic }}
+
+
+async def {{ callback.handler }}(topic: str, payload: bytes) -> None:
+    """Handle one Kafka message from ``topic``."""
+    # TODO: Implement your business logic here
+    pass
