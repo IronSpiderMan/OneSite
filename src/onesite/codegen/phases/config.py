@@ -10,6 +10,8 @@ from ..config import (
     validate_kafka_config,
     validate_navigation_config,
     validate_desktop_config,
+    validate_external_resource_providers_config,
+    validate_external_resources_config,
     validate_scheduled_tasks_config,
     validate_tools_config,
     validate_video_stream_config,
@@ -57,6 +59,8 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
         ],
     )
     validate_desktop_config(site_config)
+    validate_external_resources_config(site_config)
+    validate_external_resource_providers_config(site_config)
     allowed_origins = site_config["allowed_origins"]
     if not isinstance(allowed_origins, list) or any(
         not isinstance(origin, str) for origin in allowed_origins

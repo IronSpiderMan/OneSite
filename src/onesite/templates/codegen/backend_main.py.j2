@@ -51,6 +51,7 @@ except ImportError:
 from app.core.task_queue import task_queue
 {% if config.external_resources_enabled %}
 from app.core.external_resources import external_resource_manager
+from app.core.external_resource_provider_registry import init_external_resource_providers
 {% endif %}
 
 try:
@@ -121,6 +122,7 @@ async def lifespan(app: FastAPI):
         # Initialize application-owned resources
         await init_resources(app)
         {% if config.external_resources_enabled %}
+        init_external_resource_providers()
         _inline_external_worker = bool(getattr(settings, "EXTERNAL_RESOURCE_INLINE_WORKER", True))
         if _inline_external_worker:
             await external_resource_manager.start()

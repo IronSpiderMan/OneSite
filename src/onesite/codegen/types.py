@@ -176,6 +176,7 @@ class ModelIntrospectResult:
     role_visible: dict[str, bool]
     owner_field: str | None
     page_edit: bool
+    edit_mode: str
     is_timescaledb: bool
     timescaledb_entity_field: str | None
     timescaledb_metric_field: str | None

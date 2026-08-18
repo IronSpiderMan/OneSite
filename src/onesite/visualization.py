@@ -219,6 +219,8 @@ class DashboardMetric:
     color: str | None = None
     order: int | float | None = None
     link: str | None = None
+    items: Sequence[Mapping[str, Any]] | None = None
+    separator: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a plain declaration consumed by the code generator."""
@@ -242,6 +244,8 @@ class DashboardMetric:
             ("color", self.color),
             ("order", self.order),
             ("link", self.link),
+            ("items", [dict(item) for item in self.items] if self.items is not None else None),
+            ("separator", self.separator),
         ):
             if value is not None:
                 result[name] = value
@@ -343,8 +347,17 @@ def dashboard_metric(
     color: str | None = None,
     order: int | float | None = None,
     link: str | None = None,
+    items: Sequence[Mapping[str, Any]] | None = None,
+    separator: str | None = None,
 ) -> DashboardMetric:
-    """Declare a Dashboard KPI in a project's ``visualizations.py`` file."""
+    """Declare a Dashboard KPI in a project's ``visualizations.py`` file.
+
+    Pass two or more calculation declarations through ``items`` to render a
+    combined KPI in one Dashboard card. ``separator`` is placed between the
+    values (for example ``" / "`` or ``" − "``); it defaults to ``" / "``.
+    Each item accepts the usual calculation fields: ``aggregation``, ``field``,
+    ``where`` and ``format``.
+    """
 
     return DashboardMetric(
         key=key,
@@ -362,6 +375,8 @@ def dashboard_metric(
         color=color,
         order=order,
         link=link,
+        items=items,
+        separator=separator,
     )
 
 

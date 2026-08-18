@@ -49,8 +49,13 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
                 }
             } else {
                 {% if field.default is not none and field.default != 'PydanticUndefined' %}
-                {% if field.is_enum %}
-                localData['{{ field.name }}'] = {{ field.enum_values[0] | tojson }};
+                {#
+                CustomConfig.theme_style is the project-wide first-run default.
+                It must follow site_config.py (VITE_DEFAULT_THEME), while a
+                value already saved in localStorage above remains authoritative.
+                #}
+                {% if model.module_name == 'custom_config' and field.name == 'theme_style' %}
+                localData['{{ field.name }}'] = import.meta.env.VITE_DEFAULT_THEME || {{ field.default | tojson }};
                 {% else %}
                 localData['{{ field.name }}'] = {{ field.default | tojson }};
                 {% endif %}

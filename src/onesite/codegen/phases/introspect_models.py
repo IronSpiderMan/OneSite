@@ -174,6 +174,7 @@ def _build_model_dict(
         has_created_at=any(f.name == "created_at" for f in result.fields),
         owner_field=result.owner_field,
         page_edit=result.page_edit,
+        edit_mode=result.edit_mode,
         standalone=bool(result.model_site_props.get("standalone", True)),
         is_timescaledb=result.is_timescaledb,
         is_latest_table=result.model_site_props.get("is_latest_table", False),
@@ -390,8 +391,11 @@ def _process_introspected_class(
     if name == "User":
         _ensure_user_password_field(result.fields)
 
-    # Validate importable models have an import_key
-    if result.importable:
+    # Standard CSV imports need an import_key for upsert.  Custom import
+    # handlers receive the uploaded file directly and own their persistence.
+    import_config = result.model_site_props.get("importable", False)
+    is_custom_import = isinstance(import_config, dict) and import_config.get("custom") is True
+    if result.importable and not is_custom_import:
         if result.import_key:
             pass  # use configured key
         elif any(f["name"] == "title" and f.get("is_unique") for f in result.fields):

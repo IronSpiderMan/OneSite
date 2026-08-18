@@ -55,11 +55,12 @@ Do not treat `generated/backend/app/models/` as the model source of truth: it is
 | `site run --component backend` | Run only FastAPI. |
 | `site run --component frontend` | Run only Vite. |
 | `site run <project_path> --component all` | Run a project from another directory. |
+| `site run --host 0.0.0.0` | Expose the backend and frontend development servers on all network interfaces. |
 | `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t TAG] [--development\|--production] [-p PORT]` | Build tagged images and generate `deploy/docker-compose.yml`; production compiles the backend with Nuitka. |
 | `site build --component desktop` | Build a native Tauri client for the current macOS or Windows host. |
 | `site compose [--engine docker\|podman] up -d` | Run Compose using `deploy/docker-compose.yml`. |
 
-`component` is an option: use `site run --component backend`, not `site run backend`.
+`component` is an option: use `site run --component backend`, not `site run backend`. Use `--host 0.0.0.0` to access the development servers from other devices on the network.
 
 ### Command executables
 
@@ -528,10 +529,17 @@ Place model-level options in `__onesite__` (or table `info.site_props`). Key opt
 | `is_link_table` | Marks a many-to-many link table. |
 | `is_singleton` | Creates a single configuration-like record UI/API. |
 | `frontend_only` | Excludes a model from backend persistence. |
-| `page_edit` | Use a full page rather than dialogs for create/edit. |
+| `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode: "page"`. |
+| `edit_mode` | Create/edit container: `"modal"` (default), `"page"`, or right-side `"drawer"`. |
 | `actions` | Adds permission-controlled custom action buttons. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
 | `import_key` | Field used for import upsert matching. |
+
+For a right-side sliding create/edit form:
+
+```python
+__onesite__ = {"edit_mode": "drawer"}
+```
 
 CSV import/export can also use an object configuration. M2M relations are
 included only when explicitly listed; their values use `;` as the separator.
@@ -558,11 +566,46 @@ The example exports `category_id` as `Category.title` and `tags` as
 updates the existing row; otherwise a new row is created. Set field-level
 `site_props` `importable=False` or `exportable=False` to exclude a field even
 when it appears in a model-level field list.
+
 | `refresh_interval` | Enables periodic list refresh. |
 | `visualize` | Legacy model-level chart configuration; use project-level `visualizations.py` for new charts. |
 | `dashboard_metrics` | Legacy model-level Dashboard KPI configuration; use project-level `visualizations.py` for new KPIs. |
 | `is_notification_table` | Enables notification-center behavior and realtime push. |
 | `time_series_table` | Configures TimescaleDB/time-series generation. |
+
+### Custom import/export
+
+For non-CSV workflows, set `custom: True` on either configuration. `site sync`
+creates `app/custom_io/<model_module>.py` once and synchronizes it to
+`generated/backend/app/custom_io/` on every sync. Custom operations always run
+in the background; OneSite saves uploads, queues work, publishes completion
+notifications, and exposes export downloads automatically.
+
+```python
+__onesite__ = {
+    "importable": {"custom": True},
+    "exportable": {"custom": True},
+}
+```
+
+Implement the generated hooks as follows:
+
+```python
+from pathlib import Path
+from typing import Any
+
+async def import_product(file: Path) -> dict[str, Any]:
+    # Return at least success, failed, and errors.
+    return {"success": 10, "failed": 0, "errors": []}
+
+async def export_product(filters: dict[str, Any]) -> Path:
+    # Create a file and return its existing path.
+    return Path("/tmp/products.xlsx")
+```
+
+Custom imports do not need `import_key`. The export hook receives the active
+list filters and may produce any file type; OneSite copies it to the export
+directory and notifies the requesting user when it is ready.
 
 Useful field-level `site_props` are `permissions`, `is_search_field`, `component`, `create_optional`, `update_optional`, `is_foreign_key`, `reverse_display`, `allow_download`, `group`, `fixed_keys` and `lock_keys`.
 
@@ -594,6 +637,14 @@ dashboard_metrics = [
         where={"created_at": {"period": "today"}},
         icon="ShoppingCart", color="blue", order=1,
     ),
+    dashboard_metric(
+        "paid_over_total", model="Order", title="Paid / total orders",
+        items=[
+            {"aggregation": "count", "where": {"status": "paid"}},
+            {"aggregation": "count"},
+        ],
+        separator=" / ", icon="ReceiptText", color="purple", order=2,
+    ),
 ]
 ```
 
@@ -609,7 +660,10 @@ the existing field validation and role-permission checks still apply. The old
 `__onesite__.dashboard_metrics` configuration remains temporarily compatible
 and emits a deprecation warning during `site sync`. KPI time windows use the
 same relative-time `where` form as charts; the older `time_field` + `period`
-pair remains temporarily compatible.
+pair remains temporarily compatible. A KPI can combine two or more `items` in
+one card, with one title and icon; set `separator` to display forms such as
+`" / "`, `" − "`, or `" | "`. Each item uses its own aggregation, field,
+filter, and number format.
 
 ## Permissions and visibility
 

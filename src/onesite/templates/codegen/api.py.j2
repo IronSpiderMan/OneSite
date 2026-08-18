@@ -18,7 +18,7 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.module_name }} import service
 from app.models.{{ model.source_module }} import {{ model.name }}
-{% if model.exportable %}
+{% if model.exportable or model.custom_importable %}
 from app.core.task_queue import task_queue
 {% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
@@ -202,7 +202,11 @@ async def mark_read(
     n = await service.get(session, id)
     if not n:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
-    if getattr(n, "user_id", None) != current_user.id and not current_user.is_superuser:
+    if (
+        getattr(n, "user_id", None) != current_user.id
+        and deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        < deps.ROLE_HIERARCHY.get(deps.UserRole.ADMIN, 1)
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
     if not getattr(n, "is_read", False):
         n = await service.update(session, id, {{ model.name }}Update(is_read=True))
@@ -540,7 +544,11 @@ async def read_{{ model.lower_name }}(
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% if model.is_notification_table %}
-    if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
+    if (
+        getattr({{ model.lower_name }}, "user_id", None) != current_user.id
+        and deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        < deps.ROLE_HIERARCHY.get(deps.UserRole.ADMIN, 1)
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
     {% elif model.module_name == "user" and model.name == "User" %}
     # User get: only admin and developer (or self)
@@ -579,7 +587,11 @@ async def update_{{ model.lower_name }}(
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
-    if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
+    if (
+        getattr({{ model.lower_name }}, "user_id", None) != current_user.id
+        and deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        < deps.ROLE_HIERARCHY.get(deps.UserRole.ADMIN, 1)
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
     {% elif model.module_name == "user" and model.name == "User" %}
     # User update: admin/developer can update any, user can only update self
@@ -638,7 +650,11 @@ async def delete_{{ model.lower_name }}(
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% if model.is_notification_table %}
-    if getattr({{ model.lower_name }}, "user_id", None) != current_user.id and not current_user.is_superuser:
+    if (
+        getattr({{ model.lower_name }}, "user_id", None) != current_user.id
+        and deps.ROLE_HIERARCHY.get(current_user.role, 0)
+        < deps.ROLE_HIERARCHY.get(deps.UserRole.ADMIN, 1)
+    ):
         raise HTTPException(status_code=403, detail="Forbidden")
     {% elif model.module_name == "user" and model.name == "User" %}
     # User delete: only admin and developer
@@ -907,6 +923,7 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
 async def export_{{ model.lower_name }}s(
     *,
     current_user: User = Depends(deps.get_current_user),
+    language: str = Query("en", description="CSV header language"),
     filters: Optional[dict] = Body(None),
 ) -> Any:
     """
@@ -924,6 +941,7 @@ async def export_{{ model.lower_name }}s(
             "task_id": task_id,
             "user_id": current_user.id,
             "filters": filters,
+            "language": language,
         },
     )
 
@@ -934,6 +952,36 @@ async def export_{{ model.lower_name }}s(
 @router.post("/import")
 async def import_{{ model.lower_name }}s(
     *,
+    {% if model.custom_importable %}
+    current_user: User = Depends(deps.get_current_user),
+    file: UploadFile = File(...),
+) -> Any:
+    """Queue a custom {{ model.name }} import and return immediately."""
+    import os
+    import uuid
+    from pathlib import Path
+
+    task_id = str(uuid.uuid4())
+    upload_dir = Path(os.environ.get("UPLOAD_DIR", "uploads")) / "imports"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = Path(file.filename or "upload").name
+    filepath = upload_dir / f"{{ model.module_name }}_{task_id}_{filename}"
+
+    with filepath.open("wb") as destination:
+        while chunk := await file.read(1024 * 1024):
+            destination.write(chunk)
+    await file.close()
+
+    task_queue.publish(
+        "import.{{ model.module_name }}",
+        {
+            "task_id": task_id,
+            "user_id": current_user.id,
+            "file_path": str(filepath),
+        },
+    )
+    return {"task_id": task_id, "status": "queued"}
+    {% else %}
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     file: UploadFile = File(...),
@@ -957,8 +1005,9 @@ async def import_{{ model.lower_name }}s(
     )
     
     return result
+    {% endif %}
 
-{% if not model.exportable %}
+{% if model.importable and not model.exportable and not model.custom_importable %}
 @router.get("/export/template")
 async def export_{{ model.lower_name }}_template(
     *,

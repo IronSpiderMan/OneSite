@@ -32,6 +32,14 @@ export const applyTheme = (style: ThemeStyle, mode: ThemeMode) => {
 export const getInitialStyle = (): ThemeStyle => {
   const raw = localStorage.getItem(STYLE_KEY)
   if (raw && ALL_STYLES.includes(raw as ThemeStyle)) return raw as ThemeStyle
+
+  // The generated project theme is the first-run default. A saved user choice
+  // above still takes precedence, so changing themes in Settings keeps working.
+  const configured = import.meta.env.VITE_DEFAULT_THEME
+  if (configured && ALL_STYLES.includes(configured as ThemeStyle)) {
+    return configured as ThemeStyle
+  }
+
   // Migrate legacy key — if it was "iothub", map to "industrial"
   const legacy = localStorage.getItem(LEGACY_KEY)
   if (legacy === "iothub") return "industrial"

@@ -17,7 +17,7 @@ import {
     {% if model.exportable %}
     , export{{ model.name }}s
     {% endif %}
-    {% if model.importable and not model.exportable %}
+    {% if model.importable and not model.exportable and not model.custom_importable %}
     , download{{ model.name }}Template
     {% endif %}
 } from '../../services/{{ model.module_name }}';
@@ -31,7 +31,14 @@ import { JsonInput } from '../../components/ui/json-input';
 import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
-{% if not model.page_edit or model.importable %}
+{% if not model.page_edit %}
+{% if model.edit_mode == 'drawer' %}
+import { Drawer as EditContainer } from '../../components/ui/drawer';
+{% else %}
+import { Modal as EditContainer } from '../../components/ui/modal';
+{% endif %}
+{% endif %}
+{% if model.importable %}
 import { Modal } from '../../components/ui/modal';
 {% endif %}
 import { Label } from '../../components/ui/label';
@@ -55,11 +62,23 @@ import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../servi
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service }}';
+{% if m2m.editor == 'inline' %}
+{% for field in m2m.inline_schema.fields %}
+{% if field.foreignKey %}
+import * as {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService from '../../services/{{ field.foreignKey.targetService }}';
+{% endif %}
+{% endfor %}
+{% endif %}
 {% endfor %}
 {% endif %}
 {% for rfk in model.reverse_foreign_keys %}
 {% if rfk.editor == 'inline' %}
 import { get{{ rfk.source_model }}s } from '../../services/{{ rfk.source_service }}';
+{% for field in rfk.inline_schema.fields %}
+{% if field.foreignKey %}
+import * as {{ rfk.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService from '../../services/{{ field.foreignKey.targetService }}';
+{% endif %}
+{% endfor %}
 {% endif %}
 {% endfor %}
 
@@ -111,7 +130,7 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
 };
 
 const {{ model.name }}Page: React.FC = () => {
-  const { t } = useTranslation();
+  const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   {% if not model.page_edit %}
   const [searchParams, setSearchParams] = useSearchParams();
@@ -289,6 +308,22 @@ const {{ model.name }}Page: React.FC = () => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  {% if model.custom_importable %}
+  useEffect(() => {
+    const handleCustomImportComplete = (event: Event) => {
+      const payload = (event as CustomEvent).detail;
+      if (payload?.module !== '{{ model.module_name }}' || payload?.error) return;
+      {% if model.is_tree %}
+      refreshTree();
+      {% else %}
+      fetchData();
+      {% endif %}
+    };
+    window.addEventListener('onesite:import-complete', handleCustomImportComplete);
+    return () => window.removeEventListener('onesite:import-complete', handleCustomImportComplete);
+  }, [fetchData{% if model.is_tree %}, refreshTree{% endif %}]);
+  {% endif %}
+
   // Sync page input with current page from store
   const storePage = use{{ model.name }}Store(state => state.page);
   useEffect(() => {
@@ -359,7 +394,10 @@ const {{ model.name }}Page: React.FC = () => {
   const handleExport = async () => {
     try {
       setIsExporting(true);
-      await export{{ model.name }}s();
+      await export{{ model.name }}s(
+        i18n.resolvedLanguage || i18n.language,
+        {% if model.is_tree %}treeSearchFiltersRef.current{% else %}use{{ model.name }}Store.getState().filters{% endif %},
+      );
       toast.success(t('common.export_started', 'Export started, you will be notified when complete'));
     } catch (error) {
       toast.error(t('common.export_failed', 'Export failed'));
@@ -383,6 +421,12 @@ const {{ model.name }}Page: React.FC = () => {
 
     try {
       setIsImporting(true);
+      {% if model.custom_importable %}
+      await import{{ model.name }}s(importingFile);
+      toast.success(t('common.import_started', 'Import started, you will be notified when complete'));
+      setImportModalOpen(false);
+      setImportingFile(null);
+      {% else %}
       const result = await import{{ model.name }}s(importingFile);
       if (result.failed > 0) {
         toast.warning(t('import.partial', `Imported ${result.success} records, ${result.failed} failed`));
@@ -393,6 +437,7 @@ const {{ model.name }}Page: React.FC = () => {
       fetchData();
       setImportModalOpen(false);
       setImportingFile(null);
+      {% endif %}
     } catch (error) {
       toast.error(t('import.failed', 'Import failed'));
     } finally {
@@ -401,7 +446,7 @@ const {{ model.name }}Page: React.FC = () => {
   };
   {% endif %}
 
-  {% if model.importable and not model.exportable %}
+  {% if model.importable and not model.exportable and not model.custom_importable %}
   const handleDownloadTemplate = async () => {
     try {
       await download{{ model.name }}Template();
@@ -730,7 +775,7 @@ const {{ model.name }}Page: React.FC = () => {
               {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
             </Button>
             {% endif %}
-            {% if model.importable and not model.exportable %}
+            {% if model.importable and not model.exportable and not model.custom_importable %}
             <Button variant="outline" onClick={handleDownloadTemplate}>
               <Download className="mr-2 h-4 w-4" /> {t('common.template', 'Template')}
             </Button>
@@ -1423,7 +1468,7 @@ const {{ model.name }}Page: React.FC = () => {
 {% endif %}
 
 {% if not model.page_edit %}
-      <Modal
+      <EditContainer
         title={editingId ? `${t('common.edit')} ${t('models.{{ model.module_name }}.name')}` : `${t('common.create')} ${t('models.{{ model.module_name }}.name')}`}
         isOpen={isModalOpen}
         onClose={() => setIsModalOpen(false)}
@@ -1656,6 +1701,17 @@ const {{ model.name }}Page: React.FC = () => {
                         itemSchema={ {{ m2m.inline_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                        foreignKeyLoaders={{ '{{' }}
+                            {% for field in m2m.inline_schema.fields %}
+                            {% if field.foreignKey %}
+                            '{{ field.name }}': async (query) => {
+                                const filters = query ? { {{ field.foreignKey.labelField }}: query } : undefined;
+                                const response = await {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService.get{{ field.foreignKey.targetModel }}s(1, 20, filters);
+                                return response.items.map((item: any) => ({ label: item.{{ field.foreignKey.labelField }} || item.id, value: item.id }));
+                            },
+                            {% endif %}
+                            {% endfor %}
+                        {{ '}}' }}
                     />
                     {% elif m2m.order_field %}
                     <LinkTableOrderedSelect
@@ -1709,6 +1765,17 @@ const {{ model.name }}Page: React.FC = () => {
                         itemSchema={ {{ rfk.inline_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                        foreignKeyLoaders={{ '{{' }}
+                            {% for field in rfk.inline_schema.fields %}
+                            {% if field.foreignKey %}
+                            '{{ field.name }}': async (query) => {
+                                const filters = query ? { {{ field.foreignKey.labelField }}: query } : undefined;
+                                const response = await {{ rfk.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService.get{{ field.foreignKey.targetModel }}s(1, 20, filters);
+                                return response.items.map((item: any) => ({ label: item.{{ field.foreignKey.labelField }} || item.id, value: item.id }));
+                            },
+                            {% endif %}
+                            {% endfor %}
+                        {{ '}}' }}
                     />
                 )}
             />
@@ -1721,7 +1788,7 @@ const {{ model.name }}Page: React.FC = () => {
           </div>
         </form>
             </div>
-      </Modal>
+      </EditContainer>
       {% endif %}
 
       {% if model.importable %}

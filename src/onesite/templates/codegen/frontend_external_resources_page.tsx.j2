@@ -28,7 +28,7 @@ export default function ExternalResourcesPage() {
   useEffect(() => { void load(); const id = window.setInterval(load, 5000); return () => window.clearInterval(id); }, [load]);
 
   const retry = async (row: ExternalResourceBinding) => {
-    await retryExternalResource(row.resource_type, row.entity_id);
+    await retryExternalResource(row.resource_type, row.entity_id, row.provider);
     toast.success('同步任务已重新入队');
     await load();
   };

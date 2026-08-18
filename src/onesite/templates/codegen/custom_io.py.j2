@@ -1,0 +1,22 @@
+"""Custom import/export hooks for {{ model.name }}.
+
+This file is created once and is never overwritten by ``site sync``.  Keep
+business-specific parsing and export logic here; OneSite handles background
+execution, upload persistence, download URLs, and WebSocket notifications.
+"""
+
+from pathlib import Path
+from typing import Any
+
+{% if model.custom_importable %}
+async def import_{{ model.module_name }}(file: Path) -> dict[str, Any]:
+    """Import ``file`` and return a result such as ``{"success": 0, "failed": 0, "errors": []}``."""
+    raise NotImplementedError("Implement custom import for {{ model.name }}")
+
+
+{% endif %}
+{% if model.custom_exportable %}
+async def export_{{ model.module_name }}(filters: dict[str, Any]) -> Path:
+    """Create an export file for ``filters`` and return its filesystem path."""
+    raise NotImplementedError("Implement custom export for {{ model.name }}")
+{% endif %}

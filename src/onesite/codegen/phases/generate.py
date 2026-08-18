@@ -14,8 +14,9 @@ from pathlib import Path
 from typing import Any
 
 from ...project_paths import get_project_paths
+from ..file_utils import copy_file_with_status
 from ..i18n import generate_locale_files
-from ..render import generate_file, generate_theme_file
+from ..render import generate_file, generate_file_if_missing, generate_theme_file
 from ..theme import resolve_theme
 from ..router import update_api_router
 from ..types import ModelDefinition
@@ -116,6 +117,7 @@ def _normalize_external_health(
         "inactive_status": raw.get("inactive_status", "inactive"),
         "error_status": raw.get("error_status", "inactive"),
         "binding_resource_type": raw.get("binding_resource_type", external["resource_type"]),
+        "binding_provider": raw.get("binding_provider", external["provider"]),
         "binding_entity_field": raw.get(
             "binding_entity_field", external.get("identity_field", "id")
         ),
@@ -130,6 +132,13 @@ def _normalize_external_health(
             raise ValueError(
                 f"{model['name']} external_resource.health.{key} must be a valid identifier"
             )
+    if not isinstance(health["binding_provider"], str) or not re.fullmatch(
+        r"[A-Za-z0-9_.:-]+", health["binding_provider"]
+    ):
+        raise ValueError(
+            f"{model['name']} external_resource.health.binding_provider "
+            "contains unsupported characters"
+        )
 
     target_fields = _field_names(model)
     identity_field = external.get("identity_field", "id")
@@ -563,14 +572,40 @@ def _generate_task_handlers(model: ModelDefinition, backend_path: Path) -> None:
 
 
 def _generate_export_handlers(model: ModelDefinition, backend_path: Path) -> None:
-    """Generate background export handler file for exportable models."""
-    if not model.get("exportable"):
+    """Generate background import/export handlers for configured models."""
+    if not (model.get("exportable") or model.get("custom_importable")):
         return
 
     generate_file(
         "export_handler.py.j2",
         {"model": model},
         backend_path / "app" / "handlers" / f"export_{model['module_name']}.py",
+    )
+
+
+def _generate_custom_io_handler(
+    model: ModelDefinition, cwd: Path, backend_path: Path
+) -> None:
+    """Create and sync the developer-owned custom import/export hook."""
+    if not (model.get("custom_importable") or model.get("custom_exportable")):
+        return
+
+    source_custom_io_path = get_project_paths(cwd).source / "custom_io"
+    generated_custom_io_path = backend_path / "app" / "custom_io"
+    source_custom_io_path.mkdir(parents=True, exist_ok=True)
+    (source_custom_io_path / "__init__.py").touch(exist_ok=True)
+    generate_file_if_missing(
+        "custom_io.py.j2",
+        {"model": model},
+        source_custom_io_path / f"{model['module_name']}.py",
+    )
+    copy_file_with_status(
+        source_custom_io_path / "__init__.py",
+        generated_custom_io_path / "__init__.py",
+    )
+    copy_file_with_status(
+        source_custom_io_path / f"{model['module_name']}.py",
+        generated_custom_io_path / f"{model['module_name']}.py",
     )
 
 
@@ -660,8 +695,8 @@ def _build_navigation(
     """Build the generated menu tree from ``site_config.navigation``.
 
     When the setting is absent, preserve the historical flat menu shape. When
-    it is present, navigation ordering comes exclusively from the tree's array
-    order.
+    it is present, its declarations lead the menu in tree order; menu-eligible
+    models omitted from the tree are appended afterward in their default order.
     """
     model_by_module = {
         model["module_name"]: model
@@ -728,11 +763,29 @@ def _build_navigation(
                 default_nodes.append(node)
         return default_nodes
 
-    return [
+    declared_nodes = [
         built
         for index, declaration in enumerate(navigation)
         if (built := build_node(declaration, f"navigation[{index}]")) is not None
     ]
+    declared_models = {
+        declaration["model"]
+        for declaration in navigation
+        if declaration["type"] == "model"
+    }
+    declared_models.update(
+        child["model"]
+        for declaration in navigation
+        if declaration["type"] == "group"
+        for child in declaration["children"]
+        if child["type"] == "model"
+    )
+    declared_nodes.extend(
+        _model_menu_node(model)
+        for module_name, model in model_by_module.items()
+        if module_name not in declared_models
+    )
+    return declared_nodes
 
 
 def phase_generate_per_model(
@@ -795,6 +848,18 @@ def phase_generate_per_model(
                 raise ValueError(
                     f"{model['name']} reconcile_via references unknown field '{reconcile_via['field']}'"
                 )
+            reconcile_provider = reconcile_via.get("provider", normalized["provider"])
+            if not isinstance(reconcile_provider, str) or not re.fullmatch(
+                r"[A-Za-z0-9_.:-]+", reconcile_provider
+            ):
+                raise ValueError(
+                    f"{model['name']} external_resource.reconcile_via.provider "
+                    "contains unsupported characters"
+                )
+            normalized["reconcile_via"] = {
+                **reconcile_via,
+                "provider": reconcile_provider,
+            }
         normalized["health"] = _normalize_external_health(model, normalized, models)
         model["external_resource"] = normalized
         for dependency in dependencies:
@@ -837,6 +902,9 @@ def phase_generate_per_model(
 
         # Generate background export handler file if model is exportable
         _generate_export_handlers(model, backend_path)
+
+        # Custom I/O hooks are developer-owned and never overwritten.
+        _generate_custom_io_handler(model, cwd, backend_path)
 
         if model.get("is_singleton") or (
             model["module_name"] == "system_config" and model["name"] == "SystemConfig"
@@ -912,6 +980,17 @@ def phase_generate_aggregated(
     report_explorer_enabled = any(model.get("data_reports") for model in api_models)
     external_models = [m for m in models if m.get("external_resource")]
     external_resources_enabled = bool(external_models)
+    configured_providers = site_config.get("providers", {})
+    missing_providers = sorted({
+        m["external_resource"]["provider"]
+        for m in external_models
+        if m["external_resource"]["provider"] not in configured_providers
+    })
+    if missing_providers:
+        raise ValueError(
+            "External-resource providers must be configured in site_config.providers: "
+            + ", ".join(missing_providers)
+        )
     external_resource_configs = [
         {
             "provider": m["external_resource"]["provider"],
@@ -1006,14 +1085,27 @@ def phase_generate_aggregated(
             "resources_json": json.dumps(external_resource_configs, ensure_ascii=False),
         }
         generate_file(
-            "external_resources.py.j2",
+            "external_resource_config.py.j2",
             external_context,
+            backend_path / "app" / "core" / "external_resource_config.py",
+        )
+        generate_file(
+            "external_resources.py.j2",
+            {},
             backend_path / "app" / "core" / "external_resources.py",
         )
         generate_file(
             "external_resources_worker.py.j2",
             {},
             backend_path / "app" / "external_resources_worker.py",
+        )
+        generate_file(
+            "external_resource_provider_registry.py.j2",
+            {"providers": [
+                {"name": name, "module": definition["module"]}
+                for name, definition in sorted(configured_providers.items())
+            ]},
+            backend_path / "app" / "core" / "external_resource_provider_registry.py",
         )
         generate_file(
             "external_resources_api.py.j2",
@@ -1350,7 +1442,9 @@ def phase_generate_aggregated(
         m for m in models
         if m.get("background_hooks")
     ]
-    export_models = [m for m in models if m.get("exportable")]
+    export_models = [
+        m for m in models if m.get("exportable") or m.get("custom_importable")
+    ]
     generate_file(
         "handlers_init.py.j2",
         {

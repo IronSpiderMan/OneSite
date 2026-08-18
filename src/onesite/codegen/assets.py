@@ -302,6 +302,30 @@ def _sync_project_resources(cwd: Path, backend_path: Path) -> None:
     copy_file_with_status(source_resources, target_resources)
 
 
+def _sync_external_resource_providers(
+    cwd: Path, backend_path: Path, site_config: Dict[str, Any]
+) -> None:
+    """Scaffold configured providers once and mirror their user-owned code."""
+    providers = site_config.get("providers", {})
+    if not providers:
+        return
+    paths = get_project_paths(cwd)
+    source_providers = paths.source / "providers"
+    target_providers = backend_path / "app" / "providers"
+    _ensure_init_py(source_providers)
+    _ensure_init_py(target_providers)
+    for name, definition in sorted(providers.items()):
+        module = definition["module"]
+        source_file = source_providers / f"{module}.py"
+        if not source_file.exists():
+            generate_file(
+                "external_resource_provider.py.j2",
+                {"provider_name": name},
+                source_file,
+            )
+        copy_file_with_status(source_file, target_providers / f"{module}.py")
+
+
 def _sync_mqtt_callbacks(
     cwd: Path,
     backend_path: Path,
@@ -653,6 +677,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     )
     _sync_project_utils(cwd, backend_path)
     _sync_project_resources(cwd, backend_path)
+    _sync_external_resource_providers(cwd, backend_path, site_config)
     if site_config.get("tools"):
         _sync_tools(cwd, backend_path, site_config["tools"])
     if site_config.get("scheduled_tasks"):

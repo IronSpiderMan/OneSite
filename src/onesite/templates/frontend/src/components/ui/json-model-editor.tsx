@@ -1,6 +1,7 @@
 import * as React from "react"
-import { Braces, LayoutList, Plus, Trash2 } from "lucide-react"
+import { Braces, ChevronDown, ChevronRight, LayoutList, Plus, Trash2 } from "lucide-react"
 import { useTranslation } from "react-i18next"
+import { toast } from "sonner"
 import { Button } from "./button"
 import { Input } from "./input"
 import { Label } from "./label"
@@ -8,17 +9,25 @@ import { Switch } from "./switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "./select"
 import { JsonInput } from "./json-input"
 import { LocationInput } from "./location-input"
+import { SearchableSelect } from "./searchable-select"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "./table"
 import { cn } from "../../lib/utils"
 
 export type JsonFieldSchema = {
   name?: string
   labelKey?: string
-  kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "model" | "array" | "location" | "any"
+  kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "foreign_key" | "model" | "array" | "location" | "any"
   enumValues?: Array<string | number>
+  foreignKey?: {
+    targetModel: string
+    targetService: string
+    labelField: string
+  }
   model?: JsonModelSchema
   item?: JsonFieldSchema
 }
+
+export type JsonForeignKeyLoaders = Record<string, (query: string) => Promise<{ label: string; value: string | number }[]>>
 
 export type JsonModelSchema = {
   name: string
@@ -63,6 +72,7 @@ const buildDefaultValue = (schema: JsonModelSchema) => {
     if (f.kind === "bool") obj[f.name] = false
     else if (f.kind === "int") obj[f.name] = 0
     else if (f.kind === "float") obj[f.name] = 0
+    else if (f.kind === "foreign_key") obj[f.name] = ""
     else if (f.kind === "enum") obj[f.name] = f.enumValues?.[0]
     else if (f.kind === "model" && f.model) obj[f.name] = buildDefaultValue(f.model)
     else if (f.kind === "array") obj[f.name] = []
@@ -96,9 +106,21 @@ const JsonModelForm: React.FC<{
   value: any
   onChange: (v: any) => void
   path?: string[]
-}> = ({ schema, value, onChange, path = [] }) => {
+  foreignKeyLoaders?: JsonForeignKeyLoaders
+}> = ({ schema, value, onChange, path = [], foreignKeyLoaders }) => {
   const { t } = useTranslation()
+  const [collapsedArrayItems, setCollapsedArrayItems] = React.useState<Set<string>>(() => new Set())
   const v = value && typeof value === "object" && !Array.isArray(value) ? value : {}
+
+  const toggleArrayItem = (itemId: string) => {
+    setCollapsedArrayItems((previous) => {
+      const next = new Set(previous)
+      if (next.has(itemId)) next.delete(itemId)
+      else next.add(itemId)
+      return next
+    })
+  }
+
   return (
     <div className="space-y-4">
       {schema.fields.map((f) => {
@@ -140,6 +162,21 @@ const JsonModelForm: React.FC<{
             </div>
           )
         }
+        if (f.kind === "foreign_key" && foreignKeyLoaders?.[key]) {
+          return (
+            <div key={key} className="space-y-2">
+              <Label>{t(f.labelKey || key)}</Label>
+              <SearchableSelect
+                value={cur}
+                onValueChange={(next) => onChange(setPathValue(v, fieldPath.slice(path.length), next))}
+                defaultLabel={cur === undefined || cur === null || cur === "" ? undefined : String(cur)}
+                placeholder={`${t("common.select")} ${t(f.labelKey || key)}`}
+                searchPlaceholder={`${t("common.search")} ${t(f.labelKey || key)}...`}
+                loadOptions={foreignKeyLoaders[key]}
+              />
+            </div>
+          )
+        }
         if (f.kind === "model" && f.model) {
           return (
             <div key={key} className="space-y-2 rounded-md border p-3">
@@ -148,6 +185,7 @@ const JsonModelForm: React.FC<{
                 schema={f.model}
                 value={cur}
                 onChange={(nv) => onChange(setPathValue(v, fieldPath.slice(path.length), nv))}
+                foreignKeyLoaders={foreignKeyLoaders}
               />
             </div>
           )
@@ -177,6 +215,7 @@ const JsonModelForm: React.FC<{
                     if (f.item?.kind === "model" && f.item.model) arr.push(buildDefaultValue(f.item.model))
                     else arr.push("")
                     onChange(setPathValue(v, fieldPath.slice(path.length), arr))
+                    toast.success(t("json_editor.item_added"))
                   }}
                 >
                   <Plus className="mr-1.5 h-3.5 w-3.5" />
@@ -190,26 +229,42 @@ const JsonModelForm: React.FC<{
                     const arr = Array.isArray(cur) ? [...cur] : []
                     arr.splice(idx, 1)
                     onChange(setPathValue(v, fieldPath.slice(path.length), arr))
+                    // Array indexes shift after a removal, so expand the
+                    // remaining items instead of collapsing the wrong record.
+                    setCollapsedArrayItems(new Set())
                   }
                   if (f.item?.kind === "model" && f.item.model) {
                     return (
                       <div key={itemKey} className="rounded-md border p-3">
                         <div className="mb-2 flex items-center justify-between">
-                          <div className="text-sm font-medium">{key}[{idx + 1}]</div>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-auto gap-1 px-1.5 py-1 text-sm font-medium hover:bg-muted"
+                            onClick={() => toggleArrayItem(itemKey)}
+                            aria-expanded={!collapsedArrayItems.has(itemKey)}
+                          >
+                            {collapsedArrayItems.has(itemKey) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                            {key}[{idx + 1}]
+                          </Button>
                           <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={remove}>
                             <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                             {t("common.remove")}
                           </Button>
                         </div>
-                        <JsonModelForm
-                          schema={f.item.model}
-                          value={itemVal}
-                          onChange={(nv) => {
-                            const arr = Array.isArray(cur) ? [...cur] : []
-                            arr[idx] = nv
-                            onChange(setPathValue(v, fieldPath.slice(path.length), arr))
-                          }}
-                        />
+                        {!collapsedArrayItems.has(itemKey) && (
+                          <JsonModelForm
+                            schema={f.item.model}
+                            value={itemVal}
+                            onChange={(nv) => {
+                              const arr = Array.isArray(cur) ? [...cur] : []
+                              arr[idx] = nv
+                              onChange(setPathValue(v, fieldPath.slice(path.length), arr))
+                            }}
+                            foreignKeyLoaders={foreignKeyLoaders}
+                          />
+                        )}
                       </div>
                     )
                   }
@@ -234,7 +289,7 @@ const JsonModelForm: React.FC<{
             </div>
           )
         }
-        const inputType = f.kind === "int" || f.kind === "float" ? "number" : "text"
+        const inputType = f.kind === "int" || f.kind === "float" || f.kind === "foreign_key" ? "number" : "text"
         return (
           <div key={key} className="space-y-2">
             <Label>{t(f.labelKey || key)}</Label>
@@ -268,7 +323,8 @@ export const JsonModelEditor: React.FC<{
   value: any
   onChange: (v: any) => void
   className?: string
-}> = ({ schema, value, onChange, className }) => {
+  foreignKeyLoaders?: JsonForeignKeyLoaders
+}> = ({ schema, value, onChange, className, foreignKeyLoaders }) => {
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
   const objValue = value && typeof value === "object" && !Array.isArray(value) ? value : buildDefaultValue(schema)
 
@@ -276,7 +332,7 @@ export const JsonModelEditor: React.FC<{
     <div className={cn("space-y-3", className)}>
       <EditorModeSwitch mode={mode} onChange={setMode} />
       {mode === "ui" ? (
-        <JsonModelForm schema={schema} value={objValue} onChange={onChange} />
+        <JsonModelForm schema={schema} value={objValue} onChange={onChange} foreignKeyLoaders={foreignKeyLoaders} />
       ) : (
         <JsonInput value={objValue} onChange={onChange} jsonKind="object" />
       )}
@@ -379,7 +435,11 @@ export const JsonModelTableEditor: React.FC<{
   }
   const addItem = () => {
     const next = buildDefaultValue(itemSchema)
-    if (collectionKind === "array") return onChange([...arrayValue, next])
+    if (collectionKind === "array") {
+      onChange([...arrayValue, next])
+      toast.success(t("json_editor.item_added"))
+      return
+    }
     let index = keys.length + 1
     let key = `item_${index}`
     while (key in dictValue) key = `item_${++index}`
@@ -457,7 +517,11 @@ export const JsonDynamicTableEditor: React.FC<{
 
   const emit = (next: Array<[string, any]>) => onChange(collectionKind === "array" ? next.map(([, item]) => item) : Object.fromEntries(next))
   const add = () => {
-    if (collectionKind === "array") return emit([...entries, [String(entries.length), {}]])
+    if (collectionKind === "array") {
+      emit([...entries, [String(entries.length), {}]])
+      toast.success(t("json_editor.item_added"))
+      return
+    }
     let index = entries.length + 1
     let key = `item_${index}`
     const used = new Set(entries.map(([entryKey]) => entryKey))
@@ -652,10 +716,39 @@ export const JsonModelArrayEditor: React.FC<{
   canAdd?: boolean
   canRemove?: boolean
   showJsonMode?: boolean
-}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, showJsonMode = true }) => {
+  foreignKeyLoaders?: JsonForeignKeyLoaders
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, showJsonMode = true, foreignKeyLoaders }) => {
   const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
+  // Items are expanded by default; retaining only collapsed indexes keeps newly
+  // loaded records visible while allowing long inline forms to stay compact.
+  const [collapsedIndexes, setCollapsedIndexes] = React.useState<Set<number>>(() => new Set())
   const arrValue = Array.isArray(value) ? value : []
+
+  const toggleItem = (index: number) => {
+    setCollapsedIndexes((previous) => {
+      const next = new Set(previous)
+      if (next.has(index)) next.delete(index)
+      else next.add(index)
+      return next
+    })
+  }
+
+  const addItem = () => {
+    onChange([...arrValue, buildDefaultValue(itemSchema)])
+    toast.success(t("json_editor.item_added"))
+  }
+
+  const removeItem = (index: number) => {
+    const next = [...arrValue]
+    next.splice(index, 1)
+    onChange(next)
+    setCollapsedIndexes((previous) => new Set(
+      [...previous]
+        .filter((collapsedIndex) => collapsedIndex !== index)
+        .map((collapsedIndex) => collapsedIndex > index ? collapsedIndex - 1 : collapsedIndex),
+    ))
+  }
 
   return (
     <div className={cn("space-y-3", className)}>
@@ -670,7 +763,7 @@ export const JsonModelArrayEditor: React.FC<{
               type="button"
               variant="outline"
               size="sm"
-              onClick={() => onChange([...arrValue, buildDefaultValue(itemSchema)])}
+              onClick={addItem}
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               {t("json_editor.add_item")}
@@ -680,33 +773,42 @@ export const JsonModelArrayEditor: React.FC<{
           {arrValue.map((item, idx) => (
             <div key={idx} className="rounded-md border p-3">
               <div className="mb-2 flex items-center justify-between">
-                <div className="text-sm font-medium">{t("json_editor.item", { index: idx + 1 })}</div>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-auto gap-1 px-1.5 py-1 text-sm font-medium hover:bg-muted"
+                  onClick={() => toggleItem(idx)}
+                  aria-expanded={!collapsedIndexes.has(idx)}
+                >
+                  {collapsedIndexes.has(idx) ? <ChevronRight className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  {t("json_editor.item", { index: idx + 1 })}
+                </Button>
                 {canRemove && (
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   className="text-destructive"
-                  onClick={() => {
-                    const next = [...arrValue]
-                    next.splice(idx, 1)
-                    onChange(next)
-                  }}
+                  onClick={() => removeItem(idx)}
                 >
                   <Trash2 className="mr-1.5 h-3.5 w-3.5" />
                   {t("common.remove")}
                 </Button>
                 )}
               </div>
-              <JsonModelForm
-                schema={itemSchema}
-                value={item}
-                onChange={(nv) => {
-                  const next = [...arrValue]
-                  next[idx] = nv
-                  onChange(next)
-                }}
-              />
+              {!collapsedIndexes.has(idx) && (
+                <JsonModelForm
+                  schema={itemSchema}
+                  value={item}
+                  onChange={(nv) => {
+                    const next = [...arrValue]
+                    next[idx] = nv
+                    onChange(next)
+                  }}
+                  foreignKeyLoaders={foreignKeyLoaders}
+                />
+              )}
             </div>
           ))}
         </div>
@@ -747,7 +849,10 @@ export const JsonScalarArrayEditor: React.FC<{
       {mode === "ui" ? (
         <div className="space-y-3">
           <div className="flex justify-end">
-            <Button type="button" variant="outline" size="sm" onClick={() => onChange([...arrayValue, ""])}>
+            <Button type="button" variant="outline" size="sm" onClick={() => {
+              onChange([...arrayValue, ""])
+              toast.success(t("json_editor.item_added"))
+            }}>
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               {t("json_editor.add_item")}
             </Button>

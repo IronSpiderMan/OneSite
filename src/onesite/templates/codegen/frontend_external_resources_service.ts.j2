@@ -35,8 +35,12 @@ export async function getExternalResources(includeDeleted = false, offset = 0, l
   })).data;
 }
 
-export async function retryExternalResource(resourceType: string, entityId: string) {
-  return (await request.post(`/external-resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(entityId)}/retry`)).data;
+export async function retryExternalResource(resourceType: string, entityId: string, provider?: string) {
+  return (await request.post(
+    `/external-resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(entityId)}/retry`,
+    undefined,
+    { params: provider ? { provider } : undefined },
+  )).data;
 }
 
 export async function getExternalResourceCapabilities() {

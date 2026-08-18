@@ -32,11 +32,16 @@ async def get(session: AsyncSession) -> {{ model.name }}:
             await session.refresh(db_obj)
         except IntegrityError as e:
             await session.rollback()
-            raise RuntimeError(
-                "Failed to create default singleton config. This is usually caused by a database schema mismatch "
-                "(e.g. you changed fields in the config model). For SQLite, delete the database file and restart "
-                "the backend to recreate tables."
-            ) from e
+            # Another request may have created the singleton between the initial
+            # read and this insert.  In that expected case, return its row.
+            result = await session.exec(statement)
+            db_obj = result.first()
+            if not db_obj:
+                raise RuntimeError(
+                    "Failed to create default singleton config. This is usually caused by a database schema mismatch "
+                    "(e.g. you changed fields in the config model). For SQLite, delete the database file and restart "
+                    "the backend to recreate tables."
+                ) from e
         
     return db_obj
 

@@ -17,7 +17,7 @@ import { VideoStreamInput } from '../components/ui/video-stream-input';
 import { TimePicker } from '../components/ui/time-picker';
 import { MarkdownEditor } from '../components/ui/markdown-editor';
 import { LocationInput } from '../components/ui/location-input';
-import { applyTheme, saveTheme } from '../lib/theme';
+import { applyTheme, getInitialStyle, saveTheme } from '../lib/theme';
 {% if system_model %}
 import { use{{ system_model.name }}Store } from '../stores/use{{ system_model.name }}Store';
 {% endif %}
@@ -148,7 +148,9 @@ const SettingsPage: React.FC = () => {
       }
 
       await updateCustomData(formData);
-      const newStyle = formData.theme_style || 'normal';
+      // Do not reset a neuron/industrial project to normal when this form is
+      // saved without a theme value (for example after changing language).
+      const newStyle = formData.theme_style || getInitialStyle();
       const newMode = formData.theme_mode || 'system';
       saveTheme(newStyle, newMode);
       applyTheme(newStyle, newMode);

@@ -39,6 +39,13 @@ def generate_file(template_name: str, context: Dict, output_path: Path):
     write_file_with_status(output_path, content)
 
 
+def generate_file_if_missing(template_name: str, context: Dict, output_path: Path):
+    """Render a file only once, preserving developer-owned implementations."""
+    if output_path.exists():
+        return
+    generate_file(template_name, context, output_path)
+
+
 def generate_theme_file(
     template_name: str,
     context: Dict,

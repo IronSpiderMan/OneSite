@@ -84,6 +84,12 @@ class VideoStreamConfig(_ConfigModel):
     rtsp: RTSPConfig = Field(default_factory=RTSPConfig)
 
 
+class ExternalResourceProviderConfig(_ConfigModel):
+    """Location of a developer-owned external-resource provider module."""
+
+    module: str | None = None
+
+
 class NavModel(_ConfigModel):
     type: Literal["model"] = "model"
     model: str
@@ -228,6 +234,8 @@ class SiteConfig(_ConfigModel):
     mqtt: MqttConfig | None = None
     kafka: KafkaConfig | None = None
     video_stream: VideoStreamConfig | None = None
+    external_resources: bool = False
+    providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
 

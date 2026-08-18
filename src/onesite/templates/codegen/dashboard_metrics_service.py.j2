@@ -158,6 +158,30 @@ async def get_dashboard_metrics(
     for metric in definitions:
         if role not in metric.get("permitted_roles", []):
             continue
+        if metric.get("items"):
+            values = []
+            for calculation in metric["items"]:
+                time_field, period = _relative_time_filter(calculation)
+                start, end = _period_bounds(period) if period else (None, None)
+                values.append({
+                    "value": await _aggregate(calculation, start, end, time_field),
+                    "format": calculation["format"],
+                })
+            metrics.append({
+                "key": metric["key"],
+                "i18n_key": metric["i18n_key"],
+                "title": metric["title"],
+                "value": None,
+                "values": values,
+                "separator": metric["separator"],
+                "previous_value": None,
+                "change": None,
+                "format": {"type": "number"},
+                "icon": metric["icon"],
+                "color": metric["color"],
+                "link": metric.get("link"),
+            })
+            continue
         time_field, period = _relative_time_filter(metric)
         start, end = _period_bounds(period) if period else (None, None)
         value = await _aggregate(metric, start, end, time_field)

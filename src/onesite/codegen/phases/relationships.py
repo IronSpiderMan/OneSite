@@ -60,6 +60,8 @@ def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[
         fields.append(item)
         if field.get("is_enum"):
             kind = "enum"
+        elif field.get("fk_info"):
+            kind = "foreign_key"
         elif field.get("ui_type") in {
             "int",
             "float",
@@ -77,6 +79,20 @@ def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[
         }
         if field.get("is_enum"):
             ui_field["enumValues"] = field.get("enum_values", [])
+        if field.get("fk_info"):
+            # ``foreign_keys`` is the relationship-resolution source of truth:
+            # its target model, service, and label have already been resolved
+            # against the generated model set.  The field-level copy is still
+            # useful as a marker, but can retain the pre-resolution values.
+            fk = next(
+                (item for item in model.get("foreign_keys", []) if item["name"] == field["name"]),
+                field["fk_info"],
+            )
+            ui_field["foreignKey"] = {
+                "targetModel": fk["target_model"],
+                "targetService": fk["target_service"],
+                "labelField": fk["label_field"],
+            }
         ui_fields.append(ui_field)
     return fields, {"name": model["name"], "fields": ui_fields}
 
@@ -265,10 +281,24 @@ def _resolve_fk_labels_and_reverse(
                 "role_permissions": model.get("role_permissions", {}),
                 "actions": model.get("actions", {}),
                 "page_edit": model.get("page_edit", False),
+                "edit_mode": model.get("edit_mode", "modal"),
                 "standalone": model.get("standalone", True),
                 "source_readable_fields": source_readable_fields,
                 "source_search_fields": source_search_fields,
             })
+
+    # A source model can have more than one FK.  While processing its first
+    # reverse relation, later FKs have not necessarily had their labels and
+    # services resolved yet.  Rebuild the inline schemas now that every FK is
+    # resolved so their dropdown loader metadata is always canonical.
+    for target_model in models:
+        for relation in target_model.get("reverse_foreign_keys", []):
+            source_model = model_map[relation["source_model"]]
+            inline_fields, inline_schema = _inline_item_schema(
+                source_model, excluded={relation["source_fk_field"]}
+            )
+            relation["inline_fields"] = inline_fields
+            relation["inline_schema"] = inline_schema
 
 
 # ── M2M resolution ───────────────────────────────────────────────────────
@@ -377,10 +407,56 @@ def _lookup_field(option: Any, default: str) -> tuple[str, str | None]:
     return default, None
 
 
+def _csv_header_labels(
+    model: ModelDefinition, field_name: str, default: str, field: dict | None = None
+) -> dict[str, str]:
+    """Resolve the localized CSV headers for a generated export column.
+
+    This deliberately follows the same precedence as generated frontend labels:
+    field-level ``translations`` win, followed by the model-level
+    ``translations.<language>.fields.<field>`` entry.  A field name remains the
+    fallback so existing exports without translations retain their headers.
+    """
+    labels = {"en": default, "zh": default}
+    model_translations = model.get("translations", {})
+    if not isinstance(model_translations, dict):
+        model_translations = {}
+
+    for language in labels:
+        model_pack = model_translations.get(language)
+        if isinstance(model_pack, dict):
+            translated_fields = model_pack.get("fields")
+            translated = (
+                translated_fields.get(field_name)
+                if isinstance(translated_fields, dict)
+                else None
+            )
+            if isinstance(translated, str) and translated:
+                labels[language] = translated
+
+        if field:
+            field_translations = field.get("translations", {})
+            translated = (
+                field_translations.get(language)
+                if isinstance(field_translations, dict)
+                else None
+            )
+            if isinstance(translated, str) and translated:
+                labels[language] = translated
+
+    return labels
+
+
 def _resolve_import_export_config(
     models: list[ModelDefinition], model_map: dict[str, ModelDefinition]
 ) -> None:
-    """Resolve scalar, FK and explicitly configured M2M CSV columns."""
+    """Resolve scalar, FK, M2M and reverse-FK CSV columns.
+
+    Reverse one-to-many columns are export-only and use the source model's
+    reverse relation name.  For example, ``{"reverse_foreign_keys":
+    {"orders": "number"}}`` exports each parent row's related order numbers
+    as one semicolon-delimited ``orders`` column.
+    """
     system_fields = {"id", "created_at", "updated_at"}
     for model in models:
         fields_by_name = {field["name"]: field for field in model.get("fields", [])}
@@ -388,6 +464,12 @@ def _resolve_import_export_config(
 
         for direction in ("export", "import"):
             config = _normalise_io_config(model, direction)
+            custom = config.get("custom", False)
+            if not isinstance(custom, bool):
+                raise ValueError(
+                    f"{model['name']}.{direction}able 'custom' must be a boolean"
+                )
+            model[f"custom_{direction}able"] = custom
             selected, field_options = _configured_field_names(config)
             excluded = {str(name) for name in config.get("exclude_fields", [])}
             fk_config = _relation_mapping(config, "foreign_keys", "fk_fields", "fks")
@@ -410,7 +492,13 @@ def _resolve_import_export_config(
                 ):
                     continue
 
-                entry = {"field": field, "name": name, "column_name": name, "kind": "scalar"}
+                entry = {
+                    "field": field,
+                    "name": name,
+                    "column_name": name,
+                    "kind": "scalar",
+                }
+                has_custom_column_name = False
                 if name in fk_by_name:
                     fk = fk_by_name[name]
                     option = fk_config.get(name, field_options.get(name))
@@ -424,6 +512,15 @@ def _resolve_import_export_config(
                     entry.update({"kind": "fk", "fk": fk, "lookup_field": lookup})
                     if column:
                         entry["column_name"] = column
+                        has_custom_column_name = True
+                if direction == "export":
+                    # An explicitly configured CSV column header is intentional;
+                    # otherwise, select its title from the active UI language.
+                    entry["header_labels"] = (
+                        {"en": entry["column_name"], "zh": entry["column_name"]}
+                        if has_custom_column_name
+                        else _csv_header_labels(model, name, entry["column_name"], field)
+                    )
                 io_fields.append(entry)
 
             # Import upsert cannot work without its matching column. Include it
@@ -466,10 +563,74 @@ def _resolve_import_export_config(
                     "lookup_field": lookup,
                     "column_name": column or relation_name,
                 })
+                if direction == "export":
+                    resolved["header_labels"] = (
+                        {"en": column, "zh": column}
+                        if column
+                        else _csv_header_labels(model, relation_name, relation_name)
+                    )
                 resolved_m2m.append(resolved)
+
+            resolved_reverse_fks = []
+            if direction == "export":
+                raw_reverse_fks = _relation_mapping(
+                    config,
+                    "reverse_foreign_keys",
+                    "reverse_fks",
+                    "reverse_fk",
+                )
+                for relation_name, option in raw_reverse_fks.items():
+                    relation = next(
+                        (
+                            item
+                            for item in model.get("reverse_foreign_keys", [])
+                            if relation_name
+                            in {
+                                item.get("name"),
+                                item.get("write_name"),
+                                item.get("source_service"),
+                                pluralize(str(item.get("source_service", "")).rsplit("_", 1)[-1]),
+                            }
+                        ),
+                        None,
+                    )
+                    if relation is None:
+                        raise ValueError(
+                            f"{model['name']}.exportable reverse foreign key "
+                            f"'{relation_name}' was not found"
+                        )
+
+                    lookup, column = _lookup_field(option, relation["label_field"])
+                    source = model_map.get(relation["source_model"])
+                    if source and lookup not in {item["name"] for item in source.get("fields", [])}:
+                        raise ValueError(
+                            f"{model['name']}.exportable reverse foreign key "
+                            f"'{relation_name}' references unknown "
+                            f"{relation['source_model']} field '{lookup}'"
+                        )
+
+                    resolved = dict(relation)
+                    resolved.update(
+                        {
+                            "lookup_field": lookup,
+                            "column_name": column or relation_name,
+                            "header_labels": (
+                                {"en": column, "zh": column}
+                                if column
+                                else _csv_header_labels(model, relation_name, relation_name)
+                            ),
+                            "value_cache_name": (
+                                f"reverse_{relation['source_service']}_"
+                                f"{relation['source_fk_field']}_values"
+                            ),
+                        }
+                    )
+                    resolved_reverse_fks.append(resolved)
 
             model[f"{direction}_fields"] = io_fields
             model[f"{direction}_m2m"] = resolved_m2m
+            if direction == "export":
+                model["export_reverse_fks"] = resolved_reverse_fks
 
 
 def _apply_m2m_direction(

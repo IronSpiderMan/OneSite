@@ -150,7 +150,11 @@ THEMES: Dict[str, Dict[str, Any]] = {
 
 
 def resolve_theme(site_config: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
-    theme_name = site_config.get("style") or site_config.get("theme") or "normal"
+    # ``style`` is retained for compatibility, but SiteConfig supplies it with
+    # the default value ``normal``.  Prefer an explicitly configured ``theme``
+    # so ``SiteConfig(theme=\"neuron\")`` is not silently shadowed by that
+    # default field during model_dump().
+    theme_name = site_config.get("theme") or site_config.get("style") or "normal"
     legacy_style_alias = {
         "slate": "normal",
         "blue": "normal",

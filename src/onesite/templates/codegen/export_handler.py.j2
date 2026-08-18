@@ -1,62 +1,134 @@
-"""Background export handler for {{ model.name }}.
+"""Background import/export handlers for {{ model.name }}."""
 
-Generates CSV exports in the background and notifies the user via WebSocket
-when the export is complete.
-"""
-
+import inspect
 import logging
+from pathlib import Path
+
 from app.core.task_queue import task_queue
 
 logger = logging.getLogger(__name__)
 
 
+{% if model.exportable %}
 @task_queue.handler("export.{{ model.module_name }}")
 async def handle_export_{{ model.module_name }}(payload: dict):
-    task_id = payload.get("task_id")
+    task_id = payload.get("task_id") or "export"
     user_id = payload.get("user_id")
-    filters = payload.get("filters")
+    filters = payload.get("filters") or {}
+    language = payload.get("language", "en")
 
     if user_id is None:
         logger.warning("No user_id in export payload for {{ model.name }}")
         return
 
-    from app.core.db import engine
     from app.core.ws import manager
-    from sqlmodel.ext.asyncio.session import AsyncSession
-    from app.services.{{ model.module_name }} import service
 
-    async with AsyncSession(engine) as session:
-        try:
+    try:
+        {% if model.custom_exportable %}
+        from app.custom_io.{{ model.module_name }} import export_{{ model.module_name }}
+
+        result = export_{{ model.module_name }}(filters)
+        if inspect.isawaitable(result):
+            result = await result
+        filepath = Path(result)
+        if not filepath.is_file():
+            raise ValueError("Custom export must return the path of an existing file")
+
+        import os
+        import shutil
+
+        export_dir = Path(os.environ.get("UPLOAD_DIR", "uploads")) / "exports"
+        export_dir.mkdir(parents=True, exist_ok=True)
+        filename = f"{{ model.module_name }}_export_{task_id}_{filepath.name}"
+        destination = export_dir / filename
+        if filepath.resolve() != destination.resolve():
+            shutil.copy2(filepath, destination)
+        filepath = destination
+        {% else %}
+        from app.core.db import engine
+        from sqlmodel.ext.asyncio.session import AsyncSession
+        from app.services.{{ model.module_name }} import service
+
+        async with AsyncSession(engine) as session:
             filepath = await service.export_to_csv(
                 session,
-                task_id=task_id or "",
+                task_id=task_id,
                 user_id=user_id,
                 filters=filters,
+                language=language,
             )
+        filename = Path(filepath).name
+        {% endif %}
 
-            import os
-            filename = os.path.basename(filepath)
-            download_url = f"/uploads/exports/{filename}"
-
+        await manager.send_personal_message(
+            {
+                "type": "export_complete",
+                "download_url": f"/uploads/exports/{filename}",
+                "filename": filename,
+                "message": f"{{ model.name }} export completed",
+            },
+            user_id,
+        )
+        logger.info("Export completed for {{ model.name }}: %s", filepath)
+    except Exception:
+        logger.exception("Export failed for {{ model.name }}")
+        try:
             await manager.send_personal_message(
-                {
-                    "type": "export_complete",
-                    "download_url": download_url,
-                    "filename": filename,
-                    "message": f"{{ model.name }} export completed",
-                },
+                {"type": "export_complete", "error": "Export failed. Please try again."},
                 user_id,
             )
-            logger.info("Export completed for {{ model.name }}: %s", filepath)
         except Exception:
-            logger.exception("Export failed for {{ model.name }}")
-            try:
-                await manager.send_personal_message(
-                    {
-                        "type": "export_complete",
-                        "error": "Export failed. Please try again.",
-                    },
-                    user_id,
-                )
-            except Exception:
-                logger.exception("Failed to send export error notification")
+            logger.exception("Failed to send export error notification")
+
+
+{% endif %}
+{% if model.custom_importable %}
+@task_queue.handler("import.{{ model.module_name }}")
+async def handle_import_{{ model.module_name }}(payload: dict):
+    task_id = payload.get("task_id") or "import"
+    user_id = payload.get("user_id")
+    file_path = payload.get("file_path")
+
+    if user_id is None or not file_path:
+        logger.warning("Incomplete custom import payload for {{ model.name }}")
+        return
+
+    from app.core.ws import manager
+    from app.custom_io.{{ model.module_name }} import import_{{ model.module_name }}
+
+    uploaded_file = Path(file_path)
+    try:
+        result = import_{{ model.module_name }}(uploaded_file)
+        if inspect.isawaitable(result):
+            result = await result
+        if not isinstance(result, dict):
+            raise ValueError("Custom import must return a result dictionary")
+
+        summary = dict(result)
+        summary["success"] = int(summary.get("success", 0))
+        summary["failed"] = int(summary.get("failed", 0))
+        errors = summary.get("errors", [])
+        summary["errors"] = errors if isinstance(errors, list) else [str(errors)]
+        await manager.send_personal_message(
+            {
+                "type": "import_complete",
+                "module": "{{ model.module_name }}",
+                "task_id": task_id,
+                "result": summary,
+                "message": f"{{ model.name }} import completed",
+            },
+            user_id,
+        )
+        logger.info("Import completed for {{ model.name }}: %s", uploaded_file)
+    except Exception:
+        logger.exception("Import failed for {{ model.name }}")
+        try:
+            await manager.send_personal_message(
+                {"type": "import_complete", "module": "{{ model.module_name }}", "task_id": task_id, "error": "Import failed. Please try again."},
+                user_id,
+            )
+        except Exception:
+            logger.exception("Failed to send import error notification")
+    finally:
+        uploaded_file.unlink(missing_ok=True)
+{% endif %}

@@ -7,9 +7,8 @@ import signal
 
 from fastapi import FastAPI
 
-from app.core.db import init_db
-from app.core.external_resources import external_resource_manager
-from app.initial_data import init_data
+from app.core.external_resources import external_resource_manager, init_external_resource_db
+from app.core.external_resource_provider_registry import init_external_resource_providers
 from app.resources import destroy_resources, init_resources
 
 
@@ -20,9 +19,11 @@ async def run() -> None:
     for name in ("SIGINT", "SIGTERM"):
         if hasattr(signal, name):
             loop.add_signal_handler(getattr(signal, name), stopped.set)
-    await init_db()
-    await init_data()
+    # The worker owns only its runtime schema. Application and TimescaleDB
+    # schemas are initialized by the deployment or the web application.
+    await init_external_resource_db()
     await init_resources(app)
+    init_external_resource_providers()
     try:
         await external_resource_manager.start()
         await stopped.wait()

@@ -63,4 +63,12 @@ dashboard_metrics = [
     #     color="blue",
     #     order=1,
     # ),
+    # dashboard_metric(
+    #     "paid_over_total", model="Order", title="Paid / total orders",
+    #     items=[
+    #         {"aggregation": "count", "where": {"status": "paid"}},
+    #         {"aggregation": "count"},
+    #     ],
+    #     separator=" / ", icon="ReceiptText", color="purple", order=2,
+    # ),
 ]

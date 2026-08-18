@@ -144,6 +144,23 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
               return;
             }
 
+            if (payload?.type === 'import_complete') {
+              if (payload.error) {
+                toast.error(payload.error);
+              } else {
+                const result = payload.result || {};
+                const failed = Number(result.failed || 0);
+                const success = Number(result.success || 0);
+                if (failed > 0) {
+                  toast.warning(payload.message || `Import completed: ${success} succeeded, ${failed} failed`);
+                } else {
+                  toast.success(payload.message || t('common.import_complete', 'Import completed'));
+                }
+              }
+              window.dispatchEvent(new CustomEvent('onesite:import-complete', { detail: payload }));
+              return;
+            }
+
             if (payload?.type === 'tool_status' && payload?.data) {
               window.dispatchEvent(new CustomEvent('onesite:tool-status', { detail: payload.data }));
               if (payload.data.status === 'succeeded') {

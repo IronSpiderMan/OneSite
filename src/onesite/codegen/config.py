@@ -47,6 +47,54 @@ _NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 
 
+def validate_external_resources_config(config: Dict[str, Any]) -> None:
+    """Keep the historical project-level switch well-typed.
+
+    Runtime generation is enabled by model ``external_resource`` declarations;
+    this flag is retained as a backwards-compatible configuration field.
+    """
+    enabled = config.setdefault("external_resources", False)
+    if not isinstance(enabled, bool):
+        raise SiteConfigError(
+            "site_config.json field 'external_resources' must be true or false."
+        )
+
+
+def validate_external_resource_providers_config(config: Dict[str, Any]) -> None:
+    """Normalize configured provider names to import-safe source modules."""
+    providers = config.setdefault("providers", {})
+    if not isinstance(providers, dict):
+        raise SiteConfigError("site_config.json field 'providers' must be an object.")
+
+    normalized: dict[str, dict[str, str]] = {}
+    modules: set[str] = set()
+    for name, definition in providers.items():
+        field = f"site_config.json field 'providers.{name}'"
+        if not isinstance(name, str) or not name:
+            raise SiteConfigError("site_config.json field 'providers' keys must be non-empty strings.")
+        if definition is None:
+            definition = {}
+        if not isinstance(definition, dict):
+            raise SiteConfigError(f"{field} must be an object.")
+        unknown = set(definition) - {"module"}
+        if unknown:
+            raise SiteConfigError(
+                f"{field} contains unsupported keys: {', '.join(sorted(unknown))}."
+            )
+        module = definition.get("module", name)
+        if not isinstance(module, str) or not _MODULE_NAME_RE.fullmatch(module):
+            raise SiteConfigError(
+                f"{field}.module must be a valid Python module identifier."
+            )
+        if module in modules:
+            raise SiteConfigError(
+                f"{field}.module duplicates the configured provider module {module!r}."
+            )
+        modules.add(module)
+        normalized[name] = {"module": module}
+    config["providers"] = normalized
+
+
 def _default_desktop_identifier(project_name: str) -> str:
     """Build a stable reverse-domain identifier from a project name."""
     slug = re.sub(r"[^A-Za-z0-9-]+", "-", project_name).strip("-").lower()

@@ -65,22 +65,33 @@ interface DashboardMetric {
     icon: string;
     color: string;
     link?: string | null;
+    values?: Array<{
+        value: number | null;
+        format: { type?: 'number' | 'currency' | 'percent'; currency?: string; decimals?: number };
+    }>;
+    separator?: string;
 }
 
-const formatMetricValue = (metric: DashboardMetric): string => {
-    if (metric.value === null || metric.value === undefined) return '—';
-    const decimals = metric.format?.decimals ?? (metric.format?.type === 'currency' ? 2 : 0);
-    if (metric.format?.type === 'currency') {
+const formatMetricNumber = (
+    value: number | null | undefined,
+    format: DashboardMetric['format'],
+): string => {
+    if (value === null || value === undefined) return '—';
+    const decimals = format?.decimals ?? (format?.type === 'currency' ? 2 : 0);
+    if (format?.type === 'currency') {
         return new Intl.NumberFormat(undefined, {
-            style: 'currency', currency: metric.format.currency || 'CNY',
+            style: 'currency', currency: format.currency || 'CNY',
             minimumFractionDigits: decimals, maximumFractionDigits: decimals,
-        }).format(metric.value);
+        }).format(value);
     }
-    if (metric.format?.type === 'percent') {
-        return `${metric.value.toLocaleString(undefined, { maximumFractionDigits: decimals })}%`;
+    if (format?.type === 'percent') {
+        return `${value.toLocaleString(undefined, { maximumFractionDigits: decimals })}%`;
     }
-    return metric.value.toLocaleString(undefined, { maximumFractionDigits: decimals });
+    return value.toLocaleString(undefined, { maximumFractionDigits: decimals });
 };
+
+const formatMetricValue = (metric: DashboardMetric): string =>
+    formatMetricNumber(metric.value, metric.format);
 
 const metricIconStyle = (color: string): React.CSSProperties => ({
     color,
@@ -839,9 +850,20 @@ const DashboardPage: React.FC = () => {
                                         <p className="truncate text-sm font-medium text-muted-foreground">
                                             {t(metric.i18n_key, metric.title)}
                                         </p>
-                                        <p className="mt-2 truncate text-3xl font-bold tracking-tight tabular-nums">
-                                            {formatMetricValue(metric)}
-                                        </p>
+                                        {metric.values?.length ? (
+                                            <div className="mt-2 flex flex-wrap items-baseline gap-x-2 text-3xl font-bold tracking-tight tabular-nums">
+                                                {metric.values.map((value, valueIndex) => (
+                                                    <React.Fragment key={valueIndex}>
+                                                        {valueIndex > 0 && <span className="text-muted-foreground">{metric.separator || ' / '}</span>}
+                                                        <span>{formatMetricNumber(value.value, value.format)}</span>
+                                                    </React.Fragment>
+                                                ))}
+                                            </div>
+                                        ) : (
+                                            <p className="mt-2 truncate text-3xl font-bold tracking-tight tabular-nums">
+                                                {formatMetricValue(metric)}
+                                            </p>
+                                        )}
                                     </div>
                                     <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" style={metricIconStyle(accentColor)}>
                                         <MetricIcon className="h-5 w-5" />

@@ -72,9 +72,6 @@ async def init_db():
     {% if background_execution_enabled %}
     import app.core.background_execution  # noqa: F401
     {% endif %}
-    {% if external_resources_enabled %}
-    import app.core.external_resources  # noqa: F401
-    {% endif %}
     # Ensure _latest table models are imported so SQLModel.metadata knows about them
     {% for module in latest_table_imports %}
     import {{ module }}  # noqa: F401
@@ -84,6 +81,12 @@ async def init_db():
         {% for index in generated_indexes %}
         await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}
+    {% if external_resources_enabled %}
+    # Keep external-resource schema ownership in its runtime module. This is
+    # also the only schema initialization the standalone reconciler performs.
+    from app.core.external_resources import init_external_resource_db
+    await init_external_resource_db()
+    {% endif %}
     {% if background_execution_enabled %}
     if settings.DATABASE_URI.startswith("postgresql"):
         # Older generated projects created these columns as timestamp without
@@ -291,51 +294,6 @@ async def init_db():
             """))
         {% endfor %}
         {% endfor %}
-    {% endif %}
-
-    {% if external_resources_enabled %}
-    if settings.DATABASE_URI.startswith("postgresql"):
-        async with engine.begin() as conn:
-            await conn.execute(text("""
-                UPDATE onesite_external_resource_health
-                SET last_seen_at = NOW(), updated_at = NOW()
-                WHERE last_seen_at > NOW()
-            """))
-
-    if settings.DATABASE_URI.startswith("postgresql"):
-        async with engine.begin() as conn:
-            await conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS ix_external_binding_health
-                ON onesite_external_resource_binding
-                    (provider, resource_type, entity_id, status)
-            """))
-            await conn.execute(text("""
-                ALTER TABLE onesite_external_resource_binding
-                ADD COLUMN IF NOT EXISTS last_checked_at TIMESTAMPTZ
-            """))
-            await conn.execute(text("""
-                ALTER TABLE onesite_external_resource_binding
-                ADD COLUMN IF NOT EXISTS next_check_at TIMESTAMPTZ
-            """))
-            await conn.execute(text("""
-                UPDATE onesite_external_resource_binding
-                SET next_check_at = COALESCE(next_check_at, NOW())
-            """))
-            await conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS ix_external_binding_next_check
-                ON onesite_external_resource_binding
-                    (next_check_at, id)
-            """))
-            await conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS ix_external_outbox_ready
-                ON onesite_external_resource_outbox
-                    (status, next_attempt_at, id)
-            """))
-            await conn.execute(text("""
-                CREATE INDEX IF NOT EXISTS ix_external_outbox_entity_status
-                ON onesite_external_resource_outbox
-                    (provider, resource_type, entity_id, status)
-            """))
     {% endif %}
 
 async def get_session() -> AsyncGenerator[AsyncSession, None]:

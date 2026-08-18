@@ -87,6 +87,11 @@ export interface {{ model.name }}DashboardMetric {
     icon: string;
     color: string;
     link?: string | null;
+    values?: Array<{
+        value: number | null;
+        format: { type?: 'number' | 'currency' | 'percent'; currency?: string; decimals?: number };
+    }>;
+    separator?: string;
 }
 
 export const get{{ model.name }}DashboardMetrics = async () => {
@@ -197,8 +202,10 @@ export const get{{ model.name }}{{ rel.source_model }}s = async (id: {{ 'string'
 {% if model.importable or model.exportable %}
 // Import/Export functions
 {% if model.exportable %}
-export const export{{ model.name }}s = async (): Promise<{ task_id: string; status: string }> => {
-    const response = await request.post<{ task_id: string; status: string }>(`${API_URL}/export`);
+export const export{{ model.name }}s = async (language: string, filters?: Record<string, any>): Promise<{ task_id: string; status: string }> => {
+    const response = await request.post<{ task_id: string; status: string }>(`${API_URL}/export`, filters, {
+        params: { language },
+    });
     return response.data;
 };
 {% endif %}
@@ -210,17 +217,22 @@ export interface ImportResult {
     errors: string[];
 }
 
-export const import{{ model.name }}s = async (file: File): Promise<ImportResult> => {
+export interface ImportTask {
+    task_id: string;
+    status: string;
+}
+
+export const import{{ model.name }}s = async (file: File): Promise<{% if model.custom_importable %}ImportTask{% else %}ImportResult{% endif %}> => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await request.post<ImportResult>(`${API_URL}/import`, formData, {
+    const response = await request.post<{% if model.custom_importable %}ImportTask{% else %}ImportResult{% endif %}>(`${API_URL}/import`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' }
     });
     return response.data;
 };
 {% endif %}
 
-{% if model.importable and not model.exportable %}
+{% if model.importable and not model.exportable and not model.custom_importable %}
 export const download{{ model.name }}Template = async () => {
     const response = await request.get(`${API_URL}/export/template`, {
         responseType: 'blob'

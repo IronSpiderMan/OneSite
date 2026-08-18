@@ -57,6 +57,7 @@ class {{ model.name }}Service:
                 await enqueue_external_resource_change(
                     session,
                     resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
+                    provider="{{ model.external_resource.reconcile_via.provider }}",
                     entity_id=str(_external_parent_id),
                     operation="reconcile",
                 )
@@ -64,6 +65,7 @@ class {{ model.name }}Service:
             await enqueue_external_resource_change(
                 session,
                 resource_type="{{ model.external_resource.resource_type }}",
+                provider="{{ model.external_resource.provider }}",
                 entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
                 operation="reconcile",
             )
@@ -409,6 +411,7 @@ class {{ model.name }}Service:
                 await enqueue_external_resource_change(
                     session,
                     resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
+                    provider="{{ model.external_resource.reconcile_via.provider }}",
                     entity_id=str(_external_parent_id),
                     operation="reconcile",
                 )
@@ -416,6 +419,7 @@ class {{ model.name }}Service:
             await enqueue_external_resource_change(
                 session,
                 resource_type="{{ model.external_resource.resource_type }}",
+                provider="{{ model.external_resource.provider }}",
                 entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
                 operation="reconcile",
             )
@@ -506,6 +510,7 @@ class {{ model.name }}Service:
                 await enqueue_external_resource_change(
                     session,
                     resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
+                    provider="{{ model.external_resource.reconcile_via.provider }}",
                     entity_id=str(_parent_id),
                     operation="reconcile",
                 )
@@ -513,6 +518,7 @@ class {{ model.name }}Service:
             await enqueue_external_resource_change(
                 session,
                 resource_type="{{ model.external_resource.resource_type }}",
+                provider="{{ model.external_resource.provider }}",
                 entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
                 operation="reconcile",
                 snapshot=old,
@@ -579,6 +585,7 @@ class {{ model.name }}Service:
                 await enqueue_external_resource_change(
                     session,
                     resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
+                    provider="{{ model.external_resource.reconcile_via.provider }}",
                     entity_id=str(_external_parent_id),
                     operation="reconcile",
                 )
@@ -586,6 +593,7 @@ class {{ model.name }}Service:
             await enqueue_external_resource_change(
                 session,
                 resource_type="{{ model.external_resource.resource_type }}",
+                provider="{{ model.external_resource.provider }}",
                 entity_id=str(id),
                 operation="delete",
                 snapshot=old,
@@ -770,9 +778,9 @@ class {{ model.name }}Service:
         return {{ model.name }}Read.model_validate(obj) if obj else None
     {% endif %}
 
-    {% if model.importable or model.exportable %}
+    {% if (model.importable and not model.custom_importable) or (model.exportable and not model.custom_exportable) %}
     # Import/Export methods
-    {% if model.exportable %}
+    {% if model.exportable and not model.custom_exportable %}
     async def export_to_csv(
         self,
         session: AsyncSession,
@@ -780,17 +788,19 @@ class {{ model.name }}Service:
         task_id: str,
         user_id: int,
         filters: Optional[dict] = None,
+        language: str = "en",
         ws_manager = None,
     ) -> str:
         """
         Export {{ model.name }} records to CSV.
         Returns the file path of the exported CSV.
         Configured foreign keys are exported through their lookup field and
-        configured many-to-many relations are joined with semicolons.
+        configured many-to-many and reverse one-to-many relations are joined
+        with semicolons.
         """
         import csv
         import os
-        from datetime import datetime
+        from datetime import datetime, time
         from sqlmodel import select
         
         upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
@@ -800,14 +810,51 @@ class {{ model.name }}Service:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"{{ model.module_name }}_export_{timestamp}.csv"
         filepath = os.path.join(export_dir, filename)
+        language = "zh" if str(language).lower().startswith("zh") else "en"
+
+        # Use the same supported filters as the list endpoint.  Exports run in
+        # a background task, so date and time values arrive as JSON strings
+        # rather than FastAPI-coerced query parameters.
+        export_filters = {
+            key: value
+            for key, value in (filters or {}).items()
+            if key in {
+                {% for field in model.fields %}
+                {% if field.is_search_field and field.name != 'id' %}
+                {% if field.ui_type == 'datetime' %}"{{ field.name }}_from", "{{ field.name }}_to",
+                {% else %}"{{ field.name }}",
+                {% endif %}
+                {% endif %}
+                {% endfor %}
+                {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
+                {% for fk in model.foreign_keys %}
+                {% if fk.name != model.owner_field and fk.name not in search_field_names %}"{{ fk.name }}",
+                {% endif %}
+                {% endfor %}
+            }
+        }
+        {% for field in model.fields %}
+        {% if field.is_search_field and field.ui_type == 'datetime' %}
+        for filter_name in ("{{ field.name }}_from", "{{ field.name }}_to"):
+            value = export_filters.get(filter_name)
+            if isinstance(value, str) and value:
+                export_filters[filter_name] = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        {% endif %}
+        {% if field.is_search_field and field.ui_type == 'time' %}
+        value = export_filters.get("{{ field.name }}")
+        if isinstance(value, str) and value:
+            export_filters["{{ field.name }}"] = time.fromisoformat(value)
+        {% endif %}
+        {% endfor %}
 
         # Write CSV with UTF-8 BOM for Excel compatibility
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
 
             headers = [
-                {% for column in model.export_fields %}"{{ column.column_name }}",
-                {% endfor %}{% for m2m in model.export_m2m %}"{{ m2m.column_name }}",
+                {% for column in model.export_fields %}{{ column.header_labels | tojson }}.get(language, "{{ column.column_name }}"),
+                {% endfor %}{% for m2m in model.export_m2m %}{{ m2m.header_labels | tojson }}.get(language, "{{ m2m.column_name }}"),
+                {% endfor %}{% for rfk in model.export_reverse_fks %}{{ rfk.header_labels | tojson }}.get(language, "{{ rfk.column_name }}"),
                 {% endfor %}
             ]
             writer.writerow(headers)
@@ -825,7 +872,9 @@ class {{ model.name }}Service:
             page = 1
             
             while True:
-                items = await crud.get_multi(session, page=page, size=batch_size)
+                items = await crud.get_multi(
+                    session, page=page, size=batch_size, **export_filters
+                )
                 if not items:
                     break
                 
@@ -872,6 +921,26 @@ class {{ model.name }}Service:
                 for source_id, value in result.all():
                     {{ m2m.name }}_values.setdefault(source_id, []).append(str(value))
                 {% endfor %}
+
+                {% for rfk in model.export_reverse_fks %}
+                # Resolve one configured reverse one-to-many column for the batch.
+                from app.models.{{ rfk.source_module }} import {{ rfk.source_model }} as {{ rfk.value_cache_name }}_model
+                item_ids = [item.id for item in items]
+                stmt = (
+                    select(
+                        {{ rfk.value_cache_name }}_model.{{ rfk.source_fk_field }},
+                        getattr({{ rfk.value_cache_name }}_model, "{{ rfk.lookup_field }}"),
+                    )
+                    .where({{ rfk.value_cache_name }}_model.{{ rfk.source_fk_field }}.in_(item_ids))
+                    .order_by({{ rfk.value_cache_name }}_model.id)
+                )
+                result = await session.exec(stmt)
+                {{ rfk.value_cache_name }} = {}
+                for parent_id, value in result.all():
+                    {{ rfk.value_cache_name }}.setdefault(parent_id, []).append(
+                        "" if value is None else str(value)
+                    )
+                {% endfor %}
                 
                 for item in items:
                     row = []
@@ -909,6 +978,9 @@ class {{ model.name }}Service:
                     {% for m2m in model.export_m2m %}
                     row.append(";".join({{ m2m.name }}_values.get(item.id, [])))
                     {% endfor %}
+                    {% for rfk in model.export_reverse_fks %}
+                    row.append(";".join({{ rfk.value_cache_name }}.get(item.id, [])))
+                    {% endfor %}
                     writer.writerow(row)
                 
                 page += 1
@@ -919,7 +991,7 @@ class {{ model.name }}Service:
         return filepath
     {% endif %}
 
-    {% if model.importable %}
+    {% if model.importable and not model.custom_importable %}
     async def import_from_csv(
         self,
         session: AsyncSession,

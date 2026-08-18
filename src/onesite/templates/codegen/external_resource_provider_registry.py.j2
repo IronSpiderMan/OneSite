@@ -1,0 +1,13 @@
+"""Generated registry for configured external-resource providers."""
+
+from app.core.external_resources import register_external_resource_provider
+{% for provider in providers %}
+from app.providers.{{ provider.module }} import provider as {{ provider.module }}_provider
+{% endfor %}
+
+
+def init_external_resource_providers() -> None:
+    """Register all configured providers before reconciliation begins."""
+{% for provider in providers %}
+    register_external_resource_provider({{ provider.name|tojson }}, {{ provider.module }}_provider)
+{% endfor %}

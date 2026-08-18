@@ -2,6 +2,7 @@ from pathlib import Path
 from typing import Any, Dict
 
 from .file_utils import write_file_with_status
+from .theme import resolve_theme
 
 
 def _env_value(value: Any) -> str:
@@ -89,6 +90,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     frontend_env = frontend_path / ".env"
     project_name = config.get("project_name", "OneSite")
     api_url = config.get("api_url", "/api/v1")
+    default_theme = resolve_theme(config)[0]["id"]
 
     f_env_content = ""
     if frontend_env.exists():
@@ -112,6 +114,7 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         "VITE_PROJECT_LOGO": logo,
         "VITE_LOGO_LINK": logo_link,
         "VITE_TIMEZONE": timezone,
+        "VITE_DEFAULT_THEME": default_theme,
     }
 
     f_lines = f_env_content.splitlines()
@@ -145,5 +148,6 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         f"VITE_PROJECT_LOGO={logo}\n"
         f"VITE_LOGO_LINK={logo_link}\n"
         f"VITE_TIMEZONE={timezone}\n"
+        f"VITE_DEFAULT_THEME={default_theme}\n"
     )
     write_file_with_status(desktop_env, desktop_env_content)

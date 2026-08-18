@@ -337,7 +337,12 @@ def sync(
 @app.command()
 def run(
     project_path: Path = typer.Argument(Path("."), help="Path to the project directory"),
-    component: str = typer.Option("all", help="Component to run: backend, frontend, or all")
+    component: str = typer.Option("all", help="Component to run: backend, frontend, or all"),
+    host: str | None = typer.Option(
+        None,
+        "--host",
+        help="Host address to bind the backend and frontend development servers",
+    ),
 ):
     """
     Run the project (Backend and Frontend).
@@ -373,7 +378,10 @@ def run(
              console.print("[yellow]Tip: Make sure you are in the project directory or specify the project path.[/yellow]")
              return
         console.print("[blue]Starting Backend...[/blue]")
-        subprocess.run(["uvicorn", "app.main:app", "--reload"], cwd=str(backend_dir))
+        command = ["uvicorn", "app.main:app", "--reload"]
+        if host:
+            command.extend(["--host", host])
+        subprocess.run(command, cwd=str(backend_dir))
 
     def run_frontend():
         if not frontend_dir.exists():
@@ -401,7 +409,10 @@ def run(
                     return
 
             try:
-                subprocess.run([npm, "run", "dev"], cwd=str(frontend_dir), check=True)
+                command = [npm, "run", "dev"]
+                if host:
+                    command.extend(["--", "--host", host])
+                subprocess.run(command, cwd=str(frontend_dir), check=True)
             except (OSError, subprocess.CalledProcessError) as exc:
                 console.print(f"[bold red]Error:[/bold red] Frontend failed to start: {exc}")
         else:
