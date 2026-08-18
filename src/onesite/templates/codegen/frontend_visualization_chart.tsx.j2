@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef } from 'react';
+import { useTranslation } from 'react-i18next';
 import * as echarts from 'echarts/core';
 import type { EChartsCoreOption } from 'echarts/core';
 {% set renderers = visualizations | map(attribute='renderer') | list %}
@@ -49,6 +50,11 @@ const COLORS = ['#6366f1', '#06b6d4', '#f59e0b', '#f43f5e', '#8b5cf6', '#10b981'
 
 const unique = (values: any[]) => Array.from(new Set(values.map((value) => String(value))));
 
+const enumLabel = (binding: any, value: unknown, t: any) => {
+  const fallback = String(value);
+  return binding?.enum_i18n_key ? t(`${binding.enum_i18n_key}.${fallback}`, fallback) : fallback;
+};
+
 const cartesianBase = (xValues: any[]): EChartsCoreOption => ({
   animationDuration: 450,
   color: COLORS,
@@ -64,6 +70,9 @@ const lineOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCo
   const seriesNames = data.contract === 'xy_series'
     ? unique(data.rows.map((row) => row.series))
     : [String((spec.inputs.y as any)?.label || spec.title)];
+  const t = (spec as any)._translate;
+  const xBinding = spec.inputs.x as any;
+  const seriesBinding = spec.inputs.series as any;
   const smooth = spec.preset === 'line.smooth';
   const area = spec.preset.includes('area');
   const stacked = spec.preset.includes('stacked');
@@ -75,7 +84,7 @@ const lineOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCo
     const values = new Map(rows.map((row) => [String(row.x), row.y]));
     const color = COLORS[index % COLORS.length];
     return {
-      name,
+      name: enumLabel(seriesBinding, name, t),
       type: 'line',
       smooth,
       stack: stacked ? 'total' : undefined,
@@ -93,7 +102,7 @@ const lineOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCo
       data: xValues.map((x) => values.get(x) ?? null),
     };
   });
-  return { ...cartesianBase(xValues), series };
+  return { ...cartesianBase(xValues.map((value) => enumLabel(xBinding, value, t))), series };
 };
 
 const scatterOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
@@ -119,6 +128,8 @@ const scatterOption = (spec: VisualizationSpec, data: VisualizationData): EChart
 
 const pieOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCoreOption => {
   const half = spec.preset === 'pie.half_donut';
+  const categoryBinding = spec.inputs.category as any;
+  const t = (spec as any)._translate;
   return {
     color: COLORS,
     tooltip: { trigger: 'item' },
@@ -133,7 +144,7 @@ const pieOption = (spec: VisualizationSpec, data: VisualizationData): EChartsCor
       padAngle: spec.preset === 'pie.rounded_donut' ? 2 : 0,
       itemStyle: { borderRadius: spec.preset === 'pie.rounded_donut' ? 8 : 0, borderColor: 'transparent' },
       label: { formatter: '{b}: {d}%' },
-      data: data.rows.map((row) => ({ name: String(row.category), value: row.value })),
+      data: data.rows.map((row) => ({ name: enumLabel(categoryBinding, row.category, t), value: row.value })),
     }],
   };
 };
@@ -278,7 +289,12 @@ export const VisualizationChart: React.FC<{
   data: VisualizationData;
   className?: string;
 }> = ({ spec, data, className }) => {
-  const option = useMemo(() => buildVisualizationOption(spec, data), [spec, data]);
+  const { t } = useTranslation();
+  const localizedSpec = useMemo(
+    () => ({ ...spec, _translate: t }),
+    [spec, t],
+  );
+  const option = useMemo(() => buildVisualizationOption(localizedSpec, data), [localizedSpec, data]);
   return <EChartCanvas option={option} title={spec.title} className={className} />;
 };
 

@@ -39,7 +39,7 @@ def _require_spec(key: str, role: str) -> dict[str, Any]:
 def _public_binding(binding: dict[str, Any]) -> dict[str, Any]:
     return {
         name: binding.get(name)
-        for name in ("kind", "label", "field_type", "unit", "bucket", "extract", "aggregate")
+        for name in ("kind", "label", "field_type", "unit", "bucket", "extract", "aggregate", "enum_i18n_key")
         if binding.get(name) is not None
     }
 

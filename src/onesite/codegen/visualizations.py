@@ -283,6 +283,10 @@ def _compile_binding(
         target_field = _find_field(target_model, resolved["field"])
         if target_field is not None:
             readable_roles &= _field_readable_roles(target_field)
+            if target_field.get("is_enum"):
+                compiled["enum_i18n_key"] = (
+                    f"models.{target_model['module_name']}.enums.{target_field['name']}"
+                )
 
     if binding.get("bucket") is not None:
         if binding["bucket"] not in TIME_BUCKETS:
