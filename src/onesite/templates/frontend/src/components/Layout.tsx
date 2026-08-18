@@ -263,7 +263,13 @@ const AppLayout: React.FC = () => {
                 const containsActiveItem = groupContainsActiveItem(item);
                 const isOpen = openMenuGroups[item.key] ?? (item.defaultOpen || containsActiveItem);
                 return (
-                  <div key={item.key}>
+                  <div
+                    key={item.key}
+                    className={cn(
+                      "menu-nav-group mb-1",
+                      !isCollapsed && isOpen && "menu-nav-group--open"
+                    )}
+                  >
                     <button
                       type="button"
                       title={isCollapsed ? t(item.label) : undefined}
@@ -284,31 +290,39 @@ const AppLayout: React.FC = () => {
                         isCollapsed
                           ? "justify-center py-2.5 px-0"
                           : "space-x-2 px-4 py-2",
+                        !isCollapsed && "menu-nav-group-trigger",
                         containsActiveItem ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
                       )}
                     >
                       {item.icon}
                       {!isCollapsed && <>
                         <span className="flex-1 text-left text-sm font-medium">{t(item.label)}</span>
-                        <ChevronDown className={cn("h-4 w-4 transition-transform", isOpen && "rotate-180")} />
+                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
                       </>}
                     </button>
                     {!isCollapsed && isOpen && (
-                      <div className="ml-4 border-l border-border/60 py-1">
-                        {item.children.map((child: any) => (
-                          <Link
-                            key={child.key}
-                            to={child.key}
-                            className={cn(
-                              "flex items-center gap-2 py-2 pl-5 pr-4 text-sm transition-all duration-150",
-                              isNeuron && "neuron-nav-item",
-                              location.pathname === child.key ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
-                            )}
-                          >
-                            {child.icon}
-                            <span className="font-medium">{t(child.label)}</span>
-                          </Link>
-                        ))}
+                      <div className={cn(
+                        "menu-nav-group-children ml-4 border-l py-0.5",
+                        isNormal ? "border-border/60" : theme === 'industrial' ? "border-accent/40" : "border-primary/25"
+                      )}>
+                        {item.children.map((child: any) => {
+                          const isChildActive = location.pathname === child.key;
+                          return (
+                            <Link
+                              key={child.key}
+                              to={child.key}
+                              aria-current={isChildActive ? 'page' : undefined}
+                              className={cn(
+                                "menu-nav-group-child flex items-center gap-2 py-2 pl-5 pr-4 text-sm transition-all duration-150",
+                                isNeuron && "neuron-nav-item",
+                                isChildActive ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
+                              )}
+                            >
+                              {child.icon}
+                              <span className="font-medium">{t(child.label)}</span>
+                            </Link>
+                          );
+                        })}
                       </div>
                     )}
                   </div>
