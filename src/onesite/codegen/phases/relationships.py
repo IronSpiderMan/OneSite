@@ -17,7 +17,7 @@ from ..types import ModelDefinition
 from .base import ROLE_ORDER, ROLE_TO_ENUM, console, pluralize
 
 
-_RELATION_EDITORS = {"select", "inline", "readonly", "hidden"}
+_RELATION_EDITORS = {"select", "inline", "embedded", "readonly", "hidden"}
 
 
 def _inline_field_type(field: dict) -> str:
@@ -1070,5 +1070,22 @@ def phase_resolve_relationships(
             for rel in model.get("m2m_fields", [])
             if rel.get("editor") == "inline"
         ]
+
+    # An embedded reverse-FK editor renders the child model's normal list and
+    # modal CRUD UI inside its parent's detail tab.  The child has no route of
+    # its own when ``standalone`` is false, but still needs a generated store
+    # and reusable list component.
+    embedded_sources = {
+        rel["source_model"]
+        for parent in models
+        for rel in parent.get("reverse_foreign_keys", [])
+        if rel.get("editor") == "embedded"
+    }
+    for model in models:
+        model["has_embedded_page"] = model["name"] in embedded_sources
+        model["has_embedded_reverse"] = any(
+            rel.get("editor") == "embedded"
+            for rel in model.get("reverse_foreign_keys", [])
+        )
 
     return models

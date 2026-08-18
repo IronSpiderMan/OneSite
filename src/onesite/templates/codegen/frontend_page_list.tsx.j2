@@ -129,7 +129,19 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
   );
 };
 
-const {{ model.name }}Page: React.FC = () => {
+export type {{ model.name }}ListProps = {
+  /** Fixed server/parent filters supplied by an embedded relationship tab. */
+  scopeFilters?: Record<string, any>;
+  /** Values enforced when records are created or updated from that tab. */
+  fixedFields?: Record<string, any>;
+  embedded?: boolean;
+};
+
+const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
+  scopeFilters = {},
+  fixedFields = {},
+  embedded = false,
+}) => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
   {% if not model.page_edit %}
@@ -303,7 +315,7 @@ const {{ model.name }}Page: React.FC = () => {
     {% if model.is_tree %}
     loadRoots(1);
     {% else %}
-    fetchData();
+    fetchData(1, 20, scopeFilters);
     {% endif %}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -355,6 +367,7 @@ const {{ model.name }}Page: React.FC = () => {
     {% endif %}
     {% endfor %}
     setIsModalOpen(true);
+    Object.entries(fixedFields).forEach(([field, value]) => setValue(field, value));
     {% endif %}
   };
 
@@ -606,16 +619,17 @@ const {{ model.name }}Page: React.FC = () => {
 
   {% if not model.page_edit %}
   const onSubmit = async (values: any) => {
+    const payload = { ...values, ...fixedFields };
     try {
       {% if model.is_tree %}
       if (editingId) {
-        await updateItem(editingId, values);
+        await updateItem(editingId, payload);
         toast.success(t('toast.update_success', 'Updated'));
         setIsModalOpen(false);
         await refreshTree();
       } else {
         const parentId = values.{{ model.tree_parent_field }};
-        await createItem(values);
+        await createItem(payload);
         toast.success(t('toast.create_success', 'Created'));
         setIsModalOpen(false);
         if (parentId) {
@@ -626,10 +640,10 @@ const {{ model.name }}Page: React.FC = () => {
       }
       {% else %}
       if (editingId) {
-        await updateItem(editingId, values);
+        await updateItem(editingId, payload);
         toast.success(t('toast.update_success', 'Updated'));
       } else {
-        await createItem(values);
+        await createItem(payload);
         toast.success(t('toast.create_success', 'Created'));
       }
       setIsModalOpen(false);
@@ -642,7 +656,7 @@ const {{ model.name }}Page: React.FC = () => {
   {% endif %}
 
   const applySearch = () => {
-    const next: Record<string, any> = {};
+    const next: Record<string, any> = { ...scopeFilters };
     {% for field in model.fields %}
     {% if field.is_search_field and field.name != 'id' %}
     {% if field.ui_type == 'bool' %}
@@ -1119,7 +1133,7 @@ const {{ model.name }}Page: React.FC = () => {
                         {% endfor %}
                         {% endif %}
                         </>
-                        {hasPermission('r') && (
+                        {!embedded && hasPermission('r') && (
                         <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}>
                             <Eye className="h-4 w-4" />
                         </Button>
@@ -1144,7 +1158,7 @@ const {{ model.name }}Page: React.FC = () => {
       </div>
 
       {/* Pagination Controls */}
-      <div className="shrink-0 flex flex-wrap items-center justify-between gap-4 bg-background">
+      <div className={`shrink-0 flex flex-wrap items-center justify-between gap-4 ${embedded ? '' : 'bg-background'}`}>
         <div className="flex items-center gap-4">
           <div className="text-sm text-muted-foreground whitespace-nowrap">
             {t('common.page_info')} {use{{ model.name }}Store(state => state.page)} {t('common.of_page')} {Math.ceil(use{{ model.name }}Store(state => state.total) / use{{ model.name }}Store(state => state.size)) || 1}

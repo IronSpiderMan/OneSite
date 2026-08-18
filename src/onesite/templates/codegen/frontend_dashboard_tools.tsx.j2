@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { Loader2, Play, Wrench } from 'lucide-react';
+import { AlertCircle, CheckCircle2, CircleDotDashed, Clock3, Download, FileUp, Info, Loader2, Play, Sparkles, Wrench } from 'lucide-react';
+import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
@@ -38,6 +39,12 @@ interface ToolDefinition {
 const TOOL_DEFINITIONS: ToolDefinition[] = {{ tools | tojson }};
 const TERMINAL = new Set(['succeeded', 'failed']);
 
+const executionStyle = (status: string) => {
+  if (status === 'succeeded') return { label: 'text-emerald-700 dark:text-emerald-400', surface: 'border-emerald-500/20 bg-emerald-500/5', Icon: CheckCircle2 };
+  if (status === 'failed') return { label: 'text-destructive', surface: 'border-destructive/20 bg-destructive/5', Icon: AlertCircle };
+  return { label: 'text-amber-700 dark:text-amber-400', surface: 'border-amber-500/20 bg-amber-500/5', Icon: Clock3 };
+};
+
 const optionValue = (option: NonNullable<ToolInput['options']>[number]): string =>
   typeof option === 'object' ? String(option.value) : String(option);
 const optionLabel = (option: NonNullable<ToolInput['options']>[number]): string =>
@@ -48,6 +55,29 @@ const initialValues = (tool: ToolDefinition): Record<string, unknown> =>
     input.name,
     input.default ?? (input.type === 'bool' ? false : input.type === 'multi_select' || input.type === 'files' ? [] : ''),
   ]));
+
+const selectedFilesLabel = (value: unknown, multiple: boolean, t: TFunction) => {
+  const files = multiple ? (value as File[] || []) : value ? [value as File] : [];
+  if (files.length === 0) return t('tools.no_file_selected', 'No file selected');
+  if (files.length === 1) return files[0].name;
+  return t('tools.files_selected', '{% raw %}{{count}}{% endraw %} files selected', { count: files.length });
+};
+
+const ToolExecutionPanel: React.FC<{ execution: ToolExecution; t: TFunction }> = ({ execution, t }) => {
+  const { label, surface, Icon } = executionStyle(execution.status);
+  return (
+    <div aria-live="polite" className={`space-y-3 rounded-xl border p-4 ${surface}`}>
+      <div className="flex items-center justify-between gap-3 text-sm">
+        <span className={`flex items-center gap-2 font-medium ${label}`}><Icon className="h-4 w-4" />{t(`tools.status.${execution.status}`, execution.status)}</span>
+        <span className="font-mono text-xs text-muted-foreground">{execution.progress}%</span>
+      </div>
+      <div className="h-1.5 overflow-hidden rounded-full bg-background/80"><div className="h-full rounded-full bg-primary transition-all duration-500" style={ { width: `${execution.progress}%` } } /></div>
+      {execution.error && <p className="rounded-md bg-background/60 p-2.5 text-sm text-destructive">{execution.error}</p>}
+      {execution.result != null && <pre className="max-h-64 overflow-auto rounded-lg border bg-background/75 p-3 whitespace-pre-wrap text-xs leading-5 text-foreground">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>}
+      {execution.download_url && <Button className="bg-background/70" type="button" variant="outline" onClick={() => window.open(execution.download_url!, '_blank')}><Download className="mr-2 h-4 w-4" />{t('tools.download', 'Download result')}</Button>}
+    </div>
+  );
+};
 
 const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
   const { t } = useTranslation();
@@ -111,19 +141,20 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
   };
 
   return (
-    <form onSubmit={submit} className="rounded-lg border bg-background p-4 space-y-5">
-      <div className="flex items-start gap-3">
-        <div className="rounded-lg bg-primary/10 p-2 text-primary"><Wrench className="h-5 w-5" /></div>
-        <div>
-          <h3 className="font-semibold">{tool.title}</h3>
-          {tool.description && <p className="mt-1 text-sm text-muted-foreground">{tool.description}</p>}
+    <form onSubmit={submit} className="group relative overflow-hidden rounded-xl border bg-background p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-within:border-primary/40 focus-within:shadow-md space-y-5">
+      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/45 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+      <div className="flex items-start gap-3.5">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/10 text-primary shadow-sm"><Wrench className="h-5 w-5" /></div>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <div className="flex items-start justify-between gap-3"><h3 className="font-semibold leading-5 tracking-tight">{tool.title}</h3><span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{tool.inputs.length} {t('tools.inputs', 'inputs')}</span></div>
+          {tool.description && <p className="mt-1.5 text-sm leading-5 text-muted-foreground">{tool.description}</p>}
         </div>
       </div>
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid gap-4 border-y border-border/60 py-5 md:grid-cols-2">
         {tool.inputs.map((input) => (
           <div key={input.name} className={input.type === 'text' || input.type === 'json' || input.type === 'files' ? 'md:col-span-2 space-y-2' : 'space-y-2'}>
-            <Label htmlFor={`${tool.name}-${input.name}`}>
+            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground" htmlFor={`${tool.name}-${input.name}`}>
               {input.label}{input.required && <span className="text-destructive"> *</span>}
             </Label>
             {input.type === 'text' || input.type === 'json' ? (
@@ -138,7 +169,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
               <select
                 id={`${tool.name}-${input.name}`}
                 required={input.required}
-                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 value={String(values[input.name] ?? '')}
                 onChange={(event) => setValue(input.name, event.target.value)}
               >
@@ -150,26 +181,31 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
                 id={`${tool.name}-${input.name}`}
                 multiple
                 required={input.required}
-                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm shadow-sm transition-colors focus:border-primary focus:outline-none focus:ring-2 focus:ring-primary/20"
                 value={(values[input.name] as string[]) || []}
                 onChange={(event) => setValue(input.name, Array.from(event.target.selectedOptions, (option) => option.value))}
               >
                 {(input.options || []).map((option) => <option key={optionValue(option)} value={optionValue(option)}>{optionLabel(option)}</option>)}
               </select>
             ) : input.type === 'bool' ? (
-              <label className="flex h-10 items-center gap-2">
-                <input type="checkbox" checked={Boolean(values[input.name])} onChange={(event) => setValue(input.name, event.target.checked)} />
+              <label className="flex h-10 items-center gap-2 rounded-md border border-input bg-muted/20 px-3 text-sm transition-colors hover:bg-muted/40">
+                <input className="h-4 w-4 accent-primary" type="checkbox" checked={Boolean(values[input.name])} onChange={(event) => setValue(input.name, event.target.checked)} />
                 <span className="text-sm text-muted-foreground">{input.help || input.label}</span>
               </label>
             ) : input.type === 'file' || input.type === 'files' ? (
-              <Input
-                id={`${tool.name}-${input.name}`}
-                type="file"
-                required={input.required}
-                multiple={input.type === 'files'}
-                accept={(input.accept || []).join(',') || undefined}
-                onChange={(event) => setValue(input.name, input.type === 'files' ? Array.from(event.target.files || []) : event.target.files?.[0] || null)}
-              />
+              <div className="rounded-lg border border-dashed border-input bg-muted/20 p-3 transition-colors hover:border-primary/50 hover:bg-primary/[0.03]">
+                <div className="mb-2 flex items-center gap-2 text-xs text-muted-foreground"><FileUp className="h-4 w-4 text-primary" /><span>{input.accept?.join(', ') || t('tools.any_file', 'Any file type')}</span></div>
+                <Input
+                  id={`${tool.name}-${input.name}`}
+                  className="border-0 bg-transparent px-0 shadow-none file:mr-3 file:rounded-md file:border-0 file:bg-primary/10 file:px-3 file:py-1.5 file:text-xs file:font-medium file:text-primary hover:file:bg-primary/15"
+                  type="file"
+                  required={input.required}
+                  multiple={input.type === 'files'}
+                  accept={(input.accept || []).join(',') || undefined}
+                  onChange={(event) => setValue(input.name, input.type === 'files' ? Array.from(event.target.files || []) : event.target.files?.[0] || null)}
+                />
+                <p className="mt-2 truncate text-xs text-muted-foreground">{selectedFilesLabel(values[input.name], input.type === 'files', t)}</p>
+              </div>
             ) : (
               <Input
                 id={`${tool.name}-${input.name}`}
@@ -183,28 +219,20 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
                 onChange={(event) => setValue(input.name, event.target.value)}
               />
             )}
-            {input.help && input.type !== 'bool' && <p className="text-xs text-muted-foreground">{input.help}</p>}
+            {input.help && input.type !== 'bool' && <p className="flex items-center gap-1.5 text-xs leading-4 text-muted-foreground"><Info className="h-3.5 w-3.5 shrink-0" />{input.help}</p>}
           </div>
         ))}
       </div>
 
-      <div className="flex items-center gap-3">
-        <Button type="submit" disabled={submitting || (!!execution && !TERMINAL.has(execution.status))}>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <Button className="min-w-28 shadow-sm" type="submit" disabled={submitting || (!!execution && !TERMINAL.has(execution.status))}>
           {submitting || (!!execution && !TERMINAL.has(execution.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
           {t('tools.execute', 'Execute')}
         </Button>
-        {execution && <span className="text-sm text-muted-foreground">{execution.message || execution.status}</span>}
+        {execution && <span className="max-w-full text-sm text-muted-foreground">{execution.message || execution.status}</span>}
       </div>
 
-      {execution && (
-        <div className="space-y-2 rounded-lg bg-muted/40 p-4">
-          <div className="flex justify-between text-xs"><span>{execution.status}</span><span>{execution.progress}%</span></div>
-          <div className="h-2 overflow-hidden rounded-full bg-muted"><div className="h-full bg-primary transition-all" style={ { width: `${execution.progress}%` } } /></div>
-          {execution.error && <p className="text-sm text-destructive">{execution.error}</p>}
-          {execution.result != null && <pre className="max-h-64 overflow-auto whitespace-pre-wrap text-xs">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>}
-          {execution.download_url && <Button type="button" variant="outline" onClick={() => window.open(execution.download_url!, '_blank')}>{t('tools.download', 'Download result')}</Button>}
-        </div>
-      )}
+      {execution && <ToolExecutionPanel execution={execution} t={t} />}
     </form>
   );
 };
@@ -215,9 +243,16 @@ export const DashboardTools: React.FC = () => {
   const tools = useMemo(() => TOOL_DEFINITIONS.filter((tool) => tool.permissions.includes(role)), [role]);
   if (tools.length === 0) return null;
   return (
-    <section className="rounded-xl border bg-card text-card-foreground p-6 shadow-sm">
-      <h2 className="mb-4 text-lg font-semibold">{t('tools.title', 'Tools')}</h2>
-      <div className="grid gap-4 lg:grid-cols-2">{tools.map((tool) => <ToolCard key={tool.name} tool={tool} />)}</div>
+    <section className="overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm">
+      <div className="relative flex flex-col gap-3 overflow-hidden border-b bg-gradient-to-r from-primary/[0.09] via-primary/[0.03] to-transparent px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
+        <Sparkles className="pointer-events-none absolute -right-3 -top-3 h-20 w-20 text-primary/[0.08]" />
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm ring-4 ring-primary/10"><Wrench className="h-5 w-5" /></div>
+          <div><h2 className="text-lg font-semibold tracking-tight">{t('tools.title', 'Tools')}</h2><p className="text-sm text-muted-foreground">{t('tools.subtitle', 'Run workspace utilities and track their progress')}</p></div>
+        </div>
+        <span className="z-10 flex w-fit items-center gap-1.5 rounded-full border bg-background/80 px-2.5 py-1 text-xs font-medium text-muted-foreground"><CircleDotDashed className="h-3.5 w-3.5 text-primary" />{tools.length} {t('tools.available', 'available')}</span>
+      </div>
+      <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-2">{tools.map((tool) => <ToolCard key={tool.name} tool={tool} />)}</div>
     </section>
   );
 };

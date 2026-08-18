@@ -501,9 +501,20 @@ def _generate_regular_model(
     if model.get("is_timescaledb") or model.get("is_latest_table"):
         return
 
-    # Embedded-only models keep their backend API and frontend service, but
-    # intentionally have no independent store, pages, or routes.
+    # Embedded-only models keep their backend API and frontend service.  A
+    # reverse relation using editor="embedded" additionally needs the child
+    # list/store as a reusable, un-routed component for the parent detail tab.
     if not model.get("standalone", True):
+        if model.get("has_embedded_page"):
+            generate_file(
+                "frontend_store.ts.j2", context,
+                frontend_path / "src" / "stores" / f"use{model['name']}Store.ts",
+            )
+            generate_theme_file(
+                "frontend_page_list.tsx.j2", context,
+                frontend_path / "src" / "pages" / model["module_name"] / "embedded.tsx",
+                theme_name,
+            )
         return
 
     generate_file(

@@ -68,6 +68,9 @@ import { get{{ model.name }}{{ rel.source_model }}s } from '../../services/{{ mo
 {% endif %}
 {% if model.reverse_foreign_keys %}
 {% for rfk in model.reverse_foreign_keys %}
+{% if rfk.editor == 'embedded' %}
+import {{ rfk.source_model }}EmbeddedPage from '../../pages/{{ rfk.source_service }}/embedded';
+{% endif %}
 {% if rfk.display or rfk.editor == 'inline' %}
 import { get{{ rfk.source_model }}s{% if rfk.display %}, delete{{ rfk.source_model }}{% for action_name, action_config in rfk.actions.items() %}, perform{{ rfk.source_model }}{{ action_name.capitalize() }}{% endfor %}{% endif %} } from '../../services/{{ rfk.source_service }}';
 {% endif %}
@@ -718,7 +721,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     return (
         <div
-            className="{{ page_shell_class | default('space-y-6') }}"
+            className="{{ page_shell_class | default('space-y-6') }}{% if model.has_embedded_reverse %} !flex !h-full !min-h-0 !flex-col !gap-4 !space-y-0{% endif %}"
             data-codegen-theme="{{ codegen_theme | default('normal') }}"
             data-page-kind="detail"
         >
@@ -911,7 +914,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             </div>
             {% endif %}
 
-            <div className="{{ detail_grid_class | default('grid grid-cols-1 gap-6') }}" data-page-region="detail-grid">
+            <div className="{{ detail_grid_class | default('grid grid-cols-1 gap-6') }}{% if model.has_embedded_reverse %} !flex-1 !min-h-0{% endif %}" data-page-region="detail-grid">
                 {activeTab === 'detail' && (
                 <Card>
                     <CardHeader>
@@ -1746,11 +1749,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% for rfk in model.reverse_foreign_keys %}
                 {% if rfk.display %}
                 {activeTab === 'reverse-fk-{{ rfk.name }}' && (
-                <Card className="col-span-full">
+                <Card className="col-span-full{% if rfk.editor == 'embedded' %} flex h-full min-h-0 flex-col overflow-hidden{% endif %}">
+                    {% if rfk.editor != 'embedded' %}
                     <CardHeader>
                         <CardTitle>{t('models.{{ rfk.source_service }}.plural')}</CardTitle>
                     </CardHeader>
-                    <CardContent>
+                    {% endif %}
+                    <CardContent{% if rfk.editor == 'embedded' %} className="flex-1 min-h-0 overflow-hidden p-0"{% endif %}>
+                        {% if rfk.editor == 'embedded' %}
+                        <{{ rfk.source_model }}EmbeddedPage
+                            embedded={true}
+                            scopeFilters={{ '{{' }} {{ rfk.source_fk_field }}: {% if 'str' in model.id_type %}id{% else %}parseInt(id!){% endif %} {{ '}}' }}
+                            fixedFields={{ '{{' }} {{ rfk.source_fk_field }}: {% if 'str' in model.id_type %}id{% else %}parseInt(id!){% endif %} {{ '}}' }}
+                        />
+                        {% else %}
                         {% if model.page_edit and rfk.editor == 'inline' %}{isEditing ? (
                         <Controller
                             control={editControl}
@@ -2031,6 +2043,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             </div>
                         </div>
                         {% if model.page_edit and rfk.editor == 'inline' %}</>)}{% endif %}
+                        {% endif %}
                     </CardContent>
                 </Card>
                 )}
