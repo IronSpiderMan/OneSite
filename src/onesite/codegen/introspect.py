@@ -544,10 +544,33 @@ def get_model_fields(
     refresh_interval = model_site_props.get("refresh_interval", 0)
     reverse_fk_display = model_site_props.get("reverse_fk_display", True)
     actions = model_site_props.get("actions", {})
-    # Normalize action-level permissions (default: developer + admin)
-    for action_config in actions.values():
+    # Normalize action-level permissions (default: developer + admin).
+    # ``toggle`` is a convenience form for the common enable/disable action:
+    # {"toggle_enabled": {"toggle": "enabled"}}.
+    # It expands to the existing safe boolean inversion expression, so the API
+    # and all permission checks keep following the regular action path.
+    for action_name, action_config in actions.items():
         if isinstance(action_config, dict):
             action_config.setdefault("permissions", "da")
+            toggle_field = action_config.get("toggle")
+            if toggle_field is not None:
+                if not isinstance(toggle_field, str) or not toggle_field:
+                    raise ValueError(
+                        f"Invalid toggle action {action_name!r} on {model_cls.__name__}: "
+                        "'toggle' must be a non-empty field name."
+                    )
+                data = action_config.setdefault("data", {})
+                if not isinstance(data, dict):
+                    raise ValueError(
+                        f"Invalid toggle action {action_name!r} on {model_cls.__name__}: "
+                        "'data' must be a dictionary."
+                    )
+                if toggle_field in data and data[toggle_field] != "!{{value}}":
+                    raise ValueError(
+                        f"Invalid toggle action {action_name!r} on {model_cls.__name__}: "
+                        f"do not also set data for toggle field {toggle_field!r}."
+                    )
+                data[toggle_field] = "!{{value}}"
     is_notification_table = bool(model_site_props.get("is_notification_table", False))
     union_key = model_site_props.get("union_key", None)
     raw_importable = model_site_props.get("importable", False)

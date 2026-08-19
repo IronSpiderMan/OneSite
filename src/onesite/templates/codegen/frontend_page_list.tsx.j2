@@ -1114,7 +1114,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             return enabled;
                         })() && (
                         <Button
-                            variant="outline"
+                            variant={% if action_config.get("toggle") %}{(item as any)[{{ action_config.get("toggle") | tojson }}] ? "destructive" : "default"}{% else %}"outline"{% endif %}
                             size="sm"
                             onClick={async (e) => {
                                 e.stopPropagation();
@@ -1127,7 +1127,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                                 }
                             }}
                         >
+                            {% if action_config.get("toggle") %}
+                            {(item as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
+                            {% else %}
                             {{ action_name }}
+                            {% endif %}
                         </Button>
                         )}
                         {% endfor %}

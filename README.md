@@ -541,6 +541,26 @@ For a right-side sliding create/edit form:
 __onesite__ = {"edit_mode": "drawer"}
 ```
 
+### Enable / disable actions
+
+For a boolean field, use the `toggle` shorthand instead of defining separate
+enable and disable actions. It creates one permission-controlled action, safely
+inverts the field on the server, and labels the button **Enable/Disable** (or
+**启用/停用**) from the current value.
+
+```python
+class User(SQLModel, table=True):
+    __onesite__ = {
+        "actions": {
+            "toggle_enabled": {"toggle": "enabled", "permissions": "da"},
+        },
+    }
+    enabled: bool = True
+```
+
+The shorthand may include other fields to update, but do not set `data` for the
+toggle field itself.
+
 CSV import/export can also use an object configuration. M2M relations are
 included only when explicitly listed; their values use `;` as the separator.
 Related objects must already exist when importing.

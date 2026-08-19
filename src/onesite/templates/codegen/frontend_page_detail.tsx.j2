@@ -791,7 +791,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     return enabled;
                 })() && (
                 <Button
-                    variant="outline"
+                    variant={% if action_config.get("toggle") %}{(currentItem as any)[{{ action_config.get("toggle") | tojson }}] ? "destructive" : "default"}{% else %}"outline"{% endif %}
                     size="sm"
                     onClick={async () => {
                         if (!currentItem) return;
@@ -804,7 +804,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         }
                     }}
                 >
+                    {% if action_config.get("toggle") %}
+                    {(currentItem as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
+                    {% else %}
                     {{ action_name }}
+                    {% endif %}
                 </Button>
                 )}
                 {% endfor %}
@@ -1947,7 +1951,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                         return true;
                                                     })() && (
                                                     <Button
-                                                        variant="outline"
+                                                        variant={% if action_config.get("toggle") %}{(item as any)[{{ action_config.get("toggle") | tojson }}] ? "destructive" : "default"}{% else %}"outline"{% endif %}
                                                         size="sm"
                                                         onClick={async () => {
                                                             try {
@@ -1959,7 +1963,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                             }
                                                         }}
                                                     >
+                                                        {% if action_config.get("toggle") %}
+                                                        {(item as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
+                                                        {% else %}
                                                         {{ action_name }}
+                                                        {% endif %}
                                                     </Button>
                                                     )}
                                                     {% endfor %}
