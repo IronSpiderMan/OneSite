@@ -350,11 +350,12 @@ async def update(session: AsyncSession, db_obj: User, obj_in: Union[UserUpdate, 
     return db_obj
 
 @transactional_write
-async def delete(session: AsyncSession, id: int, *, auto_commit: bool = True) -> User:
+async def delete(session: AsyncSession, id: int, *, auto_commit: bool = True) -> int:
     db_obj = await session.get(User, id)
+    deleted_id = db_obj.id
     await session.delete(db_obj)
     await session.flush()
-    return db_obj
+    return deleted_id
 
 
 {% if model.reverse_m2m %}
