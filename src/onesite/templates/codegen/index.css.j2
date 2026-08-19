@@ -205,13 +205,14 @@
 }
 
 {# ── Neuron theme-specific rules ── #}
-{# A dark-native telemetry-console treatment inspired by the bundled neuron reference. #}
+{# A telemetry-console treatment with light and dark color modes. #}
 [data-theme="neuron"] {
-  color-scheme: dark;
+  color-scheme: light;
 }
+[data-theme="neuron"].dark { color-scheme: dark; }
 [data-theme="neuron"] body {
   font-family: Inter, "SF Pro Text", "PingFang SC", "Microsoft YaHei", sans-serif;
-  background-image: linear-gradient(rgb(255 255 255 / 0.012) 1px, transparent 1px), linear-gradient(90deg, rgb(255 255 255 / 0.012) 1px, transparent 1px);
+  background-image: linear-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
   background-size: 32px 32px;
 }
 [data-theme="neuron"] h1, [data-theme="neuron"] h2, [data-theme="neuron"] h3,
@@ -224,7 +225,7 @@
   font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
 }
 [data-theme="neuron"] aside {
-  background-color: hsl(210 13% 6%) !important;
+  background-color: hsl(var(--neuron-sidebar)) !important;
   border-right-color: hsl(var(--border)) !important;
 }
 [data-theme="neuron"] header {
@@ -286,6 +287,14 @@
 
 {# Neuron layout and component system: deliberately distinct from the standard admin shell. #}
 [data-theme="neuron"] {
+  --neuron-sidebar: 210 23% 95%;
+  --neuron-panel-soft: 210 22% 97%;
+  --neuron-panel-raised: 210 18% 93%;
+  --neuron-line-strong: 205 14% 72%;
+  --neuron-ink-soft: 207 12% 37%;
+  --neuron-ink-faint: 207 10% 50%;
+}
+[data-theme="neuron"].dark {
   --neuron-sidebar: 210 13% 6%;
   --neuron-panel-soft: 210 12% 9%;
   --neuron-panel-raised: 210 11% 14%;
@@ -578,7 +587,7 @@
   position: absolute;
   inset: 0;
   z-index: -1;
-  background-image: radial-gradient(circle at 72% 32%, hsl(var(--primary) / 0.07), transparent 22%), linear-gradient(hsl(0 0% 100% / 0.012) 1px, transparent 1px), linear-gradient(90deg, hsl(0 0% 100% / 0.012) 1px, transparent 1px);
+  background-image: radial-gradient(circle at 72% 32%, hsl(var(--primary) / 0.07), transparent 22%), linear-gradient(hsl(var(--foreground) / 0.045) 1px, transparent 1px), linear-gradient(90deg, hsl(var(--foreground) / 0.045) 1px, transparent 1px);
   background-size: auto, 32px 32px, 32px 32px;
 }
 [data-theme="neuron"] .login-brand-panel {
