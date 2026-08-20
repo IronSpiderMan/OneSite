@@ -896,44 +896,46 @@ def get_model_fields(
                         enum_translations[lang] = dict(trans)
 
         fk_info = None
-        if name.endswith("_id") and name != "id":
-            is_fk = False
-            if hasattr(field, "foreign_key") and field.foreign_key is not PydanticUndefined and field.foreign_key is not None:
-                is_fk = True
-            if site_props.get("is_foreign_key"):
-                is_fk = True
-            if is_fk:
-                fk_table = name[:-3]
-                if hasattr(field, "foreign_key") and field.foreign_key and isinstance(field.foreign_key, str):
-                    fk_table = field.foreign_key.split(".")[0]
+        declared_foreign_key = getattr(field, "foreign_key", PydanticUndefined)
+        is_fk = (
+            declared_foreign_key is not PydanticUndefined
+            and declared_foreign_key is not None
+        ) or bool(site_props.get("is_foreign_key"))
+        if is_fk:
+            # A declared foreign key is authoritative.  ``*_id`` remains a
+            # convenient naming convention, but is not a requirement for a
+            # field to be treated as a relationship by the generator.
+            fk_table = name[:-3] if name.endswith("_id") else name
+            if isinstance(declared_foreign_key, str) and declared_foreign_key:
+                fk_table = declared_foreign_key.split(".")[0]
 
-                target_model_class = "".join(word.capitalize() for word in fk_table.split("_"))
-                target_service = site_props.get("target_service") or _to_snake(target_model_class)
-                target_endpoint = f"{target_service}s"
+            target_model_class = "".join(word.capitalize() for word in fk_table.split("_"))
+            target_service = site_props.get("target_service") or _to_snake(target_model_class)
+            target_endpoint = f"{target_service}s"
 
-                reverse_display = site_props.get("reverse_display", True)
-                reverse = site_props.get("reverse", {}) or {}
-                if not isinstance(reverse, dict):
-                    console.print(
-                        f"[yellow]Warning: {model_cls.__name__}.{name} site_props.reverse "
-                        "must be an object; ignoring it.[/yellow]"
-                    )
-                    reverse = {}
-                # The nested form supersedes the legacy display-only flag.
-                if "display" in reverse:
-                    reverse_display = bool(reverse["display"])
-                model_table_name = getattr(model_cls, '__tablename__', None) or _to_snake(model_cls.__name__)
-                is_self_referencing = (target_model_class == model_cls.__name__) or (fk_table == model_table_name)
-                fk_info = ForeignKeyInfo(
-                    name=name,
-                    target_model=target_model_class,
-                    target_service=target_service,
-                    target_endpoint=target_endpoint,
-                    label_field="name",
-                    reverse_display=reverse_display,
-                    reverse=reverse,
-                    is_self_referencing=is_self_referencing,
+            reverse_display = site_props.get("reverse_display", True)
+            reverse = site_props.get("reverse", {}) or {}
+            if not isinstance(reverse, dict):
+                console.print(
+                    f"[yellow]Warning: {model_cls.__name__}.{name} site_props.reverse "
+                    "must be an object; ignoring it.[/yellow]"
                 )
+                reverse = {}
+            # The nested form supersedes the legacy display-only flag.
+            if "display" in reverse:
+                reverse_display = bool(reverse["display"])
+            model_table_name = getattr(model_cls, '__tablename__', None) or _to_snake(model_cls.__name__)
+            is_self_referencing = (target_model_class == model_cls.__name__) or (fk_table == model_table_name)
+            fk_info = ForeignKeyInfo(
+                name=name,
+                target_model=target_model_class,
+                target_service=target_service,
+                target_endpoint=target_endpoint,
+                label_field="name",
+                reverse_display=reverse_display,
+                reverse=reverse,
+                is_self_referencing=is_self_referencing,
+            )
 
         origin = get_origin(resolved_annotation)
         args = get_args(resolved_annotation)

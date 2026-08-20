@@ -10,6 +10,9 @@ from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
+{% if model.module_name == "user" and model.name == "User" %}
+from app.core.config import settings
+{% endif %}
 {% if model.is_timescaledb %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if model.data_reports %}, {{ model.name }}ReportQuery{% endif %}
 {% else %}
@@ -661,6 +664,10 @@ async def delete_{{ model.lower_name }}(
     user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
     if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
         raise HTTPException(status_code=403, detail="Insufficient permissions")
+    if {{ model.lower_name }}.id == current_user.id:
+        raise HTTPException(status_code=403, detail="You cannot delete your own account")
+    if getattr({{ model.lower_name }}, "email", "").casefold() == settings.FIRST_SUPERUSER.casefold():
+        raise HTTPException(status_code=403, detail="The initial administrator cannot be deleted")
     {% elif model.owner_field %}
     # Owner-scoped: non-admin users can only delete their own records
     user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
@@ -679,7 +686,7 @@ async def delete_{{ model.lower_name }}(
 async def bulk_delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.owner_field %}
+    {% if model.module_name == "user" and model.name == "User" or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     ids: Annotated[List[{{ model.id_type }}], Body(embed=True)],
@@ -690,22 +697,34 @@ async def bulk_delete_{{ model.lower_name }}(
     {% if model.owner_field %}
     user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
     {% endif %}
-    deleted_count = 0
+    objects = []
     for id in ids:
         obj = await service.get(session, id)
         if obj:
-            {% if model.owner_field %}
-            # Owner-scoped: non-admin users can only delete their own records
-            if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
-                if getattr(obj, "{{ model.owner_field }}", None) != current_user.id:
-                    continue
-            {% endif %}
-            try:
-                await service.delete(session, id)
-                deleted_count += 1
-            except IntegrityError:
-                await session.rollback()
-                raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
+            objects.append(obj)
+    {% if model.module_name == "user" and model.name == "User" %}
+    # Validate the full request before deleting anything, so a protected user
+    # cannot leave a bulk operation only partially applied.
+    for obj in objects:
+        if obj.id == current_user.id:
+            raise HTTPException(status_code=403, detail="You cannot delete your own account")
+        if getattr(obj, "email", "").casefold() == settings.FIRST_SUPERUSER.casefold():
+            raise HTTPException(status_code=403, detail="The initial administrator cannot be deleted")
+    {% endif %}
+    deleted_count = 0
+    for obj in objects:
+        {% if model.owner_field %}
+        # Owner-scoped: non-admin users can only delete their own records
+        if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+            if getattr(obj, "{{ model.owner_field }}", None) != current_user.id:
+                continue
+        {% endif %}
+        try:
+            await service.delete(session, obj.id)
+            deleted_count += 1
+        except IntegrityError:
+            await session.rollback()
+            raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
     return {"deleted": deleted_count}
 
 {% if model.property_config_meta %}

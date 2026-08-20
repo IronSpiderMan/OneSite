@@ -1162,7 +1162,7 @@ const DashboardPage: React.FC = () => {
                     </div>
                     <div className="flex items-center gap-2">
                         <select
-                            className="border rounded-md px-2 py-1.5 text-xs"
+                            className="border border-input bg-background text-foreground rounded-md px-2 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
                             value={logLevel}
                             onChange={(e) => setLogLevel(e.target.value)}
                         >

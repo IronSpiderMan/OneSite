@@ -145,6 +145,14 @@
 [data-theme="industrial"] h4, [data-theme="industrial"] h5, [data-theme="industrial"] h6 {
   font-weight: 800;
 }
+{# Industrial uses hard, technical edges so its corner brackets align with their containers. #}
+[data-theme="industrial"] main [class*="rounded"],
+[data-theme="industrial"] main button,
+[data-theme="industrial"] main input,
+[data-theme="industrial"] main textarea,
+[data-theme="industrial"] main select {
+  border-radius: 0;
+}
 [data-theme="industrial"] thead tr {
   border-bottom: 2px solid hsl(var(--accent) / 0.35);
 }

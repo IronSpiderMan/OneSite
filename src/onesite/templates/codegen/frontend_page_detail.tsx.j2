@@ -376,8 +376,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     // Fetch FK data
                     {% for fk in model.foreign_keys %}
                     set{{ fk.target_model }}Data(null);
-                    if (item.{{ fk.name.replace('_id', '') }}_id !== null && item.{{ fk.name.replace('_id', '') }}_id !== undefined) {
-                        get{{ fk.target_model }}(item.{{ fk.name.replace('_id', '') }}_id).then(res => {
+                    if (item.{{ fk.name }} !== null && item.{{ fk.name }} !== undefined) {
+                        get{{ fk.target_model }}(item.{{ fk.name }}).then(res => {
                              if (res) {
                                  set{{ fk.target_model }}Data(res);
                              }
@@ -835,7 +835,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
               </div>
             </div>
 
-            {% if model.m2m_fields or model.reverse_m2m or model.reverse_foreign_keys or model.json_array_fields or model.json_dict_fields %}
+            {% if model.reverse_m2m or model.reverse_foreign_keys or model.json_array_fields or model.json_dict_fields %}
             <div className="flex gap-1 overflow-x-auto border-b" role="tablist" aria-label={t('common.related_information')}>
                 <Button
                     type="button"
@@ -874,18 +874,6 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     {t('{{ field.label_key }}')}
                 </Button>
                 )}
-                {% endfor %}
-                {% for m2m in model.m2m_fields %}
-                <Button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'm2m-{{ m2m.name }}'}
-                    variant="ghost"
-                    className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'm2m-{{ m2m.name }}' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
-                    onClick={() => setActiveTab('m2m-{{ m2m.name }}')}
-                >
-                    {t('models.{{ m2m.target_service }}.plural')}
-                </Button>
                 {% endfor %}
                 {% for rel in model.reverse_m2m %}
                 {% if rel.display %}
@@ -1133,6 +1121,63 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             </div>
                             )}{% endif %}
                             {% endfor %}
+                            {% for m2m in model.m2m_fields %}
+                            <div className="space-y-2">
+                                <Label>{t('models.{{ m2m.target_service }}.plural')}</Label>
+                                <Controller
+                                    control={editControl}
+                                    name="{{ m2m.write_name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        {% if m2m.editor == 'inline' %}
+                                        <JsonModelArrayEditor
+                                            itemSchema={ {{ m2m.inline_schema | tojson }} }
+                                            value={value}
+                                            onChange={onChange}
+                                            showJsonMode={false}
+                                            foreignKeyLoaders={{ '{{' }}
+                                                {% for field in m2m.inline_schema.fields %}
+                                                {% if field.foreignKey %}
+                                                '{{ field.name }}': async (query) => {
+                                                    const filters = query ? { {{ field.foreignKey.labelField }}: query } : undefined;
+                                                    const response = await {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService.get{{ field.foreignKey.targetModel }}s(1, 20, filters);
+                                                    return response.items.map((item: any) => ({ label: item.{{ field.foreignKey.labelField }} || item.id, value: item.id }));
+                                                },
+                                                {% endif %}
+                                                {% endfor %}
+                                            {{ '}}' }}
+                                        />
+                                        {% elif m2m.order_field %}
+                                        <LinkTableOrderedSelect
+                                            value={value}
+                                            onValueChange={onChange}
+                                            placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
+                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
+                                            valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                                            loadOptions={async (query) => {
+                                                const filters = query ? { {{ m2m.label_field }}: query } : undefined;
+                                                const response = await get{{ m2m.target_model }}s(1, 20, filters);
+                                                return response.items.map((item: any) => ({ label: item.{{ m2m.label_field }} || item.id, value: item.id }));
+                                            }}
+                                        />
+                                        {% else %}
+                                        <SearchableSelect
+                                            value={value}
+                                            onValueChange={onChange}
+                                            multiple={true}
+                                            placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
+                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
+                                            valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                                            loadOptions={async (query) => {
+                                                const filters = query ? { {{ m2m.label_field }}: query } : undefined;
+                                                const response = await get{{ m2m.target_model }}s(1, 20, filters);
+                                                return response.items.map((item: any) => ({ label: item.{{ m2m.label_field }} || item.id, value: item.id }));
+                                            }}
+                                        />
+                                        {% endif %}
+                                    )}
+                                />
+                            </div>
+                            {% endfor %}
                         </form>
                         ) : ({% endif %}
                         {% if model.page_edit %}<>{% endif %}
@@ -1245,10 +1290,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <div>
                             <div className="mb-2 flex items-center justify-between">
                                 <Label className="text-lg font-semibold">{t('models.{{ fk.target_service }}.name')}</Label>
-                                <Badge variant="outline">ID: {String(currentItem.{{ fk.name.replace('_id', '') }}_id ?? '-')}</Badge>
+                                <Badge variant="outline">
+                                    {String({{ fk.target_service }}Data?.{{ fk.label_field }} ?? currentItem.{{ fk.name }}_label ?? (currentItem.{{ fk.name }} ?? '-'))}
+                                </Badge>
                             </div>
                             <div className="rounded-md border p-4">
-                                {currentItem.{{ fk.name.replace('_id', '') }}_id === null || currentItem.{{ fk.name.replace('_id', '') }}_id === undefined ? (
+                                {currentItem.{{ fk.name }} === null || currentItem.{{ fk.name }} === undefined ? (
                                     <span className="text-muted-foreground italic">{t('common.no_result')}</span>
                                 ) : {{ fk.target_service }}Data ? (
                                     <div className="space-y-2">
@@ -1482,72 +1529,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
                 {% if model.m2m_fields %}
                 {% for m2m in model.m2m_fields %}
-                {activeTab === 'm2m-{{ m2m.name }}' && (
+                {activeTab === 'detail' && (
                 <Card className="col-span-full">
                     <CardHeader>
                         <CardTitle>{t('models.{{ m2m.target_service }}.plural')}</CardTitle>
                     </CardHeader>
                     <CardContent>
-                        {% if model.page_edit %}{isEditing ? (
-                        <Controller
-                            control={editControl}
-                            name="{{ m2m.write_name }}"
-                            render={({ field: { onChange, value } }) => (
-                                {% if m2m.editor == 'inline' %}
-                                <JsonModelArrayEditor
-                                    itemSchema={ {{ m2m.inline_schema | tojson }} }
-                                    value={value}
-                                    onChange={onChange}
-                                    showJsonMode={false}
-                                    foreignKeyLoaders={{ '{{' }}
-                                        {% for field in m2m.inline_schema.fields %}
-                                        {% if field.foreignKey %}
-                                        '{{ field.name }}': async (query) => {
-                                            const filters = query ? { {{ field.foreignKey.labelField }}: query } : undefined;
-                                            const response = await {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService.get{{ field.foreignKey.targetModel }}s(1, 20, filters);
-                                            return response.items.map((item: any) => ({ label: item.{{ field.foreignKey.labelField }} || item.id, value: item.id }));
-                                        },
-                                        {% endif %}
-                                        {% endfor %}
-                                    {{ '}}' }}
-                                />
-                                {% elif m2m.order_field %}
-                                <LinkTableOrderedSelect
-                                    value={value}
-                                    onValueChange={onChange}
-                                    placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
-                                    searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
-                                    valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
-                                    loadOptions={async (query) => {
-                                        const filters = query ? { {{ m2m.label_field }}: query } : undefined;
-                                        const response = await get{{ m2m.target_model }}s(1, 20, filters);
-                                        return response.items.map((item: any) => ({
-                                            label: item.{{ m2m.label_field }} || item.id,
-                                            value: item.id
-                                        }));
-                                    }}
-                                />
-                                {% else %}
-                                <SearchableSelect
-                                    value={value}
-                                    onValueChange={onChange}
-                                    multiple={true}
-                                    placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
-                                    searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
-                                    valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
-                                    loadOptions={async (query) => {
-                                        const filters = query ? { {{ m2m.label_field }}: query } : undefined;
-                                        const response = await get{{ m2m.target_model }}s(1, 20, filters);
-                                        return response.items.map((item: any) => ({
-                                            label: item.{{ m2m.label_field }} || item.id,
-                                            value: item.id
-                                        }));
-                                    }}
-                                />
-                                {% endif %}
-                            )}
-                        />
-                        ) : (<>{% endif %}
                         <div className="rounded-md border">
                             <Table>
                                 <TableHeader>
@@ -1637,7 +1624,6 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             </Button>
                             </div>
                         </div>
-                        {% if model.page_edit %}</>)}{% endif %}
                     </CardContent>
                 </Card>
                 )}
