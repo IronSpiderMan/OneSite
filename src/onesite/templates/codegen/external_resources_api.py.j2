@@ -1,17 +1,19 @@
-from datetime import datetime, timezone
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func
+from sqlalchemy import func, tuple_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import db, deps
 from app.core.external_resource_config import RESOURCE_CONFIGS
 from app.core.external_resources import (
+    ExternalResourceBinding,
     ExternalResourceTask,
+    SyncStatus,
     TaskStatus,
+    external_resource_manager,
     get_external_resource_provider,
 )
 
@@ -19,35 +21,79 @@ router = APIRouter(dependencies=[Depends(deps.get_current_active_admin)])
 
 
 @router.get("")
-async def list_tasks(
+async def list_resources(
     provider: str | None = None,
     resource: str | None = None,
     status: str | None = None,
+    include_deleted: bool = False,
     offset: int = 0,
     limit: int = 100,
     session: AsyncSession = Depends(db.get_session),
 ) -> dict[str, Any]:
     offset = max(0, offset)
     limit = min(500, max(1, limit))
-    statement = select(ExternalResourceTask).order_by(ExternalResourceTask.id.desc())
-    count_statement = select(func.count()).select_from(ExternalResourceTask)
+    statement = select(ExternalResourceBinding).order_by(ExternalResourceBinding.updated_at.desc())
+    count_statement = select(func.count()).select_from(ExternalResourceBinding)
     if provider:
-        statement = statement.where(ExternalResourceTask.provider == provider)
-        count_statement = count_statement.where(ExternalResourceTask.provider == provider)
+        statement = statement.where(ExternalResourceBinding.provider == provider)
+        count_statement = count_statement.where(ExternalResourceBinding.provider == provider)
     if resource:
-        statement = statement.where(ExternalResourceTask.resource == resource)
-        count_statement = count_statement.where(ExternalResourceTask.resource == resource)
+        statement = statement.where(ExternalResourceBinding.resource == resource)
+        count_statement = count_statement.where(ExternalResourceBinding.resource == resource)
     if status:
-        statement = statement.where(ExternalResourceTask.status == status)
-        count_statement = count_statement.where(ExternalResourceTask.status == status)
-    rows = (await session.exec(statement.offset(offset).limit(limit))).all()
-    total = (await session.exec(count_statement)).one()
-    return {
-        "items": jsonable_encoder(rows),
-        "total": total,
-        "offset": offset,
-        "limit": limit,
-    }
+        statement = statement.where(ExternalResourceBinding.status == status)
+        count_statement = count_statement.where(ExternalResourceBinding.status == status)
+    elif not include_deleted:
+        statement = statement.where(ExternalResourceBinding.status != SyncStatus.deleted.value)
+        count_statement = count_statement.where(ExternalResourceBinding.status != SyncStatus.deleted.value)
+    bindings = (await session.exec(statement.offset(offset).limit(limit))).all()
+    keys = [
+        (binding.provider, binding.resource, binding.entity_id)
+        for binding in bindings
+    ]
+    pending_counts: dict[tuple[str, str, str], int] = {}
+    if keys:
+        pending_rows = (await session.exec(
+            select(
+                ExternalResourceTask.provider,
+                ExternalResourceTask.resource,
+                ExternalResourceTask.entity_id,
+                func.count(),
+            ).where(
+                tuple_(
+                    ExternalResourceTask.provider,
+                    ExternalResourceTask.resource,
+                    ExternalResourceTask.entity_id,
+                ).in_(keys),
+                ExternalResourceTask.status.in_([
+                    TaskStatus.pending.value,
+                    TaskStatus.processing.value,
+                    TaskStatus.retry.value,
+                ]),
+            ).group_by(
+                ExternalResourceTask.provider,
+                ExternalResourceTask.resource,
+                ExternalResourceTask.entity_id,
+            )
+        )).all()
+        pending_counts = {
+            (provider, resource_name, entity_id): count
+            for provider, resource_name, entity_id, count in pending_rows
+        }
+    items = []
+    for binding in bindings:
+        item = jsonable_encoder(binding)
+        item["pending_count"] = pending_counts.get(
+            (binding.provider, binding.resource, binding.entity_id), 0
+        )
+        items.append(item)
+    return {"items": items, "total": (await session.exec(count_statement)).one(), "offset": offset, "limit": limit}
+
+
+@router.get("/summary")
+async def summary(session: AsyncSession = Depends(db.get_session)) -> dict[str, Any]:
+    rows = (await session.exec(select(ExternalResourceBinding.status, func.count()).group_by(ExternalResourceBinding.status))).all()
+    return {"by_status": {status: count for status, count in rows}}
 
 
 @router.get("/capabilities")
@@ -58,18 +104,26 @@ async def capabilities() -> dict[str, Any]:
     return result
 
 
-@router.post("/{task_id}/retry")
-async def retry_task(
-    task_id: int,
+@router.post("/check", status_code=202)
+async def check_all() -> dict[str, str]:
+    await external_resource_manager.check_all()
+    return {"status": "checked"}
+
+
+@router.post("/{provider}/{resource}/{entity_id}/retry", status_code=202)
+async def retry_resource(
+    provider: str,
+    resource: str,
+    entity_id: str,
     session: AsyncSession = Depends(db.get_session),
 ) -> dict[str, str]:
-    task = await session.get(ExternalResourceTask, task_id)
-    if task is None:
-        raise HTTPException(status_code=404, detail="External resource task not found")
-    task.status = TaskStatus.retry.value
-    task.attempts = 0
-    task.next_attempt_at = datetime.now(timezone.utc)
-    task.locked_until = None
-    task.last_error = None
+    binding = (await session.exec(select(ExternalResourceBinding).where(
+        ExternalResourceBinding.provider == provider,
+        ExternalResourceBinding.resource == resource,
+        ExternalResourceBinding.entity_id == entity_id,
+    ))).first()
+    if binding is None:
+        raise HTTPException(status_code=404, detail="External resource binding not found")
+    await external_resource_manager.retry_binding(session, binding)
     await session.commit()
     return {"status": "queued"}

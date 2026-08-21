@@ -29,7 +29,7 @@ class UserService:
         page: int = 1,
         size: int = 20,
         {% for field in model.fields %}
-        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}: Optional[bool] = None,
         {% elif field.ui_type == 'datetime' %}
@@ -56,7 +56,7 @@ class UserService:
         total = await crud.count(
             session,
             {% for field in model.fields %}
-            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.is_search_field %}
             {% if field.ui_type == 'bool' %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'datetime' %}
@@ -82,7 +82,7 @@ class UserService:
             page=page,
             size=size,
             {% for field in model.fields %}
-            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.is_search_field %}
             {% if field.ui_type == 'bool' %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'datetime' %}

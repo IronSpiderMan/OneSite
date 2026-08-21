@@ -175,7 +175,7 @@ class {{ model.name }}Service:
         page: int = 1,
         size: int = 20,
         {% for field in model.fields %}
-        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}: Optional[bool] = None,
         {% elif field.ui_type == 'datetime' %}
@@ -212,7 +212,7 @@ class {{ model.name }}Service:
         total = await crud.count(
             session,
             {% for field in model.fields %}
-            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.is_search_field %}
             {% if field.ui_type == 'bool' %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'datetime' %}
@@ -245,7 +245,7 @@ class {{ model.name }}Service:
             page=page,
             size=size,
             {% for field in model.fields %}
-            {% if field.is_search_field and field.name != 'id' %}
+            {% if field.is_search_field %}
             {% if field.ui_type == 'bool' %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type == 'datetime' %}
@@ -746,7 +746,7 @@ class {{ model.name }}Service:
             for key, value in (filters or {}).items()
             if key in {
                 {% for field in model.fields %}
-                {% if field.is_search_field and field.name != 'id' %}
+                {% if field.is_search_field %}
                 {% if field.ui_type == 'datetime' %}"{{ field.name }}_from", "{{ field.name }}_to",
                 {% else %}"{{ field.name }}",
                 {% endif %}

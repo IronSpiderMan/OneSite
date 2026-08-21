@@ -124,14 +124,14 @@ async def lifespan(app: FastAPI):
         {% if config.external_resources_enabled %}
         init_external_resource_providers()
         await external_resource_manager.start()
-        logger.info("External resource delivery worker started")
+        logger.info("External resource synchronization scheduler started")
         {% endif %}
         yield
     finally:
         try:
             {% if config.external_resources_enabled %}
             await external_resource_manager.stop()
-            logger.info("External resource delivery worker stopped")
+            logger.info("External resource synchronization scheduler stopped")
             {% endif %}
             # Release application-owned resources before infrastructure shutdown
             await destroy_resources(app)

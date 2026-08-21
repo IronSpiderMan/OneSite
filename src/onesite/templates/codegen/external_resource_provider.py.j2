@@ -29,5 +29,17 @@ class Provider(ExternalResourceProvider):
     async def delete(self, resource: str, payload: dict[str, Any]) -> None:
         raise NotImplementedError
 
+    async def observe(
+        self,
+        resource: str,
+        payload: dict[str, Any],
+    ) -> dict[str, Any] | None:
+        """Return the current comparable external state, if supported.
+
+        Returning ``None`` keeps CUD delivery active but disables drift
+        detection for this provider resource.
+        """
+        return None
+
 
 provider = Provider()

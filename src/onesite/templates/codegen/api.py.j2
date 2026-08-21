@@ -370,7 +370,7 @@ async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.ui_type == 'datetime' %}
@@ -423,7 +423,7 @@ async def read_{{ model.lower_name }}s(
         page=page,
         size=size,
         {% for field in model.fields %}
-        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'datetime' %}

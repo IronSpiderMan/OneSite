@@ -658,7 +658,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const applySearch = () => {
     const next: Record<string, any> = { ...scopeFilters };
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     if (searchValues['{{ field.name }}'] === 'true') next['{{ field.name }}'] = true;
     if (searchValues['{{ field.name }}'] === 'false') next['{{ field.name }}'] = false;
@@ -811,7 +811,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
       {% set ns = namespace(has_search_fields=false) %}
       {% for field in model.fields %}
-          {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) and field.name != 'id' %}
+          {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
       {% set ns.has_search_fields = true %}
       {% elif field.fk_info and field.is_search_field %}
       {% set ns.has_search_fields = true %}
@@ -828,7 +828,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         <div className="mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2">
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
           {% for field in model.fields %}
-              {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) and field.name != 'id' %}
+              {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
           <div className="min-w-0 space-y-2">
             <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
             {% if field.ui_type == 'bool' %}

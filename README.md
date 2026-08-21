@@ -126,8 +126,8 @@ datetimes are normalized to UTC before database persistence.
 
 `navigation` is the ordered, declarative sidebar tree. A `model` entry refers
 to the model's `module_name`; a `group` is a non-routable, collapsible second-
-level container; and `builtin` supports `dashboard`, `reports`, and
-`external-resources`. Group labels require `zh` and `en` translations. Model
+level container; and `builtin` supports `dashboard` and `reports`. Group
+labels require `zh` and `en` translations. Model
 permissions and `visible` settings still control whether each child is shown;
 empty groups are hidden automatically. Models omitted from an explicitly
 configured tree remain reachable by route and API but are not shown in the
@@ -191,7 +191,8 @@ payload)`, `update(resource, payload, previous)`, and `delete(resource,
 payload)`. Generated model services append the matching CUD task in the same
 transaction as the local change. A lightweight backend worker delivers tasks
 after commit, retries temporary failures, and removes successful tasks. The
-`external-resources` admin page shows only pending, retrying, and failed work.
+External-resource delivery has no generated management page: the backend
+worker delivers changes automatically and handles retrying failed deliveries.
 
 The old `resource_type` and `identity_field` declaration names remain accepted
 as aliases. Reconciliation-only options (`depends_on`, `reconcile_via`, and

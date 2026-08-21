@@ -549,7 +549,7 @@ def _builtin_menu_node(
     *,
     reports_enabled: bool,
     reports_role_visible: dict[str, bool],
-    external_resources_enabled: bool,
+    external_resources_enabled: bool = False,
 ) -> dict[str, Any] | None:
     builtins = {
         "dashboard": {
@@ -585,7 +585,7 @@ def _build_navigation(
     *,
     reports_enabled: bool,
     reports_role_visible: dict[str, bool],
-    external_resources_enabled: bool,
+    external_resources_enabled: bool = False,
 ) -> list[dict[str, Any]]:
     """Build the generated menu tree from ``site_config.navigation``.
 

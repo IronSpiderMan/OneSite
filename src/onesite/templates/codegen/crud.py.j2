@@ -418,7 +418,7 @@ async def get_by_{{ model.import_key }}(
 def _apply_filters(
     statement,
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
     {% elif field.ui_type == 'datetime' %}
@@ -450,7 +450,7 @@ def _apply_filters(
     """Apply search and filter conditions to statement. Shared by get_multi and count."""
     # Apply per-field filters (configured via site_props.is_search_field)
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     if {{ field.name }} is not None:
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
@@ -516,7 +516,7 @@ async def get_multi(
     page: int = 1,
     size: int = 20,
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
     {% elif field.ui_type == 'datetime' %}
@@ -553,7 +553,7 @@ async def get_multi(
     statement = _apply_filters(
         statement,
         {% for field in model.fields %}
-        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'datetime' %}
@@ -597,7 +597,7 @@ async def get_multi_with_fk_labels(
     page: int = 1,
     size: int = 20,
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
     {% elif field.ui_type == 'datetime' %}
@@ -635,7 +635,7 @@ async def get_multi_with_fk_labels(
         page=page,
         size=size,
         {% for field in model.fields %}
-        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'datetime' %}
@@ -700,7 +700,7 @@ async def get_multi_with_fk_labels(
 async def count(
     session: AsyncSession,
     {% for field in model.fields %}
-    {% if field.is_search_field and field.name != 'id' %}
+    {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
     {% elif field.ui_type == 'datetime' %}
@@ -735,7 +735,7 @@ async def count(
     statement = _apply_filters(
         statement,
         {% for field in model.fields %}
-        {% if field.is_search_field and field.name != 'id' %}
+        {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type == 'datetime' %}
