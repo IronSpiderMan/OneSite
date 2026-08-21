@@ -40,7 +40,7 @@ The normal edit/generate loop is:
 edit app/models/, app/integrations/, app/utils/, app/resources.py or site_config.py → site sync → test /docs and the frontend
 ```
 
-Do not treat `generated/backend/app/models/` as the model source of truth: it is synced from `app/models/`. Everything under `generated/` is replaceable output. Keep durable business customizations in `app/`, not solely in generated files. Existing projects with top-level `models/`, `backend/`, and `frontend/` remain supported without an automatic directory migration.
+Do not treat `generated/backend/app/models/` as the model source of truth: it is synced from `app/models/`. Everything under `generated/` is replaceable output. Keep durable business customizations in `app/`, not solely in generated files. Projects must use the `app/` and `generated/` layout; top-level `models/`, `backend/`, and `frontend/` directories are not supported.
 
 ## CLI
 
@@ -156,6 +156,46 @@ The generated `main.py` invokes these hooks from FastAPI's `lifespan`:
 initialization runs after OneSite's built-in infrastructure starts, and cleanup
 runs before that infrastructure is shut down. Keep the two function names and
 the `app` parameter unchanged; `site sync` validates their signatures.
+
+### External resource providers
+
+One provider represents one external system and can own many resource kinds.
+Map each resource kind to one model:
+
+```python
+class Camera(SQLModel, table=True):
+    __onesite__ = {
+        "external_resource": {
+            "provider": "edgeflow",
+            "resource": "cameras",
+            # Optional; defaults to "id".
+            "identity": "id",
+        }
+    }
+```
+
+Register the provider module in `site_config.py`:
+
+```python
+config = SiteConfig(
+    ...,
+    providers={
+        "edgeflow": ExternalResourceProviderConfig(module="edgeflow")
+    },
+)
+```
+
+The first `site sync` creates the developer-owned
+`app/providers/edgeflow.py`. Its provider implements `create(resource,
+payload)`, `update(resource, payload, previous)`, and `delete(resource,
+payload)`. Generated model services append the matching CUD task in the same
+transaction as the local change. A lightweight backend worker delivers tasks
+after commit, retries temporary failures, and removes successful tasks. The
+`external-resources` admin page shows only pending, retrying, and failed work.
+
+The old `resource_type` and `identity_field` declaration names remain accepted
+as aliases. Reconciliation-only options (`depends_on`, `reconcile_via`, and
+`health`) are no longer part of External Resources.
 
 `desktop.api_url` must be an absolute HTTP(S) URL because a packaged desktop
 client cannot use Vite's development proxy. `site sync` adds the exact Tauri
@@ -366,8 +406,8 @@ OneSite creates `__init__.py` when needed and skips `__pycache__` and `.pyc`
 files. Import utilities in backend code with paths such as
 `from app.utils.formatting import format_alarm`.
 
-Legacy projects may continue using top-level `utils/`, which is mirrored to
-`backend/app/utils/`.
+Project utilities belong in `app/utils/` and are mirrored to
+`generated/backend/app/utils/`.
 
 ## Model basics
 
@@ -741,7 +781,7 @@ site compose up -d
 site compose logs -f
 ```
 
-The tag is applied to both `<project>-backend` and `<project>-frontend`. `site build` writes `deploy/docker-compose.yml`. `site create`, `site init`, and `site sync` ensure that `deploy/.env.example` exists; copy it to `deploy/.env` for deployment-specific overrides. `site compose` automatically passes that `.env` file when present. PostgreSQL is included when `database_url` starts with `postgresql`; configure production credentials and API origins before exposing the application. A legacy root-level `docker-compose.yml` remains supported when no deploy Compose file exists.
+The tag is applied to both `<project>-backend` and `<project>-frontend`. `site build` writes `deploy/docker-compose.yml`. `site create`, `site init`, and `site sync` ensure that `deploy/.env.example` exists; copy it to `deploy/.env` for deployment-specific overrides. `site compose` automatically passes that `.env` file when present. PostgreSQL is included when `database_url` starts with `postgresql`; configure production credentials and API origins before exposing the application.
 
 Generated backend Dockerfiles use the Tsinghua TUNA PyPI mirror, upgrade
 pip/setuptools/wheel before installing dependencies, and apply extended retry

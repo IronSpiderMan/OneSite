@@ -19,8 +19,8 @@ from app.models.{{ model.timescaledb_entity_source_module }} import {{ model.tim
 from app.models.{{ model.timescaledb_model_source_module }} import {{ model.timescaledb_model_class }}
 {% endif %}
 {% endif %}
-{% if model.external_resource or model.external_resource_dependents %}
-from app.core.external_resources import enqueue_external_resource_change, enqueue_external_resource_dependents
+{% if model.external_resource %}
+from app.core.external_resources import enqueue_external_resource_change
 {% endif %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
@@ -47,35 +47,17 @@ class {{ model.name }}Service:
             input_data=obj_in.dict(exclude_none=True),
             changed_fields=frozenset(obj_in.dict(exclude_none=True)),
         )
-        {% if model.external_resource or model.external_resource_dependents %}
+        {% if model.external_resource %}
         try:
             obj = await crud.create(session, obj_in, auto_commit=False)
-            {% if model.external_resource %}
-            {% if model.external_resource.get('reconcile_via') %}
-            _external_parent_id = getattr(obj, "{{ model.external_resource.reconcile_via.field }}", None)
-            if _external_parent_id is not None:
-                await enqueue_external_resource_change(
-                    session,
-                    resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
-                    provider="{{ model.external_resource.reconcile_via.provider }}",
-                    entity_id=str(_external_parent_id),
-                    operation="reconcile",
-                )
-            {% else %}
             await enqueue_external_resource_change(
                 session,
-                resource_type="{{ model.external_resource.resource_type }}",
                 provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
                 entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
-                operation="reconcile",
+                operation="create",
+                payload=snapshot_model(obj),
             )
-            {% endif %}
-            {% endif %}
-            {% if model.external_resource_dependents %}
-            await enqueue_external_resource_dependents(
-                session, source_type="{{ model.module_name }}", source_id=str(getattr(obj, "id"))
-            )
-            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -401,35 +383,17 @@ class {{ model.name }}Service:
             # Return the first created object as representative
             return {{ model.name }}Read.model_validate(created_objects[0]) if created_objects else {{ model.name }}Read.model_validate({{ model.name }}())
         {% endif %}
-        {% if model.external_resource or model.external_resource_dependents %}
+        {% if model.external_resource %}
         try:
             obj = await crud.create(session, obj_in, auto_commit=False)
-            {% if model.external_resource %}
-            {% if model.external_resource.get('reconcile_via') %}
-            _external_parent_id = getattr(obj, "{{ model.external_resource.reconcile_via.field }}", None)
-            if _external_parent_id is not None:
-                await enqueue_external_resource_change(
-                    session,
-                    resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
-                    provider="{{ model.external_resource.reconcile_via.provider }}",
-                    entity_id=str(_external_parent_id),
-                    operation="reconcile",
-                )
-            {% else %}
             await enqueue_external_resource_change(
                 session,
-                resource_type="{{ model.external_resource.resource_type }}",
                 provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
                 entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
-                operation="reconcile",
+                operation="create",
+                payload=snapshot_model(obj),
             )
-            {% endif %}
-            {% endif %}
-            {% if model.external_resource_dependents %}
-            await enqueue_external_resource_dependents(
-                session, source_type="{{ model.module_name }}", source_id=str(getattr(obj, "id"))
-            )
-            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -499,37 +463,18 @@ class {{ model.name }}Service:
         {% endfor %}
         {% endif %}
 
-        {% if model.external_resource or model.external_resource_dependents %}
+        {% if model.external_resource %}
         try:
             obj = await crud.update(session, db_obj, obj_in, auto_commit=False)
-            {% if model.external_resource %}
-            {% if model.external_resource.get('reconcile_via') %}
-            _external_parent_id = getattr(obj, "{{ model.external_resource.reconcile_via.field }}", None)
-            _old_external_parent_id = old.get("{{ model.external_resource.reconcile_via.field }}")
-            for _parent_id in {_external_parent_id, _old_external_parent_id} - {None}:
-                await enqueue_external_resource_change(
-                    session,
-                    resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
-                    provider="{{ model.external_resource.reconcile_via.provider }}",
-                    entity_id=str(_parent_id),
-                    operation="reconcile",
-                )
-            {% else %}
             await enqueue_external_resource_change(
                 session,
-                resource_type="{{ model.external_resource.resource_type }}",
                 provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
                 entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
-                operation="reconcile",
-                snapshot=old,
+                operation="update",
+                payload=snapshot_model(obj),
+                previous=old,
             )
-            {% endif %}
-            {% endif %}
-            {% if model.external_resource_dependents %}
-            await enqueue_external_resource_dependents(
-                session, source_type="{{ model.module_name }}", source_id=str(id)
-            )
-            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -571,40 +516,21 @@ class {{ model.name }}Service:
         db_obj = None
         old = None
         hook_context = ModelHookContext(operation="delete")
-        {% if model.external_resource or model.external_resource_dependents %}
+        {% if model.external_resource %}
         try:
             db_obj = await crud.get(session, id)
             if not db_obj:
                 raise ValueError("{{ model.name }} not found")
             old = snapshot_model(db_obj)
             deleted_id = await crud.delete(session, id, auto_commit=False)
-            {% if model.external_resource %}
-            {% if model.external_resource.get('reconcile_via') %}
-            _external_parent_id = old.get("{{ model.external_resource.reconcile_via.field }}")
-            if _external_parent_id is not None:
-                await enqueue_external_resource_change(
-                    session,
-                    resource_type="{{ model.external_resource.reconcile_via.resource_type }}",
-                    provider="{{ model.external_resource.reconcile_via.provider }}",
-                    entity_id=str(_external_parent_id),
-                    operation="reconcile",
-                )
-            {% else %}
             await enqueue_external_resource_change(
                 session,
-                resource_type="{{ model.external_resource.resource_type }}",
                 provider="{{ model.external_resource.provider }}",
-                entity_id=str(id),
+                resource="{{ model.external_resource.resource }}",
+                entity_id=str(old["{{ model.external_resource.get('identity_field', 'id') }}"]),
                 operation="delete",
-                snapshot=old,
+                payload=old,
             )
-            {% endif %}
-            {% endif %}
-            {% if model.external_resource_dependents %}
-            await enqueue_external_resource_dependents(
-                session, source_type="{{ model.module_name }}", source_id=str(id)
-            )
-            {% endif %}
             await session.commit()
         except Exception:
             await session.rollback()

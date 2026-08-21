@@ -1,55 +1,32 @@
 """{{ provider_name }} external-resource provider.
 
-This file is developer-owned. OneSite creates it only when absent and never
-overwrites it during subsequent ``site sync`` runs.
+One provider represents one external system and can handle any number of
+resource kinds. This file is developer-owned and is never overwritten by
+subsequent ``site sync`` runs.
 """
 
 from __future__ import annotations
 
 from typing import Any
 
-from sqlmodel.ext.asyncio.session import AsyncSession
-
-from app.core.external_resources import (
-    ExternalResourceBinding,
-    ExternalResourceProvider,
-)
+from app.core.external_resources import ExternalResourceProvider
 
 
 class Provider(ExternalResourceProvider):
-    """Implement {{ provider_name }} reconciliation operations here."""
+    """Implement CUD delivery for {{ provider_name }} resources."""
 
-    async def build_desired(
-        self,
-        session: AsyncSession,
-        resource_type: str,
-        entity: Any,
-        binding: ExternalResourceBinding,
-    ) -> dict[str, Any]:
+    async def create(self, resource: str, payload: dict[str, Any]) -> None:
         raise NotImplementedError
 
-    async def observe(
+    async def update(
         self,
-        resource_type: str,
-        desired: dict[str, Any],
-        binding: ExternalResourceBinding,
-    ) -> dict[str, Any] | None:
-        raise NotImplementedError
-
-    async def apply(
-        self,
-        resource_type: str,
-        desired: dict[str, Any],
-        binding: ExternalResourceBinding,
-    ) -> str | None:
-        raise NotImplementedError
-
-    async def delete(
-        self,
-        resource_type: str,
-        binding: ExternalResourceBinding,
-        snapshot: dict[str, Any],
+        resource: str,
+        payload: dict[str, Any],
+        previous: dict[str, Any],
     ) -> None:
+        raise NotImplementedError
+
+    async def delete(self, resource: str, payload: dict[str, Any]) -> None:
         raise NotImplementedError
 
 

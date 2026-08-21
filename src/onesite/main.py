@@ -146,14 +146,7 @@ def init():
     Ensures necessary models (User, SystemConfig, CustomConfig) exist.
     """
     base_dir = get_cwd_safely()
-    has_modern_layout = (base_dir / "app").exists() or (base_dir / "generated").exists()
-    has_legacy_layout = any(
-        (base_dir / name).exists() for name in ("models", "backend", "frontend")
-    )
-    paths = get_project_paths(
-        base_dir,
-        modern=has_modern_layout or not has_legacy_layout,
-    )
+    paths = get_project_paths(base_dir)
 
     # Check current state
     has_models = paths.models.exists()
@@ -244,7 +237,7 @@ def create(
         raise typer.Exit(code=1)
 
     target_dir.mkdir(parents=True)
-    paths = get_project_paths(target_dir, modern=True)
+    paths = get_project_paths(target_dir)
     copy_ignore = shutil.ignore_patterns("__pycache__", "*.pyc")
 
     shutil.copytree(
@@ -725,8 +718,7 @@ def compose(
 
     base_dir = get_cwd_safely()
     deploy_compose = get_project_paths(base_dir).deploy / "docker-compose.yml"
-    legacy_compose = base_dir / "docker-compose.yml"
-    compose_file = deploy_compose if deploy_compose.exists() else legacy_compose
+    compose_file = deploy_compose
 
     if not compose_file.exists():
         console.print(

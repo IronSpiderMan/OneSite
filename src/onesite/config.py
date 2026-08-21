@@ -85,7 +85,7 @@ class VideoStreamConfig(_ConfigModel):
 
 
 class ExternalResourceProviderConfig(_ConfigModel):
-    """Location of a developer-owned external-resource provider module."""
+    """One external system that can synchronize multiple resource kinds."""
 
     module: str | None = None
 

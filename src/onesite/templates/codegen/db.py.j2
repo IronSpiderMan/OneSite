@@ -233,26 +233,6 @@ async def init_db():
                         {{ ts_model.timescaledb_time_column }} = EXCLUDED.{{ ts_model.timescaledb_time_column }}
                     WHERE EXCLUDED.{{ ts_model.timescaledb_time_column }} >=
                           {{ ts_model.timescaledb_latest_table_name }}.{{ ts_model.timescaledb_time_column }};
-                    {% for projection in ts_model.get('health_projections', []) %}
-                    INSERT INTO onesite_external_resource_health (
-                        provider, resource_type, entity_id, last_seen_at, updated_at
-                    ) VALUES (
-                        '{{ projection.provider }}',
-                        '{{ projection.resource_type }}',
-                        NEW.{{ projection.entity_field }}::TEXT,
-                        LEAST(NEW.{{ projection.time_field }}, NOW()),
-                        NOW()
-                    )
-                    ON CONFLICT (provider, resource_type, entity_id)
-                    DO UPDATE SET
-                        last_seen_at = GREATEST(
-                            onesite_external_resource_health.last_seen_at,
-                            EXCLUDED.last_seen_at
-                        ),
-                        updated_at = NOW()
-                    WHERE EXCLUDED.last_seen_at >
-                          onesite_external_resource_health.last_seen_at;
-                    {% endfor %}
                     RETURN NEW;
                 END;
                 $$ LANGUAGE plpgsql
@@ -263,36 +243,6 @@ async def init_db():
                 FOR EACH ROW
                 EXECUTE FUNCTION fn_sync_{{ ts_model.table_name }}_latest()
             """))
-        {% endfor %}
-
-        # Backfill health rows when upgrading projects that already contain
-        # latest telemetry. This is idempotent and timestamps never regress.
-        {% for ts_model in timescaledb_models %}
-        {% for projection in ts_model.get('health_projections', []) %}
-        async with engine.begin() as conn:
-            await conn.execute(text("""
-                INSERT INTO onesite_external_resource_health (
-                    provider, resource_type, entity_id, last_seen_at, updated_at
-                )
-                SELECT
-                    '{{ projection.provider }}',
-                    '{{ projection.resource_type }}',
-                    {{ projection.entity_field }}::TEXT,
-                    LEAST(MAX({{ projection.time_field }}), NOW()),
-                    NOW()
-                FROM {{ ts_model.timescaledb_latest_table_name }}
-                GROUP BY {{ projection.entity_field }}
-                ON CONFLICT (provider, resource_type, entity_id)
-                DO UPDATE SET
-                    last_seen_at = GREATEST(
-                        onesite_external_resource_health.last_seen_at,
-                        EXCLUDED.last_seen_at
-                    ),
-                    updated_at = NOW()
-                WHERE EXCLUDED.last_seen_at >
-                      onesite_external_resource_health.last_seen_at
-            """))
-        {% endfor %}
         {% endfor %}
     {% endif %}
 

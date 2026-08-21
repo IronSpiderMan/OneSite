@@ -323,7 +323,46 @@ def _sync_external_resource_providers(
                 {"provider_name": name},
                 source_file,
             )
+        _validate_external_resource_provider(source_file)
         copy_file_with_status(source_file, target_providers / f"{module}.py")
+
+
+def _validate_external_resource_provider(file_path: Path) -> None:
+    """Validate the simplified multi-resource Provider CUD contract."""
+    try:
+        tree = ast.parse(file_path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError, UnicodeError) as exc:
+        raise SiteConfigError(f"Unable to parse {file_path}: {exc}") from exc
+    provider_class = next(
+        (
+            node
+            for node in tree.body
+            if isinstance(node, ast.ClassDef) and node.name == "Provider"
+        ),
+        None,
+    )
+    if provider_class is None:
+        raise SiteConfigError(f"{file_path} must define a Provider class.")
+
+    expected = {
+        "create": ["self", "resource", "payload"],
+        "update": ["self", "resource", "payload", "previous"],
+        "delete": ["self", "resource", "payload"],
+    }
+    methods = {
+        node.name: node
+        for node in provider_class.body
+        if isinstance(node, ast.AsyncFunctionDef)
+    }
+    for method_name, parameters in expected.items():
+        method = methods.get(method_name)
+        actual = [argument.arg for argument in method.args.args] if method else []
+        if method is None or actual != parameters:
+            raise SiteConfigError(
+                f"{file_path}:Provider.{method_name} must be async with parameters "
+                f"({', '.join(parameters)}). External Resource providers now use "
+                "the simplified create/update/delete multi-resource contract."
+            )
 
 
 def _sync_mqtt_callbacks(

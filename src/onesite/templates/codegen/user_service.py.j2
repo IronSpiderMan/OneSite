@@ -7,6 +7,9 @@ from app.schemas.user import UserCreate, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
+{% if model.external_resource %}
+from app.core.external_resources import enqueue_external_resource_change
+{% endif %}
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
 from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
@@ -147,6 +150,16 @@ class UserService:
                 context=hook_context,
             )
             await session.flush()
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
+                entity_id=str(getattr(db_obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
+                operation="create",
+                payload=snapshot_model(db_obj),
+            )
+            {% endif %}
             await session.commit()
             await session.refresh(db_obj)
         except Exception:
@@ -218,6 +231,17 @@ class UserService:
                 context=hook_context,
             )
             await session.flush()
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
+                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
+                operation="update",
+                payload=snapshot_model(obj),
+                previous=old,
+            )
+            {% endif %}
             await session.commit()
             await session.refresh(obj)
         except Exception:
@@ -265,6 +289,16 @@ class UserService:
                 context=hook_context,
             )
             await session.flush()
+            {% if model.external_resource %}
+            await enqueue_external_resource_change(
+                session,
+                provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
+                entity_id=str(old["{{ model.external_resource.get('identity_field', 'id') }}"]),
+                operation="delete",
+                payload=old,
+            )
+            {% endif %}
             await session.commit()
         except Exception:
             await session.rollback()

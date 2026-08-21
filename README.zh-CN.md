@@ -22,7 +22,7 @@ site run
 - API 文档：`http://localhost:8000/docs`
 - 初始管理员：`admin@example.com` / `admin`（上线前必须修改）
 
-日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.json` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。旧项目使用顶层 `models/`、`backend/`、`frontend/` 时仍可继续同步，CLI 不会自动搬迁目录。
+日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.json` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
 
 ### 应用资源生命周期
 
@@ -40,6 +40,41 @@ async def destroy_resources(app: FastAPI) -> None:
 ```
 
 `site sync` 会把该文件同步到生成后端，并由 `main.py` 的 FastAPI `lifespan` 调用：OneSite 内置基础设施启动后执行初始化，内置基础设施关闭前执行销毁。请保留 `init_resources`、`destroy_resources` 函数名和 `app` 参数，生成时会校验其签名。
+
+### 外部资源 Provider
+
+一个 Provider 表示一个外部系统，可以管理多类资源；每类资源对应一个模型：
+
+```python
+class Camera(SQLModel, table=True):
+    __onesite__ = {
+        "external_resource": {
+            "provider": "edgeflow",
+            "resource": "cameras",
+            "identity": "id",  # 可省略，默认 id
+        }
+    }
+```
+
+在 `site_config.py` 注册 Provider 模块：
+
+```python
+config = SiteConfig(
+    ...,
+    providers={
+        "edgeflow": ExternalResourceProviderConfig(module="edgeflow")
+    },
+)
+```
+
+首次执行 `site sync` 会创建开发者维护的 `app/providers/edgeflow.py`。Provider 实现
+`create(resource, payload)`、`update(resource, payload, previous)` 和
+`delete(resource, payload)`。生成的模型 Service 会在本地 CUD 事务中同时写入同步任务，
+后端轻量 worker 在提交后调用 Provider、自动重试临时失败，并删除成功任务。
+`external-resources` 管理页只展示待处理、重试中和失败任务。
+
+旧字段名 `resource_type`、`identity_field` 仍作为别名兼容；`depends_on`、
+`reconcile_via`、`health` 不再属于 External Resource。
 
 ## 命令
 
@@ -335,7 +370,7 @@ app/utils/
 from app.utils.formatting import format_alarm
 ```
 
-旧布局项目仍可使用顶层 `utils/`，它会同步到 `backend/app/utils/`。
+项目工具函数应放在 `app/utils/`，会同步到 `generated/backend/app/utils/`。
 
 ## 已生成能力
 
@@ -389,7 +424,7 @@ site compose up -d
 site compose logs -f
 ```
 
-`site build` 会生成 `deploy/docker-compose.yml`；`site create`、`site init` 和 `site sync` 会确保 `deploy/.env.example` 存在。部署时可复制为 `deploy/.env` 并填写环境差异，`site compose` 会自动加载它。若 `database_url` 以 `postgresql` 开头，会加入 PostgreSQL 服务。旧项目在没有 `deploy/docker-compose.yml` 时仍可使用根目录 Compose。新项目的开发源码位于 `app/models/` 和 `app/integrations/`；可重新生成的后端、前端与各自的 Dockerfile 位于 `generated/backend/` 和 `generated/frontend/`。
+`site build` 会生成 `deploy/docker-compose.yml`；`site create`、`site init` 和 `site sync` 会确保 `deploy/.env.example` 存在。部署时可复制为 `deploy/.env` 并填写环境差异，`site compose` 会自动加载它。若 `database_url` 以 `postgresql` 开头，会加入 PostgreSQL 服务。项目的开发源码位于 `app/models/` 和 `app/integrations/`；可重新生成的后端、前端与各自的 Dockerfile 位于 `generated/backend/` 和 `generated/frontend/`。
 
 生成的后端 Dockerfile 默认使用清华 TUNA PyPI 镜像，并在安装依赖前升级
 pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢的容器网络。

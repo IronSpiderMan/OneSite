@@ -4,6 +4,9 @@ from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Update
 from app.models.{{ model.source_module }} import {{ model.name }}
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
+{% if model.external_resource %}
+from app.core.external_resources import enqueue_external_resource_change
+{% endif %}
 
 logger = logging.getLogger(__name__)
 
@@ -20,7 +23,26 @@ class {{ model.name }}Service:
             input_data=dict(changes),
             changed_fields=frozenset(changes),
         )
+        {% if model.external_resource %}
+        try:
+            obj = await crud.update(session, obj_in, auto_commit=False)
+            await enqueue_external_resource_change(
+                session,
+                provider="{{ model.external_resource.provider }}",
+                resource="{{ model.external_resource.resource }}",
+                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
+                operation="update",
+                payload=snapshot_model(obj),
+                previous=old,
+            )
+            await session.commit()
+            await session.refresh(obj)
+        except Exception:
+            await session.rollback()
+            raise
+        {% else %}
         obj = await crud.update(session, obj_in)
+        {% endif %}
         try:
             await invoke_model_hook(
                 obj,

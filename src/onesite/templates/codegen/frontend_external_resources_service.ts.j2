@@ -1,46 +1,35 @@
 import request from '../utils/request';
 
-export interface ExternalResourceBinding {
+export interface ExternalResourceTask {
   id: number;
   provider: string;
-  resource_type: string;
+  resource: string;
   entity_id: string;
-  external_id?: string;
-  status: string;
-  desired_revision: number;
-  applied_revision: number;
-  retry_count: number;
-  drift_count: number;
-  desired_hash?: string;
-  observed_hash?: string;
-  last_drift_at?: string;
-  last_observed_at?: string;
+  operation: 'create' | 'update' | 'delete';
+  status: 'pending' | 'processing' | 'retry' | 'failed';
+  attempts: number;
+  next_attempt_at: string;
+  locked_until?: string;
   last_error?: string;
-  last_synced_at?: string;
-  last_checked_at?: string;
-  next_check_at: string;
+  created_at: string;
   updated_at: string;
 }
 
-export interface ExternalResourcePage {
-  items: ExternalResourceBinding[];
+export interface ExternalResourceTaskPage {
+  items: ExternalResourceTask[];
   total: number;
   offset: number;
   limit: number;
 }
 
-export async function getExternalResources(includeDeleted = false, offset = 0, limit = 100) {
-  return (await request.get<ExternalResourcePage>('/external-resources', {
-    params: { include_deleted: includeDeleted, offset, limit },
+export async function getExternalResourceTasks(offset = 0, limit = 100) {
+  return (await request.get<ExternalResourceTaskPage>('/external-resources', {
+    params: { offset, limit },
   })).data;
 }
 
-export async function retryExternalResource(resourceType: string, entityId: string, provider?: string) {
-  return (await request.post(
-    `/external-resources/${encodeURIComponent(resourceType)}/${encodeURIComponent(entityId)}/retry`,
-    undefined,
-    { params: provider ? { provider } : undefined },
-  )).data;
+export async function retryExternalResourceTask(taskId: number) {
+  return (await request.post(`/external-resources/${taskId}/retry`)).data;
 }
 
 export async function getExternalResourceCapabilities() {

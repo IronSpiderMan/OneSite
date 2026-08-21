@@ -78,163 +78,47 @@ def _field_names(model: ModelDefinition) -> set[str]:
     return {str(field["name"]) for field in model.get("fields", [])}
 
 
-def _normalize_external_health(
+def _normalize_external_resource(
     model: ModelDefinition,
-    external: dict[str, Any],
-    models: list[ModelDefinition],
-) -> dict[str, Any] | None:
-    """Validate and enrich an external-resource health declaration.
+    raw: Any,
+) -> dict[str, str] | None:
+    """Normalize one model-to-provider resource mapping.
 
-    Health projection is deliberately tied to a generated TimescaleDB latest
-    table.  This lets the runtime maintain one health row per external entity
-    instead of grouping every property row during each status scan.
+    A provider represents one external system and may own many resource kinds.
+    Each resource kind maps to exactly one OneSite model. The historical
+    ``resource_type`` and ``identity_field`` names remain accepted as aliases.
     """
-    raw = external.get("health")
     if raw is None:
         return None
     if not isinstance(raw, dict):
-        raise ValueError(f"{model['name']} external_resource.health must be an object")
+        raise ValueError(f"{model['name']} external_resource must be an object")
 
-    required = {"latest_table", "entity_field", "time_field"}
-    missing = required - set(raw)
-    if missing:
+    removed = sorted(set(raw) & {"depends_on", "reconcile_via", "health"})
+    if removed:
         raise ValueError(
-            f"{model['name']} external_resource.health is missing: "
-            + ", ".join(sorted(missing))
+            f"{model['name']} external_resource no longer supports: "
+            + ", ".join(removed)
         )
 
-    health = {
-        **raw,
-        "enabled_field": raw.get("enabled_field", "is_enabled"),
-        "status_field": raw.get("status_field", "status"),
-        "last_seen_field": raw.get("last_seen_field", "last_online_at"),
-        "interval_field": raw.get("interval_field", "collection_interval_ms"),
-        "minimum_offline_seconds": raw.get("minimum_offline_seconds", 30),
-        "interval_multiplier": raw.get("interval_multiplier", 3),
-        "online_status": raw.get("online_status", "online"),
-        "offline_status": raw.get("offline_status", "offline"),
-        "disabled_status": raw.get("disabled_status", "disabled"),
-        "inactive_status": raw.get("inactive_status", "inactive"),
-        "error_status": raw.get("error_status", "inactive"),
-        "binding_resource_type": raw.get("binding_resource_type", external["resource_type"]),
-        "binding_provider": raw.get("binding_provider", external["provider"]),
-        "binding_entity_field": raw.get(
-            "binding_entity_field", external.get("identity_field", "id")
-        ),
+    provider = raw.get("provider")
+    resource = raw.get("resource", raw.get("resource_type", model["module_name"]))
+    identity_field = raw.get("identity", raw.get("identity_field", "id"))
+    for key, value in (("provider", provider), ("resource", resource)):
+        if not isinstance(value, str) or not re.fullmatch(r"[A-Za-z0-9_.:-]+", value):
+            raise ValueError(
+                f"{model['name']} external_resource.{key} is required and "
+                "may only contain letters, numbers, '.', '_', ':', or '-'"
+            )
+    if not isinstance(identity_field, str) or identity_field not in _field_names(model):
+        raise ValueError(
+            f"{model['name']} external_resource.identity references unknown field "
+            f"'{identity_field}'"
+        )
+    return {
+        "provider": provider,
+        "resource": resource,
+        "identity_field": identity_field,
     }
-    identifier_keys = (
-        "latest_table", "entity_field", "time_field", "enabled_field",
-        "status_field", "last_seen_field", "interval_field", "binding_entity_field",
-    )
-    for key in identifier_keys:
-        value = health.get(key)
-        if not isinstance(value, str) or not value.isidentifier():
-            raise ValueError(
-                f"{model['name']} external_resource.health.{key} must be a valid identifier"
-            )
-    if not isinstance(health["binding_provider"], str) or not re.fullmatch(
-        r"[A-Za-z0-9_.:-]+", health["binding_provider"]
-    ):
-        raise ValueError(
-            f"{model['name']} external_resource.health.binding_provider "
-            "contains unsupported characters"
-        )
-
-    target_fields = _field_names(model)
-    identity_field = external.get("identity_field", "id")
-    if identity_field not in target_fields:
-        raise ValueError(
-            f"{model['name']} external_resource.identity_field references "
-            f"unknown field '{identity_field}'"
-        )
-    for key in ("enabled_field", "status_field", "last_seen_field", "interval_field"):
-        if health[key] not in target_fields:
-            raise ValueError(
-                f"{model['name']} external_resource.health.{key} "
-                f"references unknown field '{health[key]}'"
-            )
-    if health["binding_entity_field"] not in target_fields:
-        raise ValueError(
-            f"{model['name']} external_resource.health.binding_entity_field "
-            f"references unknown field '{health['binding_entity_field']}'"
-        )
-    try:
-        minimum = float(health["minimum_offline_seconds"])
-        multiplier = float(health["interval_multiplier"])
-    except (TypeError, ValueError) as exc:
-        raise ValueError(
-            f"{model['name']} health thresholds must be numeric"
-        ) from exc
-    if minimum <= 0 or multiplier <= 0:
-        raise ValueError(f"{model['name']} health thresholds must be greater than zero")
-    health["minimum_offline_seconds"] = minimum
-    health["interval_multiplier"] = multiplier
-
-    source = next(
-        (
-            candidate
-            for candidate in models
-            if candidate.get("is_timescaledb")
-            and candidate.get("timescaledb_latest_table_name") == health["latest_table"]
-        ),
-        None,
-    )
-    if source is None:
-        raise ValueError(
-            f"{model['name']} health latest_table '{health['latest_table']}' "
-            "is not generated from a TimescaleDB model"
-        )
-    if source.get("timescaledb_entity_field") != health["entity_field"]:
-        raise ValueError(
-            f"{model['name']} health entity_field does not match "
-            f"{source['name']} time-series metadata"
-        )
-    if source.get("timescaledb_time_column") != health["time_field"]:
-        raise ValueError(
-            f"{model['name']} health time_field does not match "
-            f"{source['name']} time-series metadata"
-        )
-    target_table = source.get("timescaledb_entity_target_table")
-    if target_table and target_table != model["table_name"]:
-        raise ValueError(
-            f"{model['name']} health latest table belongs to '{target_table}', "
-            f"not '{model['table_name']}'"
-        )
-
-    status_field = next(
-        field for field in model["fields"] if field["name"] == health["status_field"]
-    )
-    if status_field.get("is_enum"):
-        allowed = set(status_field.get("enum_values", []))
-        configured = {
-            health[key]
-            for key in (
-                "online_status", "offline_status", "disabled_status",
-                "inactive_status", "error_status",
-            )
-        }
-        invalid = configured - allowed
-        if invalid:
-            raise ValueError(
-                f"{model['name']} health statuses are not valid enum values: "
-                + ", ".join(sorted(map(str, invalid)))
-            )
-
-    health.update({
-        "source_table": source["table_name"],
-        "source_module": source["source_module"],
-        "target_table": model["table_name"],
-        "target_id_field": identity_field,
-    })
-    source.setdefault("health_projections", []).append(
-        {
-            "provider": external["provider"],
-            "resource_type": external["resource_type"],
-            "entity_field": health["entity_field"],
-            "time_field": health["time_field"],
-        }
-    )
-    return health
 
 
 def _resolve_visualize_filters(
@@ -814,88 +698,13 @@ def phase_generate_per_model(
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
     theme_name = resolve_theme(site_config)[0]["id"]
 
-    # External resources are declared on the target model. Resolve the reverse
-    # dependency graph once so source-row changes can fan out reconciliation.
-    by_key = {
-        key: model
-        for model in models
-        for key in (model["name"], model["module_name"], model["table_name"])
-    }
+    # Map each external model to one resource kind owned by a provider. Model
+    # CUD operations become provider CUD calls through the delivery worker.
     for model in models:
-        external = model.get("site_props", {}).get("external_resource")
-        if external is None:
-            model["external_resource"] = None
-            continue
-        if not isinstance(external, dict):
-            raise ValueError(f"{model['name']} external_resource must be an object")
-        missing = {"provider", "resource_type"} - set(external)
-        if missing:
-            raise ValueError(
-                f"{model['name']} external_resource is missing: "
-                + ", ".join(sorted(missing))
-            )
-        for key in ("provider", "resource_type"):
-            if not isinstance(external[key], str) or not re.fullmatch(
-                r"[A-Za-z0-9_.:-]+", external[key]
-            ):
-                raise ValueError(
-                    f"{model['name']} external_resource.{key} contains unsupported characters"
-                )
-        dependencies = external.get("depends_on", [])
-        if not isinstance(dependencies, list):
-            raise ValueError(
-                f"{model['name']} external_resource.depends_on must be a list"
-            )
-        normalized = {**external, "depends_on": dependencies}
-        reconcile_via = normalized.get("reconcile_via")
-        if reconcile_via is not None:
-            if not isinstance(reconcile_via, dict) or not {
-                "resource_type", "field"
-            }.issubset(reconcile_via):
-                raise ValueError(
-                    f"{model['name']} external_resource.reconcile_via requires resource_type and field"
-                )
-            if reconcile_via["field"] not in _field_names(model):
-                raise ValueError(
-                    f"{model['name']} reconcile_via references unknown field '{reconcile_via['field']}'"
-                )
-            reconcile_provider = reconcile_via.get("provider", normalized["provider"])
-            if not isinstance(reconcile_provider, str) or not re.fullmatch(
-                r"[A-Za-z0-9_.:-]+", reconcile_provider
-            ):
-                raise ValueError(
-                    f"{model['name']} external_resource.reconcile_via.provider "
-                    "contains unsupported characters"
-                )
-            normalized["reconcile_via"] = {
-                **reconcile_via,
-                "provider": reconcile_provider,
-            }
-        normalized["health"] = _normalize_external_health(model, normalized, models)
-        model["external_resource"] = normalized
-        for dependency in dependencies:
-            if (
-                not isinstance(dependency, dict)
-                or not dependency.get("source")
-                or not dependency.get("field")
-            ):
-                raise ValueError(
-                    f"{model['name']} external_resource dependencies require source and field"
-                )
-            source = by_key.get(str(dependency["source"]))
-            if source is None:
-                raise ValueError(
-                    f"{model['name']} external_resource dependency source "
-                    f"'{dependency['source']}' was not found"
-                )
-            source.setdefault("external_resource_dependents", []).append(
-                {
-                    "target_resource_type": normalized["resource_type"],
-                    "target_module": model["source_module"],
-                    "target_model": model["name"],
-                    "target_field": dependency["field"],
-                }
-            )
+        model["external_resource"] = _normalize_external_resource(
+            model,
+            model.get("site_props", {}).get("external_resource"),
+        )
 
     # Resolve visualize filter paths for all models
     for model in models:
@@ -1002,17 +811,27 @@ def phase_generate_aggregated(
             "External-resource providers must be configured in site_config.providers: "
             + ", ".join(missing_providers)
         )
+    resource_keys = [
+        (m["external_resource"]["provider"], m["external_resource"]["resource"])
+        for m in external_models
+    ]
+    duplicate_resource_keys = sorted({
+        key for key in resource_keys if resource_keys.count(key) > 1
+    })
+    if duplicate_resource_keys:
+        rendered = ", ".join(
+            f"{provider}/{resource}" for provider, resource in duplicate_resource_keys
+        )
+        raise ValueError(
+            "Each provider resource may map to only one model: " + rendered
+        )
     external_resource_configs = [
         {
             "provider": m["external_resource"]["provider"],
-            "resource_type": m["external_resource"]["resource_type"],
+            "resource": m["external_resource"]["resource"],
             "module": m["source_module"],
             "model": m["name"],
-            "table": m["table_name"],
             "id_field": m["external_resource"].get("identity_field", "id"),
-            "depends_on": m["external_resource"].get("depends_on", []),
-            "health": m["external_resource"].get("health"),
-            "reconcile_via": m["external_resource"].get("reconcile_via"),
         }
         for m in external_models
     ]
@@ -1105,11 +924,9 @@ def phase_generate_aggregated(
             {},
             backend_path / "app" / "core" / "external_resources.py",
         )
-        generate_file(
-            "external_resources_worker.py.j2",
-            {},
-            backend_path / "app" / "external_resources_worker.py",
-        )
+        # The simplified delivery worker runs with the backend process. Remove
+        # the retired standalone reconciler from previously generated projects.
+        (backend_path / "app" / "external_resources_worker.py").unlink(missing_ok=True)
         generate_file(
             "external_resource_provider_registry.py.j2",
             {"providers": [
