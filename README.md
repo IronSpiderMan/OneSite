@@ -573,6 +573,7 @@ Place model-level options in `__onesite__` (or table `info.site_props`). Key opt
 | `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode: "page"`. |
 | `edit_mode` | Create/edit container: `"modal"` (default), `"page"`, or right-side `"drawer"`. |
 | `actions` | Adds permission-controlled custom action buttons. |
+| `ui.detail.layout` | Shared layout for detail views and create/edit fields. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
 | `import_key` | Field used for import upsert matching. |
 
@@ -580,6 +581,65 @@ For a right-side sliding create/edit form:
 
 ```python
 __onesite__ = {"edit_mode": "drawer"}
+```
+
+### Detail page layout
+
+Use `ui.detail.layout` to arrange both the read-only detail view and generated
+create/edit fields. A string is a field, an array is a horizontal row, and an
+object with `section`, `title` and `items` is a titled card. Sections can share
+a row; `span` controls their relative width (from 1 to 4). On small screens all
+rows stack vertically.
+
+```python
+__onesite__ = {
+    "ui": {
+        "detail": {
+            "layout": [
+                {
+                    "section": "basic",
+                    "title": "基本信息",
+                    "items": [["title", "protocol"], "endpoint"],
+                },
+                [
+                    {
+                        "section": "connection",
+                        "title": "连接设置",
+                        "span": 1,
+                        "items": ["is_enabled"],
+                    },
+                    {
+                        "section": "auth",
+                        "title": "鉴权设置",
+                        "span": 2,
+                        "items": [["auth_type", "auth_config"]],
+                    },
+                ],
+            ],
+        },
+    },
+}
+```
+
+Configured fields must be readable fields and may appear once. Fields
+omitted from the layout are appended after the configured content in model
+declaration order, so a layout cannot accidentally hide data. FK relationship
+cards and JSON collection tabs keep their existing detail-page treatment.
+
+Writable fields that do not belong in a read-only detail view are appended to
+the generated editor. JSON submodels use the same `detail.layout` declaration
+for both their read-only renderer and structured editor:
+
+```python
+class AuthConfig(BaseModel):
+    __onesite__ = {
+        "ui": {
+            "detail": {"layout": [["client_id", "client_secret"], "enabled"]},
+        }
+    }
+    client_id: str = ""
+    client_secret: str = ""
+    enabled: bool = True
 ```
 
 ### Enable / disable actions

@@ -79,6 +79,178 @@ def _ensure_user_password_field(fields: list[FieldDefinition]) -> None:
 # ── Model metadata assembly ──────────────────────────────────────────────
 
 
+def _normalize_ui_layout(
+    raw_ui: Any,
+    *,
+    model_name: str,
+    displayable_fields: list[str],
+    view: str,
+) -> list[dict[str, Any]]:
+    """Validate and normalize a ``__onesite__[\"ui\"]`` form or detail layout.
+
+    The caller supplies fields appropriate for the target view.  Detail
+    layouts exclude relationship cards and JSON collection tabs because they
+    have their own data loading and pagination behaviour; form layouts include
+    editable model fields.
+
+    The normalized form is consumed by the frontend template.  Doing this in
+    the generator gives model authors useful errors for misspelled fields
+    instead of silently producing an incomplete page.
+    """
+    if raw_ui is None:
+        return []
+    displayable_field_set = set(displayable_fields)
+    if not isinstance(raw_ui, dict):
+        raise ValueError(
+            f"Invalid ui configuration for {model_name}: 'ui' must be an object."
+        )
+
+    raw_view = raw_ui.get(view)
+    if raw_view is None:
+        return []
+    if not isinstance(raw_view, dict):
+        raise ValueError(
+            f"Invalid ui.{view} configuration for {model_name}: expected an object."
+        )
+
+    raw_layout = raw_view.get("layout")
+    if not isinstance(raw_layout, list) or not raw_layout:
+        raise ValueError(
+            f"Invalid ui.{view}.layout configuration for {model_name}: "
+            "expected a non-empty list."
+        )
+
+    def field_node(raw: Any, path: str) -> dict[str, Any]:
+        if isinstance(raw, str):
+            field_name, span = raw, 1
+        elif isinstance(raw, dict) and set(raw).issubset({"field", "span"}):
+            field_name = raw.get("field")
+            span = raw.get("span", 1)
+        else:
+            raise ValueError(
+                f"Invalid {path} for {model_name}: expected a field name or "
+                "{'field': 'name', 'span': n}."
+            )
+
+        if not isinstance(field_name, str) or not field_name:
+            raise ValueError(f"Invalid {path} for {model_name}: field must be a non-empty string.")
+        if field_name not in displayable_field_set:
+            available = ", ".join(displayable_fields) or "(none)"
+            raise ValueError(
+                f"Invalid {path} for {model_name}: field {field_name!r} cannot be "
+                f"placed in ui.{view}.layout. Available fields: {available}."
+            )
+        if not isinstance(span, int) or isinstance(span, bool) or not 1 <= span <= 4:
+            raise ValueError(f"Invalid {path} for {model_name}: span must be an integer from 1 to 4.")
+        return {"kind": "field", "field": field_name, "span": span}
+
+    def section_node(raw: dict[str, Any], path: str) -> dict[str, Any]:
+        allowed = {"section", "title", "items", "span"}
+        unknown = set(raw) - allowed
+        if unknown:
+            raise ValueError(
+                f"Invalid {path} for {model_name}: unsupported keys {', '.join(sorted(unknown))}."
+            )
+        section = raw.get("section")
+        title = raw.get("title")
+        items = raw.get("items")
+        span = raw.get("span", 1)
+        if not isinstance(section, str) or not section:
+            raise ValueError(f"Invalid {path} for {model_name}: section must be a non-empty string.")
+        if not isinstance(title, str) or not title:
+            raise ValueError(f"Invalid {path} for {model_name}: title must be a non-empty string.")
+        if not isinstance(items, list) or not items:
+            raise ValueError(f"Invalid {path} for {model_name}: items must be a non-empty list.")
+        if not isinstance(span, int) or isinstance(span, bool) or not 1 <= span <= 4:
+            raise ValueError(f"Invalid {path} for {model_name}: span must be an integer from 1 to 4.")
+        return {
+            "kind": "section",
+            "section": section,
+            "title": title,
+            "span": span,
+            "items": [row_node(item, f"{path}.items[{index}]") for index, item in enumerate(items)],
+        }
+
+    def row_node(raw: Any, path: str) -> dict[str, Any]:
+        # A list is a horizontal row. A single field/section is normalized into
+        # a one-cell row, making the grammar predictable at every nesting level.
+        raw_cells = raw if isinstance(raw, list) else [raw]
+        if not raw_cells:
+            raise ValueError(f"Invalid {path} for {model_name}: a row cannot be empty.")
+        cells: list[dict[str, Any]] = []
+        for index, cell in enumerate(raw_cells):
+            cell_path = f"{path}[{index}]" if isinstance(raw, list) else path
+            if isinstance(cell, dict) and "section" in cell:
+                cells.append(section_node(cell, cell_path))
+            else:
+                cells.append(field_node(cell, cell_path))
+        total_span = sum(cell["span"] for cell in cells)
+        if total_span > 4:
+            raise ValueError(
+                f"Invalid {path} for {model_name}: a row may use at most 4 columns, got {total_span}."
+            )
+        return {"kind": "row", "columns": total_span, "items": cells}
+
+    layout = [row_node(item, f"ui.{view}.layout[{index}]") for index, item in enumerate(raw_layout)]
+
+    seen_fields: set[str] = set()
+
+    def collect_fields(node: dict[str, Any]) -> None:
+        if node["kind"] == "field":
+            field_name = node["field"]
+            if field_name in seen_fields:
+                raise ValueError(
+                    f"Invalid ui.{view}.layout for {model_name}: field {field_name!r} is configured more than once."
+                )
+            seen_fields.add(field_name)
+        else:
+            for child in node["items"]:
+                collect_fields(child)
+
+    for node in layout:
+        collect_fields(node)
+
+    # Preserve existing behaviour for fields omitted from a custom layout by
+    # appending them as a final one-column row.
+    for field_name in displayable_fields:
+        if field_name in seen_fields:
+            continue
+        layout.append({"kind": "row", "columns": 1, "items": [{"kind": "field", "field": field_name, "span": 1}]})
+    return layout
+
+
+def _form_layout_from_detail_layout(
+    detail_layout: list[dict[str, Any]], form_fields: list[str]
+) -> list[dict[str, Any]]:
+    """Reuse the detail layout for forms, omitting read-only fields.
+
+    Keeping one declarative layout avoids divergent detail and editor UIs.
+    Fields that are writable but cannot appear in the detail layout (such as a
+    password) are appended in declaration order.
+    """
+    allowed = set(form_fields)
+    seen: set[str] = set()
+
+    def filter_node(node: dict[str, Any]) -> dict[str, Any] | None:
+        if node["kind"] == "field":
+            if node["field"] not in allowed:
+                return None
+            seen.add(node["field"])
+            return node
+        items = [child for item in node["items"] if (child := filter_node(item)) is not None]
+        if not items:
+            return None
+        if node["kind"] == "row":
+            return {**node, "columns": sum(item["span"] for item in items), "items": items}
+        return {**node, "items": items}
+
+    layout = [node for item in detail_layout if (node := filter_node(item)) is not None]
+    for field_name in form_fields:
+        if field_name not in seen:
+            layout.append({"kind": "row", "columns": 1, "items": [{"kind": "field", "field": field_name, "span": 1}]})
+    return layout
+
+
 def _build_model_dict(
     name: str,
     module_name: str,
@@ -124,6 +296,24 @@ def _build_model_dict(
         and field.type.startswith("Dict[")
         and "r" in field.permissions
     ]
+    json_tab_names = {field.name for field in json_array_fields + json_dict_fields}
+    displayable_fields = [
+        field.name
+        for field in result.fields
+        if not field.fk_info and field.name not in json_tab_names and "r" in field.permissions
+    ]
+    detail_layout = _normalize_ui_layout(
+        result.model_site_props.get("ui"),
+        model_name=name,
+        displayable_fields=displayable_fields,
+        view="detail",
+    )
+    form_fields = [
+        field.name
+        for field in result.fields
+        if "c" in field.permissions or "u" in field.permissions
+    ]
+    form_layout = _form_layout_from_detail_layout(detail_layout, form_fields)
 
     # ── Tree view detection ──────────────────────────────────────────────
     tree_view_config = result.model_site_props.get("tree_view", "auto")
@@ -145,6 +335,8 @@ def _build_model_dict(
         lower_name=name.lower(),
         table_name=table_name,
         fields=result.fields,
+        detail_layout=detail_layout,
+        form_layout=form_layout,
         json_array_fields=json_array_fields,
         json_dict_fields=json_dict_fields,
         id_type=id_type,

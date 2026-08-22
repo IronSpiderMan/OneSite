@@ -122,6 +122,95 @@ def _normalize_json_condition(
     return normalized
 
 
+def _get_json_model_ui(model: type[BaseModel]) -> Dict[str, Any]:
+    """Return optional OneSite UI configuration declared by a JSON submodel."""
+    for attribute in ("__onesite__", "__site_props__"):
+        value = getattr(model, attribute, None)
+        if isinstance(value, dict):
+            ui = value.get("ui")
+            if isinstance(ui, dict):
+                return ui
+    return {}
+
+
+def _normalize_json_model_layout(
+    raw_ui: Dict[str, Any], *, model_name: str, field_names: List[str], view: str
+) -> List[Dict[str, Any]]:
+    """Validate a Pydantic/SQLModel JSON submodel layout.
+
+    The grammar deliberately matches the shared top-level detail layout so
+    structured JSON fields use the same rows, spans, and titled sections in
+    both detail and edit views.
+    """
+    raw_view = raw_ui.get(view)
+    if raw_view is None:
+        return []
+    if not isinstance(raw_view, dict):
+        raise ValueError(f"Invalid ui.{view} configuration for {model_name}: expected an object.")
+    raw_layout = raw_view.get("layout")
+    if not isinstance(raw_layout, list) or not raw_layout:
+        raise ValueError(f"Invalid ui.{view}.layout configuration for {model_name}: expected a non-empty list.")
+
+    available = set(field_names)
+
+    def field_node(raw: Any, path: str) -> Dict[str, Any]:
+        if isinstance(raw, str):
+            name, span = raw, 1
+        elif isinstance(raw, dict) and set(raw).issubset({"field", "span"}):
+            name, span = raw.get("field"), raw.get("span", 1)
+        else:
+            raise ValueError(f"Invalid {path} for {model_name}: expected a field name or {{'field': 'name', 'span': n}}.")
+        if not isinstance(name, str) or not name:
+            raise ValueError(f"Invalid {path} for {model_name}: field must be a non-empty string.")
+        if name not in available:
+            raise ValueError(f"Invalid {path} for {model_name}: field {name!r} cannot be placed in ui.{view}.layout.")
+        if not isinstance(span, int) or isinstance(span, bool) or not 1 <= span <= 4:
+            raise ValueError(f"Invalid {path} for {model_name}: span must be an integer from 1 to 4.")
+        return {"kind": "field", "field": name, "span": span}
+
+    def section_node(raw: Dict[str, Any], path: str) -> Dict[str, Any]:
+        if set(raw) - {"section", "title", "items", "span"}:
+            raise ValueError(f"Invalid {path} for {model_name}: unsupported section keys.")
+        section, title, items, span = raw.get("section"), raw.get("title"), raw.get("items"), raw.get("span", 1)
+        if not isinstance(section, str) or not section or not isinstance(title, str) or not title:
+            raise ValueError(f"Invalid {path} for {model_name}: section and title must be non-empty strings.")
+        if not isinstance(items, list) or not items:
+            raise ValueError(f"Invalid {path} for {model_name}: items must be a non-empty list.")
+        if not isinstance(span, int) or isinstance(span, bool) or not 1 <= span <= 4:
+            raise ValueError(f"Invalid {path} for {model_name}: span must be an integer from 1 to 4.")
+        return {"kind": "section", "section": section, "title": title, "span": span,
+                "items": [row_node(item, f"{path}.items[{index}]") for index, item in enumerate(items)]}
+
+    def row_node(raw: Any, path: str) -> Dict[str, Any]:
+        cells = raw if isinstance(raw, list) else [raw]
+        if not cells:
+            raise ValueError(f"Invalid {path} for {model_name}: a row cannot be empty.")
+        items = [section_node(cell, f"{path}[{index}]") if isinstance(cell, dict) and "section" in cell else field_node(cell, f"{path}[{index}]") for index, cell in enumerate(cells)]
+        columns = sum(item["span"] for item in items)
+        if columns > 4:
+            raise ValueError(f"Invalid {path} for {model_name}: a row may use at most 4 columns, got {columns}.")
+        return {"kind": "row", "columns": columns, "items": items}
+
+    layout = [row_node(item, f"ui.{view}.layout[{index}]") for index, item in enumerate(raw_layout)]
+    seen: Set[str] = set()
+
+    def collect(node: Dict[str, Any]) -> None:
+        if node["kind"] == "field":
+            if node["field"] in seen:
+                raise ValueError(f"Invalid ui.{view}.layout for {model_name}: field {node['field']!r} is configured more than once.")
+            seen.add(node["field"])
+        else:
+            for child in node["items"]:
+                collect(child)
+
+    for node in layout:
+        collect(node)
+    for name in field_names:
+        if name not in seen:
+            layout.append({"kind": "row", "columns": 1, "items": [{"kind": "field", "field": name, "span": 1}]})
+    return layout
+
+
 def _build_json_model_schema(
     model: type[BaseModel], visited: Set[type] | None = None, depth: int = 0
 ) -> Dict[str, Any]:
@@ -180,7 +269,15 @@ def _build_json_model_schema(
                 item_schema["model"] = _build_json_model_schema(item_ann, visited=visited, depth=depth + 1)
             field_schema["item"] = item_schema
         fields.append(field_schema)
-    return {"name": model.__name__, "fields": fields}
+    schema: Dict[str, Any] = {"name": model.__name__, "fields": fields}
+    field_names = [field["name"] for field in fields]
+    raw_ui = _get_json_model_ui(model)
+    layout = _normalize_json_model_layout(
+        raw_ui, model_name=model.__name__, field_names=field_names, view="detail"
+    )
+    if layout:
+        schema["layout"] = layout
+    return schema
 
 
 def _json_schema_has_conditions(schema: Dict[str, Any] | None) -> bool:

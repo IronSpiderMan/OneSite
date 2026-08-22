@@ -1,3 +1,141 @@
+{% macro detail_read_field(field) -%}
+hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+<div className="space-y-1">
+    <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
+    <div className="font-medium">
+        {% if field.ui_type == 'bool' %}
+        <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
+            {currentItem.{{ field.name }} ? 'Yes' : 'No'}
+        </Badge>
+        {% elif field.is_enum and field.is_multi_select %}
+        <div className="flex flex-wrap gap-1">
+        {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.map((v: string) => (
+            <Badge key={v} variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v))}</Badge>
+        ))}
+        </div>
+        {% elif field.is_enum %}
+        {currentItem.{{ field.name }} != null ? (
+            <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${currentItem.{{ field.name }}}`, currentItem.{{ field.name }}))}</Badge>
+        ) : '-'}
+        {% elif field.ui_type == 'image' %}
+        {currentItem.{{ field.name }} ? (
+            <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
+                <img src={currentItem.{{ field.name }}} alt="{{ field.name }}" className="h-full w-full object-cover" />
+            </div>
+        ) : <span className="text-muted-foreground italic">No image</span>}
+        {% elif field.ui_type == 'images' %}
+        {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.length ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+                {currentItem.{{ field.name }}.map((url: string, index: number) => (
+                    <div key={`${url}-${index}`} className="aspect-video overflow-hidden rounded-lg border bg-muted">
+                        <img src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
+                    </div>
+                ))}
+            </div>
+        ) : <span className="text-muted-foreground italic">No images</span>}
+        {% elif field.ui_type == 'file' %}
+        {currentItem.{{ field.name }} ? (
+            <FileUpload value={currentItem.{{ field.name }}} onChange={() => {}} readOnly={true} allowDownload={ {{ "true" if field.allow_download else "false" }} } />
+        ) : <span className="text-muted-foreground italic">No file</span>}
+        {% elif field.ui_type == 'video_stream' %}
+        {currentItem.{{ field.name }} ? (
+            <VideoStreamPlayer src={currentItem.{{ field.name }}} protocol="{{ field.stream_protocol }}" autoPlay={ {{ "true" if field.stream_autoplay else "false" }} } muted={ {{ "true" if field.stream_muted else "false" }} } controls={ {{ "true" if field.stream_controls else "false" }} } reconnect={ {{ "true" if field.stream_reconnect else "false" }} } className="max-w-3xl" />
+        ) : <span className="text-muted-foreground italic">{t('video_stream.empty')}</span>}
+        {% elif field.ui_type == 'location' %}
+        <span className="text-muted-foreground">
+            {currentItem.{{ field.name }}?.latitude != null && currentItem.{{ field.name }}?.longitude != null ? `${currentItem.{{ field.name }}.latitude}, ${currentItem.{{ field.name }}.longitude}` : '-'}
+        </span>
+        {% elif field.ui_type == 'json' and field.json_model_schema %}
+        <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} } value={currentItem.{{ field.name }}} />
+        {% elif field.ui_type == 'json' %}
+        <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+            {currentItem.{{ field.name }} !== undefined && currentItem.{{ field.name }} !== null ? JSON.stringify(currentItem.{{ field.name }}, null, 2) : '-'}
+        </pre>
+        {% elif field.ui_type == 'datetime' %}
+        <span className="text-muted-foreground">{formatDateTime(currentItem.{{ field.name }}, timeZone)}</span>
+        {% elif field.ui_type == 'time' %}
+        <span className="text-muted-foreground">{formatTime(currentItem.{{ field.name }})}</span>
+        {% else %}
+        <span className="block max-w-[250px] truncate" title={String(currentItem.{{ field.name }} ?? '-')}>
+        {String(currentItem.{{ field.name }} ?? '-')}</span>
+        {% endif %}
+    </div>
+</div>
+)
+{%- endmacro %}
+{% macro detail_edit_field(field) -%}
+hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+<div className="space-y-2">
+    <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
+    {% if field.ui_type == 'bool' %}
+    <div className="flex h-10 items-center justify-end rounded-md border px-3">
+        <Controller control={editControl} name="{{ field.name }}" defaultValue={ {{ 'true' if field.default else 'false' }} } render={({ field: { onChange, value } }) => (
+            <Switch checked={value} onCheckedChange={onChange} id="edit-{{ field.name }}" />
+        )} />
+    </div>
+    {% elif field.ui_type == 'image' %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <ImageUpload value={value} onChange={onChange} />
+    )} />
+    {% elif field.ui_type == 'images' %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <ImagesUpload id="edit-{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
+    )} />
+    {% elif field.ui_type == 'file' %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <FileUpload value={value} onChange={onChange} allowDownload={ {{ "true" if field.allow_download else "false" }} } />
+    )} />
+    {% elif field.ui_type == 'video_stream' %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
+    )} />
+    {% elif field.is_enum and field.is_multi_select %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <SearchableSelect value={value || []} onValueChange={onChange} multiple={true}
+            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+            searchPlaceholder={`${t('common.search')}...`}
+            loadOptions={async () => {{ field.enum_values | tojson }}.map((v: string) => ({ label: t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v), value: v }))} />
+    )} />
+    {% elif field.is_enum %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => {
+        {% if model.module_name == "user" and model.name == "User" and field.name == "role" %}
+        const filteredValues = userRole === 'developer' ? {{ field.enum_values | tojson }} : ({{ field.enum_values | tojson }} as string[]).filter(v => v !== 'developer');
+        {% else %}
+        const filteredValues = {{ field.enum_values | tojson }};
+        {% endif %}
+        return <Select onValueChange={onChange} defaultValue={value}>
+            <SelectTrigger><SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} /></SelectTrigger>
+            <SelectContent>{filteredValues.map((enumVal: string) => <SelectItem key={enumVal} value={enumVal}>{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${enumVal}`, enumVal)}</SelectItem>)}</SelectContent>
+        </Select>;
+    }} />
+    {% elif field.ui_type == 'time' %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <TimePicker value={value} onChange={onChange} placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
+    )} />
+    {% elif field.ui_type == 'location' %}
+    <Controller control={editControl} name="{{ field.name }}" defaultValue={null} render={({ field: { onChange, value } }) => (
+        <LocationInput value={value} onChange={onChange} />
+    )} />
+    {% elif field.ui_type == 'json' %}
+    <Controller control={editControl} name="{{ field.name }}" defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} } render={({ field: { onChange, value } }) => (
+        {% if field.json_model_schema %}
+        <JsonModelEditor schema={ {{ field.json_model_schema | tojson }} } value={value} onChange={onChange} />
+        {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
+        <JsonModelDictEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
+        {% elif field.json_item_kind %}
+        <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
+        {% elif field.json_item_schema %}
+        <JsonModelArrayEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange}{% if model.property_config_meta and field.name == model.property_config_meta.field_name %} canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')} canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}{% endif %} />
+        {% else %}
+        <JsonInput value={value} onChange={onChange} jsonKind="{{ field.json_kind or 'object' }}" placeholder={ {% if field.json_kind == 'array' %}"[\\n  \\n]"{% else %}"{\\n  \\n}"{% endif %} } />
+        {% endif %}
+    )} />
+    {% else %}
+    <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })} />
+    {% endif %}
+</div>
+)
+{%- endmacro %}
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Braces, Eye, Loader2{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
@@ -19,6 +157,15 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/pop
 import { Input } from '../../components/ui/input';
 import { TimePicker } from '../../components/ui/time-picker';
 import { SearchableSelect } from '../../components/ui/searchable-select';
+{% set json_detail = namespace(has_model_schema=false) %}
+{% for field in model.fields %}
+{% if field.json_model_schema %}
+{% set json_detail.has_model_schema = true %}
+{% endif %}
+{% endfor %}
+{% if json_detail.has_model_schema %}
+import { JsonModelDetail } from '../../components/ui/json-model-editor';
+{% endif %}
 {% if model.page_edit %}
 import { useForm, Controller } from 'react-hook-form';
 import { JsonInput } from '../../components/ui/json-input';
@@ -719,6 +866,82 @@ const {{ model.name }}DetailPage: React.FC = () => {
         );
     }
 
+    // The layout is validated and normalized by the generator.  Keeping the
+    // renderer data-driven lets a model author arrange fields and cards without
+    // owning a generated page implementation.
+    const detailLayout = {{ model.detail_layout | default([]) | tojson }} as any[];
+    const hasDetailLayout = detailLayout.length > 0;
+    const rowClasses: Record<number, string> = {
+        1: 'grid grid-cols-1 gap-4',
+        2: 'grid grid-cols-1 gap-4 md:grid-cols-2',
+        3: 'grid grid-cols-1 gap-4 md:grid-cols-3',
+        4: 'grid grid-cols-1 gap-4 md:grid-cols-4',
+    };
+    const spanClasses: Record<number, string> = {
+        1: '',
+        2: 'md:col-span-2',
+        3: 'md:col-span-3',
+        4: 'md:col-span-4',
+    };
+    const renderDetailField = (fieldName: string): React.ReactNode => {
+        switch (fieldName) {
+            {% for field in model.fields %}
+            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'r' in field.permissions %}
+            case '{{ field.name }}':
+                return ({{ detail_read_field(field) }});
+            {% endif %}
+            {% endfor %}
+            default:
+                return null;
+            }
+    };
+    {% if model.page_edit %}
+    const renderDetailEditField = (fieldName: string): React.ReactNode => {
+        switch (fieldName) {
+            {% for field in model.fields %}
+            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}
+            case '{{ field.name }}':
+                return ({{ detail_edit_field(field) }});
+            {% endif %}
+            {% endfor %}
+            default:
+                return null;
+        }
+    };
+    {% endif %}
+    const renderDetailLayoutNode = (node: any, key: string{% if model.page_edit %}, editing = false{% endif %}): React.ReactNode => {
+        if (node.kind === 'field') {
+            const content = {% if model.page_edit %}editing ? renderDetailEditField(node.field) : {% endif %}renderDetailField(node.field);
+            return content ? <div key={key} className={`min-w-0 ${spanClasses[node.span] || ''}`}>{content}</div> : null;
+        }
+        if (node.kind === 'row') {
+            const items = node.items
+                .map((item: any, index: number) => renderDetailLayoutNode(item, `${key}-${index}`{% if model.page_edit %}, editing{% endif %}))
+                .filter(Boolean);
+            if (!items.length) return null;
+            return (
+                <div key={key} className={rowClasses[node.columns] || rowClasses[1]}>
+                    {items}
+                </div>
+            );
+        }
+        if (node.kind === 'section') {
+            const items = node.items
+                .map((item: any, index: number) => renderDetailLayoutNode(item, `${key}-${index}`{% if model.page_edit %}, editing{% endif %}))
+                .filter(Boolean);
+            if (!items.length) return null;
+            return (
+                <Card key={key} className={spanClasses[node.span] || ''}>
+                    <CardHeader><CardTitle>{node.title}</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                        {items}
+                    </CardContent>
+                </Card>
+            );
+        }
+        return null;
+    };
+
     return (
         <div
             className="{{ page_shell_class | default('space-y-6') }}{% if model.has_embedded_reverse %} !flex !h-full !min-h-0 !flex-col !gap-4 !space-y-0{% endif %}"
@@ -907,7 +1130,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             {% endif %}
 
             <div className="{{ detail_grid_class | default('grid grid-cols-1 gap-6') }}{% if model.has_embedded_reverse %} !flex-1 !min-h-0{% endif %}" data-page-region="detail-grid">
-                {activeTab === 'detail' && (
+                {activeTab === 'detail' && !hasDetailLayout && (
                 <Card>
                     <CardHeader>
                         <CardTitle>{% if model.page_edit %}{isEditing ? t('common.edit') + ' ' : ''}{% endif %}{t('common.basic_information')}</CardTitle>
@@ -917,17 +1140,19 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <form id="detail-edit-form" className="space-y-4">
                             {% for field in model.fields %}
                             {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
-                            <div className="{% if field.ui_type == 'bool' %}flex min-h-14 items-center justify-between gap-4 rounded-md border px-4 py-3{% else %}space-y-2{% endif %}">
-                                <Label htmlFor="edit-{{ field.name }}"{% if field.ui_type == 'bool' %} className="cursor-pointer"{% endif %}>{t('{{ field.label_key }}')}</Label>
+                            <div className="space-y-2">
+                                <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
                                 {% if field.ui_type == 'bool' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    defaultValue={ {{ 'true' if field.default else 'false' }} }
-                                    render={({ field: { onChange, value } }) => (
-                                        <Switch checked={value} onCheckedChange={onChange} id="edit-{{ field.name }}" />
-                                    )}
-                                />
+                                <div className="flex h-10 items-center justify-end rounded-md border px-3">
+                                    <Controller
+                                        control={editControl}
+                                        name="{{ field.name }}"
+                                        defaultValue={ {{ 'true' if field.default else 'false' }} }
+                                        render={({ field: { onChange, value } }) => (
+                                            <Switch checked={value} onCheckedChange={onChange} id="edit-{{ field.name }}" />
+                                        )}
+                                    />
+                                </div>
                                 {% elif field.ui_type == 'image' %}
                                 <Controller
                                     control={editControl}
@@ -1277,6 +1502,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% if model.page_edit %}</>)}{% endif %}
                     </CardContent>
                 </Card>
+                )}
+
+                {activeTab === 'detail' && hasDetailLayout && (
+                    {% if model.page_edit %}
+                    isEditing ? (
+                        <form id="detail-edit-form" className="space-y-4">
+                            {detailLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`, true))}
+                        </form>
+                    ) : (
+                        <>{detailLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`))}</>
+                    )
+                    {% else %}
+                    <>{detailLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`))}</>
+                    {% endif %}
                 )}
 
                 {% if model.foreign_keys %}

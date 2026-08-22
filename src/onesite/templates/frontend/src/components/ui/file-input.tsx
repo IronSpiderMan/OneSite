@@ -11,7 +11,7 @@ interface FileInputProps {
 }
 
 export const FileInput: React.FC<FileInputProps> = ({
-  accept = '.csv',
+  accept,
   onChange,
   value,
   className,

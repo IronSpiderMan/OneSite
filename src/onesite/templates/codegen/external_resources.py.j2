@@ -292,11 +292,11 @@ class ExternalResourceManager:
         self.call_timeout_seconds = call_timeout_seconds
         self.max_attempts = max_attempts
         self._scheduler: AsyncIOScheduler | None = None
+        self._bootstrap_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if self._scheduler is not None and self._scheduler.running:
             return
-        await bootstrap_external_resource_bindings()
         self._scheduler = AsyncIOScheduler(timezone=timezone.utc)
         self._scheduler.add_job(self.process_pending, "interval", seconds=self.delivery_seconds, id="onesite-external-resource-delivery", replace_existing=True, coalesce=True, max_instances=1)
         # A full observation invokes provider I/O for every binding.  For
@@ -307,8 +307,25 @@ class ExternalResourceManager:
         # Provider I/O must not delay FastAPI lifespan startup.  A single
         # external-resource task can take minutes for large point sets; the
         # scheduler owns delivery after the application is ready to serve.
+        self._bootstrap_task = asyncio.create_task(
+            self._bootstrap_bindings(),
+            name="onesite-external-resource-bootstrap",
+        )
+
+    async def _bootstrap_bindings(self) -> None:
+        """Backfill existing bindings without delaying FastAPI startup."""
+        try:
+            await bootstrap_external_resource_bindings()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            logger.exception("Failed to bootstrap external resource bindings")
 
     async def stop(self) -> None:
+        bootstrap_task, self._bootstrap_task = self._bootstrap_task, None
+        if bootstrap_task is not None and not bootstrap_task.done():
+            bootstrap_task.cancel()
+            await asyncio.gather(bootstrap_task, return_exceptions=True)
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None

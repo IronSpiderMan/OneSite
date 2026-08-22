@@ -33,9 +33,20 @@ export type JsonFieldSchema = {
 
 export type JsonForeignKeyLoaders = Record<string, (query: string) => Promise<{ label: string; value: string | number }[]>>
 
+export type JsonLayoutNode = {
+  kind: "field" | "row" | "section"
+  field?: string
+  section?: string
+  title?: string
+  span?: number
+  columns?: number
+  items?: JsonLayoutNode[]
+}
+
 export type JsonModelSchema = {
   name: string
   fields: JsonFieldSchema[]
+  layout?: JsonLayoutNode[]
 }
 
 const matchesCondition = (conditions: JsonFieldSchema["visibleWhen"], value: Record<string, any>) => {
@@ -152,7 +163,8 @@ const JsonModelForm: React.FC<{
   onChange: (v: any) => void
   path?: string[]
   foreignKeyLoaders?: JsonForeignKeyLoaders
-}> = ({ schema, value, onChange, path = [], foreignKeyLoaders }) => {
+  layoutDisabled?: boolean
+}> = ({ schema, value, onChange, path = [], foreignKeyLoaders, layoutDisabled = false }) => {
   const { t } = useTranslation()
   const [collapsedArrayItems, setCollapsedArrayItems] = React.useState<Set<string>>(() => new Set())
   const v = value && typeof value === "object" && !Array.isArray(value) ? value : {}
@@ -165,6 +177,40 @@ const JsonModelForm: React.FC<{
       else next.add(itemId)
       return next
     })
+  }
+
+  const rowClasses: Record<number, string> = {
+    1: "grid grid-cols-1 gap-4",
+    2: "grid grid-cols-1 gap-4 md:grid-cols-2",
+    3: "grid grid-cols-1 gap-4 md:grid-cols-3",
+    4: "grid grid-cols-1 gap-4 md:grid-cols-4",
+  }
+  const spanClasses: Record<number, string> = {
+    1: "", 2: "md:col-span-2", 3: "md:col-span-3", 4: "md:col-span-4",
+  }
+  const renderLayoutNode = (node: JsonLayoutNode, key: string): React.ReactNode => {
+    if (node.kind === "field") {
+      const field = schema.fields.find((candidate) => candidate.name === node.field)
+      if (!field) return null
+      return (
+        <div key={key} className={`min-w-0 ${spanClasses[node.span ?? 1] || ""}`}>
+          <JsonModelForm schema={{ ...schema, fields: [field] }} value={v} onChange={emitChange} path={path} foreignKeyLoaders={foreignKeyLoaders} layoutDisabled />
+        </div>
+      )
+    }
+    const items = (node.items ?? []).map((item, index) => renderLayoutNode(item, `${key}-${index}`)).filter(Boolean)
+    if (!items.length) return null
+    if (node.kind === "row") return <div key={key} className={rowClasses[node.columns ?? 1] || rowClasses[1]}>{items}</div>
+    return (
+      <fieldset key={key} className={`min-w-0 rounded-md border p-3 ${spanClasses[node.span ?? 1] || ""}`}>
+        <legend className="px-1 text-sm font-semibold">{node.title}</legend>
+        <div className="space-y-4">{items}</div>
+      </fieldset>
+    )
+  }
+
+  if (!layoutDisabled && schema.layout?.length) {
+    return <div className="space-y-4">{schema.layout.map((node, index) => renderLayoutNode(node, `layout-${index}`))}</div>
   }
 
   return (
@@ -379,10 +425,69 @@ export const JsonModelEditor: React.FC<{
     <div className={cn("space-y-3", className)}>
       <EditorModeSwitch mode={mode} onChange={setMode} />
       {mode === "ui" ? (
-        <JsonModelForm schema={schema} value={objValue} onChange={onChange} foreignKeyLoaders={foreignKeyLoaders} />
+        <JsonModelForm schema={schema} value={objValue} onChange={(next) => onChange(normalizeJsonModelValue(schema, next))} foreignKeyLoaders={foreignKeyLoaders} />
       ) : (
       <JsonInput value={objValue} onChange={(next) => onChange(normalizeJsonModelValue(schema, next))} jsonKind="object" />
       )}
+    </div>
+  )
+}
+
+/** Read-only renderer for JSON submodels on generated detail pages. */
+export const JsonModelDetail: React.FC<{
+  schema: JsonModelSchema
+  value: any
+  className?: string
+}> = ({ schema, value, className }) => {
+  const { t } = useTranslation()
+  const data = value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  const rowClasses: Record<number, string> = {
+    1: "grid grid-cols-1 gap-4",
+    2: "grid grid-cols-1 gap-4 md:grid-cols-2",
+    3: "grid grid-cols-1 gap-4 md:grid-cols-3",
+    4: "grid grid-cols-1 gap-4 md:grid-cols-4",
+  }
+  const spanClasses: Record<number, string> = {
+    1: "", 2: "md:col-span-2", 3: "md:col-span-3", 4: "md:col-span-4",
+  }
+  const renderField = (field: JsonFieldSchema, key: string): React.ReactNode => {
+    if (!field.name || !matchesCondition(field.visibleWhen, data)) return null
+    const fieldValue = data[field.name]
+    let content: React.ReactNode
+    if (field.kind === "bool") content = fieldValue ? t("common.yes", "Yes") : t("common.no", "No")
+    else if (field.kind === "model" && field.model) content = <JsonModelDetail schema={field.model} value={fieldValue} />
+    else if (field.kind === "array" || (fieldValue && typeof fieldValue === "object")) {
+      content = <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">{JSON.stringify(fieldValue ?? (field.kind === "array" ? [] : {}), null, 2)}</pre>
+    } else content = String(fieldValue ?? "-")
+    return (
+      <div key={key} className="space-y-1">
+        <Label className="text-muted-foreground">{t(field.labelKey || field.name)}</Label>
+        <div className="font-medium">{content}</div>
+      </div>
+    )
+  }
+  const renderLayoutNode = (node: JsonLayoutNode, key: string): React.ReactNode => {
+    if (node.kind === "field") {
+      const field = schema.fields.find((candidate) => candidate.name === node.field)
+      const content = field ? renderField(field, `${key}-field`) : null
+      return content ? <div key={key} className={`min-w-0 ${spanClasses[node.span ?? 1] || ""}`}>{content}</div> : null
+    }
+    const items = (node.items ?? []).map((item, index) => renderLayoutNode(item, `${key}-${index}`)).filter(Boolean)
+    if (!items.length) return null
+    if (node.kind === "row") return <div key={key} className={rowClasses[node.columns ?? 1] || rowClasses[1]}>{items}</div>
+    return (
+      <fieldset key={key} className={`min-w-0 rounded-md border p-3 ${spanClasses[node.span ?? 1] || ""}`}>
+        <legend className="px-1 text-sm font-semibold">{node.title}</legend>
+        <div className="space-y-4">{items}</div>
+      </fieldset>
+    )
+  }
+
+  return (
+    <div className={cn("space-y-4", className)}>
+      {schema.layout?.length
+        ? schema.layout.map((node, index) => renderLayoutNode(node, `detail-layout-${index}`))
+        : schema.fields.map((field) => renderField(field, field.name || "field"))}
     </div>
   )
 }
