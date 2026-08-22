@@ -52,14 +52,18 @@ class KafkaManager:
     ) -> None:
         retry_delay = 1
         while self._started:
-            consumer = AIOKafkaConsumer(
-                topic,
-                bootstrap_servers=settings.KAFKA_BROKERS,
-                group_id=group_id,
-                enable_auto_commit=False,
-                auto_offset_reset="latest",
-            )
+            consumer = None
             try:
+                # Keep consumer construction in the retry boundary as well.  Some
+                # aiokafka validation/connection failures can be raised before
+                # ``consumer.start()`` is awaited.
+                consumer = AIOKafkaConsumer(
+                    topic,
+                    bootstrap_servers=settings.KAFKA_BROKERS,
+                    group_id=group_id,
+                    enable_auto_commit=False,
+                    auto_offset_reset="latest",
+                )
                 await consumer.start()
                 retry_delay = 1
                 logger.info(
@@ -73,18 +77,21 @@ class KafkaManager:
                     await consumer.commit()
             except asyncio.CancelledError:
                 raise
-            except Exception:
-                logger.exception(
-                    "Kafka consumer failed: topic=%s group_id=%s; retrying in %ss",
+            except Exception as exc:
+                logger.warning(
+                    "Failed to connect Kafka consumer: topic=%s group_id=%s; "
+                    "backend will continue and retry in %ss: %s",
                     topic,
                     group_id,
                     retry_delay,
+                    exc,
                 )
             finally:
-                try:
-                    await consumer.stop()
-                except Exception:
-                    logger.exception("Failed to stop Kafka consumer cleanly")
+                if consumer is not None:
+                    try:
+                        await consumer.stop()
+                    except Exception:
+                        logger.exception("Failed to stop Kafka consumer cleanly")
 
             if self._started:
                 await asyncio.sleep(retry_delay)
