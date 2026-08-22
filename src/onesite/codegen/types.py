@@ -65,6 +65,9 @@ class FieldDefinition:
     json_kind: str | None = None
     json_model_schema: dict | None = None
     json_item_schema: dict | None = None
+    # Structured JSON schema carrying conditional child-field rules used by
+    # generated API validators.  ``None`` means no conditional rules exist.
+    json_condition_schema: dict | None = None
     json_item_kind: str | None = None
     json_fixed_keys: list[str] | None = None
     json_lock_keys: bool = False

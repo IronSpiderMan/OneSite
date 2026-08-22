@@ -55,6 +55,73 @@ def _json_field_kind_from_annotation(annotation: Any) -> str:
     return "any"
 
 
+def _get_field_site_props(field: Any) -> Dict[str, Any]:
+    """Return OneSite field metadata from SQLModel or Pydantic field info.
+
+    JSON child models are usually ``SQLModel(table=False)`` instances.  They
+    do not have a SQL column of their own, but SQLModel still preserves
+    ``sa_column_kwargs`` on their FieldInfo, making it the most consistent
+    place for nested JSON UI metadata.
+    """
+    sa_column_kwargs = getattr(field, "sa_column_kwargs", {})
+    if sa_column_kwargs is PydanticUndefined or not isinstance(sa_column_kwargs, dict):
+        sa_column_kwargs = {}
+    info = sa_column_kwargs.get("info", {})
+    if not isinstance(info, dict):
+        info = {}
+    site_props = info.get("site_props", {})
+    if not isinstance(site_props, dict):
+        site_props = {}
+    if "group" in info and not site_props.get("group"):
+        site_props = {**site_props, "group": info["group"]}
+
+    if site_props:
+        return site_props
+
+    for extra_name in ("json_schema_extra", "schema_extra"):
+        extra = getattr(field, extra_name, None)
+        if extra is PydanticUndefined or not isinstance(extra, dict):
+            continue
+        props = extra.get("site_props", {})
+        if isinstance(props, dict) and props:
+            return props
+
+    sa_column = getattr(field, "sa_column", None)
+    if sa_column is not None and sa_column is not PydanticUndefined:
+        column_info = getattr(sa_column, "info", {})
+        if isinstance(column_info, dict):
+            props = column_info.get("site_props", {})
+            if isinstance(props, dict):
+                return props
+    return {}
+
+
+def _normalize_json_condition(
+    value: Any, *, model_name: str, field_name: str, rule_name: str
+) -> Dict[str, List[Any]] | None:
+    """Validate and normalize a JSON child-field condition declaration."""
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not value:
+        raise ValueError(
+            f"{model_name}.{field_name} site_props.{rule_name} must be a non-empty object"
+        )
+    normalized: Dict[str, List[Any]] = {}
+    for controller, expected in value.items():
+        if not isinstance(controller, str) or not controller:
+            raise ValueError(
+                f"{model_name}.{field_name} site_props.{rule_name} keys must be non-empty strings"
+            )
+        values = expected if isinstance(expected, (list, tuple, set)) else [expected]
+        if not values or any(isinstance(item, (dict, list, tuple, set)) for item in values):
+            raise ValueError(
+                f"{model_name}.{field_name} site_props.{rule_name}.{controller} "
+                "must be a scalar or a non-empty list of scalars"
+            )
+        normalized[controller] = list(values)
+    return normalized
+
+
 def _build_json_model_schema(
     model: type[BaseModel], visited: Set[type] | None = None, depth: int = 0
 ) -> Dict[str, Any]:
@@ -70,6 +137,33 @@ def _build_json_model_schema(
         ann = f.annotation
         kind = _json_field_kind_from_annotation(ann)
         field_schema: Dict[str, Any] = {"name": fname, "kind": kind}
+        site_props = _get_field_site_props(f)
+        visible_when = _normalize_json_condition(
+            site_props.get("visible_when"),
+            model_name=model.__name__,
+            field_name=fname,
+            rule_name="visible_when",
+        )
+        required_when = _normalize_json_condition(
+            site_props.get("required_when"),
+            model_name=model.__name__,
+            field_name=fname,
+            rule_name="required_when",
+        )
+        if visible_when is not None:
+            field_schema["visibleWhen"] = visible_when
+        if required_when is not None:
+            field_schema["requiredWhen"] = required_when
+        if "clear_when_hidden" in site_props:
+            clear_when_hidden = site_props["clear_when_hidden"]
+            if not isinstance(clear_when_hidden, bool):
+                raise ValueError(
+                    f"{model.__name__}.{fname} site_props.clear_when_hidden must be a boolean"
+                )
+            field_schema["clearWhenHidden"] = clear_when_hidden
+        default = getattr(f, "default", PydanticUndefined)
+        if default is not PydanticUndefined and default is not None:
+            field_schema["default"] = getattr(default, "value", default)
         if kind == "enum" and inspect.isclass(ann) and issubclass(ann, Enum):
             field_schema["enumValues"] = [e.value for e in ann]
         elif kind == "model" and inspect.isclass(ann) and _is_pydantic_model(ann):
@@ -87,6 +181,21 @@ def _build_json_model_schema(
             field_schema["item"] = item_schema
         fields.append(field_schema)
     return {"name": model.__name__, "fields": fields}
+
+
+def _json_schema_has_conditions(schema: Dict[str, Any] | None) -> bool:
+    """Whether a JSON editor schema includes any conditional child field."""
+    if not schema:
+        return False
+    for field in schema.get("fields", []):
+        if field.get("visibleWhen") or field.get("requiredWhen"):
+            return True
+        if _json_schema_has_conditions(field.get("model")):
+            return True
+        item = field.get("item")
+        if isinstance(item, dict) and _json_schema_has_conditions(item.get("model")):
+            return True
+    return False
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -821,6 +930,10 @@ def get_model_fields(
 
         ui_type = "json" if json_kind else type_str
 
+        json_condition_schema = json_model_schema or json_item_schema
+        if not _json_schema_has_conditions(json_condition_schema):
+            json_condition_schema = None
+
         if is_multi_select:
             ui_type = "multi_select"
         elif site_props.get("component") == "textarea":
@@ -997,6 +1110,7 @@ def get_model_fields(
                 json_kind=json_kind,
                 json_model_schema=json_model_schema,
                 json_item_schema=json_item_schema,
+                json_condition_schema=json_condition_schema,
                 json_item_kind=json_item_kind,
                 json_fixed_keys=json_fixed_keys,
                 json_lock_keys=json_lock_keys,

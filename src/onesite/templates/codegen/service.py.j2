@@ -1,4 +1,5 @@
 import logging
+import os
 from typing import Optional, List, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, col
@@ -10,6 +11,7 @@ from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
 from app.core.datetime import SYSTEM_TIMEZONE, to_utc
+from app.core.config import settings
 {% if model.data_reports %}
 from app.core.reports import get_report_options as build_report_options, query_report as execute_report
 {% if model.timescaledb_entity_model and model.timescaledb_entity_source_module %}
@@ -725,11 +727,10 @@ class {{ model.name }}Service:
         with semicolons.
         """
         import csv
-        import os
         from datetime import datetime, time
         from sqlmodel import select
         
-        upload_dir = os.environ.get("UPLOAD_DIR", "uploads")
+        upload_dir = settings.UPLOAD_DIR
         export_dir = os.path.join(upload_dir, "exports")
         os.makedirs(export_dir, exist_ok=True)
         
