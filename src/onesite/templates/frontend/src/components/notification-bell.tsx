@@ -137,9 +137,9 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
             if (payload?.type === 'export_complete') {
               if (payload.download_url) {
                 window.open(payload.download_url, '_blank');
-                toast.success(payload.message || t('common.export_complete', 'Export completed'));
+                toast.success(t('common.export_complete', 'Export completed'));
               } else if (payload.error) {
-                toast.error(payload.error);
+                toast.error(t('common.export_failed', 'Export failed'));
               }
               return;
             }
