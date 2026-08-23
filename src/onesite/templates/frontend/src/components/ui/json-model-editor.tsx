@@ -457,7 +457,7 @@ export const JsonModelDetail: React.FC<{
     if (field.kind === "bool") content = fieldValue ? t("common.yes", "Yes") : t("common.no", "No")
     else if (field.kind === "model" && field.model) content = <JsonModelDetail schema={field.model} value={fieldValue} />
     else if (field.kind === "array" || (fieldValue && typeof fieldValue === "object")) {
-      content = <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">{JSON.stringify(fieldValue ?? (field.kind === "array" ? [] : {}), null, 2)}</pre>
+      content = <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">{JSON.stringify(fieldValue ?? (field.kind === "array" ? [] : {}), null, 2)}</pre>
     } else content = String(fieldValue ?? "-")
     return (
       <div key={key} className="space-y-1">

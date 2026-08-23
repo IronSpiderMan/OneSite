@@ -46,9 +46,12 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
             {currentItem.{{ field.name }}?.latitude != null && currentItem.{{ field.name }}?.longitude != null ? `${currentItem.{{ field.name }}.latitude}, ${currentItem.{{ field.name }}.longitude}` : '-'}
         </span>
         {% elif field.ui_type == 'json' and field.json_model_schema %}
-        <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} } value={currentItem.{{ field.name }}} />
+        <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} }
+            value={currentItem.{{ field.name }}}
+            className="max-h-80 overflow-auto overscroll-contain rounded-md border bg-muted/20 p-3"
+        />
         {% elif field.ui_type == 'json' %}
-        <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+        <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
             {currentItem.{{ field.name }} !== undefined && currentItem.{{ field.name }} !== null ? JSON.stringify(currentItem.{{ field.name }}, null, 2) : '-'}
         </pre>
         {% elif field.ui_type == 'datetime' %}
@@ -138,7 +141,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
 {%- endmacro %}
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Braces, Eye, Loader2{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
+import { ArrowLeft, Braces, Eye, Loader2{% if model.reverse_timeseries %}, Search{% endif %}{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
@@ -374,8 +377,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% for ts in model.reverse_timeseries %}
     const [{{ ts.model_name }}Realtime, set{{ ts.model_name }}Realtime] = useState<any[]>([]);
     const [{{ ts.model_name }}Properties, set{{ ts.model_name }}Properties] = useState<Record<string, any>>({});
+    const [{{ ts.model_name }}RealtimeSearch, set{{ ts.model_name }}RealtimeSearch] = useState('');
+    const [{{ ts.model_name }}RealtimeDensity, set{{ ts.model_name }}RealtimeDensity] = useState<'compact' | 'comfortable'>('compact');
     const [{{ ts.model_name }}History, set{{ ts.model_name }}History] = useState<any[]>([]);
     const [{{ ts.model_name }}HistoryLoading, set{{ ts.model_name }}HistoryLoading] = useState(false);
+    const [{{ ts.model_name }}HistorySearch, set{{ ts.model_name }}HistorySearch] = useState('');
+    const [{{ ts.model_name }}HistoryDensity, set{{ ts.model_name }}HistoryDensity] = useState<'compact' | 'comfortable'>('compact');
+    const [{{ ts.model_name }}HistoryChartLimit, set{{ ts.model_name }}HistoryChartLimit] = useState(6);
+    const {{ ts.model_name }}HistorySelectionInitialized = useRef(false);
     const [tsHistoryAutoRefresh, setTsHistoryAutoRefresh] = useState(true);
     const [tsHistoryLastRefreshed, setTsHistoryLastRefreshed] = useState<Date | null>(null);
     const [{{ ts.model_name }}SelectedMetrics, set{{ ts.model_name }}SelectedMetrics] = useState<string[]>([]);
@@ -792,6 +801,16 @@ const {{ model.name }}DetailPage: React.FC = () => {
     };
 
     {% if ts.metric_field %}
+    const {{ ts.model_name }}FilteredRealtime = React.useMemo(() => {
+        const query = {{ ts.model_name }}RealtimeSearch.trim().toLocaleLowerCase();
+        if (!query) return {{ ts.model_name }}Realtime;
+        return {{ ts.model_name }}Realtime.filter((row: any) => {
+            const metric = String(row.{{ ts.metric_field }} ?? '');
+            const meta = {{ ts.model_name }}Properties[row.{{ ts.metric_field }}] || {};
+            return `${meta.display_name || ''} ${metric}`.toLocaleLowerCase().includes(query);
+        });
+    }, [{{ ts.model_name }}Realtime, {{ ts.model_name }}Properties, {{ ts.model_name }}RealtimeSearch]);
+
     const {{ ts.model_name }}Metrics = React.useMemo(() => {
         const set = new Set<string>();
         {{ ts.model_name }}History.forEach((row: any) => {
@@ -800,11 +819,29 @@ const {{ model.name }}DetailPage: React.FC = () => {
         return Array.from(set);
     }, [{{ ts.model_name }}History]);
 
+    const {{ ts.model_name }}FilteredMetrics = React.useMemo(() => {
+        const query = {{ ts.model_name }}HistorySearch.trim().toLocaleLowerCase();
+        if (!query) return {{ ts.model_name }}Metrics;
+        return {{ ts.model_name }}Metrics.filter((metric: string) => {
+            const meta = {{ ts.model_name }}Properties[metric] || {};
+            return `${meta.display_name || ''} ${metric} ${meta.unit || ''}`.toLocaleLowerCase().includes(query);
+        });
+    }, [{{ ts.model_name }}Metrics, {{ ts.model_name }}Properties, {{ ts.model_name }}HistorySearch]);
+
     useEffect(() => {
-        if ({{ ts.model_name }}Metrics.length > 0 && {{ ts.model_name }}SelectedMetrics.length === 0) {
+        if ({{ ts.model_name }}Metrics.length > 0 && !{{ ts.model_name }}HistorySelectionInitialized.current) {
             set{{ ts.model_name }}SelectedMetrics({{ ts.model_name }}Metrics);
+            {{ ts.model_name }}HistorySelectionInitialized.current = true;
         }
     }, [{{ ts.model_name }}Metrics.length]);
+
+    useEffect(() => {
+        set{{ ts.model_name }}History([]);
+        set{{ ts.model_name }}SelectedMetrics([]);
+        set{{ ts.model_name }}HistorySearch('');
+        set{{ ts.model_name }}HistoryChartLimit(6);
+        {{ ts.model_name }}HistorySelectionInitialized.current = false;
+    }, [id]);
 
     const {{ ts.model_name }}ChartData = React.useMemo(() => {
         let filtered = {{ ts.model_name }}History;
@@ -2293,13 +2330,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {activeTab === 'detail' && (<>
                 {/* Timeseries Realtime */}
                 <Card className="col-span-full">
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <CardTitle>{t('models.{{ ts.module_name }}.name')} &mdash; Realtime</CardTitle>
-                            <div className="flex items-center gap-3">
+                    <CardHeader className="pb-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <CardTitle className="truncate">{t('models.{{ ts.module_name }}.name')} &mdash; {t('common.realtime', 'Realtime')}</CardTitle>
+                                <Badge variant="secondary" className="shrink-0 tabular-nums">
+                                    { {{ ts.model_name }}Realtime.length }
+                                </Badge>
+                            </div>
+                            <div className="flex shrink-0 items-center gap-3">
                                 <div className="flex items-center gap-2">
                                     {tsAutoRefresh && <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
-                                    <span className="text-sm text-muted-foreground">Auto</span>
+                                    <span className="text-sm text-muted-foreground">{t('common.auto_refresh', 'Auto refresh')}</span>
                                     <Switch checked={tsAutoRefresh} onCheckedChange={setTsAutoRefresh} />
                                 </div>
                                 {tsLastRefreshed && (
@@ -2314,43 +2356,78 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% if ts.timescaledb_model_table and ts.timescaledb_model_class %}
                         {# Card-style display with properties enrichment #}
                         {% if ts.metric_field %}
-                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-                            { {{ ts.model_name }}Realtime.length > 0 ? (
-                                {{ ts.model_name }}Realtime.map((row, idx) => {
+                        <div className="mb-3 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="relative w-full sm:max-w-xs">
+                                <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                <Input
+                                    value={ {{ ts.model_name }}RealtimeSearch }
+                                    onChange={(event) => set{{ ts.model_name }}RealtimeSearch(event.target.value)}
+                                    placeholder={t('common.search', 'Search point')}
+                                    className="h-8 pl-8"
+                                />
+                            </div>
+                            <div className="flex items-center justify-between gap-2 sm:justify-end">
+                                <span className="text-xs text-muted-foreground tabular-nums">
+                                    { {{ ts.model_name }}FilteredRealtime.length } / { {{ ts.model_name }}Realtime.length }
+                                </span>
+                                <Select
+                                    value={ {{ ts.model_name }}RealtimeDensity }
+                                    onValueChange={(value) => set{{ ts.model_name }}RealtimeDensity(value as 'compact' | 'comfortable')}
+                                >
+                                    <SelectTrigger className="h-8 w-[118px] text-xs">
+                                        <SelectValue />
+                                    </SelectTrigger>
+                                    <SelectContent>
+                                        <SelectItem value="compact">{t('common.compact', 'Compact')}</SelectItem>
+                                        <SelectItem value="comfortable">{t('common.comfortable', 'Comfortable')}</SelectItem>
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                        </div>
+                        <div className={
+                            {{ ts.model_name }}RealtimeDensity === 'compact'
+                                ? 'grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-4 2xl:grid-cols-5'
+                                : 'grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3'
+                        }>
+                            { {{ ts.model_name }}FilteredRealtime.length > 0 ? (
+                                {{ ts.model_name }}FilteredRealtime.map((row, idx) => {
                                     const meta = {{ ts.model_name }}Properties[row.{{ ts.metric_field }}] || {};
-                                    const rtColors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
+                                    const rawValue = row.value?.value;
+                                    const displayValue = (() => {
+                                        if (rawValue === null || rawValue === undefined) return '-';
+                                        if (typeof rawValue === 'object') return JSON.stringify(rawValue);
+                                        if (typeof rawValue === 'number') {
+                                            if (meta.data_type === 'float' && meta.decimals != null) return rawValue.toFixed(meta.decimals);
+                                            return new Intl.NumberFormat(undefined, { maximumFractionDigits: 6 }).format(rawValue);
+                                        }
+                                        return String(rawValue);
+                                    })();
                                     return (
-                                        <Card key={idx} className="relative overflow-hidden transition-shadow hover:shadow-md" style={{ "{{" }} borderLeft: `4px solid ${rtColors[idx % rtColors.length]}` {{ "}}" }}>
-                                            <div className="p-4">
-                                                <div className="flex items-center gap-2 mb-2">
-                                                    {meta.icon && <span className="text-lg">{meta.icon}</span>}
-                                                    <span className="font-medium text-sm text-muted-foreground">
-                                                        {meta.display_name || row.{{ ts.metric_field }}}
-                                                    </span>
-                                                </div>
-                                                <div className="flex items-baseline gap-1">
-                                                    <span className="text-3xl font-bold tracking-tight">
-                                                        {(() => {
-                                                            const v = row.value?.value;
-                                                            if (v === null || v === undefined) return '-';
-                                                            if (typeof v === 'object') return JSON.stringify(v);
-                                                            if (meta.data_type === 'float' && meta.decimals != null) return Number(v).toFixed(meta.decimals);
-                                                            return String(v);
-                                                        })()}
-                                                    </span>
-                                                    {meta.unit && <span className="text-sm font-medium text-muted-foreground">{meta.unit}</span>}
-                                                </div>
-                                                <div className="text-xs text-muted-foreground mt-2 flex items-center gap-1">
-                                                    <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />
-                                                    {formatDateTime(row.{{ ts.time_field }}, timeZone)}
-                                                </div>
+                                        <div key={row.{{ ts.metric_field }} ?? idx} className="group min-w-0 rounded-md border bg-card p-3 transition-colors hover:bg-muted/30">
+                                            <div className="flex min-w-0 items-center gap-2">
+                                                <span className="h-1.5 w-1.5 shrink-0 rounded-full bg-emerald-500" />
+                                                {meta.icon && <span className="shrink-0 text-sm">{meta.icon}</span>}
+                                                <span className="truncate text-xs font-medium text-muted-foreground" title={meta.display_name || row.{{ ts.metric_field }}}>
+                                                    {meta.display_name || row.{{ ts.metric_field }}}
+                                                </span>
                                             </div>
-                                        </Card>
+                                            <div className={ {{ ts.model_name }}RealtimeDensity === 'compact' ? 'mt-1.5 flex min-w-0 items-baseline gap-1' : 'mt-2 flex min-w-0 items-baseline gap-1' }>
+                                                <span className={ {{ ts.model_name }}RealtimeDensity === 'compact' ? 'truncate text-xl font-semibold tracking-tight tabular-nums' : 'truncate text-2xl font-semibold tracking-tight tabular-nums' } title={displayValue}>
+                                                    {displayValue}
+                                                </span>
+                                                {meta.unit && <span className="shrink-0 text-xs font-medium text-muted-foreground">{meta.unit}</span>}
+                                            </div>
+                                            <div className="mt-1 truncate text-[11px] text-muted-foreground tabular-nums" title={formatDateTime(row.{{ ts.time_field }}, timeZone)}>
+                                                {formatDateTime(row.{{ ts.time_field }}, timeZone)}
+                                            </div>
+                                        </div>
                                     );
                                 })
                             ) : (
-                                <div className="col-span-full h-24 flex items-center justify-center text-muted-foreground">
-                                    No realtime data.
+                                <div className="col-span-full flex h-24 items-center justify-center text-sm text-muted-foreground">
+                                    { {{ ts.model_name }}Realtime.length > 0
+                                        ? t('common.no_matching_point', 'No matching point')
+                                        : t('common.no_realtime_data', 'No realtime data')}
                                 </div>
                             )}
                         </div>
@@ -2423,13 +2500,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
                 {/* Timeseries History */}
                 <Card className="col-span-full">
-                    <CardHeader>
-                        <div className="flex items-center justify-between">
-                            <CardTitle>{t('models.{{ ts.module_name }}.name')} — History</CardTitle>
-                            <div className="flex items-center gap-3">
+                    <CardHeader className="pb-3">
+                        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                            <div className="flex min-w-0 items-center gap-2">
+                                <CardTitle className="truncate">{t('models.{{ ts.module_name }}.name')} — {t('common.history', 'History')}</CardTitle>
+                                {% if ts.metric_field %}
+                                <Badge variant="secondary" className="shrink-0 tabular-nums">
+                                    { {{ ts.model_name }}Metrics.length }
+                                </Badge>
+                                {% endif %}
+                            </div>
+                            <div className="flex shrink-0 items-center gap-3">
                                 <div className="flex items-center gap-2">
                                     {tsHistoryAutoRefresh && <span className="inline-block w-2 h-2 rounded-full bg-green-500 animate-pulse" />}
-                                    <span className="text-sm text-muted-foreground">Auto</span>
+                                    <span className="text-sm text-muted-foreground">{t('common.auto_refresh', 'Auto refresh')}</span>
                                     <Switch checked={tsHistoryAutoRefresh} onCheckedChange={setTsHistoryAutoRefresh} />
                                 </div>
                                 {tsHistoryLastRefreshed && (
@@ -2450,8 +2534,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         ) : {{ ts.model_name }}History.length > 0 ? (
                             <>
                                 {/* Time Range Selector */}
-                                <div className="flex items-center gap-2 mb-4 flex-wrap">
-                                    <span className="text-sm text-muted-foreground">Time Range:</span>
+                                <div className="mb-3 flex flex-wrap items-center gap-2">
+                                    <span className="text-sm text-muted-foreground">{t('common.time_range', 'Time range')}:</span>
                                     {['latest100', '1h', '6h', '24h', 'custom'].map(range => (
                                         <Button
                                             key={range}
@@ -2487,10 +2571,39 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     </div>
                                 )}
 
-                                {/* Metric Checkbox Selector */}
-                                <div className="flex flex-wrap items-center gap-2 mb-6 p-3 bg-muted/20 rounded-lg border">
-                                    <span className="text-sm text-muted-foreground mr-1">Metrics:</span>
-                                    { {{ ts.model_name }}Metrics.map((metric: string) => {
+                                {/* Compact metric selector */}
+                                <div className="mb-3 rounded-lg border bg-muted/20 p-3">
+                                    <div className="mb-2 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                                        <div className="relative w-full sm:max-w-xs">
+                                            <Search className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                                            <Input
+                                                value={ {{ ts.model_name }}HistorySearch }
+                                                onChange={(event) => set{{ ts.model_name }}HistorySearch(event.target.value)}
+                                                placeholder={t('common.search', 'Search metric')}
+                                                className="h-8 pl-8"
+                                            />
+                                        </div>
+                                        <div className="flex items-center gap-2">
+                                            <Button variant="outline" size="sm" className="h-8" onClick={() => set{{ ts.model_name }}SelectedMetrics({{ ts.model_name }}Metrics)}>
+                                                {t('common.select_all', 'Select all')}
+                                            </Button>
+                                            <Button variant="ghost" size="sm" className="h-8" onClick={() => set{{ ts.model_name }}SelectedMetrics([])}>
+                                                {t('common.clear', 'Clear')}
+                                            </Button>
+                                            <Select
+                                                value={ {{ ts.model_name }}HistoryDensity }
+                                                onValueChange={(value) => set{{ ts.model_name }}HistoryDensity(value as 'compact' | 'comfortable')}
+                                            >
+                                                <SelectTrigger className="h-8 w-[118px] text-xs"><SelectValue /></SelectTrigger>
+                                                <SelectContent>
+                                                    <SelectItem value="compact">{t('common.compact', 'Compact')}</SelectItem>
+                                                    <SelectItem value="comfortable">{t('common.comfortable', 'Comfortable')}</SelectItem>
+                                                </SelectContent>
+                                            </Select>
+                                        </div>
+                                    </div>
+                                    <div className="flex max-h-28 flex-wrap items-start gap-1.5 overflow-y-auto overscroll-contain pr-1">
+                                    { {{ ts.model_name }}FilteredMetrics.map((metric: string) => {
                                         const meta = {{ ts.model_name }}Properties[metric] || {};
                                         const colors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
                                         const accent = colors[metric.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length];
@@ -2499,7 +2612,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             <button
                                                 key={metric}
                                                 onClick={() => toggle{{ ts.model_name }}Metric(metric)}
-                                                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-sm font-medium transition-all border"
+                                                className="inline-flex max-w-full items-center gap-1.5 rounded-full border px-2.5 py-1 text-xs font-medium transition-all"
                                                 style={{"{{"}}
                                                     backgroundColor: isSelected ? `${accent}15` : 'transparent',
                                                     borderColor: isSelected ? accent : 'var(--border)',
@@ -2507,20 +2620,22 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 {{"}}"}}
                                             >
                                                 {meta.icon && <span>{meta.icon}</span>}
-                                                <span>{meta.display_name || metric}</span>
+                                                <span className="max-w-48 truncate" title={meta.display_name || metric}>{meta.display_name || metric}</span>
                                                 {meta.unit && <span className="text-xs opacity-60">({meta.unit})</span>}
                                             </button>
                                         );
                                     })}
-                                    { {{ ts.model_name }}Metrics.length === 0 && (
-                                        <span className="text-sm text-muted-foreground">No metrics available</span>
+                                    { {{ ts.model_name }}FilteredMetrics.length === 0 && (
+                                        <span className="py-2 text-sm text-muted-foreground">{t('common.no_matching_metric', 'No matching metric')}</span>
                                     )}
+                                    </div>
                                 </div>
 
                                 {/* Charts */}
                                 { {{ ts.model_name }}SelectedMetrics.length > 0 ? (
-                                    <div className="space-y-6">
-                                        { {{ ts.model_name }}SelectedMetrics.map((metric: string) => {
+                                    <>
+                                    <div className="grid gap-3 xl:grid-cols-2">
+                                        { {{ ts.model_name }}SelectedMetrics.slice(0, {{ ts.model_name }}HistoryChartLimit).map((metric: string) => {
                                             const meta = {{ ts.model_name }}Properties[metric] || {};
                                             const colors = ['#f43f5e', '#0ea5e9', '#10b981', '#f59e0b', '#8b5cf6', '#06b6d4', '#f97316', '#14b8a6'];
                                             const accent = colors[metric.split('').reduce((a, c) => a + c.charCodeAt(0), 0) % colors.length];
@@ -2531,17 +2646,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             if (isNumeric && chartData.length > 0) {
                                                 const lastEntry = chartData[chartData.length - 1];
                                                 return (
-                                                    <div key={metric} className="rounded-lg border p-4">
-                                                        <div className="flex items-center gap-2 mb-3">
+                                                    <div key={metric} className="min-w-0 rounded-lg border p-3">
+                                                        <div className="mb-2 flex min-w-0 items-center gap-2">
                                                             {meta.icon && <span className="text-lg">{meta.icon}</span>}
-                                                            <h4 className="font-medium">{meta.display_name || metric}</h4>
+                                                            <h4 className="truncate text-sm font-medium" title={meta.display_name || metric}>{meta.display_name || metric}</h4>
                                                             {meta.unit && <span className="text-xs text-muted-foreground">({meta.unit})</span>}
-                                                            <span className="ml-auto text-2xl font-bold tabular-nums" style={{"{{"}} color: accent {{"}}"}}>
+                                                            <span className="ml-auto truncate text-lg font-bold tabular-nums" style={{"{{"}} color: accent {{"}}"}}>
                                                                 {meta.decimals != null ? Number(lastEntry.value).toFixed(meta.decimals) : lastEntry.value}
                                                             </span>
                                                             {meta.unit && <span className="text-sm text-muted-foreground">{meta.unit}</span>}
                                                         </div>
-                                                        <ResponsiveContainer width="100%" height={220}>
+                                                        <ResponsiveContainer width="100%" height={ {{ ts.model_name }}HistoryDensity === 'compact' ? 150 : 220 }>
                                                             <LineChart data={chartData} margin={{"{{"}} top: 5, right: 20, left: 20, bottom: 5 {{"}}"}}>
                                                                 <CartesianGrid strokeDasharray="3 3" opacity={0.4} />
                                                                 <XAxis
@@ -2587,7 +2702,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                 const lastEntry = nonNumericData[nonNumericData.length - 1];
                                                 const displayVal = typeof lastEntry.value === 'object' ? JSON.stringify(lastEntry.value) : String(lastEntry.value);
                                                 return (
-                                                    <div key={metric} className="rounded-lg border p-4">
+                                                    <div key={metric} className="min-w-0 rounded-lg border p-3">
                                                         <div className="flex items-center gap-2 mb-3">
                                                             {meta.icon && <span className="text-lg">{meta.icon}</span>}
                                                             <h4 className="font-medium">{meta.display_name || metric}</h4>
@@ -2630,6 +2745,24 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             }
                                         })}
                                     </div>
+                                    { {{ ts.model_name }}SelectedMetrics.length > 6 && (
+                                        <div className="mt-3 flex items-center justify-center gap-3 text-xs text-muted-foreground">
+                                            <span className="tabular-nums">
+                                                {Math.min({{ ts.model_name }}HistoryChartLimit, {{ ts.model_name }}SelectedMetrics.length)} / { {{ ts.model_name }}SelectedMetrics.length }
+                                            </span>
+                                            <Button
+                                                variant="outline"
+                                                size="sm"
+                                                className="h-8"
+                                                onClick={() => set{{ ts.model_name }}HistoryChartLimit(prev => prev >= {{ ts.model_name }}SelectedMetrics.length ? 6 : Math.min(prev + 6, {{ ts.model_name }}SelectedMetrics.length))}
+                                            >
+                                                { {{ ts.model_name }}HistoryChartLimit >= {{ ts.model_name }}SelectedMetrics.length
+                                                    ? t('common.show_less', 'Show less')
+                                                    : t('common.show_more', 'Show more') }
+                                            </Button>
+                                        </div>
+                                    )}
+                                    </>
                                 ) : (
                                     <div className="flex h-24 items-center justify-center text-muted-foreground">
                                         Select at least one metric to display.
