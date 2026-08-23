@@ -63,6 +63,10 @@ class KafkaManager:
                     group_id=group_id,
                     enable_auto_commit=False,
                     auto_offset_reset="latest",
+                    # Bound each poll and commit offsets once per batch. Per-message
+                    # commits collapse under telemetry bursts and can cause rebalances.
+                    max_poll_records=500,
+                    max_poll_interval_ms=300_000,
                 )
                 await consumer.start()
                 retry_delay = 1
@@ -71,9 +75,14 @@ class KafkaManager:
                     topic,
                     group_id,
                 )
-                async for message in consumer:
-                    for callback in callbacks:
-                        await callback(message.topic, message.value)
+                while self._started:
+                    records = await consumer.getmany(timeout_ms=1000, max_records=500)
+                    if not records:
+                        continue
+                    for messages in records.values():
+                        for message in messages:
+                            for callback in callbacks:
+                                await callback(message.topic, message.value)
                     await consumer.commit()
             except asyncio.CancelledError:
                 raise

@@ -698,17 +698,19 @@ const {{ model.name }}DetailPage: React.FC = () => {
         set{{ ts.model_name }}HistoryLoading(true);
         try {
             let limit = -1;
+            let perMetric = false;
             let startTime: string | undefined;
             let endTime: string | undefined;
             if ({{ ts.model_name }}TimeRange === 'latest100') {
                 limit = 100;
+                perMetric = true;
             } else if ({{ ts.model_name }}TimeRange === 'custom') {
                 startTime = {{ ts.model_name }}CustomStartTime || undefined;
                 endTime = {{ ts.model_name }}CustomEndTime || undefined;
             } else {
                 startTime = calcStartTime({{ ts.model_name }}TimeRange);
             }
-            const result = await get{{ ts.model_name }}History(itemId, undefined, startTime, endTime, limit);
+            const result = await get{{ ts.model_name }}History(itemId, undefined, startTime, endTime, limit, perMetric);
             set{{ ts.model_name }}History(result);
             setTsHistoryLastRefreshed(new Date());
         } catch (error) {
@@ -721,17 +723,19 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const refresh{{ ts.model_name }}History = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         try {
             let limit = -1;
+            let perMetric = false;
             let startTime: string | undefined;
             let endTime: string | undefined;
             if ({{ ts.model_name }}TimeRange === 'latest100') {
                 limit = 100;
+                perMetric = true;
             } else if ({{ ts.model_name }}TimeRange === 'custom') {
                 startTime = {{ ts.model_name }}CustomStartTime || undefined;
                 endTime = {{ ts.model_name }}CustomEndTime || undefined;
             } else {
                 startTime = calcStartTime({{ ts.model_name }}TimeRange);
             }
-            const result = await get{{ ts.model_name }}History(itemId, undefined, startTime, endTime, limit);
+            const result = await get{{ ts.model_name }}History(itemId, undefined, startTime, endTime, limit, perMetric);
             set{{ ts.model_name }}History(result);
             setTsHistoryLastRefreshed(new Date());
         } catch (error) {

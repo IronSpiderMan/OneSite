@@ -849,23 +849,40 @@ def phase_generate_aggregated(
         if not m.get("frontend_only")
     })
     generated_indexes: list[dict[str, Any]] = []
+    obsolete_indexes: list[dict[str, Any]] = []
     seen_indexes: set[tuple[str, tuple[str, ...]]] = set()
+
+    def index_name(table: str, suffix: str) -> str:
+        raw_name = f"ix_{table}_{suffix}"
+        if len(raw_name.encode("utf-8")) > 63:
+            import hashlib
+            digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:10]
+            raw_name = f"{raw_name[:52]}_{digest}"
+        return raw_name
 
     def add_index(table: str, columns: list[str], suffix: str) -> None:
         key = (table, tuple(columns))
         if key in seen_indexes:
             return
         seen_indexes.add(key)
-        raw_name = f"ix_{table}_{suffix}"
-        if len(raw_name.encode("utf-8")) > 63:
-            import hashlib
-            digest = hashlib.sha1(raw_name.encode("utf-8")).hexdigest()[:10]
-            raw_name = f"{raw_name[:52]}_{digest}"
+        raw_name = index_name(table, suffix)
         sql = _render_create_index_sql(raw_name, table, columns)
         generated_indexes.append({"sql_literal": repr(sql)})
 
+    def remove_obsolete_index(table: str, suffix: str) -> None:
+        sql = f"DROP INDEX IF EXISTS {_quote_ddl_identifier(index_name(table, suffix))}"
+        obsolete_indexes.append({"sql_literal": repr(sql)})
+
     for model in models:
         for fk in model.get("foreign_keys", []):
+            if (
+                model.get("is_timescaledb")
+                and fk["name"] == model.get("timescaledb_entity_field")
+            ):
+                remove_obsolete_index(
+                    model["table_name"], f"{fk['name']}_page"
+                )
+                continue
             columns = [fk["name"]]
             if model.get("has_created_at"):
                 columns.append("created_at DESC")
@@ -879,10 +896,14 @@ def phase_generate_aggregated(
             f"{entity}_{time_column}_desc",
         )
         if metric:
-            add_index(
-                model["table_name"], [entity, metric, f"{time_column} DESC"],
-                f"{entity}_{metric}_{time_column}_desc",
-            )
+            suffix = f"{entity}_{metric}_{time_column}_desc"
+            if model.get("primary_key_columns") == [entity, metric, time_column]:
+                remove_obsolete_index(model["table_name"], suffix)
+            else:
+                add_index(
+                    model["table_name"], [entity, metric, f"{time_column} DESC"],
+                    suffix,
+                )
     generate_file(
         "db.py.j2",
         {
@@ -895,6 +916,7 @@ def phase_generate_aggregated(
             "latest_table_imports": latest_table_imports,
             "external_resources_enabled": external_resources_enabled,
             "generated_indexes": generated_indexes,
+            "obsolete_indexes": obsolete_indexes,
         },
         backend_path / "app" / "core" / "db.py",
     )

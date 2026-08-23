@@ -144,6 +144,7 @@ async def read_{{ model.lower_name }}_history(
     start_time: Optional[datetime] = Query(None, description="Start time (ISO format)"),
     end_time: Optional[datetime] = Query(None, description="End time (ISO format)"),
     limit: int = Query(1000, ge=-1, le=10000, description="Max records to return (-1 for unlimited)"),
+    per_metric: bool = Query(False, description="Apply the limit independently to each metric"),
 ) -> Any:
     """
     Get historical timeseries data for an entity's metric.
@@ -157,6 +158,7 @@ async def read_{{ model.lower_name }}_history(
         start_time=start_time,
         end_time=end_time,
         limit=limit,
+        per_metric=per_metric,
     )
     return {"data": results}
 

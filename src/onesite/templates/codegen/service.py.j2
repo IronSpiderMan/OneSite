@@ -95,6 +95,7 @@ class {{ model.name }}Service:
         start_time: datetime | None = None,
         end_time: datetime | None = None,
         limit: int = 1000,
+        per_metric: bool = False,
     ) -> list[dict]:
         return await crud.get_history_by_entity(
             session, entity_id,
@@ -104,6 +105,7 @@ class {{ model.name }}Service:
             start_time=start_time,
             end_time=end_time,
             limit=limit,
+            per_metric=per_metric,
         )
 
     {% if model.dashboard_metrics %}

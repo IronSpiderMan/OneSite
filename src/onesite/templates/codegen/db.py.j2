@@ -81,6 +81,9 @@ async def init_db():
         {% for index in generated_indexes %}
         await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}
+        {% for index in obsolete_indexes %}
+        await conn.execute(text({{ index.sql_literal }}))
+        {% endfor %}
     {% if external_resources_enabled %}
     # Keep external-resource schema ownership in its runtime module. This is
     # also the only schema initialization the standalone reconciler performs.
@@ -234,26 +237,34 @@ async def init_db():
                         value,
                         {{ ts_model.timescaledb_time_column }}
                     )
-                    VALUES (
-                        NEW.{{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
-                        NEW.{{ ts_model.timescaledb_metric_field }}{% endif %},
-                        NEW.value,
-                        NEW.{{ ts_model.timescaledb_time_column }}
+                    SELECT DISTINCT ON (
+                        {{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
+                        {{ ts_model.timescaledb_metric_field }}{% endif %}
                     )
+                        {{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
+                        {{ ts_model.timescaledb_metric_field }}{% endif %},
+                        value,
+                        {{ ts_model.timescaledb_time_column }}
+                    FROM inserted_rows
+                    ORDER BY
+                        {{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %},
+                        {{ ts_model.timescaledb_metric_field }}{% endif %},
+                        {{ ts_model.timescaledb_time_column }} DESC
                     ON CONFLICT ({{ ts_model.timescaledb_entity_field }}{% if ts_model.timescaledb_metric_field %}, {{ ts_model.timescaledb_metric_field }}{% endif %})
                     DO UPDATE SET
                         value = EXCLUDED.value,
                         {{ ts_model.timescaledb_time_column }} = EXCLUDED.{{ ts_model.timescaledb_time_column }}
                     WHERE EXCLUDED.{{ ts_model.timescaledb_time_column }} >=
                           {{ ts_model.timescaledb_latest_table_name }}.{{ ts_model.timescaledb_time_column }};
-                    RETURN NEW;
+                    RETURN NULL;
                 END;
                 $$ LANGUAGE plpgsql
             """))
             await conn.execute(text("""
                 CREATE TRIGGER trg_sync_{{ ts_model.table_name }}_latest
                 AFTER INSERT ON {{ ts_model.table_name }}
-                FOR EACH ROW
+                REFERENCING NEW TABLE AS inserted_rows
+                FOR EACH STATEMENT
                 EXECUTE FUNCTION fn_sync_{{ ts_model.table_name }}_latest()
             """))
         {% endfor %}

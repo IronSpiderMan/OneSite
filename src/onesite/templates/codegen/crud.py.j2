@@ -340,6 +340,7 @@ async def get_history_by_entity(
     start_time: datetime | None = None,
     end_time: datetime | None = None,
     limit: int = 1000,
+    per_metric: bool = False,
 ) -> list[dict]:
     """Get historical timeseries data for an entity from hypertable."""
     from sqlalchemy import text
@@ -363,18 +364,48 @@ async def get_history_by_entity(
         params["end"] = end_time
 
     where_clause = " AND ".join(conditions)
-    query = text(f"""
-        SELECT *
-        FROM {{ model.table_name }}
-        WHERE {where_clause}
-        ORDER BY {{ model.timescaledb_time_column }} DESC
-        LIMIT NULLIF(:limit, -1)
-    """)
+    {% if model.timescaledb_metric_field %}
+    if per_metric and metric is None and limit >= 0:
+        per_metric_conditions = [
+            "source_rows.{{ model.timescaledb_entity_field }} = :entity"
+        ]
+        if start_time is not None:
+            per_metric_conditions.append(
+                "source_rows.{{ model.timescaledb_time_column }} >= :start"
+            )
+        if end_time is not None:
+            per_metric_conditions.append(
+                "source_rows.{{ model.timescaledb_time_column }} <= :end"
+            )
+        per_metric_where = " AND ".join(per_metric_conditions)
+        query = text(f"""
+            SELECT history_rows.*
+            FROM {{ model.timescaledb_latest_table_name }} AS latest_metric
+            CROSS JOIN LATERAL (
+                SELECT source_rows.*
+                FROM {{ model.table_name }} AS source_rows
+                WHERE {per_metric_where}
+                  AND source_rows.{{ model.timescaledb_metric_field }} =
+                      latest_metric.{{ model.timescaledb_metric_field }}
+                ORDER BY source_rows.{{ model.timescaledb_time_column }} DESC
+                LIMIT :limit
+            ) AS history_rows
+            WHERE latest_metric.{{ model.timescaledb_entity_field }} = :entity
+            ORDER BY history_rows.{{ model.timescaledb_time_column }} DESC
+        """)
+    else:
+    {% endif %}
+        query = text(f"""
+            SELECT *
+            FROM {{ model.table_name }}
+            WHERE {where_clause}
+            ORDER BY {{ model.timescaledb_time_column }} DESC
+            LIMIT NULLIF(:limit, -1)
+        """)
     params["limit"] = limit
     result = await session.execute(query, params)
     rows = result.fetchall()
-    columns = result.keys()
-    return [dict(zip(columns, row)) for row in rows]
+    return [dict(row._mapping) for row in rows]
 
 {% else %}
 

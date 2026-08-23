@@ -279,9 +279,11 @@ export const get{{ model.name }}History = async (
     metric?: string,
     startTime?: string,
     endTime?: string,
-    limit: number = 100
+    limit: number = 100,
+    perMetric: boolean = false
 ) => {
     let url = `${API_URL}/history?entity_id=${entityId}&limit=${limit}`;
+    if (perMetric) url += '&per_metric=true';
     if (metric) url += `&metric=${encodeURIComponent(metric)}`;
     if (startTime) url += `&start_time=${encodeURIComponent(startTime)}`;
     if (endTime) url += `&end_time=${encodeURIComponent(endTime)}`;

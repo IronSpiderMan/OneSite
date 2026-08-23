@@ -610,6 +610,13 @@ def _process_introspected_class(
         table_name=getattr(obj, "__tablename__", None),
     )
 
+    table = getattr(obj, "__table__", None)
+    mdl["primary_key_columns"] = (
+        [str(column.name) for column in table.primary_key.columns]
+        if table is not None
+        else []
+    )
+
     # Attach low-level SQLAlchemy event listeners (on_orm_before_*/on_orm_after_*).
     mdl["event_listeners"] = _extract_event_listeners(obj)
     mdl["background_hooks"] = _extract_background_hooks(obj)
