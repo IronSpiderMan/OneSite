@@ -1,6 +1,6 @@
 # OneSite
 
-[English README](README.md) · [完整中文培训教程](docs/onesite-training-guide.md)
+[English README](README.md) · [设计原则](docs/design-principles.md)
 
 OneSite 是一个模型驱动的全栈代码生成 CLI。开发者维护 `app/models/` 中的 SQLModel；执行 `site sync` 后，在 `generated/` 中自动生成 FastAPI 的 Schema、CRUD、Service、REST API，以及 React/Vite 的页面、服务、菜单、国际化和主题资源。
 
@@ -18,11 +18,19 @@ site sync --install
 site run
 ```
 
+开发本仓库时使用锁定的工具环境：
+
+```bash
+uv sync --group dev
+uv run pytest
+uv run ruff check src/onesite src/onesite_runtime tests
+```
+
 - 前端：`http://localhost:5173`
 - API 文档：`http://localhost:8000/docs`
 - 初始管理员：`admin@example.com` / `admin`（上线前必须修改）
 
-日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.json` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
+日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.py` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
 
 ### 应用资源生命周期
 
@@ -138,15 +146,87 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
 ## 配置与权限
 
-`site_config.json` 常用配置包括 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation`。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports` 和 `external-resources`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的模型仍可通过路由和 API 访问，但不会出现在侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
+推荐在 `site_config.py` 中使用带类型的 `SiteConfig`；旧项目的 `site_config.json` 仍然兼容。两种格式都支持 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation` 等配置。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports` 和 `external-resources`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的模型仍可通过路由和 API 访问，但不会出现在侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
 
 模型级选项写入 `__onesite__`：
+
+`__onesite__` 也支持带编辑器自动补全和运行时校验的 Pydantic 配置；原有字典写法继续兼容：
+
+```python
+from onesite.config import OneSiteConfig
+
+class Product(SQLModel, table=True):
+    __onesite__ = OneSiteConfig(
+        icon="Package",
+        permissions={"user": "r", "admin": "crud", "developer": "crud"},
+        edit_mode="drawer",
+    )
+```
 
 - `translations`、`icon`：中英文文案和菜单图标。
 - `permissions`、`visible`：接口 CRUD 权限和菜单可见性。
 - `owner_field`：用户只能访问自己拥有的数据。
 - `is_link_table`、`is_singleton`、`frontend_only`、`page_edit`：关系、单例、纯前端和编辑页行为。
 - `actions`、`importable`、`exportable`、`import_key`：自定义操作与 CSV 导入导出。
+
+### 函数式 Action
+
+需要自定义 Python 业务逻辑时，可以直接在 SQLModel 中使用 `@action`。
+方法运行在数据库事务内，可按名称声明 `context`、`session` 或
+`current_user` 参数：
+
+```python
+from onesite_runtime import ActionContext, ActionState, action
+
+class Dataset(SQLModel, table=True):
+    id: int | None = Field(default=None, primary_key=True)
+    status: str = "draft"
+    is_enabled: bool = False
+
+    @action(permissions="da", label="切换状态", unavailable="disable")
+    def toggle_enabled(self, *, context: ActionContext):
+        self.is_enabled = not self.is_enabled
+
+    @toggle_enabled.available
+    async def can_toggle_enabled(self, *, session, current_user):
+        if self.status != "draft":
+            return ActionState(
+                visible=True,
+                enabled=False,
+                reason="只有草稿状态可以修改",
+            )
+        return True
+```
+
+`available` 方法可以返回 `bool`、`None` 或 `ActionState`。动态条件由后端
+计算，列表页通过一次批量请求获取当前页所有按钮状态；真正执行 action
+时后端会再次检查，不能通过手工请求绕过条件。`unavailable="hide"`（默认）
+会隐藏返回 `False` 的按钮，`"disable"` 则保留禁用按钮。`available` 可能被
+重复调用，因此不应在其中修改数据或触发外部副作用。
+
+只依赖当前记录字段的简单条件可以继续使用声明式写法，前端会即时判断，
+后端也会再次校验：
+
+```python
+@action(condition={"field": "status", "op": "eq", "value": "draft"})
+def publish(self):
+    self.status = "published"
+```
+
+`condition=` 和 `@method.available` 不能同时配置。原有配置式 action 仍然
+兼容，包括同时使用 `toggle` 和 `condition`：
+
+```python
+__onesite__ = {
+    "actions": {
+        "toggle_enabled": {
+            "toggle": "is_enabled",
+            "permissions": "da",
+            "condition": {"field": "status", "op": "eq", "value": "draft"},
+        },
+    },
+}
+```
 
 `importable` / `exportable` 也支持对象配置。M2M 只有显式配置后才会参与，
 多个值使用 `;` 分隔；导入时，外键和 M2M 对应的对象必须已经存在。
@@ -308,7 +388,8 @@ Leaflet 依赖。
 
 ## MQTT 回调
 
-MQTT Broker 参数和 Topic 绑定继续写在 `site_config.json`：
+MQTT Broker 参数和 Topic 绑定写在项目配置中；下面展示与旧版
+`site_config.json` 兼容的结构，`site_config.py` 使用同名字段：
 
 ```json
 {
@@ -388,7 +469,8 @@ from app.utils.formatting import format_alarm
 ### 桌面客户端
 
 `site sync` 会在 `generated/frontend/src-tauri` 生成 Tauri 2 桌面外壳。
-先在 `site_config.json` 中配置桌面客户端访问的 FastAPI 地址：
+先在项目配置中设置桌面客户端访问的 FastAPI 地址；下面展示与旧版
+`site_config.json` 兼容的结构，`site_config.py` 使用同名字段：
 
 ```json
 {
@@ -451,8 +533,8 @@ pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢�
 │   ├── .env.example
 │   ├── .env                     # 可选，本地创建且不会提交
 │   └── docker-compose.yml       # site build 时生成
-├── site_config.json
+├── site_config.py
 └── icon-reference.html
 ```
 
-更多逐步示例请阅读 [完整中文培训教程](docs/onesite-training-guide.md)，并参考 `examples/`。
+更多设计背景请阅读 [设计原则](docs/design-principles.md)，并参考 `examples/`。

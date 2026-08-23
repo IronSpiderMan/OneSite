@@ -9,11 +9,11 @@ from pathlib import Path
 
 from rich.console import Console
 
-from ..project_paths import get_project_paths
 from .phases import config as phase_config
 from .phases import generate as phase_generate
 from .phases import introspect_models as phase_introspect
 from .phases import model_tables as phase_model_tables
+from .phases import plugin_models as phase_plugin_models
 from .phases import relationships as phase_relationships
 from .phases import sync_models as phase_sync_models
 from .phases import theme_assets as phase_theme_assets
@@ -32,7 +32,6 @@ def generate_code() -> None:
     This is the public entry point called by ``site sync``.
     """
     cwd = Path(os.getcwd())
-    paths = get_project_paths(cwd)
 
     # Phase 1 — Config. Validate it before creating or modifying generated
     # project files so malformed input cannot be replaced by defaults.
@@ -41,18 +40,16 @@ def generate_code() -> None:
     # Phase 2 — Generate model tables (into models/, before sync so they are picked up)
     phase_model_tables.phase_generate_model_tables(cwd, backend_path)
 
-    # Phase 2.1 — Generate plugin models directly into generated output.  Do
-    # not write plugin implementation details into the user's models/ source
-    # directory, and allow an explicit project model to override the default.
-    if (
-        "site_logger" in site_config.get("plugins", [])
-        and not (paths.models / "app_log.py").exists()
-    ):
-        from .render import generate_file as _gf
-        _gf("app_log.py.j2", {}, backend_path / "app" / "models" / "app_log.py")
-
     # Phase 2.5 — Sync model files (copies generated + user models to backend)
     phase_sync_models.phase_sync_models(cwd, backend_path)
+
+    # Phase 2.75 — Add generated plugin models after stale mirror files have
+    # been removed, while still allowing project-owned models to override them.
+    phase_plugin_models.phase_generate_plugin_models(
+        site_config,
+        cwd,
+        backend_path,
+    )
 
     # Phase 3 — Introspect
     models = phase_introspect.phase_introspect(backend_path)

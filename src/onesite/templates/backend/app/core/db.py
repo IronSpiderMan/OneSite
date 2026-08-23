@@ -55,7 +55,7 @@ if database_url.startswith(("sqlite://", "sqlite+aiosqlite://")):
         sqlite_path.parent.mkdir(parents=True, exist_ok=True)
 elif database_url.startswith("postgresql://"):
     # Ensure asyncpg driver
-    if not "postgresql+asyncpg://" in database_url:
+    if "postgresql+asyncpg://" not in database_url:
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
 
 # Create Async Engine

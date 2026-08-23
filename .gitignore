@@ -28,6 +28,16 @@ ENV/
 .env
 .venv/
 
+# Test and lint caches
+.pytest_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+coverage/
+
+# JavaScript dependencies
+node_modules/
+
 # IDEs
 .idea/
 .vscode/
@@ -46,3 +56,14 @@ myapp/
 
 # Logs
 *.log
+*.log.*
+
+# Local databases and generated example output
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+临时/
+examples/**/generated/
+examples/**/backend/data/
+examples/**/backend/uploads/

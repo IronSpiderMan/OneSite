@@ -8,7 +8,6 @@ phases run.
 
 import re
 from pathlib import Path
-from typing import Any
 
 from ..file_utils import write_file_with_status
 from ..render import generate_file
@@ -310,6 +309,9 @@ def _parse_config_class_fields(filepath: Path, class_name: str) -> dict[str, str
         return fields
 
     return {}
+
+
+def _config_type_to_python(type_str: str) -> tuple[str, str | None]:
     """Convert a config_fields type string to (python_annotation, default_value).
 
     Examples:

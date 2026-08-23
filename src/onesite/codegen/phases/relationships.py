@@ -280,6 +280,7 @@ def _resolve_fk_labels_and_reverse(
                 "inline_schema": inline_schema,
                 "role_permissions": model.get("role_permissions", {}),
                 "actions": model.get("actions", {}),
+                "has_dynamic_action_states": model.get("has_dynamic_action_states", False),
                 "page_edit": model.get("page_edit", False),
                 "edit_mode": model.get("edit_mode", "modal"),
                 "standalone": model.get("standalone", True),

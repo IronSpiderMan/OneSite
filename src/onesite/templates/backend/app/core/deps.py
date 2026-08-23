@@ -1,11 +1,10 @@
-from typing import Generator, Optional
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core import config, db
+from app.core import db
 from app.models.user import User, UserRole
 from app.core.config import settings
 

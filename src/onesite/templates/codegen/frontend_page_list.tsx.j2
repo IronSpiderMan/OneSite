@@ -10,6 +10,9 @@ import {
     {% for action_name, action_config in model.actions.items() %}
     , perform{{ model.name }}{{ action_name.capitalize() }}
     {% endfor %}
+    {% if model.has_dynamic_action_states %}
+    , get{{ model.name }}ActionStates
+    {% endif %}
     {% endif %}
     {% if model.importable %}
     , import{{ model.name }}s
@@ -161,6 +164,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
   const [gotoPageInput, setGotoPageInput] = useState('');
+  {% if model.has_dynamic_action_states %}
+  const [actionStates, setActionStates] = useState<Record<string, Record<string, { visible: boolean; enabled: boolean; reason?: string; label?: string }>>>({});
+  {% endif %}
   {% if model.is_tree %}
   // Lazy-loading tree state
   const [rootItems, setRootItems] = useState<any[]>([]);
@@ -319,6 +325,25 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     {% endif %}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  {% if model.has_dynamic_action_states %}
+  useEffect(() => {
+    let cancelled = false;
+    const ids = data.map((item) => item.id);
+    if (ids.length === 0) {
+      setActionStates({});
+      return () => { cancelled = true; };
+    }
+    get{{ model.name }}ActionStates(ids)
+      .then((states) => {
+        if (!cancelled) setActionStates(states);
+      })
+      .catch(() => {
+        if (!cancelled) setActionStates({});
+      });
+    return () => { cancelled = true; };
+  }, [data]);
+  {% endif %}
 
   {% if model.custom_importable %}
   useEffect(() => {
@@ -1090,6 +1115,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
                             const roleChar = userRole[0];
                             if (!actionPerms.includes(roleChar)) return false;
+                            {% if action_config.get("dynamic_availability") %}
+                            const state = actionStates[String(item.id)]?.[{{ action_name | tojson }}];
+                            return Boolean(state?.visible);
+                            {% else %}
                             const cond = {{ action_config.get("condition", None) | tojson }} as any;
                             let enabled = true;
                             if (cond) {
@@ -1112,10 +1141,15 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                                 else if (op === 'is_not_null') enabled = actual !== null && actual !== undefined;
                             }
                             return enabled;
+                            {% endif %}
                         })() && (
                         <Button
                             variant={% if action_config.get("toggle") %}{(item as any)[{{ action_config.get("toggle") | tojson }}] ? "destructive" : "default"}{% else %}"outline"{% endif %}
                             size="sm"
+                            {% if action_config.get("dynamic_availability") %}
+                            disabled={!actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.enabled}
+                            title={actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.reason}
+                            {% endif %}
                             onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
@@ -1130,7 +1164,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             {% if action_config.get("toggle") %}
                             {(item as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
                             {% else %}
-                            {{ action_name }}
+                            {% if action_config.get("dynamic_availability") %}
+                            {actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.label || {{ (action_config.get("label") or action_name) | tojson }}}
+                            {% else %}
+                            { {{ (action_config.get("label") or action_name) | tojson }} }
+                            {% endif %}
                             {% endif %}
                         </Button>
                         )}

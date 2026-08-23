@@ -47,6 +47,7 @@ RUN python -m nuitka \
     --mode=standalone \
     --assume-yes-for-downloads \
     --include-package=app \
+    --include-package=onesite_runtime \
     --include-package=sqlalchemy.dialects \
     --include-package=passlib.handlers \
     --include-package=bcrypt \

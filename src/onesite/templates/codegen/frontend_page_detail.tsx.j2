@@ -200,8 +200,9 @@ import { get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}
 {% if model.actions %}
 import {
     {% for action_name, action_config in model.actions.items() %}
-    perform{{ model.name }}{{ action_name.capitalize() }}{% if not loop.last %}, {% endif %}
+    perform{{ model.name }}{{ action_name.capitalize() }},
     {% endfor %}
+    {% if model.has_dynamic_action_states %}get{{ model.name }}ActionStates{% endif %}
 } from '../../services/{{ model.module_name }}';
 {% endif %}
 {% if model.m2m_fields %}
@@ -222,7 +223,7 @@ import { get{{ model.name }}{{ rel.source_model }}s } from '../../services/{{ mo
 import {{ rfk.source_model }}EmbeddedPage from '../../pages/{{ rfk.source_service }}/embedded';
 {% endif %}
 {% if rfk.display or rfk.editor == 'inline' %}
-import { get{{ rfk.source_model }}s{% if rfk.display %}, delete{{ rfk.source_model }}{% for action_name, action_config in rfk.actions.items() %}, perform{{ rfk.source_model }}{{ action_name.capitalize() }}{% endfor %}{% endif %} } from '../../services/{{ rfk.source_service }}';
+import { get{{ rfk.source_model }}s{% if rfk.display %}, delete{{ rfk.source_model }}{% for action_name, action_config in rfk.actions.items() %}, perform{{ rfk.source_model }}{{ action_name.capitalize() }}{% endfor %}{% if rfk.has_dynamic_action_states %}, get{{ rfk.source_model }}ActionStates{% endif %}{% endif %} } from '../../services/{{ rfk.source_service }}';
 {% endif %}
 {% if rfk.editor == 'inline' %}
 {% for field in rfk.inline_schema.fields %}
@@ -306,10 +307,31 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const userPerms = rolePermissions[userRole] || '';
     const hasPermission = (perm: 'r' | 'c' | 'u' | 'd') => userPerms.includes(perm);
     const [activeTab, setActiveTab] = useState('detail');
+    {% if model.has_dynamic_action_states %}
+    const [actionStates, setActionStates] = useState<Record<string, Record<string, { visible: boolean; enabled: boolean; reason?: string; label?: string }>>>({});
+    {% endif %}
 
     useEffect(() => {
         setActiveTab('detail');
     }, [id]);
+
+    {% if model.has_dynamic_action_states %}
+    useEffect(() => {
+        let cancelled = false;
+        if (!currentItem) {
+            setActionStates({});
+            return () => { cancelled = true; };
+        }
+        get{{ model.name }}ActionStates([currentItem.id])
+            .then((states) => {
+                if (!cancelled) setActionStates(states);
+            })
+            .catch(() => {
+                if (!cancelled) setActionStates({});
+            });
+        return () => { cancelled = true; };
+    }, [currentItem]);
+    {% endif %}
 
     // Field-level role-based permissions (Layer 2)
     const fieldRolePerms: Record<string, Record<string, string>> = {
@@ -363,6 +385,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const [{{ rfk.name }}Page, set{{ rfk.source_model }}Page] = useState(1);
     const [{{ rfk.name }}Size, set{{ rfk.source_model }}Size] = useState(20);
     const [{{ rfk.name }}Loading, set{{ rfk.source_model }}Loading] = useState(false);
+    {% if rfk.has_dynamic_action_states %}
+    const [{{ rfk.name }}ActionStates, set{{ rfk.source_model }}ActionStates] = useState<Record<string, Record<string, { visible: boolean; enabled: boolean; reason?: string; label?: string }>>>({});
+    {% endif %}
     const [{{ rfk.name }}SearchValues, set{{ rfk.source_model }}SearchValues] = useState<Record<string, any>>({});
     {% for field in rfk.source_search_fields %}
     {% if field.fk_info %}
@@ -663,6 +688,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
             const filters = { {{ rfk.source_fk_field }}: itemId, ...build{{ rfk.source_model }}SearchFilters(searchValues) };
             const result = await get{{ rfk.source_model }}s(page, size, filters);
             set{{ rfk.source_model }}Data(result.items);
+            {% if rfk.has_dynamic_action_states %}
+            try {
+                const states = await get{{ rfk.source_model }}ActionStates(result.items.map((item) => item.id));
+                set{{ rfk.source_model }}ActionStates(states);
+            } catch (stateError) {
+                console.error(stateError);
+                set{{ rfk.source_model }}ActionStates({});
+            }
+            {% endif %}
             set{{ rfk.source_model }}Total(result.total);
             set{{ rfk.source_model }}Page(result.page);
             set{{ rfk.source_model }}Size(result.size);
@@ -1031,6 +1065,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
                     const roleChar = userRole[0];
                     if (!actionPerms.includes(roleChar)) return false;
+                    {% if action_config.get("dynamic_availability") %}
+                    if (!currentItem) return false;
+                    const state = actionStates[String(currentItem.id)]?.[{{ action_name | tojson }}];
+                    return Boolean(state?.visible);
+                    {% else %}
                     const cond = {{ action_config.get("condition", None) | tojson }} as any;
                     let enabled = true;
                     if (cond && currentItem) {
@@ -1053,10 +1092,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         else if (op === 'is_not_null') enabled = actual !== null && actual !== undefined;
                     }
                     return enabled;
+                    {% endif %}
                 })() && (
                 <Button
                     variant={% if action_config.get("toggle") %}{(currentItem as any)[{{ action_config.get("toggle") | tojson }}] ? "destructive" : "default"}{% else %}"outline"{% endif %}
                     size="sm"
+                    {% if action_config.get("dynamic_availability") %}
+                    disabled={!currentItem || !actionStates[String(currentItem.id)]?.[{{ action_name | tojson }}]?.enabled}
+                    title={currentItem ? actionStates[String(currentItem.id)]?.[{{ action_name | tojson }}]?.reason : undefined}
+                    {% endif %}
                     onClick={async () => {
                         if (!currentItem) return;
                         try {
@@ -1071,7 +1115,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     {% if action_config.get("toggle") %}
                     {(currentItem as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
                     {% else %}
-                    {{ action_name }}
+                    {% if action_config.get("dynamic_availability") %}
+                    {currentItem ? (actionStates[String(currentItem.id)]?.[{{ action_name | tojson }}]?.label || {{ (action_config.get("label") or action_name) | tojson }}) : {{ (action_config.get("label") or action_name) | tojson }}}
+                    {% else %}
+                    { {{ (action_config.get("label") or action_name) | tojson }} }
+                    {% endif %}
                     {% endif %}
                 </Button>
                 )}
@@ -2197,6 +2245,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {(() => {
                                                         const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
                                                         if (!actionPerms.includes(userRole[0])) return false;
+                                                        {% if action_config.get("dynamic_availability") %}
+                                                        const state = {{ rfk.name }}ActionStates[String(item.id)]?.[{{ action_name | tojson }}];
+                                                        return Boolean(state?.visible);
+                                                        {% else %}
                                                         const cond = {{ action_config.get("condition", None) | tojson }} as any;
                                                         if (!cond) return true;
                                                         const actual = (item as any)[cond.field];
@@ -2215,10 +2267,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                         if (cond.op === 'is_null') return actual === null || actual === undefined;
                                                         if (cond.op === 'is_not_null') return actual !== null && actual !== undefined;
                                                         return true;
+                                                        {% endif %}
                                                     })() && (
                                                     <Button
                                                         variant={% if action_config.get("toggle") %}{(item as any)[{{ action_config.get("toggle") | tojson }}] ? "destructive" : "default"}{% else %}"outline"{% endif %}
                                                         size="sm"
+                                                        {% if action_config.get("dynamic_availability") %}
+                                                        disabled={!{{ rfk.name }}ActionStates[String(item.id)]?.[{{ action_name | tojson }}]?.enabled}
+                                                        title={ {{ rfk.name }}ActionStates[String(item.id)]?.[{{ action_name | tojson }}]?.reason}
+                                                        {% endif %}
                                                         onClick={async () => {
                                                             try {
                                                                 await perform{{ rfk.source_model }}{{ action_name.capitalize() }}(item.id);
@@ -2232,7 +2289,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                         {% if action_config.get("toggle") %}
                                                         {(item as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
                                                         {% else %}
-                                                        {{ action_name }}
+                                                        {% if action_config.get("dynamic_availability") %}
+                                                        { {{ rfk.name }}ActionStates[String(item.id)]?.[{{ action_name | tojson }}]?.label || {{ (action_config.get("label") or action_name) | tojson }} }
+                                                        {% else %}
+                                                        { {{ (action_config.get("label") or action_name) | tojson }} }
+                                                        {% endif %}
                                                         {% endif %}
                                                     </Button>
                                                     )}

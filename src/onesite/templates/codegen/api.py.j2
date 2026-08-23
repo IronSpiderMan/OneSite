@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.im
 {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.dashboard_metrics or model.data_reports %}
 from app.models.user import User
 {% endif %}
-{% if model.is_notification_table %}
+{% if model.is_notification_table or model.has_dynamic_action_states %}
 from sqlmodel import select, func, col
 {% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -20,7 +20,13 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 {% endif %}
 from app.schemas.pagination import PaginatedResponse
 from app.services.{{ model.module_name }} import service
+{% if model.has_function_actions %}
+from app.cruds import {{ model.module_name }} as crud
+{% endif %}
 from app.models.{{ model.source_module }} import {{ model.name }}
+{% if model.has_function_actions %}
+from onesite_runtime import ActionContext, evaluate_action_state, invoke_action_callable
+{% endif %}
 {% if model.exportable or model.custom_importable %}
 from app.core.task_queue import task_queue
 {% endif %}
@@ -759,6 +765,60 @@ async def update_{{ model.lower_name }}_properties_config(
 {% endif %}
 
 {% if model.actions %}
+{% if model.has_dynamic_action_states %}
+@router.post("/action-states")
+async def get_{{ model.lower_name }}_action_states(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    ids: List[{{ model.id_type }}] = Body(..., embed=True),
+) -> dict[str, dict[str, dict[str, Any]]]:
+    """Return dynamic action presentation state in one request per page."""
+    if not ids:
+        return {}
+    if len(ids) > 200:
+        raise HTTPException(status_code=400, detail="At most 200 action states may be requested")
+
+    statement = select({{ model.name }}).where({{ model.name }}.id.in_(ids))
+    {% if model.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role.value, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        statement = statement.where({{ model.name }}.{{ model.owner_field }} == current_user.id)
+    {% endif %}
+    objects = (await session.exec(statement)).all()
+    role_char_map = {"user": "u", "admin": "a", "developer": "d"}
+    user_role_char = role_char_map.get(current_user.role.value, "")
+    result: dict[str, dict[str, dict[str, Any]]] = {}
+
+    for obj in objects:
+        object_states: dict[str, dict[str, Any]] = {}
+        {% for action_name, action_config in model.actions.items() %}
+        {% if action_config.get("dynamic_availability") %}
+        if user_role_char not in {{ action_config.get("permissions", "da") | tojson }}:
+            object_states["{{ action_name }}"] = {"visible": False, "enabled": False}
+        else:
+            context = ActionContext(
+                session=session,
+                user=current_user,
+                action_name="{{ action_name }}",
+            )
+            state = await evaluate_action_state(
+                obj,
+                availability_handler={% if action_config.get("availability_handler") %}{{ action_config.get("availability_handler") | tojson }}{% else %}None{% endif %},
+                unavailable={{ action_config.get("unavailable", "hide") | tojson }},
+                context=context,
+            )
+            {% if action_config.get("label") %}
+            if state.label is None:
+                state.label = {{ action_config.get("label") | tojson }}
+            {% endif %}
+            object_states["{{ action_name }}"] = state.as_dict()
+        {% endif %}
+        {% endfor %}
+        result[str(obj.id)] = object_states
+    return result
+
+{% endif %}
 {% for action_name, action_config in model.actions.items() %}
 @router.post("/{id}/actions/{{ action_name }}", response_model={{ model.name }}Read)
 async def perform_{{ model.lower_name }}_{{ action_name }}(
@@ -767,9 +827,19 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
     current_user: User = Depends(deps.get_current_user),
     id: {{ model.id_type }},
 ) -> Any:
+    {% if action_config.get("function") %}
+    obj = await crud.get(session, id)
+    {% else %}
     obj = await service.get(session, id)
+    {% endif %}
     if not obj:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% if model.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role.value, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        if getattr(obj, "{{ model.owner_field }}", None) != current_user.id:
+            raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% endif %}
 
     import json
     action_data = json.loads("""{{ action_config | tojson }}""")
@@ -821,6 +891,37 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
         if not condition_passed:
             raise HTTPException(status_code=400, detail=f"Action '{{ action_name }}' not allowed: condition not met")
 
+    {% if action_config.get("function") %}
+    context = ActionContext(
+        session=session,
+        user=current_user,
+        action_name="{{ action_name }}",
+    )
+    state = await evaluate_action_state(
+        obj,
+        availability_handler={% if action_config.get("availability_handler") %}{{ action_config.get("availability_handler") | tojson }}{% else %}None{% endif %},
+        unavailable={{ action_config.get("unavailable", "hide") | tojson }},
+        context=context,
+    )
+    if not state.visible or not state.enabled:
+        raise HTTPException(
+            status_code=409,
+            detail=state.reason or "Action '{{ action_name }}' is not available",
+        )
+
+    try:
+        await invoke_action_callable(getattr(obj, "{{ action_config.get('handler', action_name) }}"), context)
+        session.add(obj)
+        await session.commit()
+        await session.refresh(obj)
+        return obj
+    except HTTPException:
+        await session.rollback()
+        raise
+    except Exception as exc:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    {% else %}
     # Resolve special placeholders in data
     import re
     from datetime import datetime, timedelta
@@ -883,6 +984,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
         return await service.update(session, id, update_obj)
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
+    {% endif %}
 {% endfor %}
 {% endif %}
 

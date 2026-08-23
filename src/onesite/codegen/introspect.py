@@ -2,12 +2,14 @@ import inspect
 import re
 from datetime import date as date_type, datetime as datetime_type, time as time_type
 from enum import Enum
-from typing import Any, Dict, List, Optional, Set, Union, get_args, get_origin
+from typing import Any, Dict, List, Set, Union, get_args, get_origin
 
 from pydantic import BaseModel
 from pydantic_core import PydanticUndefined
 from rich.console import Console
 from sqlmodel import SQLModel
+
+from onesite.config import normalize_onesite_config
 
 from .types import FieldDefinition, ForeignKeyInfo, ModelIntrospectResult
 from .time_filters import RELATIVE_TIME_PERIODS
@@ -125,8 +127,8 @@ def _normalize_json_condition(
 def _get_json_model_ui(model: type[BaseModel]) -> Dict[str, Any]:
     """Return optional OneSite UI configuration declared by a JSON submodel."""
     for attribute in ("__onesite__", "__site_props__"):
-        value = getattr(model, attribute, None)
-        if isinstance(value, dict):
+        value = normalize_onesite_config(getattr(model, attribute, None))
+        if value is not None:
             ui = value.get("ui")
             if isinstance(ui, dict):
                 return ui
@@ -724,8 +726,9 @@ def get_model_fields(
     model_cls: type[SQLModel], module_name: str | None = None
 ) -> ModelIntrospectResult:
     model_site_props: Dict[str, Any] = {}
-    if hasattr(model_cls, "__onesite__") and isinstance(getattr(model_cls, "__onesite__"), dict):
-        model_site_props.update(getattr(model_cls, "__onesite__"))
+    onesite_config = normalize_onesite_config(getattr(model_cls, "__onesite__", None))
+    if onesite_config is not None:
+        model_site_props.update(onesite_config)
     if hasattr(model_cls, "__site_props__") and isinstance(getattr(model_cls, "__site_props__"), dict):
         model_site_props.update(getattr(model_cls, "__site_props__"))
 
@@ -849,7 +852,10 @@ def get_model_fields(
             console.print(f"[yellow]Warning: union_key should be a list of field names, got {type(union_key)}[/yellow]")
             union_key = None
         elif len(union_key) < 2:
-            console.print(f"[yellow]Warning: union_key should have at least 2 fields for composite key[/yellow]")
+            console.print(
+                "[yellow]Warning: union_key should have at least 2 fields "
+                "for composite key[/yellow]"
+            )
             union_key = None
 
     fields: List[Dict[str, Any]] = []

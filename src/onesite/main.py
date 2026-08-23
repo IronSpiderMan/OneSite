@@ -170,7 +170,7 @@ def init():
     if not has_site_config:
         project_name = base_dir.name.lower().replace("-", "_")
         _write_python_site_config(site_config_file, project_name)
-        console.print(f"[green]Created site_config.py[/green]")
+        console.print("[green]Created site_config.py[/green]")
     else:
         console.print("[blue]Project configuration already exists[/blue]")
 
@@ -194,7 +194,7 @@ def init():
             else:
                 console.print(f"[yellow]Template {model_file} not found[/yellow]")
     else:
-        console.print(f"[blue]models directory already exists[/blue]")
+        console.print("[blue]models directory already exists[/blue]")
 
     utils_dir = paths.source / "utils"
     utils_dir.mkdir(parents=True, exist_ok=True)
@@ -422,8 +422,8 @@ def run(
         for future in concurrent.futures.as_completed(futures):
             try:
                 future.result()
-            except Exception as e:
-                console.print(f"[red]Error: {e}[/red]")
+            except Exception as exc:
+                console.print(f"[red]Error: {exc}[/red]")
 
 
 @app.command()
@@ -606,7 +606,7 @@ def build(
                     else:
                         console.print(f"[yellow]Skipping build for {backend_image} as per user request.[/yellow]")
                         should_build = False
-            except Exception as e:
+            except Exception:
                 # Ignore errors here (e.g. docker not installed), run_build will handle/report it
                 pass
 
@@ -657,7 +657,7 @@ def build(
                     else:
                         console.print(f"[yellow]Skipping build for {frontend_image} as per user request.[/yellow]")
                         should_build = False
-            except Exception as e:
+            except Exception:
                 pass
 
             if should_build:

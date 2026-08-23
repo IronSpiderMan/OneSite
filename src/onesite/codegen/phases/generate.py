@@ -197,10 +197,10 @@ def _resolve_visualize_filters(
             target_table = target_model["table_name"]
 
             # Find the FK on current_model that points to target_table
-            fk = _find_fk_to_table(current_model, target_table)
+            fk = _find_fk_to_table(current_model, target_table, model_lookup)
             if not fk:
                 # Try reverse: find FK on target_model that points back to prev_table
-                fk = _find_fk_to_table(target_model, prev_table)
+                fk = _find_fk_to_table(target_model, prev_table, model_lookup)
                 if fk:
                     # Reverse join: target_model has FK pointing to prev_table
                     joins.append({
@@ -267,26 +267,29 @@ def _resolve_visualize_filters(
         viz["global_joins"] = global_joins
 
 
-def _find_fk_to_table(model: ModelDefinition, target_table: str) -> dict | None:
+def _find_fk_to_table(
+    model: ModelDefinition,
+    target_table: str,
+    model_lookup: dict[str, ModelDefinition],
+) -> dict | None:
     """Find a foreign key on model that points to target_table."""
     for fk in model.get("foreign_keys", []):
         fk_target = fk.get("target_model", "")
         # Try model name lookup -> table name
-        target_model = model_lookup_global.get(fk_target)
+        target_model = model_lookup.get(fk_target)
         if target_model and target_model["table_name"] == target_table:
             return {"name": fk["name"], "target_model": fk_target}
         # Try case-insensitive model name -> table name
-        for key, m in model_lookup_global.items():
-            if key.lower() == fk_target.lower() and m["table_name"] == target_table:
+        for key, candidate_model in model_lookup.items():
+            if (
+                key.lower() == fk_target.lower()
+                and candidate_model["table_name"] == target_table
+            ):
                 return {"name": fk["name"], "target_model": fk_target}
         # Direct table name match (FK target_model might be a table name)
         if fk_target.lower().replace(" ", "_") == target_table.lower().replace(" ", "_"):
             return {"name": fk["name"], "target_model": fk_target}
     return None
-
-
-# Module-level lookup, populated before code generation
-model_lookup_global: dict[str, ModelDefinition] = {}
 
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -693,8 +696,7 @@ def phase_generate_per_model(
 
     Returns the sorted list of API-visible models for use in routing & navigation.
     """
-    global model_lookup_global
-    model_lookup_global = _build_model_lookup(models)
+    model_lookup = _build_model_lookup(models)
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
     theme_name = resolve_theme(site_config)[0]["id"]
 
@@ -708,7 +710,7 @@ def phase_generate_per_model(
 
     # Resolve visualize filter paths for all models
     for model in models:
-        _resolve_visualize_filters(model, model_lookup_global)
+        _resolve_visualize_filters(model, model_lookup)
 
     for model in models:
         if model["is_link_table"] and not model.get("is_association_table"):

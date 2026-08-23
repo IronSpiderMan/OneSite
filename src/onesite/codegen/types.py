@@ -7,9 +7,6 @@ so the data flow through the pipeline is explicit and IDE-friendly.
 from dataclasses import dataclass, field
 from typing import Any
 
-from pydantic_core import PydanticUndefined
-
-
 # ── Field-level types ───────────────────────────────────────────────────────
 
 

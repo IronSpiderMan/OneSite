@@ -8,7 +8,6 @@ the downstream code generation phases.
 
 import importlib
 import inspect
-import sys
 import textwrap
 import warnings
 from pathlib import Path
@@ -18,7 +17,11 @@ from pydantic_core import PydanticUndefined
 import sqlmodel.main
 from sqlmodel import SQLModel
 
+from onesite.config import normalize_onesite_config
+from onesite_runtime import ACTION_METADATA_ATTRIBUTE, ActionMetadata
+
 from ..introspect import get_model_fields
+from ..model_imports import ModelIntrospectionError, isolated_project_imports
 from ..types import (
     BackgroundHook,
     EventListener,
@@ -454,6 +457,80 @@ def _validate_service_hooks(model_cls: type) -> None:
         _validate_named_hook_signature(model_cls, hook_name, method, supported)
 
 
+_ACTION_ARGUMENTS = {"self", "context", "session", "current_user"}
+
+
+def _validate_action_method_signature(
+    model_cls: type,
+    method_name: str,
+    method: Any,
+) -> None:
+    """Validate the dependency names supported by generated action dispatch."""
+
+    signature = inspect.signature(method)
+    parameters = list(signature.parameters.values())
+    if not parameters or parameters[0].name != "self":
+        raise ValueError(
+            f"{model_cls.__name__}.{method_name} must be an instance method "
+            "whose first parameter is 'self'"
+        )
+    _validate_named_hook_signature(
+        model_cls,
+        method_name,
+        method,
+        _ACTION_ARGUMENTS,
+    )
+
+
+def _extract_function_actions(model_cls: type) -> dict[str, dict[str, Any]]:
+    """Extract methods decorated with :func:`onesite_runtime.action`."""
+
+    actions: dict[str, dict[str, Any]] = {}
+    for method_name, raw_method in vars(model_cls).items():
+        if isinstance(raw_method, (classmethod, staticmethod)):
+            decorated = getattr(raw_method.__func__, ACTION_METADATA_ATTRIBUTE, None)
+            if decorated is not None:
+                raise ValueError(
+                    f"{model_cls.__name__}.{method_name} must be an instance method"
+                )
+            continue
+        metadata = getattr(raw_method, ACTION_METADATA_ATTRIBUTE, None)
+        if metadata is None:
+            continue
+        if not isinstance(metadata, ActionMetadata) or not inspect.isfunction(raw_method):
+            raise ValueError(
+                f"Invalid action metadata on {model_cls.__name__}.{method_name}"
+            )
+        _validate_action_method_signature(model_cls, method_name, raw_method)
+
+        availability_handler = metadata.availability_handler
+        if metadata.condition is not None and availability_handler is not None:
+            raise ValueError(
+                f"{model_cls.__name__}.{method_name} cannot define both "
+                "condition= and @action.available"
+            )
+        if availability_handler is not None:
+            guard = inspect.getattr_static(model_cls, availability_handler, None)
+            if isinstance(guard, (classmethod, staticmethod)) or not inspect.isfunction(guard):
+                raise ValueError(
+                    f"Availability handler {model_cls.__name__}.{availability_handler} "
+                    "must be an instance method"
+                )
+            _validate_action_method_signature(model_cls, availability_handler, guard)
+
+        actions[method_name] = {
+            "function": True,
+            "handler": method_name,
+            "permissions": metadata.permissions,
+            "label": metadata.label,
+            "unavailable": metadata.unavailable,
+            "condition": metadata.condition,
+            "availability_handler": availability_handler,
+            "dynamic_availability": availability_handler is not None,
+        }
+    return actions
+
+
 def _extract_background_hooks(model_cls: type) -> list[BackgroundHook]:
     """Return explicitly named post-commit background hooks."""
     return [
@@ -579,6 +656,15 @@ def _process_introspected_class(
     model_module_name = to_snake(name)
     result = get_model_fields(obj, model_module_name)
     _validate_service_hooks(obj)
+    function_actions = _extract_function_actions(obj)
+    duplicate_actions = sorted(set(result.actions) & set(function_actions))
+    if duplicate_actions:
+        duplicates = ", ".join(duplicate_actions)
+        raise ValueError(
+            f"{name} defines action(s) in both __onesite__ and decorated "
+            f"methods: {duplicates}"
+        )
+    result.actions.update(function_actions)
 
     if name == "User":
         _ensure_user_password_field(result.fields)
@@ -620,6 +706,16 @@ def _process_introspected_class(
     # Attach low-level SQLAlchemy event listeners (on_orm_before_*/on_orm_after_*).
     mdl["event_listeners"] = _extract_event_listeners(obj)
     mdl["background_hooks"] = _extract_background_hooks(obj)
+    mdl["has_function_actions"] = any(
+        action_config.get("function", False)
+        for action_config in result.actions.values()
+        if isinstance(action_config, dict)
+    )
+    mdl["has_dynamic_action_states"] = any(
+        action_config.get("dynamic_availability", False)
+        for action_config in result.actions.values()
+        if isinstance(action_config, dict)
+    )
 
     return mdl
 
@@ -641,9 +737,9 @@ def _introspect_module(
             site_props = info.get("site_props", {})
             singleton_marker = bool(site_props.get("is_singleton", False))
 
-        onesite_props = getattr(obj, "__onesite__", None)
+        onesite_props = normalize_onesite_config(getattr(obj, "__onesite__", None))
         onesite_marker = False
-        if isinstance(onesite_props, dict):
+        if onesite_props is not None:
             onesite_marker = bool(
                 onesite_props.get("frontend_only")
                 or onesite_props.get("is_singleton")
@@ -669,38 +765,41 @@ def _introspect_module(
 def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
     """Import every SQLModel module and extract field-level metadata.
 
-    Returns a list of model metadata dicts, or an empty list on critical failure.
+    Returns an empty list only when the project contains no models. Import and
+    validation failures raise :class:`ModelIntrospectionError`.
     """
     _install_snake_case_tablenames()
-    sys.path.insert(0, str(backend_path))
 
-    try:
-        import app.models  # noqa: F401
-    except Exception as exc:
-        console.print(f"[red]Could not import app.models: {exc}[/red]")
-        return []
-
-    models_dir = backend_path / "app" / "models"
-    module_names = [
-        f.stem for f in models_dir.glob("*.py")
-        if f.stem != "__init__" and not f.stem.startswith("_")
-    ]
-    found_models: list[ModelDefinition] = []
-
-    for module_name in module_names:
-        full_module_name = f"app.models.{module_name}"
+    with isolated_project_imports(backend_path):
         try:
-            if full_module_name in sys.modules:
-                module = sys.modules[full_module_name]
-            else:
-                module = importlib.import_module(full_module_name)
+            importlib.import_module("app.models")
         except Exception as exc:
-            console.print(f"[red]Error importing {full_module_name}: {exc}[/red]")
-            return []
+            raise ModelIntrospectionError(
+                f"Could not import generated model package app.models: {exc}"
+            ) from exc
 
-        module_models = _introspect_module(module, module_name)
-        if module_models is None:  # fatal error (e.g. missing import_key)
-            return []
-        found_models.extend(module_models)
+        models_dir = backend_path / "app" / "models"
+        module_names = sorted(
+            model_file.stem
+            for model_file in models_dir.glob("*.py")
+            if model_file.stem != "__init__" and not model_file.stem.startswith("_")
+        )
+        found_models: list[ModelDefinition] = []
 
-    return found_models
+        for module_name in module_names:
+            full_module_name = f"app.models.{module_name}"
+            try:
+                module = importlib.import_module(full_module_name)
+            except Exception as exc:
+                raise ModelIntrospectionError(
+                    f"Could not import generated model module {full_module_name}: {exc}"
+                ) from exc
+
+            module_models = _introspect_module(module, module_name)
+            if module_models is None:
+                raise ModelIntrospectionError(
+                    f"Model validation failed while introspecting {full_module_name}"
+                )
+            found_models.extend(module_models)
+
+        return found_models

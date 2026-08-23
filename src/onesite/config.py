@@ -199,6 +199,123 @@ class ScheduledTask(_ConfigModel):
     params: dict[str, ScheduledTaskParam] = Field(default_factory=dict)
 
 
+# ── Model-level ``__onesite__`` configuration ─────────────────────────────
+
+
+ModelPermissions = str | dict[Role, str]
+ModelVisibility = bool | Role | list[Role] | dict[Role, bool]
+
+
+class ModelAction(_ConfigModel):
+    """A custom action rendered on a model's list/detail pages."""
+
+    permissions: str | None = None
+    label: str | None = None
+    unavailable: Literal["hide", "disable"] | None = None
+    toggle: str | None = None
+    data: dict[str, Any] = Field(default_factory=dict)
+    condition: Any = None
+
+
+class ImportExportConfig(_ConfigModel):
+    """CSV or custom import/export behavior for a model."""
+
+    custom: bool = False
+    fields: list[str] | None = None
+    foreign_keys: dict[str, str] = Field(default_factory=dict)
+    reverse_foreign_keys: dict[str, str] = Field(default_factory=dict)
+    m2m: dict[str, str] = Field(default_factory=dict)
+
+
+class DetailUIConfig(_ConfigModel):
+    # Layout nodes are deliberately open: the recursive layout grammar accepts
+    # field names, rows, and nested section objects, and is validated against
+    # the actual model fields during introspection.
+    layout: list[Any]
+
+
+class ModelUIConfig(_ConfigModel):
+    detail: DetailUIConfig | None = None
+
+
+class TimeSeriesTableConfig(_ConfigModel):
+    entity_field: str
+    metric_field: str | None = None
+    time_field: str | None = None
+    model_table: str | None = None
+    property_config: dict[str, Any] | None = None
+
+
+class ExternalResourceConfig(_ConfigModel):
+    provider: str
+    resource: str
+
+
+class OneSiteConfig(_ConfigModel):
+    """Typed, editor-friendly configuration for a model's ``__onesite__``.
+
+    Unknown keys remain supported so new generator features and legacy
+    projects can adopt this class without waiting for every option to be
+    represented explicitly.
+    """
+
+    translations: dict[str, Any] = Field(default_factory=dict)
+    icon: str | None = None
+    permissions: ModelPermissions | None = None
+    visible: ModelVisibility | None = None
+    owner_field: str | None = None
+    is_link_table: bool = False
+    is_singleton: bool = False
+    frontend_only: bool = False
+    is_notification_table: bool = False
+    is_latest_table: bool = False
+    standalone: bool = True
+    page_edit: bool = False
+    edit_mode: Literal["modal", "page", "drawer"] | None = None
+    refresh_interval: int = 0
+    reverse_fk_display: bool = True
+    actions: dict[str, ModelAction] = Field(default_factory=dict)
+    ui: ModelUIConfig | None = None
+    importable: bool | ImportExportConfig = False
+    exportable: bool | ImportExportConfig = False
+    import_key: str | None = None
+    union_key: list[str] | None = None
+    time_series_table: TimeSeriesTableConfig | None = None
+    # Legacy flat TimescaleDB spelling, retained for migration compatibility.
+    is_timescaledb: bool = False
+    timescaledb_entity_field: str | None = None
+    timescaledb_metric_field: str | None = None
+    timescaledb_time_field: str | None = None
+    timescaledb_model_table: str | None = None
+    external_resource: ExternalResourceConfig | None = None
+    tree_view: Literal["auto"] | bool = "auto"
+    m2m: dict[str, Any] = Field(default_factory=dict)
+    special_me_permissions: ModelPermissions | None = None
+    # Deprecated configurations stay typed at the container level while their
+    # detailed schemas continue to live in the visualization/report modules.
+    visualize: dict[str, Any] | list[dict[str, Any]] | None = None
+    dashboard_metrics: list[Any] = Field(default_factory=list)
+    data_reports: list[dict[str, Any]] = Field(default_factory=list)
+
+
+# A discoverable alias for users who search for "model config" in an editor.
+ModelConfig = OneSiteConfig
+
+
+def normalize_onesite_config(value: Any) -> dict[str, Any] | None:
+    """Normalize legacy dictionaries and typed ``__onesite__`` values.
+
+    ``exclude_unset`` is important here: an empty :class:`OneSiteConfig`
+    behaves like an empty dictionary instead of overriding generator defaults.
+    """
+
+    if isinstance(value, dict):
+        return dict(value)
+    if isinstance(value, OneSiteConfig):
+        return value.model_dump(mode="python", exclude_unset=True)
+    return None
+
+
 class SiteConfig(_ConfigModel):
     """The root configuration object exported by a project's ``site_config.py``."""
 

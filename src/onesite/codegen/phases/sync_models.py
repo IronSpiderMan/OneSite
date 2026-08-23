@@ -13,6 +13,7 @@ from .base import console
 
 # Root of the onesite package (…/onesite/)
 _ONESITE_ROOT = Path(__file__).resolve().parent.parent.parent
+_ONESITE_RUNTIME_ROOT = _ONESITE_ROOT.parent / "onesite_runtime"
 
 
 def phase_sync_models(cwd: Path, backend_path: Path) -> None:
@@ -28,6 +29,16 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
 
     models_dest_dir.mkdir(parents=True, exist_ok=True)
     write_file_with_status(models_dest_dir / "__init__.py", "")
+
+    # Function-based model actions import this tiny package from model source.
+    # Copy it into the generated backend as well so deployments stay standalone
+    # and do not need the full OneSite generator installed at runtime.
+    runtime_dest_dir = backend_path / "onesite_runtime"
+    runtime_dest_dir.mkdir(parents=True, exist_ok=True)
+    copy_file_with_status(
+        _ONESITE_RUNTIME_ROOT / "__init__.py",
+        runtime_dest_dir / "__init__.py",
+    )
 
     source_models = (
         {model_file.name: model_file for model_file in models_src_dir.glob("*.py")}

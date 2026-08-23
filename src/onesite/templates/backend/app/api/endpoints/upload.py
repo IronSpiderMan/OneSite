@@ -2,8 +2,6 @@ from fastapi import APIRouter, UploadFile, File, HTTPException
 import shutil
 import uuid
 from pathlib import Path
-from app.core.config import settings
-
 router = APIRouter()
 
 @router.post("/upload")

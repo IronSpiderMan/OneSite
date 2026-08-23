@@ -18,7 +18,6 @@ from ..config import (
 )
 from ..envsync import sync_env_files
 from ...project_paths import get_project_paths
-from .base import console
 
 
 def phase_load_config(cwd: Path) -> tuple[dict, Path]:

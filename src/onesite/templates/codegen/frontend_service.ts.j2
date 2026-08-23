@@ -152,6 +152,23 @@ export const get{{ model.name }}StatsFilters = async (filterName: string): Promi
 {% endif %}
 
 {% if model.actions %}
+{% if model.has_dynamic_action_states %}
+export interface {{ model.name }}ActionState {
+    visible: boolean;
+    enabled: boolean;
+    reason?: string;
+    label?: string;
+}
+
+export type {{ model.name }}ActionStates = Record<string, Record<string, {{ model.name }}ActionState>>;
+
+export const get{{ model.name }}ActionStates = async (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => {
+    if (ids.length === 0) return {} as {{ model.name }}ActionStates;
+    const response = await request.post<{{ model.name }}ActionStates>(`${API_URL}/action-states`, { ids });
+    return response.data;
+};
+
+{% endif %}
 {% for action_name, action_config in model.actions.items() %}
 export const perform{{ model.name }}{{ action_name.capitalize() }} = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     const response = await request.post<{{ model.name }}>(`${API_URL}/${id}/actions/{{ action_name }}`);
