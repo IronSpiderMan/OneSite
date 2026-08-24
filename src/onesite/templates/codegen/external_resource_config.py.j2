@@ -11,6 +11,11 @@ RESOURCE_BY_KEY = {
     (item["provider"], item["resource"]): item
     for item in RESOURCE_CONFIGS
 }
+RESOURCE_BY_MODEL = {
+    (item["module"], item["model"]): item
+    for item in RESOURCE_CONFIGS
+    if item.get("module") and item.get("model")
+}
 
 
 def get_resource_config(provider: str, resource: str) -> dict[str, Any]:
@@ -21,3 +26,8 @@ def get_resource_config(provider: str, resource: str) -> dict[str, Any]:
         raise ValueError(
             f"Unknown external resource: provider='{provider}', resource='{resource}'"
         ) from exc
+
+
+def get_model_resource_config(module: str, model: str) -> dict[str, Any] | None:
+    """Return the external resource mapped to a generated model, if any."""
+    return RESOURCE_BY_MODEL.get((module, model))

@@ -8,8 +8,6 @@ the downstream code generation phases.
 
 import importlib
 import inspect
-import textwrap
-import warnings
 from pathlib import Path
 from typing import Any
 
@@ -23,8 +21,6 @@ from onesite_runtime import ACTION_METADATA_ATTRIBUTE, ActionMetadata
 from ..introspect import get_model_fields
 from ..model_imports import ModelIntrospectionError, isolated_project_imports
 from ..types import (
-    BackgroundHook,
-    EventListener,
     FieldDefinition,
     ModelDefinition,
     ModelIntrospectResult,
@@ -398,7 +394,23 @@ _TRANSACTIONAL_HOOK_ARGUMENTS = {
     "on_after_commit_update": {"self", "old", "changes", "context"},
     "on_after_commit_delete": {"self", "old", "context"},
 }
-_BACKGROUND_OPERATIONS = {"create", "update", "delete"}
+_BULK_DELETE_HOOK_ARGUMENTS = {
+    "on_after_bulk_delete": {"cls", "session", "olds", "context"},
+    "on_after_commit_bulk_delete": {"cls", "olds", "context"},
+}
+_REMOVED_MODEL_HOOKS = {
+    "on_background_after_create",
+    "on_background_after_update",
+    "on_background_after_delete",
+    "on_orm_before_insert",
+    "on_orm_after_insert",
+    "on_orm_before_update",
+    "on_orm_after_update",
+    "on_orm_before_delete",
+    "on_orm_after_delete",
+    "on_before_insert",
+    "on_after_insert",
+}
 
 
 def _validate_named_hook_signature(
@@ -429,7 +441,7 @@ def _validate_named_hook_signature(
 
 
 def _validate_service_hooks(model_cls: type) -> None:
-    """Validate transactional, post-commit, and background hook signatures."""
+    """Validate supported hooks and reject retired hook families."""
     for hook_name, supported in _TRANSACTIONAL_HOOK_ARGUMENTS.items():
         method = inspect.getattr_static(model_cls, hook_name, None)
         if method is None:
@@ -440,21 +452,27 @@ def _validate_service_hooks(model_cls: type) -> None:
             )
         _validate_named_hook_signature(model_cls, hook_name, method, supported)
 
-    for operation in _BACKGROUND_OPERATIONS:
-        hook_name = f"on_background_after_{operation}"
+    for hook_name, supported in _BULK_DELETE_HOOK_ARGUMENTS.items():
         method = inspect.getattr_static(model_cls, hook_name, None)
         if method is None:
             continue
-        if isinstance(method, (classmethod, staticmethod)) or not inspect.isfunction(method):
+        if not isinstance(method, classmethod):
             raise ValueError(
-                f"{model_cls.__name__}.{hook_name} must be an instance method"
+                f"{model_cls.__name__}.{hook_name} must be a classmethod"
             )
-        supported = {"self", "session", "context"}
-        if operation == "update":
-            supported.update({"old", "changes"})
-        elif operation == "delete":
-            supported.add("old")
-        _validate_named_hook_signature(model_cls, hook_name, method, supported)
+        _validate_named_hook_signature(
+            model_cls, hook_name, method.__func__, supported
+        )
+
+    for hook_name in sorted(_REMOVED_MODEL_HOOKS):
+        method = inspect.getattr_static(model_cls, hook_name, None)
+        if method is None:
+            continue
+        raise ValueError(
+            f"{model_cls.__name__}.{hook_name} is no longer supported. "
+            "Use on_after_create/update/delete for transactional work or "
+            "on_after_commit_create/update/delete for post-commit work."
+        )
 
 
 _ACTION_ARGUMENTS = {"self", "context", "session", "current_user"}
@@ -531,121 +549,6 @@ def _extract_function_actions(model_cls: type) -> dict[str, dict[str, Any]]:
     return actions
 
 
-def _extract_background_hooks(model_cls: type) -> list[BackgroundHook]:
-    """Return explicitly named post-commit background hooks."""
-    return [
-        BackgroundHook(operation=operation)
-        for operation in sorted(_BACKGROUND_OPERATIONS)
-        if inspect.getattr_static(
-            model_cls, f"on_background_after_{operation}", None
-        ) is not None
-    ]
-
-
-def _extract_event_listeners(model_cls: type) -> list[EventListener]:
-    """Extract explicitly ORM-scoped methods as SQLAlchemy event listeners.
-
-    ``on_orm_before_*`` / ``on_orm_after_*`` are the unambiguous low-level
-    names. The legacy ``on_before_insert`` / ``on_after_insert`` aliases emit a
-    migration warning. Async ORM hooks are rejected because silently moving a
-    mapper event to a background worker changes its transaction semantics.
-
-    The ``self`` parameter is stripped from the generated function —
-    the template adds ``self = target`` so existing ``self.`` references
-    in the body still work.
-    """
-    listeners: list[EventListener] = []
-    orm_events = {
-        "before_insert",
-        "after_insert",
-        "before_update",
-        "after_update",
-        "before_delete",
-        "after_delete",
-    }
-    for name, method in inspect.getmembers(model_cls, predicate=inspect.isfunction):
-        is_legacy = False
-        if name.startswith("on_orm_"):
-            event_name = name[len("on_orm_"):]
-        elif name in {"on_before_insert", "on_after_insert"}:
-            event_name = name[len("on_"):]
-            is_legacy = True
-        else:
-            continue
-
-        if event_name not in orm_events:
-            continue
-        if inspect.iscoroutinefunction(method):
-            transactional_name = (
-                "on_before_create" if event_name == "before_insert"
-                else "on_after_create" if event_name == "after_insert"
-                else None
-            )
-            suggestion = (
-                f" Use '{transactional_name}' for rollback semantics."
-                if transactional_name
-                else ""
-            )
-            raise ValueError(
-                f"{model_cls.__name__}.{name} is async, but ORM hooks must use "
-                f"'def', not 'async def'.{suggestion} Use an explicit "
-                f"'on_background_after_create/update/delete' hook for "
-                f"post-commit background work."
-            )
-        if is_legacy:
-            replacement = f"on_orm_{event_name}"
-            warnings.warn(
-                f"{model_cls.__name__}.{name} is deprecated and is a low-level "
-                f"ORM event, not a transactional CUD hook. Rename it to "
-                f"'{replacement}', or use "
-                f"'on_{'before' if event_name.startswith('before') else 'after'}_create' "
-                f"for rollback semantics.",
-                FutureWarning,
-                stacklevel=2,
-            )
-
-        supported = {"self", "mapper", "connection", "target"}
-        if event_name == "after_update":
-            supported.add("old")
-        _validate_named_hook_signature(model_cls, name, method, supported)
-        try:
-            source = inspect.getsource(method)
-        except (OSError, TypeError):
-            continue
-
-        lines = source.splitlines()
-        # Skip decorator / def / async def lines to reach the body
-        body_start = 0
-        for i, line in enumerate(lines):
-            stripped = line.strip()
-            if stripped.startswith("def ") or stripped.startswith("async def "):
-                body_start = i + 1
-                break
-        body_lines = lines[body_start:]
-        if not body_lines:
-            continue
-
-        has_old_param = False
-        try:
-            sig = inspect.signature(method)
-            has_old_param = "old" in sig.parameters
-        except (ValueError, TypeError):
-            pass
-
-        body = textwrap.dedent("\n".join(body_lines))
-        # Remove surrounding blank lines
-        body = body.strip("\n")
-        listeners.append(
-            EventListener(
-                event_name=event_name,
-                body=body,
-                has_old_param=has_old_param,
-            )
-        )
-
-    return listeners
-
-
 # ── Module-level introspection ───────────────────────────────────────────
 
 
@@ -703,9 +606,6 @@ def _process_introspected_class(
         else []
     )
 
-    # Attach low-level SQLAlchemy event listeners (on_orm_before_*/on_orm_after_*).
-    mdl["event_listeners"] = _extract_event_listeners(obj)
-    mdl["background_hooks"] = _extract_background_hooks(obj)
     mdl["has_function_actions"] = any(
         action_config.get("function", False)
         for action_config in result.actions.values()

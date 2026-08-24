@@ -52,28 +52,28 @@ export const get{{ model.name }} = async (id: {{ 'string' if 'str' in model.id_t
 };
 
 export const create{{ model.name }} = async (data: any) => {
-    const response = await request.post<{{ model.name }}>(`${API_URL}/`, data);
+    const response = await request.post<{{ model.name }}>(`${API_URL}/`, data, { suppressErrorToast: true });
     return response.data;
 };
 
 export const update{{ model.name }} = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, data: any) => {
-    const response = await request.put<{{ model.name }}>(`${API_URL}/${id}`, data);
+    const response = await request.put<{{ model.name }}>(`${API_URL}/${id}`, data, { suppressErrorToast: true });
     return response.data;
 };
 
 export const delete{{ model.name }} = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
-    const response = await request.delete<{{ model.name }}>(`${API_URL}/${id}`);
+    const response = await request.delete<{{ model.name }}>(`${API_URL}/${id}`, { suppressErrorToast: true });
     return response.data;
 };
 
 export const bulkDelete{{ model.name }} = async (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => {
-    const response = await request.post<{ deleted: number }>(`${API_URL}/bulk_delete`, { ids });
+    const response = await request.post<{ deleted: number }>(`${API_URL}/bulk_delete`, { ids }, { suppressErrorToast: true });
     return response.data;
 };
 
 {% if model.property_config_meta %}
 export const update{{ model.name }}PropertiesConfig = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, configs: Record<string, any>[]) => {
-    const response = await request.put(`${API_URL}/${id}/properties-config`, configs);
+    const response = await request.put(`${API_URL}/${id}/properties-config`, configs, { suppressErrorToast: true });
     return response.data;
 };
 {% endif %}
@@ -187,7 +187,7 @@ export const getMe = async () => {
 };
 
 export const updateMe = async (data: any) => {
-    const response = await request.put<{{ model.name }}>(`${API_URL}/me`, data);
+    const response = await request.put<{{ model.name }}>(`${API_URL}/me`, data, { suppressErrorToast: true });
     return response.data;
 };
 {% endif %}
@@ -303,7 +303,7 @@ export interface {{ model.name }}RealtimeResponse {
 }
 
 export const create{{ model.name }} = async (data: any) => {
-    const response = await request.post<{{ model.name }}>(`${API_URL}/`, data);
+    const response = await request.post<{{ model.name }}>(`${API_URL}/`, data, { suppressErrorToast: true });
     return response.data;
 };
 

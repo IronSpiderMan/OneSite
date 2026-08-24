@@ -1,6 +1,13 @@
 import axios from 'axios';
 import { toast } from 'sonner';
 
+declare module 'axios' {
+  export interface AxiosRequestConfig {
+    /** The caller will present a contextual error message for this request. */
+    suppressErrorToast?: boolean;
+  }
+}
+
 // Runtime API URL from window.__ENV__ (set at container startup via envsubst)
 // Falls back to VITE_API_URL (baked at build time) if not set
 declare global {
@@ -58,6 +65,7 @@ request.interceptors.response.use(
     return response;
   },
   (error) => {
+    const suppressErrorToast = error.config?.suppressErrorToast === true;
     if (error.response) {
       if (error.response.status === 401) {
         localStorage.removeItem('token');
@@ -80,7 +88,7 @@ request.interceptors.response.use(
         } else if (!window.location.pathname.startsWith('/error/403')) {
           redirectTo('/error/403');
         }
-      } else if (error.response.status >= 500) {
+      } else if (error.response.status >= 500 && !suppressErrorToast) {
         // Keep the current page usable and surface the server's safe error message.
         // Structured errors (for example a missing DB migration) are not connectivity
         // failures and must never be presented as "offline".
@@ -90,7 +98,7 @@ request.interceptors.response.use(
       console.error(error.response.data?.detail || 'Request failed');
     } else if (error.code === 'ECONNABORTED') {
       // Request timed out — show toast, don't redirect
-      toast.error('Request timed out. Please try again.');
+      if (!suppressErrorToast) toast.error('Request timed out. Please try again.');
       console.error('Request timeout');
     } else if (typeof navigator !== 'undefined' && navigator.onLine === false) {
       if (!window.location.pathname.startsWith('/error/offline')) {
@@ -100,7 +108,7 @@ request.interceptors.response.use(
     } else {
       // A reachable network with no HTTP response usually means the API server or
       // proxy is unavailable, not that the user's device is offline.
-      toast.error('Unable to reach the server. Please try again.');
+      if (!suppressErrorToast) toast.error('Unable to reach the server. Please try again.');
       console.error('Server connection error');
     }
     return Promise.reject(error);

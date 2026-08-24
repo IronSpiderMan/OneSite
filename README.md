@@ -190,12 +190,12 @@ config = SiteConfig(
 
 The first `site sync` creates the developer-owned
 `app/providers/edgeflow.py`. Its provider implements `create(resource,
-payload)`, `update(resource, payload, previous)`, and `delete(resource,
-payload)`. Generated model services append the matching CUD task in the same
-transaction as the local change. A lightweight backend worker delivers tasks
-after commit, retries temporary failures, and removes successful tasks. The
-External-resource delivery has no generated management page: the backend
-worker delivers changes automatically and handles retrying failed deliveries.
+payload)`, `update(resource, payload, previous)`, `delete(resource, payload)`,
+and `reconcile(desired)`. External-resource CUD runs as a hidden transactional
+`on_after_*` hook: provider failure rolls back the local change. A periodic
+backend reconciliation converges every provider after timeouts, process
+crashes, or external drift. The management page exposes provider-level health
+and aggregate reconciliation counters rather than per-resource tasks.
 
 The old `resource_type` and `identity_field` declaration names remain accepted
 as aliases. Reconciliation-only options (`depends_on`, `reconcile_via`, and
@@ -491,36 +491,43 @@ class Order(SQLModel, table=True):
     async def on_after_commit_update(self, old, context):
         # The database transaction is already committed here.
         pass
+
+    @classmethod
+    async def on_after_bulk_delete(cls, session, olds, context):
+        # Called once for the whole batch, before commit.
+        pass
+
+    @classmethod
+    async def on_after_commit_bulk_delete(cls, olds, context):
+        # Called once for the whole batch, after commit.
+        pass
 ```
 
 `on_before_create/update/delete` and `on_after_create/update/delete` run in the same transaction as the CUD operation. The generated service commits only after they succeed and rolls back on any exception. A hook may declare only the named arguments it needs: `session`, `old`, `changes`, or `context`. `context` contains `operation`, `input_data`, and `changed_fields`.
 
 `on_after_commit_create/update/delete` runs after commit; failures are logged and cannot roll back the database. Use a transactional outbox rather than direct email, HTTP or message-broker calls when reliable external delivery is required.
 
-Explicit background hooks use `on_background_after_create/update/delete`. They
-are queued only after the database commit succeeds and run with a fresh
-`AsyncSession`. They may declare the same named arguments as the corresponding
-post-commit hook, plus `session`. Background failures are logged and cannot
-roll back the original CUD operation.
+Bulk deletion has two class-level hooks: `on_after_bulk_delete` runs once in
+the batch transaction, while `on_after_commit_bulk_delete` runs once after a
+successful commit. Both receive `olds`, a list of deleted row snapshots, and
+`context.operation` is `"bulk_delete"`. They must be declared with
+`@classmethod`. Per-record delete hooks still run for each deleted row. The
+batch is atomic and duplicate or missing IDs are ignored.
 
-```python
-async def on_background_after_create(self, session, context):
-    session.add(DeliveryJob(order_id=self.id))
-```
+Background work should be submitted to the application's task system from an
+`on_after_commit_*` hook. For reliable external delivery, use a transactional
+outbox or another durable queue.
 
-Low-level SQLAlchemy mapper hooks use the explicit
-`on_orm_before_insert/update/delete` and
-`on_orm_after_insert/update/delete` names and must be synchronous `def`
-methods. The ambiguous legacy `on_before_insert` and `on_after_insert` aliases
-emit a deprecation warning; async legacy/ORM hooks are rejected during
-`site sync` instead of being silently converted into background work.
+The former `on_background_after_*`, `on_orm_*`, `on_before_insert`, and
+`on_after_insert` model hooks are no longer supported. `site sync` reports a
+migration error when it finds one instead of silently ignoring it.
 
 | Hook family | Execution | Can roll back the CUD transaction? |
 |---|---|---|
 | `on_before/after_create/update/delete` | Same transaction | Yes |
 | `on_after_commit_create/update/delete` | Inline, after commit | No |
-| `on_background_after_create/update/delete` | Background, after commit | No |
-| `on_orm_before/after_insert/update/delete` | SQLAlchemy mapper event | Low-level; use with care |
+| `on_after_bulk_delete` | Once per batch, same transaction | Yes |
+| `on_after_commit_bulk_delete` | Once per batch, after commit | No |
 
 ### Business primary keys
 
@@ -771,6 +778,12 @@ legacy synchronous CSV import API remains available by omitting
 `background=true`. Both paths require model-level create and update
 permissions. Standard CSV imports also enforce the caller's field permissions
 per create/update row and force the configured owner scope for non-admin users.
+
+> **TODO (optimization):** Standard CSV imports currently use the regular
+> create/update service path, so transactional and post-commit model hooks run
+> once per imported row. Add a batch-oriented import path that reduces
+> per-row commits and hook overhead while preserving validation, rollback
+> semantics, and reliable post-commit processing.
 
 Hide selected executions from both the Task Center list and detail API with an
 exact `kind` plus `name` pair. Hidden jobs still execute, persist, notify, and

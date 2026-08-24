@@ -41,12 +41,6 @@ from app.core.kafka import kafka_manager
 from app.core.kafka_bindings import register_kafka_handlers
 {% endif %}
 {% endif %}
-# Import event listeners to register them with SQLAlchemy
-try:
-    import app.events
-except ImportError:
-    pass
-
 # Import background task queue and handlers
 from app.core.task_queue import task_queue
 {% if config.background_tasks_enabled %}

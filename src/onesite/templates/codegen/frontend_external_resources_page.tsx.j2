@@ -2,78 +2,86 @@ import React, { useCallback, useEffect, useState } from 'react';
 import { RefreshCw, RotateCcw, ShieldCheck } from 'lucide-react';
 import { toast } from 'sonner';
 import {
-  ExternalResourceBinding,
-  checkExternalResources,
-  getExternalResources,
-  retryExternalResource,
+  ExternalProviderState,
+  getExternalProviders,
+  reconcileExternalProvider,
+  reconcileExternalProviders,
 } from '../services/external-resources';
 
 const statusColor: Record<string, string> = {
-  pending: 'bg-blue-100 text-blue-700', syncing: 'bg-violet-100 text-violet-700',
-  synced: 'bg-emerald-100 text-emerald-700', retrying: 'bg-amber-100 text-amber-700',
-  failed: 'bg-red-100 text-red-700', drifted: 'bg-orange-100 text-orange-700',
-  deleting: 'bg-slate-100 text-slate-700', deleted: 'bg-slate-100 text-slate-600',
+  unknown: 'bg-slate-100 text-slate-700',
+  syncing: 'bg-violet-100 text-violet-700',
+  synced: 'bg-emerald-100 text-emerald-700',
+  degraded: 'bg-red-100 text-red-700',
 };
 
 export default function ExternalResourcesPage() {
-  const [rows, setRows] = useState<ExternalResourceBinding[]>([]);
+  const [rows, setRows] = useState<ExternalProviderState[]>([]);
   const [loading, setLoading] = useState(true);
-  const [showDeleted, setShowDeleted] = useState(false);
-  const [offset, setOffset] = useState(0);
-  const [total, setTotal] = useState(0);
-  const pageSize = 100;
   const load = useCallback(async () => {
     setLoading(true);
-    try {
-      const page = await getExternalResources(showDeleted, offset, pageSize);
-      setRows(page.items);
-      setTotal(page.total);
-    }
+    try { setRows(await getExternalProviders()); }
     finally { setLoading(false); }
-  }, [showDeleted, offset]);
+  }, []);
 
-  useEffect(() => { void load(); const id = window.setInterval(load, 5000); return () => window.clearInterval(id); }, [load]);
+  useEffect(() => {
+    void load();
+    const id = window.setInterval(load, 5000);
+    return () => window.clearInterval(id);
+  }, [load]);
 
-  const retry = async (row: ExternalResourceBinding) => {
-    await retryExternalResource(row.provider, row.resource, row.entity_id);
-    toast.success('已按当前版本重新入队');
+  const reconcileAll = async () => {
+    await reconcileExternalProviders();
+    toast.success('Provider 全局同步完成');
     await load();
   };
-  const check = async () => {
-    await checkExternalResources();
-    toast.success('已完成全局同步检测');
+
+  const reconcileOne = async (provider: string) => {
+    await reconcileExternalProvider(provider);
+    toast.success(`${provider} 同步完成`);
     await load();
   };
 
   return <div className="flex h-full min-h-0 flex-col gap-5 p-6">
     <div className="flex shrink-0 items-center justify-between">
-      <div><h1 className="text-2xl font-semibold">外部资源同步</h1><p className="text-sm text-muted-foreground">查看版本、待同步任务和外部资源一致性</p></div>
+      <div>
+        <h1 className="text-2xl font-semibold">外部 Provider 同步</h1>
+        <p className="text-sm text-muted-foreground">查看外部系统的整体同步与健康状态</p>
+      </div>
       <div className="flex items-center gap-3">
-        <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={event => { setShowDeleted(event.target.checked); setOffset(0); }} />显示已删除</label>
-        <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm" onClick={() => void check()}><ShieldCheck className="h-4 w-4" />全局检测</button>
-        <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新</button>
+        <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm" onClick={() => void reconcileAll()}>
+          <ShieldCheck className="h-4 w-4" />全局同步
+        </button>
+        <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm" onClick={() => void load()}>
+          <RefreshCw className="h-4 w-4" />刷新
+        </button>
       </div>
     </div>
-    <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-card"><table className="w-full text-sm"><thead className="sticky top-0 z-20 border-b bg-muted text-left shadow-sm"><tr>
-      <th className="p-3">Provider</th><th className="p-3">资源</th><th className="p-3">业务 ID</th><th className="p-3">状态</th><th className="p-3">版本</th><th className="p-3">待同步</th><th className="p-3">一致性</th><th className="p-3">最近检查</th><th className="p-3">操作</th>
-    </tr></thead><tbody>
-      {rows.map(row => <tr className="border-b last:border-0" key={`${row.provider}:${row.resource}:${row.entity_id}`}>
-        <td className="p-3 font-medium">{row.provider}</td><td className="p-3">{row.resource}</td><td className="p-3 font-mono text-xs">{row.entity_id}</td>
-        <td className="p-3"><span className={`rounded-full px-2 py-1 text-xs ${statusColor[row.status] || 'bg-blue-100 text-blue-700'}`}>{row.status}</span>{row.last_error && <div className="mt-1 max-w-xs truncate text-xs text-red-600" title={row.last_error}>{row.last_error}</div>}</td>
-        <td className="p-3" title="已同步版本 / 目标版本">{row.synced_version}/{row.desired_version}</td><td className="p-3">{row.pending_count}</td>
-        <td className="p-3">{row.status === 'deleted' ? '已删除' : !row.observed_hash ? <span className="text-muted-foreground">待检测</span> : row.desired_hash === row.observed_hash ? <span className="text-emerald-600">一致</span> : <span className="text-orange-600">存在漂移</span>}</td>
-        <td className="p-3">{row.last_checked_at ? new Date(row.last_checked_at).toLocaleString() : '—'}</td>
-        <td className="p-3">{row.status !== 'deleted' && <button className="inline-flex items-center gap-1 rounded border px-2 py-1" onClick={() => void retry(row)}><RotateCcw className="h-3 w-3" />重试</button>}</td>
-      </tr>)}
-      {!loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={9}>暂无外部资源绑定</td></tr>}
-      {loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={9}>加载中…</td></tr>}
-    </tbody></table></div>
-    <div className="flex shrink-0 items-center justify-between text-sm text-muted-foreground">
-      <span>共 {total} 条，第 {total === 0 ? 0 : Math.floor(offset / pageSize) + 1} / {Math.max(1, Math.ceil(total / pageSize))} 页</span>
-      <div className="flex gap-2">
-        <button className="rounded border px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50" disabled={loading || offset === 0} onClick={() => setOffset(value => Math.max(0, value - pageSize))}>上一页</button>
-        <button className="rounded border px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50" disabled={loading || offset + pageSize >= total} onClick={() => setOffset(value => value + pageSize)}>下一页</button>
-      </div>
+    <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-card">
+      <table className="w-full text-sm">
+        <thead className="sticky top-0 z-20 border-b bg-muted text-left shadow-sm"><tr>
+          <th className="p-3">Provider</th><th className="p-3">状态</th>
+          <th className="p-3">同步代次</th><th className="p-3">检查</th>
+          <th className="p-3">修复</th><th className="p-3">失败</th>
+          <th className="p-3">最近同步</th><th className="p-3">操作</th>
+        </tr></thead>
+        <tbody>
+          {rows.map(row => <tr className="border-b last:border-0" key={row.provider}>
+            <td className="p-3 font-medium">{row.provider}</td>
+            <td className="p-3">
+              <span className={`rounded-full px-2 py-1 text-xs ${statusColor[row.status]}`}>{row.status}</span>
+              {row.last_error && <div className="mt-1 max-w-md truncate text-xs text-red-600" title={row.last_error}>{row.last_error}</div>}
+            </td>
+            <td className="p-3" title="已同步 / 目标">{row.synced_generation}/{row.desired_generation}</td>
+            <td className="p-3">{row.checked_count}</td><td className="p-3">{row.changed_count}</td>
+            <td className="p-3">{row.failed_count}</td>
+            <td className="p-3">{row.last_synced_at ? new Date(row.last_synced_at).toLocaleString() : '—'}</td>
+            <td className="p-3"><button className="inline-flex items-center gap-1 rounded border px-2 py-1" disabled={row.status === 'syncing'} onClick={() => void reconcileOne(row.provider)}><RotateCcw className="h-3 w-3" />同步</button></td>
+          </tr>)}
+          {!loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={8}>暂无 External Resource Provider</td></tr>}
+          {loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={8}>加载中…</td></tr>}
+        </tbody>
+      </table>
     </div>
   </div>;
 }

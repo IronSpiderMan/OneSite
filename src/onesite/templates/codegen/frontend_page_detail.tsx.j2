@@ -429,6 +429,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
 
     {% if model.page_edit %}
     const [isEditing, setIsEditing] = useState(false);
+    const [isSaving, setIsSaving] = useState(false);
     const { register, handleSubmit: handleEditSubmit, reset, setValue: setEditValue, control: editControl } = useForm();
 
     {% for field in model.fields %}
@@ -443,11 +444,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% endif %}
 
     const onEditSave = async (values: any) => {
+      if (isSaving) return;
+      setIsSaving(true);
       try {
         await updateItem(currentItem!.id, values);
         toast.success(t('toast.update_success', 'Updated'));
         setIsEditing(false);
-        fetchItem(currentItem!.id);
+        await fetchItem(currentItem!.id);
         {% if model.m2m_fields %}
         {% for m2m in model.m2m_fields %}
         fetch{{ m2m.target_model }}s(currentItem!.id, 1);
@@ -456,6 +459,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
       } catch (error) {
         toast.error(t('toast.save_failed', 'Save failed'));
         console.error(error);
+      } finally {
+        setIsSaving(false);
       }
     };
 
@@ -1134,11 +1139,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 )}
                 {isEditing && (
                   <>
-                    <Button variant="outline" size="sm" onClick={() => setIsEditing(false)}>
+                    <Button variant="outline" size="sm" disabled={isSaving} onClick={() => setIsEditing(false)}>
                       <X className="mr-2 h-4 w-4" /> {t('common.cancel')}
                     </Button>
-                    <Button size="sm" type="button" onClick={handleEditSubmit(onEditSave)}>
-                      <Save className="mr-2 h-4 w-4" /> {t('common.save')}
+                    <Button size="sm" type="button" disabled={isSaving} onClick={handleEditSubmit(onEditSave)}>
+                      {isSaving ? (
+                        <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.saving', 'Saving...')}</>
+                      ) : (
+                        <><Save className="mr-2 h-4 w-4" /> {t('common.save')}</>
+                      )}
                     </Button>
                   </>
                 )}

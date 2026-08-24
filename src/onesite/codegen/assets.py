@@ -348,6 +348,7 @@ def _validate_external_resource_provider(file_path: Path) -> None:
         "create": ["self", "resource", "payload"],
         "update": ["self", "resource", "payload", "previous"],
         "delete": ["self", "resource", "payload"],
+        "reconcile": ["self", "desired"],
     }
     methods = {
         node.name: node
@@ -361,7 +362,7 @@ def _validate_external_resource_provider(file_path: Path) -> None:
             raise SiteConfigError(
                 f"{file_path}:Provider.{method_name} must be async with parameters "
                 f"({', '.join(parameters)}). External Resource providers now use "
-                "the simplified create/update/delete multi-resource contract."
+                "the create/update/delete/reconcile multi-resource contract."
             )
 
 
@@ -721,6 +722,13 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         _sync_tools(cwd, backend_path, site_config["tools"])
     if site_config.get("scheduled_tasks"):
         _sync_scheduled_tasks(cwd, backend_path, site_config["scheduled_tasks"])
+    else:
+        # Task modules may also provide implementation helpers used by hidden
+        # framework jobs (for example an external provider reconciler) even
+        # when they are not exposed as scheduled tasks in the task center.
+        source_tasks = get_project_paths(cwd).tasks
+        if source_tasks.exists():
+            _mirror_python_tree(source_tasks, backend_path / "app" / "tasks")
 
     template_endpoints_dir = template_backend_root / "app" / "api" / "endpoints"
     target_endpoints_dir = backend_path / "app" / "api" / "endpoints"

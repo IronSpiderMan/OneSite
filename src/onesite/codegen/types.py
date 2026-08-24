@@ -189,30 +189,6 @@ class ModelIntrospectResult:
 
 
 @dataclass
-class EventListener:
-    """A database event listener method extracted from a model.
-
-    Generated from model methods named ``on_orm_before_<event>`` or
-    ``on_orm_after_<event>`` (plus legacy insert aliases) — the method body is extracted and wrapped
-    in a ``@event.listens_for`` decorated function.
-
-    ORM listeners are always synchronous. Background work uses the explicit
-    ``on_background_after_<operation>`` lifecycle instead.
-    """
-
-    event_name: str   # e.g. "before_insert", "after_update"
-    body: str          # dedented source code of the method body
-    has_old_param: bool = False  # method signature has "old" param (after_update only)
-
-
-@dataclass(frozen=True)
-class BackgroundHook:
-    """An explicit post-commit background model hook."""
-
-    operation: str  # create, update, or delete
-
-
-@dataclass
 class PipelineContext:
     """Accumulated state passed through the code generation pipeline phases."""
 

@@ -29,17 +29,17 @@ class Provider(ExternalResourceProvider):
     async def delete(self, resource: str, payload: dict[str, Any]) -> None:
         raise NotImplementedError
 
-    async def observe(
+    async def reconcile(
         self,
-        resource: str,
-        payload: dict[str, Any],
-    ) -> dict[str, Any] | None:
-        """Return the current comparable external state, if supported.
+        desired: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, int] | None:
+        """Converge all managed resources in this provider.
 
-        Returning ``None`` keeps CUD delivery active but disables drift
-        detection for this provider resource.
+        Enumerate only resources owned by this OneSite project when removing
+        external orphans. Return aggregate ``checked``, ``changed`` and
+        ``failed`` counters.
         """
-        return None
+        raise NotImplementedError
 
 
 provider = Provider()

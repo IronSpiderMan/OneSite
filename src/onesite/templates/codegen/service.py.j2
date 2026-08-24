@@ -9,7 +9,7 @@ from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not model.is_timescaledb %}, {{ model.name }}Update{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
-from app.core.model_hooks import ModelHookContext, invoke_model_hook, publish_model_background_hook, snapshot_model
+from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
 from app.core.datetime import SYSTEM_TIMEZONE, to_utc
 from app.core.config import settings
 {% if model.data_reports %}
@@ -20,9 +20,6 @@ from app.models.{{ model.timescaledb_entity_source_module }} import {{ model.tim
 {% if model.timescaledb_model_class and model.timescaledb_model_source_module %}
 from app.models.{{ model.timescaledb_model_source_module }} import {{ model.timescaledb_model_class }}
 {% endif %}
-{% endif %}
-{% if model.external_resource %}
-from app.core.external_resources import enqueue_external_resource_change
 {% endif %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
@@ -49,25 +46,7 @@ class {{ model.name }}Service:
             input_data=obj_in.dict(exclude_none=True),
             changed_fields=frozenset(obj_in.dict(exclude_none=True)),
         )
-        {% if model.external_resource %}
-        try:
-            obj = await crud.create(session, obj_in, auto_commit=False)
-            await enqueue_external_resource_change(
-                session,
-                provider="{{ model.external_resource.provider }}",
-                resource="{{ model.external_resource.resource }}",
-                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
-                operation="create",
-                payload=snapshot_model(obj),
-            )
-            await session.commit()
-            await session.refresh(obj)
-        except Exception:
-            await session.rollback()
-            raise
-        {% else %}
         obj = await crud.create(session, obj_in)
-        {% endif %}
         try:
             await invoke_model_hook(obj, "on_after_commit_create", context=context)
         except Exception:
@@ -75,7 +54,6 @@ class {{ model.name }}Service:
                 "Post-commit create hook failed for {{ model.name }} id=%s",
                 getattr(obj, "id", None),
             )
-        publish_model_background_hook(obj, "create", context=context)
         return obj.model_dump()
 
     async def get_realtime_by_entity(
@@ -365,7 +343,6 @@ class {{ model.name }}Service:
                         "Post-commit create hook failed for {{ model.name }} id=%s",
                         getattr(obj, "id", None),
                     )
-                publish_model_background_hook(obj, "create", context=hook_context)
             
             # Push notifications to all users
             for obj in created_objects:
@@ -387,25 +364,7 @@ class {{ model.name }}Service:
             # Return the first created object as representative
             return {{ model.name }}Read.model_validate(created_objects[0]) if created_objects else {{ model.name }}Read.model_validate({{ model.name }}())
         {% endif %}
-        {% if model.external_resource %}
-        try:
-            obj = await crud.create(session, obj_in, auto_commit=False)
-            await enqueue_external_resource_change(
-                session,
-                provider="{{ model.external_resource.provider }}",
-                resource="{{ model.external_resource.resource }}",
-                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
-                operation="create",
-                payload=snapshot_model(obj),
-            )
-            await session.commit()
-            await session.refresh(obj)
-        except Exception:
-            await session.rollback()
-            raise
-        {% else %}
         obj = await crud.create(session, obj_in)
-        {% endif %}
 
         try:
             await invoke_model_hook(
@@ -415,7 +374,6 @@ class {{ model.name }}Service:
             )
         except Exception:
             logger.exception("Post-commit create hook failed for {{ model.name }} id=%s", getattr(obj, "id", None))
-        publish_model_background_hook(obj, "create", context=hook_context)
 
         {% if model.is_notification_table %}
         # Auto-push for notification
@@ -467,26 +425,7 @@ class {{ model.name }}Service:
         {% endfor %}
         {% endif %}
 
-        {% if model.external_resource %}
-        try:
-            obj = await crud.update(session, db_obj, obj_in, auto_commit=False)
-            await enqueue_external_resource_change(
-                session,
-                provider="{{ model.external_resource.provider }}",
-                resource="{{ model.external_resource.resource }}",
-                entity_id=str(getattr(obj, "{{ model.external_resource.get('identity_field', 'id') }}")),
-                operation="update",
-                payload=snapshot_model(obj),
-                previous=old,
-            )
-            await session.commit()
-            await session.refresh(obj)
-        except Exception:
-            await session.rollback()
-            raise
-        {% else %}
         obj = await crud.update(session, db_obj, obj_in)
-        {% endif %}
 
         try:
             await invoke_model_hook(
@@ -498,13 +437,6 @@ class {{ model.name }}Service:
             )
         except Exception:
             logger.exception("Post-commit update hook failed for {{ model.name }} id=%s", id)
-        publish_model_background_hook(
-            obj,
-            "update",
-            old=old,
-            changes=changes,
-            context=hook_context,
-        )
 
         {% if model.is_notification_table %}
         # Auto-push read status
@@ -520,32 +452,11 @@ class {{ model.name }}Service:
         db_obj = None
         old = None
         hook_context = ModelHookContext(operation="delete")
-        {% if model.external_resource %}
-        try:
-            db_obj = await crud.get(session, id)
-            if not db_obj:
-                raise ValueError("{{ model.name }} not found")
-            old = snapshot_model(db_obj)
-            deleted_id = await crud.delete(session, id, auto_commit=False)
-            await enqueue_external_resource_change(
-                session,
-                provider="{{ model.external_resource.provider }}",
-                resource="{{ model.external_resource.resource }}",
-                entity_id=str(old["{{ model.external_resource.get('identity_field', 'id') }}"]),
-                operation="delete",
-                payload=old,
-            )
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        {% else %}
         db_obj = await crud.get(session, id)
         if not db_obj:
             raise ValueError("{{ model.name }} not found")
         old = snapshot_model(db_obj)
         deleted_id = await crud.delete(session, id)
-        {% endif %}
 
         try:
             await invoke_model_hook(
@@ -556,13 +467,70 @@ class {{ model.name }}Service:
             )
         except Exception:
             logger.exception("Post-commit delete hook failed for {{ model.name }} id=%s", id)
-        publish_model_background_hook(
-            db_obj,
-            "delete",
-            old=old,
-            context=hook_context,
-        )
         return deleted_id
+
+    async def bulk_delete(
+        self, session: AsyncSession, ids: List[{{ model.id_type }}]
+    ) -> int:
+        unique_ids = list(dict.fromkeys(ids))
+        objects = []
+        olds = []
+        for id in unique_ids:
+            obj = await crud.get(session, id)
+            if obj is not None:
+                objects.append(obj)
+                olds.append(snapshot_model(obj))
+
+        if not objects:
+            return 0
+
+        hook_context = ModelHookContext(
+            operation="bulk_delete",
+            input_data={"ids": unique_ids},
+            changed_fields=frozenset(),
+        )
+        try:
+            for obj, old in zip(objects, olds):
+                await crud.delete(session, obj.id, auto_commit=False)
+            await invoke_model_hook(
+                {{ model.name }},
+                "on_after_bulk_delete",
+                session=session,
+                olds=olds,
+                context=hook_context,
+            )
+            await session.flush()
+            await session.commit()
+        except Exception:
+            await session.rollback()
+            raise
+
+        for obj, old in zip(objects, olds):
+            try:
+                await invoke_model_hook(
+                    obj,
+                    "on_after_commit_delete",
+                    old=old,
+                    context=ModelHookContext(operation="delete"),
+                )
+            except Exception:
+                logger.exception(
+                    "Post-commit delete hook failed for {{ model.name }} id=%s",
+                    getattr(obj, "id", None),
+                )
+        try:
+            await invoke_model_hook(
+                {{ model.name }},
+                "on_after_commit_bulk_delete",
+                olds=olds,
+                context=hook_context,
+            )
+        except Exception:
+            logger.exception(
+                "Post-commit bulk delete hook failed for {{ model.name }} ids=%s",
+                unique_ids,
+            )
+        return len(objects)
 
     {% if model.property_config_meta %}
     async def update_properties_config(

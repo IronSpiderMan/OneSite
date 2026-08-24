@@ -1,43 +1,29 @@
 import request from '../utils/request';
 
-export interface ExternalResourceBinding {
-  id: number;
+export interface ExternalProviderState {
   provider: string;
-  resource: string;
-  entity_id: string;
-  status: string;
-  desired_version: number;
-  synced_version: number;
-  pending_count: number;
-  retry_count: number;
-  desired_hash?: string;
-  observed_hash?: string;
+  status: 'unknown' | 'syncing' | 'synced' | 'degraded';
+  desired_generation: number;
+  synced_generation: number;
+  checked_count: number;
+  changed_count: number;
+  failed_count: number;
   last_error?: string;
+  last_started_at?: string;
   last_synced_at?: string;
-  last_checked_at?: string;
-  last_drift_at?: string;
   updated_at: string;
 }
 
-export interface ExternalResourcePage {
-  items: ExternalResourceBinding[];
-  total: number;
-  offset: number;
-  limit: number;
+export async function getExternalProviders() {
+  return (await request.get<ExternalProviderState[]>('/external-resources')).data;
 }
 
-export async function getExternalResources(includeDeleted = false, offset = 0, limit = 100) {
-  return (await request.get<ExternalResourcePage>('/external-resources', {
-    params: { include_deleted: includeDeleted, offset, limit },
-  })).data;
+export async function reconcileExternalProviders() {
+  return (await request.post('/external-resources/reconcile')).data;
 }
 
-export async function retryExternalResource(provider: string, resource: string, entityId: string) {
+export async function reconcileExternalProvider(provider: string) {
   return (await request.post(
-    `/external-resources/${encodeURIComponent(provider)}/${encodeURIComponent(resource)}/${encodeURIComponent(entityId)}/retry`,
+    `/external-resources/${encodeURIComponent(provider)}/reconcile`,
   )).data;
-}
-
-export async function checkExternalResources() {
-  return (await request.post('/external-resources/check')).data;
 }

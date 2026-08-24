@@ -751,7 +751,7 @@ async def bulk_delete_{{ model.lower_name }}(
         if getattr(obj, "email", "").casefold() == settings.FIRST_SUPERUSER.casefold():
             raise HTTPException(status_code=403, detail="The initial administrator cannot be deleted")
     {% endif %}
-    deleted_count = 0
+    delete_ids = []
     for obj in objects:
         {% if model.owner_field %}
         # Owner-scoped: non-admin users can only delete their own records
@@ -759,12 +759,12 @@ async def bulk_delete_{{ model.lower_name }}(
             if getattr(obj, "{{ model.owner_field }}", None) != current_user.id:
                 continue
         {% endif %}
-        try:
-            await service.delete(session, obj.id)
-            deleted_count += 1
-        except IntegrityError:
-            await session.rollback()
-            raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
+        delete_ids.append(obj.id)
+    try:
+        deleted_count = await service.bulk_delete(session, delete_ids)
+    except IntegrityError:
+        await session.rollback()
+        raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
     return {"deleted": deleted_count}
 
 {% if model.property_config_meta %}

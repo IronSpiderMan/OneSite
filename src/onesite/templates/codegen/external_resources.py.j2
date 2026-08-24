@@ -1,16 +1,14 @@
-"""Versioned synchronization runtime for provider-owned external resources.
+"""Provider-level synchronization for model-owned external resources.
 
-Model CUD transactions write an outbox row and advance the desired resource
-version atomically. APScheduler executes bounded delivery and audit jobs; no
-long-running polling loop lives in the application process.
+Model CUD calls the provider synchronously from the transactional ``on_after``
+lifecycle. A periodic provider-wide reconciliation repairs uncertain outcomes
+and external drift without retaining per-resource task or binding rows.
 """
 
 from __future__ import annotations
 
 import asyncio
-import hashlib
 import importlib
-import json
 import logging
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -18,160 +16,126 @@ from typing import Any
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from fastapi.encoders import jsonable_encoder
-from sqlalchemy import Column, DateTime, JSON, String, UniqueConstraint, inspect, or_, text
+from sqlalchemy import Column, DateTime, String
 from sqlalchemy.orm import sessionmaker
 from sqlmodel import Field, SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from app.core.external_resource_config import RESOURCE_CONFIGS, get_resource_config
+from app.core.external_resource_config import (
+    RESOURCE_CONFIGS,
+    get_model_resource_config,
+    get_resource_config,
+)
 
 logger = logging.getLogger(__name__)
 
 
-class SyncStatus(str, Enum):
-    pending = "pending"
+class ProviderSyncStatus(str, Enum):
+    unknown = "unknown"
     syncing = "syncing"
     synced = "synced"
-    retrying = "retrying"
-    failed = "failed"
-    drifted = "drifted"
-    deleting = "deleting"
-    deleted = "deleted"
+    degraded = "degraded"
 
 
-class TaskStatus(str, Enum):
-    pending = "pending"
-    processing = "processing"
-    retry = "retry"
-    failed = "failed"
-    completed = "completed"
+class ExternalProviderState(SQLModel, table=True):
+    """Aggregate synchronization state for one provider."""
 
+    __tablename__ = "onesite_external_provider_state"
 
-class ExternalResourceBinding(SQLModel, table=True):
-    """Current desired and observed state for one local/external resource pair."""
-
-    __tablename__ = "onesite_external_resource_binding"
-    __table_args__ = (
-        UniqueConstraint("provider", "resource", "entity_id", name="uq_external_resource_binding"),
+    provider: str = Field(
+        sa_column=Column(String(100), primary_key=True, nullable=False),
     )
-
-    id: int | None = Field(default=None, primary_key=True)
-    provider: str = Field(sa_column=Column(String(100), nullable=False, index=True))
-    resource: str = Field(sa_column=Column(String(100), nullable=False, index=True))
-    entity_id: str = Field(sa_column=Column(String(255), nullable=False, index=True))
-    status: str = Field(default=SyncStatus.pending.value, sa_column=Column(String(32), nullable=False, index=True))
-    desired_version: int = 0
-    synced_version: int = 0
-    desired_operation: str = Field(default="update", sa_column=Column(String(16), nullable=False))
-    desired_payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    desired_hash: str | None = None
-    observed_hash: str | None = None
-    observed_payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    retry_count: int = 0
+    status: str = Field(
+        default=ProviderSyncStatus.unknown.value,
+        sa_column=Column(String(32), nullable=False, index=True),
+    )
+    desired_generation: int = 0
+    synced_generation: int = 0
+    checked_count: int = 0
+    changed_count: int = 0
+    failed_count: int = 0
     last_error: str | None = None
-    last_synced_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
-    last_checked_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
-    last_drift_at: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True)))
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
-
-
-class ExternalResourceTask(SQLModel, table=True):
-    """Durable delivery history. Rows are retained for audit and diagnosis."""
-
-    __tablename__ = "onesite_external_resource_task"
-
-    id: int | None = Field(default=None, primary_key=True)
-    provider: str = Field(sa_column=Column(String(100), nullable=False, index=True))
-    resource: str = Field(sa_column=Column(String(100), nullable=False, index=True))
-    entity_id: str = Field(sa_column=Column(String(255), nullable=False, index=True))
-    operation: str = Field(sa_column=Column(String(16), nullable=False))
-    revision: int = Field(default=0, index=True)
-    payload: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    previous: dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON, nullable=False))
-    status: str = Field(default=TaskStatus.pending.value, sa_column=Column(String(16), nullable=False, index=True))
-    attempts: int = 0
-    next_attempt_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False, index=True))
-    locked_until: datetime | None = Field(default=None, sa_column=Column(DateTime(timezone=True), index=True))
-    last_error: str | None = None
-    created_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
-    updated_at: datetime = Field(default_factory=lambda: datetime.now(timezone.utc), sa_column=Column(DateTime(timezone=True), nullable=False))
+    last_started_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True))
+    )
+    last_synced_at: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True))
+    )
+    locked_until: datetime | None = Field(
+        default=None, sa_column=Column(DateTime(timezone=True), index=True)
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
 
 
 async def init_external_resource_db() -> None:
-    """Create runtime tables and upgrade the former CUD task table."""
     from app.core.db import engine
 
     async with engine.begin() as connection:
         await connection.run_sync(
             lambda sync_connection: SQLModel.metadata.create_all(
                 sync_connection,
-                tables=(ExternalResourceBinding.__table__, ExternalResourceTask.__table__),
+                tables=(ExternalProviderState.__table__,),
             )
         )
-        has_revision = await connection.run_sync(
-            lambda sync_connection: "revision" in {
-                column["name"]
-                for column in inspect(sync_connection).get_columns(ExternalResourceTask.__tablename__)
-            }
-        )
-        if not has_revision:
-            await connection.execute(text(
-                "ALTER TABLE onesite_external_resource_task ADD COLUMN revision INTEGER NOT NULL DEFAULT 0"
-            ))
+    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+    async with factory() as session:
+        for provider in sorted({item["provider"] for item in RESOURCE_CONFIGS}):
+            await _provider_state(session, provider)
+        await session.commit()
 
 
 class ExternalResourceError(RuntimeError):
-    """Base class for provider delivery and observation errors."""
+    pass
 
 
 class ExternalResourcePermanentError(ExternalResourceError):
-    """An error that needs an explicit operator retry."""
+    pass
 
 
 class ExternalResourceProvider:
-    """Provider SPI. ``observe`` is optional but enables drift detection."""
+    """Provider SPI for immediate CUD and provider-wide reconciliation."""
 
     async def create(self, resource: str, payload: dict[str, Any]) -> None:
         raise NotImplementedError
 
-    async def update(self, resource: str, payload: dict[str, Any], previous: dict[str, Any]) -> None:
+    async def update(
+        self,
+        resource: str,
+        payload: dict[str, Any],
+        previous: dict[str, Any],
+    ) -> None:
         raise NotImplementedError
 
     async def delete(self, resource: str, payload: dict[str, Any]) -> None:
         raise NotImplementedError
 
-    async def observe(self, resource: str, payload: dict[str, Any]) -> dict[str, Any] | None:
-        """Return the comparable external state, or ``None`` when unsupported."""
-        return None
+    async def reconcile(
+        self,
+        desired: dict[str, list[dict[str, Any]]],
+    ) -> dict[str, int] | None:
+        """Converge every resource kind and return aggregate counters.
 
-    def comparable_state(self, state: dict[str, Any] | None) -> dict[str, Any]:
-        """Normalize desired and observed state before drift comparison.
-
-        Providers may intentionally expose a narrow observation, such as an
-        existence check. Apply the same normalization to the local desired
-        payload and the observed external payload before comparing them.
+        Implementations own external enumeration and ownership filtering. A
+        result may contain ``checked``, ``changed`` and ``failed`` counts.
         """
-        return state or {}
+        raise NotImplementedError
 
     async def capabilities(self) -> dict[str, Any]:
-        return {"observe": type(self).observe is not ExternalResourceProvider.observe}
-
-    async def deliver(self, task: ExternalResourceTask) -> None:
-        if task.operation == "create":
-            await self.create(task.resource, task.payload)
-        elif task.operation == "update":
-            await self.update(task.resource, task.payload, task.previous)
-        elif task.operation == "delete":
-            await self.delete(task.resource, task.payload)
-        else:
-            raise ExternalResourcePermanentError(f"Unsupported external-resource operation: {task.operation}")
+        return {
+            "reconcile": type(self).reconcile
+            is not ExternalResourceProvider.reconcile
+        }
 
 
 _providers: dict[str, ExternalResourceProvider] = {}
 
 
-def register_external_resource_provider(name: str, provider: ExternalResourceProvider) -> None:
+def register_external_resource_provider(
+    name: str, provider: ExternalResourceProvider
+) -> None:
     if not name:
         raise ValueError("Provider name cannot be empty")
     _providers[name] = provider
@@ -181,291 +145,234 @@ def get_external_resource_provider(name: str) -> ExternalResourceProvider:
     try:
         return _providers[name]
     except KeyError as exc:
-        raise ExternalResourcePermanentError(f"External resource provider '{name}' is not registered") from exc
+        raise ExternalResourcePermanentError(
+            f"External resource provider '{name}' is not registered"
+        ) from exc
 
 
 def _utcnow() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _hash(value: dict[str, Any] | None) -> str:
-    encoded = json.dumps(jsonable_encoder(value or {}), ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(encoded.encode("utf-8")).hexdigest()
+async def _provider_state(
+    session: AsyncSession,
+    provider: str,
+    *,
+    for_update: bool = False,
+) -> ExternalProviderState:
+    statement = select(ExternalProviderState).where(
+        ExternalProviderState.provider == provider
+    )
+    if for_update:
+        statement = statement.with_for_update()
+    state = (await session.exec(statement)).first()
+    if state is None:
+        state = ExternalProviderState(provider=provider)
+        session.add(state)
+        await session.flush()
+    return state
 
 
-async def _binding_for(session: AsyncSession, *, provider: str, resource: str, entity_id: str) -> ExternalResourceBinding | None:
-    return (await session.exec(select(ExternalResourceBinding).where(
-        ExternalResourceBinding.provider == provider,
-        ExternalResourceBinding.resource == resource,
-        ExternalResourceBinding.entity_id == str(entity_id),
-    ))).first()
-
-
-async def enqueue_external_resource_change(
+async def sync_external_resource_change(
     session: AsyncSession,
     *,
-    provider: str,
-    resource: str,
-    entity_id: str,
+    target: Any,
     operation: str,
-    payload: dict[str, Any],
     previous: dict[str, Any] | None = None,
-) -> ExternalResourceTask:
-    """Advance desired version and add a pending task in the caller transaction."""
+) -> None:
+    """Run the hidden transactional provider hook for one mapped model."""
     if operation not in {"create", "update", "delete"}:
         raise ValueError(f"Unsupported external-resource operation: {operation}")
-    get_resource_config(provider, resource)
-    now = _utcnow()
-    encoded_payload = jsonable_encoder(payload)
-    binding = await _binding_for(session, provider=provider, resource=resource, entity_id=str(entity_id))
-    if binding is None:
-        binding = ExternalResourceBinding(provider=provider, resource=resource, entity_id=str(entity_id))
-        session.add(binding)
-    binding.desired_version += 1
-    binding.desired_operation = operation
-    binding.desired_payload = encoded_payload
-    provider_instance = get_external_resource_provider(provider)
-    binding.desired_hash = _hash(provider_instance.comparable_state(
-        encoded_payload if operation != "delete" else {}
-    ))
-    binding.status = SyncStatus.deleting.value if operation == "delete" else SyncStatus.pending.value
-    binding.last_error = None
-    binding.updated_at = now
-    task = ExternalResourceTask(
-        provider=provider, resource=resource, entity_id=str(entity_id), operation=operation,
-        revision=binding.desired_version, payload=encoded_payload,
-        previous=jsonable_encoder(previous or {}),
-    )
-    session.add(task)
-    return task
+
+    model_cls = target if isinstance(target, type) else type(target)
+    source_module = model_cls.__module__.rsplit(".", 1)[-1]
+    config = get_model_resource_config(source_module, model_cls.__name__)
+    if config is None:
+        return
+
+    provider_name = config["provider"]
+    resource = config["resource"]
+    get_resource_config(provider_name, resource)
+    provider = get_external_resource_provider(provider_name)
+    from app.core.model_hooks import snapshot_model
+
+    current = jsonable_encoder(snapshot_model(target))
+    old = jsonable_encoder(previous or {})
+    payload = old if operation == "delete" else current
+
+    state = await _provider_state(session, provider_name, for_update=True)
+    if operation == "create":
+        await provider.create(resource, payload)
+    elif operation == "update":
+        await provider.update(resource, payload, old)
+    else:
+        await provider.delete(resource, payload)
+
+    state.desired_generation += 1
+    state.synced_generation = state.desired_generation
+    state.status = ProviderSyncStatus.synced.value
+    state.last_error = None
+    state.last_synced_at = _utcnow()
+    state.updated_at = _utcnow()
 
 
-async def bootstrap_external_resource_bindings() -> int:
-    """Backfill pending bindings for resources created before this runtime.
-
-    The lookup is intentionally idempotent: a row that already has a binding,
-    including a deleted tombstone, is left untouched.  Previously untracked
-    local rows enter the same versioned delivery path as a new CUD operation.
-    """
-    from app.core.db import engine
-
-    factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-    created = 0
-    async with factory() as session:
-        for config in RESOURCE_CONFIGS:
-            module = importlib.import_module(f"app.models.{config['module']}")
-            model = getattr(module, config["model"])
-            entities = (await session.exec(select(model))).all()
-            for entity in entities:
-                entity_id = str(getattr(entity, config.get("id_field", "id")))
-                binding = await _binding_for(
-                    session,
-                    provider=config["provider"],
-                    resource=config["resource"],
-                    entity_id=entity_id,
-                )
-                if binding is not None:
-                    continue
-                await enqueue_external_resource_change(
-                    session,
-                    provider=config["provider"],
-                    resource=config["resource"],
-                    entity_id=entity_id,
-                    operation="update",
-                    payload=jsonable_encoder(entity),
-                )
-                created += 1
-        await session.commit()
-    if created:
-        logger.info("Backfilled %s external resource binding(s)", created)
-    return created
+async def mark_external_provider_synced(
+    session: AsyncSession,
+    provider: str,
+    *,
+    changes: int = 1,
+) -> None:
+    """Record a custom bulk operation that already synchronized its provider."""
+    state = await _provider_state(session, provider, for_update=True)
+    state.desired_generation += max(1, int(changes))
+    state.synced_generation = state.desired_generation
+    state.status = ProviderSyncStatus.synced.value
+    state.changed_count = max(0, int(changes))
+    state.failed_count = 0
+    state.last_error = None
+    state.last_synced_at = _utcnow()
+    state.updated_at = _utcnow()
 
 
 class ExternalResourceManager:
-    """Runs bounded delivery and global consistency scans through APScheduler."""
+    """Periodically reconciles all resources and exposes provider health."""
 
-    def __init__(self, *, delivery_seconds: float = 10.0, check_seconds: float = 300.0, batch_size: int = 1, lease_seconds: float = 120.0, call_timeout_seconds: float = 60.0, max_attempts: int = 8) -> None:
-        self.delivery_seconds = delivery_seconds
-        self.check_seconds = check_seconds
-        self.batch_size = batch_size
+    def __init__(
+        self,
+        *,
+        reconcile_seconds: float = 300.0,
+        lease_seconds: float = 900.0,
+        call_timeout_seconds: float = 600.0,
+    ) -> None:
+        self.reconcile_seconds = reconcile_seconds
         self.lease_seconds = lease_seconds
         self.call_timeout_seconds = call_timeout_seconds
-        self.max_attempts = max_attempts
         self._scheduler: AsyncIOScheduler | None = None
-        self._bootstrap_task: asyncio.Task[None] | None = None
+        self._initial_task: asyncio.Task[None] | None = None
 
     async def start(self) -> None:
         if self._scheduler is not None and self._scheduler.running:
             return
         self._scheduler = AsyncIOScheduler(timezone=timezone.utc)
-        self._scheduler.add_job(self.process_pending, "interval", seconds=self.delivery_seconds, id="onesite-external-resource-delivery", replace_existing=True, coalesce=True, max_instances=1)
-        # A full observation invokes provider I/O for every binding.  For
-        # high-cardinality resources that can become a control-plane flood,
-        # so it is intentionally operator-triggered through the API instead
-        # of running automatically in every application process.
+        self._scheduler.add_job(
+            self.reconcile_all,
+            "interval",
+            seconds=self.reconcile_seconds,
+            id="onesite-external-provider-reconcile",
+            replace_existing=True,
+            coalesce=True,
+            max_instances=1,
+        )
         self._scheduler.start()
-        # Provider I/O must not delay FastAPI lifespan startup.  A single
-        # external-resource task can take minutes for large point sets; the
-        # scheduler owns delivery after the application is ready to serve.
-        self._bootstrap_task = asyncio.create_task(
-            self._bootstrap_bindings(),
-            name="onesite-external-resource-bootstrap",
+        self._initial_task = asyncio.create_task(
+            self.reconcile_all(),
+            name="onesite-external-provider-initial-reconcile",
         )
 
-    async def _bootstrap_bindings(self) -> None:
-        """Backfill existing bindings without delaying FastAPI startup."""
-        try:
-            await bootstrap_external_resource_bindings()
-        except asyncio.CancelledError:
-            raise
-        except Exception:
-            logger.exception("Failed to bootstrap external resource bindings")
-
     async def stop(self) -> None:
-        bootstrap_task, self._bootstrap_task = self._bootstrap_task, None
-        if bootstrap_task is not None and not bootstrap_task.done():
-            bootstrap_task.cancel()
-            await asyncio.gather(bootstrap_task, return_exceptions=True)
+        initial_task, self._initial_task = self._initial_task, None
+        if initial_task is not None and not initial_task.done():
+            initial_task.cancel()
+            await asyncio.gather(initial_task, return_exceptions=True)
         if self._scheduler is not None:
             self._scheduler.shutdown(wait=False)
             self._scheduler = None
 
-    async def process_pending(self) -> int:
-        """Deliver one bounded batch; the next scheduler tick continues it."""
-        delivered = 0
-        for _ in range(self.batch_size):
-            task_id = await self._claim_one()
-            if task_id is None:
-                break
-            await self._process_task(task_id)
-            delivered += 1
-        return delivered
+    async def reconcile_all(self) -> int:
+        reconciled = 0
+        for provider_name in sorted({item["provider"] for item in RESOURCE_CONFIGS}):
+            if await self.reconcile_provider(provider_name):
+                reconciled += 1
+        return reconciled
 
-    async def _claim_one(self) -> int | None:
+    async def _claim_provider(self, provider_name: str) -> int | None:
         from app.core.db import engine
 
         factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        now = _utcnow()
         async with factory() as session:
-            ready = or_(
-                (ExternalResourceTask.status.in_([TaskStatus.pending.value, TaskStatus.retry.value]) & (ExternalResourceTask.next_attempt_at <= now)),
-                ((ExternalResourceTask.status == TaskStatus.processing.value) & (ExternalResourceTask.locked_until <= now)),
-            )
-            statement = select(ExternalResourceTask).where(ready).order_by(ExternalResourceTask.id).limit(1)
-            if engine.dialect.name == "postgresql":
-                statement = statement.with_for_update(skip_locked=True)
-            task = (await session.exec(statement)).first()
-            if task is None:
+            state = await _provider_state(session, provider_name, for_update=True)
+            now = _utcnow()
+            if state.locked_until is not None and state.locked_until > now:
+                await session.rollback()
                 return None
-            task.status = TaskStatus.processing.value
-            task.attempts += 1
-            task.locked_until = now + timedelta(seconds=self.lease_seconds)
-            task.updated_at = now
+            state.status = ProviderSyncStatus.syncing.value
+            state.last_started_at = now
+            state.locked_until = now + timedelta(seconds=self.lease_seconds)
+            state.updated_at = now
+            generation = state.desired_generation
             await session.commit()
-            return task.id
+            return generation
 
-    async def _process_task(self, task_id: int) -> None:
+    async def _desired_resources(
+        self, provider_name: str
+    ) -> dict[str, list[dict[str, Any]]]:
+        from app.core.db import engine
+        from app.core.model_hooks import snapshot_model
+
+        factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
+        desired: dict[str, list[dict[str, Any]]] = {}
+        async with factory() as session:
+            for config in RESOURCE_CONFIGS:
+                if config["provider"] != provider_name:
+                    continue
+                module = importlib.import_module(f"app.models.{config['module']}")
+                model = getattr(module, config["model"])
+                entities = (await session.exec(select(model))).all()
+                desired[config["resource"]] = [
+                    jsonable_encoder(snapshot_model(entity))
+                    for entity in entities
+                ]
+        return desired
+
+    async def reconcile_provider(self, provider_name: str) -> bool:
+        generation = await self._claim_provider(provider_name)
+        if generation is None:
+            return False
+
+        checked = changed = failed = 0
+        error: str | None = None
+        try:
+            provider = get_external_resource_provider(provider_name)
+            desired = await self._desired_resources(provider_name)
+            result = await asyncio.wait_for(
+                provider.reconcile(desired),
+                timeout=self.call_timeout_seconds,
+            ) or {}
+            checked = int(result.get(
+                "checked", sum(len(items) for items in desired.values())
+            ))
+            changed = int(result.get("changed", 0))
+            failed = int(result.get("failed", 0))
+            if failed:
+                error = f"{failed} resource(s) failed reconciliation"
+        except Exception as exc:
+            logger.exception(
+                "External provider reconciliation failed: %s", provider_name
+            )
+            failed = max(1, failed)
+            error = str(exc)[:2000]
+
         from app.core.db import engine
 
         factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
         async with factory() as session:
-            task = await session.get(ExternalResourceTask, task_id)
-            if task is None:
-                return
-            binding = await _binding_for(session, provider=task.provider, resource=task.resource, entity_id=task.entity_id)
-            if binding is None:
-                await self._finish_task(task, TaskStatus.failed.value, "External resource binding is missing")
-                await session.commit()
-                return
-            if task.revision < binding.desired_version:
-                await self._finish_task(task, TaskStatus.completed.value, "Superseded by a newer version")
-                await session.commit()
-                return
-            try:
-                binding.status = SyncStatus.deleting.value if task.operation == "delete" else SyncStatus.syncing.value
-                provider = get_external_resource_provider(task.provider)
-                await asyncio.wait_for(provider.deliver(task), timeout=self.call_timeout_seconds)
-                now = _utcnow()
-                binding.synced_version = task.revision
-                binding.status = SyncStatus.deleted.value if task.operation == "delete" else SyncStatus.synced.value
-                binding.observed_payload = {} if task.operation == "delete" else binding.desired_payload
-                binding.observed_hash = binding.desired_hash
-                binding.retry_count = 0
-                binding.last_error = None
-                binding.last_synced_at = now
-                binding.updated_at = now
-                await self._finish_task(task, TaskStatus.completed.value)
-            except Exception as exc:
-                self._record_failure(task, binding, exc)
+            state = await _provider_state(session, provider_name, for_update=True)
+            state.checked_count = checked
+            state.changed_count = changed
+            state.failed_count = failed
+            state.last_error = error
+            state.locked_until = None
+            state.updated_at = _utcnow()
+            if error is None and state.desired_generation == generation:
+                state.synced_generation = generation
+                state.status = ProviderSyncStatus.synced.value
+                state.last_synced_at = _utcnow()
+            elif error is None:
+                state.status = ProviderSyncStatus.unknown.value
+            else:
+                state.status = ProviderSyncStatus.degraded.value
             await session.commit()
-
-    async def _finish_task(self, task: ExternalResourceTask, status: str, error: str | None = None) -> None:
-        task.status = status
-        task.locked_until = None
-        task.last_error = error
-        task.updated_at = _utcnow()
-
-    def _record_failure(self, task: ExternalResourceTask, binding: ExternalResourceBinding, exc: Exception) -> None:
-        message = str(exc)[:2000]
-        permanent = isinstance(exc, ExternalResourcePermanentError) or task.attempts >= self.max_attempts
-        task.status = TaskStatus.failed.value if permanent else TaskStatus.retry.value
-        task.next_attempt_at = _utcnow() + timedelta(seconds=min(300, 2 ** min(task.attempts, 8)))
-        task.locked_until = None
-        task.last_error = message
-        task.updated_at = _utcnow()
-        if task.revision == binding.desired_version:
-            binding.status = SyncStatus.failed.value if permanent else SyncStatus.retrying.value
-            binding.retry_count = task.attempts
-            binding.last_error = message
-            binding.updated_at = _utcnow()
-
-    async def check_all(self) -> int:
-        """Observe every active binding and mark external drift without mutating it."""
-        from app.core.db import engine
-
-        factory = sessionmaker(engine, class_=AsyncSession, expire_on_commit=False)
-        async with factory() as session:
-            bindings = (await session.exec(select(ExternalResourceBinding).where(
-                ExternalResourceBinding.status != SyncStatus.deleted.value
-            ).order_by(ExternalResourceBinding.id))).all()
-            for binding in bindings:
-                try:
-                    provider = get_external_resource_provider(binding.provider)
-                    observed = await asyncio.wait_for(
-                        provider.observe(binding.resource, binding.desired_payload),
-                        timeout=self.call_timeout_seconds,
-                    )
-                    now = _utcnow()
-                    binding.last_checked_at = now
-                    if observed is not None:
-                        binding.observed_payload = jsonable_encoder(observed)
-                        # Normalize both sides. A provider may report only
-                        # presence instead of reconstructing every local
-                        # configuration field.
-                        binding.desired_hash = _hash(provider.comparable_state(
-                            binding.desired_payload
-                        ))
-                        binding.observed_hash = _hash(provider.comparable_state(observed))
-                        if binding.synced_version == binding.desired_version and binding.observed_hash != binding.desired_hash:
-                            binding.status = SyncStatus.drifted.value
-                            binding.last_drift_at = now
-                        elif binding.synced_version == binding.desired_version:
-                            binding.status = SyncStatus.synced.value
-                    binding.updated_at = now
-                except Exception as exc:
-                    binding.last_error = str(exc)[:2000]
-                    binding.status = SyncStatus.failed.value
-                    binding.last_checked_at = _utcnow()
-                    binding.updated_at = _utcnow()
-            await session.commit()
-            return len(bindings)
-
-    async def retry_binding(self, session: AsyncSession, binding: ExternalResourceBinding) -> ExternalResourceTask:
-        return await enqueue_external_resource_change(
-            session, provider=binding.provider, resource=binding.resource,
-            entity_id=binding.entity_id, operation=binding.desired_operation,
-            payload=binding.desired_payload,
-        )
+        return True
 
 
 external_resource_manager = ExternalResourceManager()

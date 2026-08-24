@@ -1,18 +1,14 @@
+import asyncio
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from fastapi.encoders import jsonable_encoder
-from sqlalchemy import func, tuple_
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import db, deps
 from app.core.external_resource_config import RESOURCE_CONFIGS
 from app.core.external_resources import (
-    ExternalResourceBinding,
-    ExternalResourceTask,
-    SyncStatus,
-    TaskStatus,
+    ExternalProviderState,
     external_resource_manager,
     get_external_resource_provider,
 )
@@ -21,79 +17,18 @@ router = APIRouter(dependencies=[Depends(deps.get_current_active_admin)])
 
 
 @router.get("")
-async def list_resources(
-    provider: str | None = None,
-    resource: str | None = None,
-    status: str | None = None,
-    include_deleted: bool = False,
-    offset: int = 0,
-    limit: int = 100,
+async def list_providers(
     session: AsyncSession = Depends(db.get_session),
-) -> dict[str, Any]:
-    offset = max(0, offset)
-    limit = min(500, max(1, limit))
-    statement = select(ExternalResourceBinding).order_by(ExternalResourceBinding.updated_at.desc())
-    count_statement = select(func.count()).select_from(ExternalResourceBinding)
-    if provider:
-        statement = statement.where(ExternalResourceBinding.provider == provider)
-        count_statement = count_statement.where(ExternalResourceBinding.provider == provider)
-    if resource:
-        statement = statement.where(ExternalResourceBinding.resource == resource)
-        count_statement = count_statement.where(ExternalResourceBinding.resource == resource)
-    if status:
-        statement = statement.where(ExternalResourceBinding.status == status)
-        count_statement = count_statement.where(ExternalResourceBinding.status == status)
-    elif not include_deleted:
-        statement = statement.where(ExternalResourceBinding.status != SyncStatus.deleted.value)
-        count_statement = count_statement.where(ExternalResourceBinding.status != SyncStatus.deleted.value)
-    bindings = (await session.exec(statement.offset(offset).limit(limit))).all()
-    keys = [
-        (binding.provider, binding.resource, binding.entity_id)
-        for binding in bindings
+) -> list[ExternalProviderState]:
+    configured = sorted({item["provider"] for item in RESOURCE_CONFIGS})
+    states = {
+        state.provider: state
+        for state in (await session.exec(select(ExternalProviderState))).all()
+    }
+    return [
+        states.get(name) or ExternalProviderState(provider=name)
+        for name in configured
     ]
-    pending_counts: dict[tuple[str, str, str], int] = {}
-    if keys:
-        pending_rows = (await session.exec(
-            select(
-                ExternalResourceTask.provider,
-                ExternalResourceTask.resource,
-                ExternalResourceTask.entity_id,
-                func.count(),
-            ).where(
-                tuple_(
-                    ExternalResourceTask.provider,
-                    ExternalResourceTask.resource,
-                    ExternalResourceTask.entity_id,
-                ).in_(keys),
-                ExternalResourceTask.status.in_([
-                    TaskStatus.pending.value,
-                    TaskStatus.processing.value,
-                    TaskStatus.retry.value,
-                ]),
-            ).group_by(
-                ExternalResourceTask.provider,
-                ExternalResourceTask.resource,
-                ExternalResourceTask.entity_id,
-            )
-        )).all()
-        pending_counts = {
-            (provider, resource_name, entity_id): count
-            for provider, resource_name, entity_id, count in pending_rows
-        }
-    items = []
-    for binding in bindings:
-        item = jsonable_encoder(binding)
-        item["pending_count"] = pending_counts.get(
-            (binding.provider, binding.resource, binding.entity_id), 0
-        )
-        items.append(item)
-    return {"items": items, "total": (await session.exec(count_statement)).one(), "offset": offset, "limit": limit}
-
-
-@router.get("/summary")
-async def summary(session: AsyncSession = Depends(db.get_session)) -> dict[str, Any]:
-    rows = (await session.exec(select(ExternalResourceBinding.status, func.count()).group_by(ExternalResourceBinding.status))).all()
-    return {"by_status": {status: count for status, count in rows}}
 
 
 @router.get("/capabilities")
@@ -104,26 +39,16 @@ async def capabilities() -> dict[str, Any]:
     return result
 
 
-@router.post("/check", status_code=202)
-async def check_all() -> dict[str, str]:
-    await external_resource_manager.check_all()
-    return {"status": "checked"}
+@router.post("/reconcile", status_code=202)
+async def reconcile_all() -> dict[str, int]:
+    asyncio.create_task(external_resource_manager.reconcile_all())
+    return {"providers": len({item["provider"] for item in RESOURCE_CONFIGS})}
 
 
-@router.post("/{provider}/{resource}/{entity_id}/retry", status_code=202)
-async def retry_resource(
-    provider: str,
-    resource: str,
-    entity_id: str,
-    session: AsyncSession = Depends(db.get_session),
-) -> dict[str, str]:
-    binding = (await session.exec(select(ExternalResourceBinding).where(
-        ExternalResourceBinding.provider == provider,
-        ExternalResourceBinding.resource == resource,
-        ExternalResourceBinding.entity_id == entity_id,
-    ))).first()
-    if binding is None:
-        raise HTTPException(status_code=404, detail="External resource binding not found")
-    await external_resource_manager.retry_binding(session, binding)
-    await session.commit()
-    return {"status": "queued"}
+@router.post("/{provider}/reconcile", status_code=202)
+async def reconcile_provider(provider: str) -> dict[str, str]:
+    configured = {item["provider"] for item in RESOURCE_CONFIGS}
+    if provider not in configured:
+        raise HTTPException(status_code=404, detail="External provider not found")
+    asyncio.create_task(external_resource_manager.reconcile_provider(provider))
+    return {"status": "scheduled"}

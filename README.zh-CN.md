@@ -76,10 +76,11 @@ config = SiteConfig(
 ```
 
 首次执行 `site sync` 会创建开发者维护的 `app/providers/edgeflow.py`。Provider 实现
-`create(resource, payload)`、`update(resource, payload, previous)` 和
-`delete(resource, payload)`。生成的模型 Service 会在本地 CUD 事务中同时写入同步任务，
-后端轻量 worker 在提交后调用 Provider、自动重试临时失败，并删除成功任务。
-`external-resources` 管理页只展示待处理、重试中和失败任务。
+`create(resource, payload)`、`update(resource, payload, previous)`、
+`delete(resource, payload)` 和 `reconcile(desired)`。External Resource CUD
+作为框架隐藏的事务内 `on_after_*` 钩子执行；Provider 失败会回滚本地变更。后端定时按
+Provider 全局扫描并修复超时、进程中断或外部漂移造成的不一致。`external-resources`
+管理页只展示 Provider 级健康状态和汇总计数，不再保留逐资源同步任务。
 
 旧字段名 `resource_type`、`identity_field` 仍作为别名兼容；`depends_on`、
 `reconcile_via`、`health` 不再属于 External Resource。

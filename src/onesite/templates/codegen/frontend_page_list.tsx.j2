@@ -155,6 +155,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   {% if not model.page_edit %}
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [editingId, setEditingId] = useState<{{ 'string' if 'str' in model.id_type else 'number' }} | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
   {% endif %}
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deleteId, setDeleteId] = useState<{{ 'string' if 'str' in model.id_type else 'number' }} | null>(null);
@@ -641,6 +642,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   {% if not model.page_edit %}
   const onSubmit = async (values: any) => {
+    if (isSaving) return;
+    setIsSaving(true);
     const payload = { ...values, ...fixedFields };
     try {
       {% if model.is_tree %}
@@ -673,6 +676,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     } catch (error) {
       toast.error(t('toast.save_failed', 'Save failed'));
       console.error(error);
+    } finally {
+      setIsSaving(false);
     }
   };
   {% endif %}
@@ -738,7 +743,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       data-codegen-theme="{{ codegen_theme | default('normal') }}"
       data-page-kind="list"
     >
-      <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+      <AlertDialog open={deleteOpen} onOpenChange={(open) => { if (!isDeleting) setDeleteOpen(open); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('alert.delete_title', 'Confirm deletion')}</AlertDialogTitle>
@@ -748,14 +753,24 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction disabled={isDeleting} onClick={confirmDelete}>
-              {isDeleting ? t('common.loading') : t('common.delete')}
+            <AlertDialogAction
+              disabled={isDeleting}
+              onClick={(event) => {
+                // Radix Action closes immediately by default. Keep the dialog
+                // mounted so the pending state remains visible until deletion finishes.
+                event.preventDefault();
+                void confirmDelete();
+              }}
+            >
+              {isDeleting ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.deleting', 'Deleting...')}</>
+              ) : t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
 
-      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={(open) => { if (!isBulkDeleting) setBulkDeleteOpen(open); }}>
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>{t('alert.delete_title', 'Confirm deletion')}</AlertDialogTitle>
@@ -765,8 +780,18 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isBulkDeleting}>{t('common.cancel')}</AlertDialogCancel>
-            <AlertDialogAction disabled={isBulkDeleting} onClick={confirmBulkDelete}>
-              {isBulkDeleting ? t('common.loading') : t('common.delete')}
+            <AlertDialogAction
+              disabled={isBulkDeleting}
+              onClick={(event) => {
+                // Radix Action closes immediately by default. Keep the dialog
+                // mounted so the pending state remains visible until deletion finishes.
+                event.preventDefault();
+                void confirmBulkDelete();
+              }}
+            >
+              {isBulkDeleting ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.deleting', 'Deleting...')}</>
+              ) : t('common.delete')}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -1528,7 +1553,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       <EditContainer
         title={editingId ? `${t('common.edit')} ${t('models.{{ model.module_name }}.name')}` : `${t('common.create')} ${t('models.{{ model.module_name }}.name')}`}
         isOpen={isModalOpen}
-        onClose={() => setIsModalOpen(false)}
+        onClose={() => { if (!isSaving) setIsModalOpen(false); }}
       >
             <div className="max-h-[80vh] overflow-y-auto pr-2">
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
@@ -1875,8 +1900,12 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% endif %}
           {% endfor %}
           <div className="flex justify-end space-x-2 pt-4">
-            <Button variant="outline" type="button" onClick={() => setIsModalOpen(false)}>{t('common.cancel')}</Button>
-            <Button type="submit">{t('common.save')}</Button>
+            <Button variant="outline" type="button" disabled={isSaving} onClick={() => setIsModalOpen(false)}>{t('common.cancel')}</Button>
+            <Button type="submit" disabled={isSaving}>
+              {isSaving ? (
+                <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.saving', 'Saving...')}</>
+              ) : t('common.save')}
+            </Button>
           </div>
         </form>
             </div>

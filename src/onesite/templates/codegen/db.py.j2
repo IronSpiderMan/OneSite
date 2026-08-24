@@ -85,23 +85,9 @@ async def init_db():
         await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}
     {% if external_resources_enabled %}
-    # Keep external-resource schema ownership in its runtime module. This is
-    # also the only schema initialization the standalone reconciler performs.
+    # Provider synchronization owns its aggregate state schema.
     from app.core.external_resources import init_external_resource_db
     await init_external_resource_db()
-    # Outbox polling and the management page both filter these task columns.
-    # Keep the indexes idempotent so existing deployments are upgraded at
-    # startup without a separate migration step.
-    async with engine.begin() as conn:
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_external_resource_task_ready "
-            "ON onesite_external_resource_task (status, next_attempt_at, id)"
-        ))
-        await conn.execute(text(
-            "CREATE INDEX IF NOT EXISTS ix_external_resource_task_binding_status "
-            "ON onesite_external_resource_task "
-            "(provider, resource, entity_id, status)"
-        ))
     {% endif %}
     {% if background_execution_enabled %}
     if settings.DATABASE_URI.startswith("postgresql"):
