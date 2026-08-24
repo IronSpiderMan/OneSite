@@ -45,8 +45,8 @@ export default function ExternalResourcesPage() {
     await load();
   };
 
-  return <div className="space-y-5 p-6">
-    <div className="flex items-center justify-between">
+  return <div className="flex h-full min-h-0 flex-col gap-5 p-6">
+    <div className="flex shrink-0 items-center justify-between">
       <div><h1 className="text-2xl font-semibold">外部资源同步</h1><p className="text-sm text-muted-foreground">查看版本、待同步任务和外部资源一致性</p></div>
       <div className="flex items-center gap-3">
         <label className="inline-flex cursor-pointer items-center gap-2 text-sm text-muted-foreground"><input type="checkbox" checked={showDeleted} onChange={event => { setShowDeleted(event.target.checked); setOffset(0); }} />显示已删除</label>
@@ -54,7 +54,7 @@ export default function ExternalResourcesPage() {
         <button className="inline-flex items-center gap-2 rounded-md border px-3 py-2 text-sm" onClick={() => void load()}><RefreshCw className="h-4 w-4" />刷新</button>
       </div>
     </div>
-    <div className="overflow-hidden rounded-lg border bg-card"><table className="w-full text-sm"><thead className="border-b bg-muted/40 text-left"><tr>
+    <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-card"><table className="w-full text-sm"><thead className="sticky top-0 z-20 border-b bg-muted text-left shadow-sm"><tr>
       <th className="p-3">Provider</th><th className="p-3">资源</th><th className="p-3">业务 ID</th><th className="p-3">状态</th><th className="p-3">版本</th><th className="p-3">待同步</th><th className="p-3">一致性</th><th className="p-3">最近检查</th><th className="p-3">操作</th>
     </tr></thead><tbody>
       {rows.map(row => <tr className="border-b last:border-0" key={`${row.provider}:${row.resource}:${row.entity_id}`}>
@@ -68,7 +68,7 @@ export default function ExternalResourcesPage() {
       {!loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={9}>暂无外部资源绑定</td></tr>}
       {loading && rows.length === 0 && <tr><td className="p-8 text-center text-muted-foreground" colSpan={9}>加载中…</td></tr>}
     </tbody></table></div>
-    <div className="flex items-center justify-between text-sm text-muted-foreground">
+    <div className="flex shrink-0 items-center justify-between text-sm text-muted-foreground">
       <span>共 {total} 条，第 {total === 0 ? 0 : Math.floor(offset / pageSize) + 1} / {Math.max(1, Math.ceil(total / pageSize))} 页</span>
       <div className="flex gap-2">
         <button className="rounded border px-3 py-1 disabled:cursor-not-allowed disabled:opacity-50" disabled={loading || offset === 0} onClick={() => setOffset(value => Math.max(0, value - pageSize))}>上一页</button>
