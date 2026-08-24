@@ -471,13 +471,17 @@ def _generate_task_handlers(model: ModelDefinition, backend_path: Path) -> None:
 
 def _generate_export_handlers(model: ModelDefinition, backend_path: Path) -> None:
     """Generate background import/export handlers for configured models."""
-    if not (model.get("exportable") or model.get("custom_importable")):
+    output_path = (
+        backend_path / "app" / "handlers" / f"export_{model['module_name']}.py"
+    )
+    if not (model.get("importable") or model.get("exportable")):
+        output_path.unlink(missing_ok=True)
         return
 
     generate_file(
         "export_handler.py.j2",
         {"model": model},
-        backend_path / "app" / "handlers" / f"export_{model['module_name']}.py",
+        output_path,
     )
 
 
@@ -553,6 +557,8 @@ def _builtin_menu_node(
     reports_enabled: bool,
     reports_role_visible: dict[str, bool],
     external_resources_enabled: bool = False,
+    import_export_enabled: bool = False,
+    import_export_role_visible: dict[str, bool] | None = None,
 ) -> dict[str, Any] | None:
     builtins = {
         "dashboard": {
@@ -573,10 +579,19 @@ def _builtin_menu_node(
             "label": "menu.external_resources",
             "visible": {"user": False, "admin": True, "developer": True},
         },
+        "task-center": {
+            "key": "/task-center",
+            "icon": "ArrowRightLeft",
+            "label": "menu.task_center",
+            "visible": import_export_role_visible
+            or {"user": False, "admin": False, "developer": False},
+        },
     }
     if key == "reports" and not reports_enabled:
         return None
     if key == "external-resources" and not external_resources_enabled:
+        return None
+    if key == "task-center" and not import_export_enabled:
         return None
     node = builtins[key]
     return {"type": "item", **node}
@@ -589,6 +604,8 @@ def _build_navigation(
     reports_enabled: bool,
     reports_role_visible: dict[str, bool],
     external_resources_enabled: bool = False,
+    import_export_enabled: bool = False,
+    import_export_role_visible: dict[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the generated menu tree from ``site_config.navigation``.
 
@@ -620,6 +637,8 @@ def _build_navigation(
                 reports_enabled=reports_enabled,
                 reports_role_visible=reports_role_visible,
                 external_resources_enabled=external_resources_enabled,
+                import_export_enabled=import_export_enabled,
+                import_export_role_visible=import_export_role_visible,
             )
 
         children = [
@@ -647,15 +666,19 @@ def _build_navigation(
                 reports_enabled=reports_enabled,
                 reports_role_visible=reports_role_visible,
                 external_resources_enabled=external_resources_enabled,
+                import_export_enabled=import_export_enabled,
+                import_export_role_visible=import_export_role_visible,
             )
         ]
         default_nodes.extend(_model_menu_node(model) for model in model_by_module.values())
-        for key in ("reports", "external-resources"):
+        for key in ("reports", "external-resources", "task-center"):
             node = _builtin_menu_node(
                 key,
                 reports_enabled=reports_enabled,
                 reports_role_visible=reports_role_visible,
                 external_resources_enabled=external_resources_enabled,
+                import_export_enabled=import_export_enabled,
+                import_export_role_visible=import_export_role_visible,
             )
             if node is not None:
                 default_nodes.append(node)
@@ -683,6 +706,29 @@ def _build_navigation(
         for module_name, model in model_by_module.items()
         if module_name not in declared_models
     )
+    declared_builtins = {
+        declaration["key"]
+        for declaration in navigation
+        if declaration["type"] == "builtin"
+    }
+    declared_builtins.update(
+        child["key"]
+        for declaration in navigation
+        if declaration["type"] == "group"
+        for child in declaration["children"]
+        if child["type"] == "builtin"
+    )
+    if import_export_enabled and "task-center" not in declared_builtins:
+        declared_nodes.append(
+            _builtin_menu_node(
+                "task-center",
+                reports_enabled=reports_enabled,
+                reports_role_visible=reports_role_visible,
+                external_resources_enabled=external_resources_enabled,
+                import_export_enabled=True,
+                import_export_role_visible=import_export_role_visible,
+            )
+        )
     return declared_nodes
 
 
@@ -699,10 +745,20 @@ def phase_generate_per_model(
     model_lookup = _build_model_lookup(models)
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
     theme_name = resolve_theme(site_config)[0]["id"]
+    hidden_tasks = {
+        (item["kind"], item["name"])
+        for item in site_config.get("task_center", {}).get("hidden", [])
+    }
 
     # Map each external model to one resource kind owned by a provider. Model
     # CUD operations become provider CUD calls through the delivery worker.
     for model in models:
+        model["import_task_center_visible"] = (
+            "import", model["module_name"]
+        ) not in hidden_tasks
+        model["export_task_center_visible"] = (
+            "export", model["module_name"]
+        ) not in hidden_tasks
         model["external_resource"] = _normalize_external_resource(
             model,
             model.get("site_props", {}).get("external_resource"),
@@ -722,7 +778,7 @@ def phase_generate_per_model(
         # Generate handlers for explicit on_background_after_* methods.
         _generate_task_handlers(model, backend_path)
 
-        # Generate background export handler file if model is exportable
+        # Generate one tracked background handler for every import/export model.
         _generate_export_handlers(model, backend_path)
 
         # Custom I/O hooks are developer-owned and never overwritten.
@@ -800,6 +856,19 @@ def phase_generate_aggregated(
     theme_name = resolve_theme(site_config)[0]["id"]
     visualizations = site_config.get("_visualizations", [])
     report_explorer_enabled = any(model.get("data_reports") for model in api_models)
+    import_export_models = [
+        model
+        for model in api_models
+        if model.get("importable") or model.get("exportable")
+    ]
+    import_export_enabled = bool(import_export_models)
+    scheduled_tasks = site_config.get("scheduled_tasks", [])
+    tools = site_config.get("tools", [])
+    hidden_tasks = {
+        (item["kind"], item["name"])
+        for item in site_config.get("task_center", {}).get("hidden", [])
+    }
+    background_tasks_enabled = bool(import_export_enabled or tools or scheduled_tasks)
     external_models = [m for m in models if m.get("external_resource")]
     external_resources_enabled = bool(external_models)
     configured_providers = site_config.get("providers", {})
@@ -910,7 +979,9 @@ def phase_generate_aggregated(
         "db.py.j2",
         {
             "background_execution_enabled": bool(
-                site_config.get("tools") or site_config.get("scheduled_tasks")
+                site_config.get("tools")
+                or site_config.get("scheduled_tasks")
+                or import_export_enabled
             ),
             "has_timescaledb": has_timescaledb,
             "timescaledb_models": timescaledb_models,
@@ -1015,13 +1086,18 @@ def phase_generate_aggregated(
 
     generate_file(
         "backend_main.py.j2",
-        {"config": {**site_config, "external_resources_enabled": external_resources_enabled}},
+        {
+            "config": {
+                **site_config,
+                "external_resources_enabled": external_resources_enabled,
+                "import_export_enabled": import_export_enabled,
+                "background_tasks_enabled": background_tasks_enabled,
+            }
+        },
         backend_path / "app" / "main.py",
     )
 
     # ── API router ──
-    scheduled_tasks = site_config.get("scheduled_tasks", [])
-    tools = site_config.get("tools", [])
     update_api_router(
         api_models,
         backend_path / "app" / "api" / "api.py",
@@ -1029,13 +1105,51 @@ def phase_generate_aggregated(
         tools,
         external_resources_enabled,
         bool(visualizations),
+        background_tasks_enabled,
     )
 
-    if tools or scheduled_tasks:
+    if tools or scheduled_tasks or import_export_enabled:
         generate_file(
             "tool_execution_model.py.j2",
             {},
             backend_path / "app" / "core" / "background_execution.py",
+        )
+    if import_export_enabled:
+        generate_file(
+            "import_export_runtime.py.j2",
+            {},
+            backend_path / "app" / "core" / "import_export_runtime.py",
+        )
+    # Remove generated artifacts from the retired import/export-only page even
+    # when the project no longer has any background-task features enabled.
+    (backend_path / "app" / "api" / "endpoints" / "import_export_tasks.py").unlink(
+        missing_ok=True
+    )
+    (frontend_path / "src" / "services" / "import-export-tasks.ts").unlink(
+        missing_ok=True
+    )
+    (frontend_path / "src" / "pages" / "ImportExportTasks.tsx").unlink(
+        missing_ok=True
+    )
+    if background_tasks_enabled:
+        generate_file(
+            "background_execution_cleanup.py.j2",
+            {},
+            backend_path / "app" / "core" / "background_execution_cleanup.py",
+        )
+        generate_file(
+            "task_center_api.py.j2",
+            {
+                "scheduled_task_permissions": {
+                    task["name"]: task.get("manual_permissions", [])
+                    for task in scheduled_tasks
+                },
+                "hidden_tasks": [
+                    {"kind": kind, "name": name}
+                    for kind, name in sorted(hidden_tasks)
+                ],
+            },
+            backend_path / "app" / "api" / "endpoints" / "task_center.py",
         )
     if tools:
         generate_file(
@@ -1177,16 +1291,86 @@ def phase_generate_aggregated(
         )
         for role in ("user", "admin", "developer")
     }
+    import_export_role_visible = {
+        role: (
+            any(
+                role in tool.get("permissions", [])
+                and ("tool", tool["name"]) not in hidden_tasks
+                for tool in tools
+            )
+            or any(
+                role in task.get("manual_permissions", [])
+                and ("scheduled_task", task["name"]) not in hidden_tasks
+                for task in scheduled_tasks
+            )
+            or any(
+                bool(model.get("role_visible", {}).get(role, False))
+                and (
+                    (
+                        bool(model.get("exportable"))
+                        and "r" in model.get("role_permissions", {}).get(role, "")
+                        and ("export", model["module_name"]) not in hidden_tasks
+                    )
+                    or (
+                        bool(model.get("importable"))
+                        and "c" in model.get("role_permissions", {}).get(role, "")
+                        and "u" in model.get("role_permissions", {}).get(role, "")
+                        and ("import", model["module_name"]) not in hidden_tasks
+                    )
+                )
+                for model in import_export_models
+            )
+        )
+        for role in ("user", "admin", "developer")
+    }
     navigation = _build_navigation(
         site_config.get("navigation"),
         frontend_models,
         reports_enabled=bool(report_models),
         reports_role_visible=reports_role_visible,
         external_resources_enabled=external_resources_enabled,
+        import_export_enabled=background_tasks_enabled,
+        import_export_role_visible=import_export_role_visible,
     )
+    if background_tasks_enabled:
+        generate_file(
+            "frontend_task_center_service.ts.j2",
+            {},
+            frontend_path / "src" / "services" / "task-center.ts",
+        )
+        generate_file(
+            "frontend_task_center_page.tsx.j2",
+            {
+                "io_models": import_export_models,
+                "tools": tools,
+                "scheduled_tasks": scheduled_tasks,
+                "task_names": sorted({
+                    model["module_name"]
+                    for model in import_export_models
+                    if (
+                        (model.get("importable") and ("import", model["module_name"]) not in hidden_tasks)
+                        or (model.get("exportable") and ("export", model["module_name"]) not in hidden_tasks)
+                    )
+                } | {
+                    tool["name"]
+                    for tool in tools
+                    if ("tool", tool["name"]) not in hidden_tasks
+                } | {
+                    task["name"]
+                    for task in scheduled_tasks
+                    if ("scheduled_task", task["name"]) not in hidden_tasks
+                }),
+            },
+            frontend_path / "src" / "pages" / "TaskCenter.tsx",
+        )
     generate_file(
         "frontend_routes.tsx.j2",
-        {"models": frontend_models, "external_resources_enabled": external_resources_enabled, "reports_enabled": bool(report_models)},
+        {
+            "models": frontend_models,
+            "external_resources_enabled": external_resources_enabled,
+            "reports_enabled": bool(report_models),
+            "import_export_enabled": background_tasks_enabled,
+        },
         frontend_path / "src" / "Routes.tsx",
     )
     # Collect icons from both model items and declared navigation groups.
@@ -1294,9 +1478,9 @@ def phase_generate_aggregated(
         m for m in models
         if m.get("background_hooks")
     ]
-    export_models = [
-        m for m in models if m.get("exportable") or m.get("custom_importable")
-    ]
+    # Match the models that received a routed API and the shared I/O runtime;
+    # frontend-only and internal link models must not import unavailable handlers.
+    export_models = import_export_models
     generate_file(
         "handlers_init.py.j2",
         {

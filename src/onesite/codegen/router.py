@@ -11,6 +11,7 @@ def update_api_router(
     tools: List[Dict[str, Any]] | None = None,
     external_resources_enabled: bool = False,
     visualizations_enabled: bool = False,
+    import_export_enabled: bool = False,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -39,6 +40,13 @@ def update_api_router(
         imports.append("from app.api.endpoints import tools")
         routers.append(
             'api_router.include_router(tools.router, prefix="/tools", tags=["tools"])'
+        )
+
+    if import_export_enabled:
+        imports.append("from app.api.endpoints import task_center")
+        routers.append(
+            'api_router.include_router(task_center.router, '
+            'prefix="/task-center", tags=["task-center"])'
         )
 
     if external_resources_enabled:

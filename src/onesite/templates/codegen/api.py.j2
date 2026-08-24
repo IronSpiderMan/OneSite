@@ -1,6 +1,13 @@
 from typing import List, Any, Optional, Annotated
+{% if model.importable or model.exportable %}
+import json
+import uuid
+{% endif %}
+{% if model.importable %}
+from pathlib import Path
+{% endif %}
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
-from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable or model.exportable %}, UploadFile, File{% endif %}
+from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable %}, UploadFile, File{% endif %}
 {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.dashboard_metrics or model.data_reports %}
 from app.models.user import User
 {% endif %}
@@ -10,7 +17,7 @@ from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
-{% if model.module_name == "user" and model.name == "User" %}
+{% if (model.module_name == "user" and model.name == "User") or model.importable %}
 from app.core.config import settings
 {% endif %}
 {% if model.is_timescaledb %}
@@ -27,8 +34,10 @@ from app.models.{{ model.source_module }} import {{ model.name }}
 {% if model.has_function_actions %}
 from onesite_runtime import ActionContext, evaluate_action_state, invoke_action_callable
 {% endif %}
-{% if model.exportable or model.custom_importable %}
+{% if model.importable or model.exportable %}
 from app.core.task_queue import task_queue
+from app.core.background_execution import BackgroundExecution
+from app.core.import_export_runtime import execution_to_dict, mark_failed
 {% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
 from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
@@ -50,6 +59,29 @@ router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ mode
 router = APIRouter()
 {% else %}
 router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
+{% endif %}
+
+{% if model.importable %}
+def _publish_{{ model.module_name }}_import(payload: dict) -> None:
+    task_queue.publish(
+        "import.{{ model.module_name }}",
+        payload,
+    )
+
+
+def _check_{{ model.module_name }}_import_permissions(current_user: User) -> str:
+    """Return the caller's role after enforcing both import write operations."""
+    raw_role = getattr(current_user, "role", "user")
+    role = str(getattr(raw_role, "value", raw_role))
+    permissions = {{ model.role_permissions | tojson }}.get(role, "")
+    if "c" not in permissions or "u" not in permissions:
+        raise HTTPException(
+            status_code=403,
+            detail="Import requires both create and update permissions",
+        )
+    return role
+
+
 {% endif %}
 
 {% if model.inline_relations %}
@@ -1045,6 +1077,7 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
 @router.post("/export")
 async def export_{{ model.lower_name }}s(
     *,
+    session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     language: str = Query("en", description="CSV header language"),
     filters: Optional[dict] = Body(None),
@@ -1054,81 +1087,148 @@ async def export_{{ model.lower_name }}s(
     Publishes a background task and returns immediately.
     The user will be notified via WebSocket when the export is complete.
     """
-    import uuid
-
+    raw_role = getattr(current_user, "role", "user")
+    current_role = str(getattr(raw_role, "value", raw_role))
+    if "r" not in {{ model.role_permissions | tojson }}.get(current_role, ""):
+        raise HTTPException(status_code=403, detail="Export requires read permission")
     task_id = str(uuid.uuid4())
-
-    task_queue.publish(
-        "export.{{ model.module_name }}",
-        {
-            "task_id": task_id,
-            "user_id": current_user.id,
-            "filters": filters,
-            "language": language,
-        },
+    effective_filters = dict(filters or {})
+    {% if model.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        # Service/CRUD use ``owner_id`` as the stable scope argument even when
+        # the configured model field has another name (for example creator_id).
+        effective_filters["owner_id"] = current_user.id
+    {% endif %}
+    execution = BackgroundExecution(
+        id=task_id,
+        kind="export",
+        name="{{ model.module_name }}",
+        trigger="manual",
+        requested_by=current_user.id,
+        status="queued",
+        progress=0,
+        message="queued",
+        inputs_json=json.dumps(
+            {
+                "language": language,
+                "filters": effective_filters,
+                "current_role": current_role,
+            },
+            ensure_ascii=False,
+            default=str,
+        ),
     )
+    session.add(execution)
+    await session.commit()
 
-    return {"task_id": task_id, "status": "queued"}
+    try:
+        task_queue.publish(
+            "export.{{ model.module_name }}",
+            {
+                "task_id": task_id,
+                "user_id": current_user.id,
+                "filters": effective_filters,
+                "language": language,
+                "current_role": current_role,
+            },
+        )
+    except Exception as exc:
+        await mark_failed(task_id, f"Failed to queue export: {exc}")
+        raise HTTPException(status_code=503, detail="Unable to queue export") from exc
+
+    return execution_to_dict(execution)
 {% endif %}
 
 {% if model.importable %}
 @router.post("/import")
 async def import_{{ model.lower_name }}s(
     *,
-    {% if model.custom_importable %}
-    current_user: User = Depends(deps.get_current_user),
-    file: UploadFile = File(...),
-) -> Any:
-    """Queue a custom {{ model.name }} import and return immediately."""
-    import os
-    import uuid
-    from pathlib import Path
-
-    task_id = str(uuid.uuid4())
-    upload_dir = Path(os.environ.get("UPLOAD_DIR", "uploads")) / "imports"
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    filename = Path(file.filename or "upload").name
-    filepath = upload_dir / f"{{ model.module_name }}_{task_id}_{filename}"
-
-    with filepath.open("wb") as destination:
-        while chunk := await file.read(1024 * 1024):
-            destination.write(chunk)
-    await file.close()
-
-    task_queue.publish(
-        "import.{{ model.module_name }}",
-        {
-            "task_id": task_id,
-            "user_id": current_user.id,
-            "file_path": str(filepath),
-        },
-    )
-    return {"task_id": task_id, "status": "queued"}
-    {% else %}
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     file: UploadFile = File(...),
     dry_run: bool = Query(False, description="Validate without importing"),
+    background: bool = Query({{ 'True' if model.custom_importable else 'False' }}, description="Queue a trackable background import"),
 ) -> Any:
-    """
-    Import {{ model.name }} records from CSV.
-    Returns the import result directly.
-    """
-    import uuid
-    task_id = str(uuid.uuid4())
-    
-    # Import synchronously and return result
-    result = await service.import_from_csv(
-        session,
-        task_id=task_id,
-        user_id=current_user.id,
-        file=file,
-        dry_run=dry_run,
-        ws_manager=None,  # No WebSocket progress for synchronous import
-    )
-    
-    return result
+    """Import immediately for compatibility, or queue a trackable background job."""
+    current_role = _check_{{ model.module_name }}_import_permissions(current_user)
+    scoped_owner_id = None
+    {% if model.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_role, 0)
+    if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
+        scoped_owner_id = current_user.id
     {% endif %}
+
+    {% if not model.custom_importable %}
+    if not background:
+        return await service.import_from_csv(
+            session,
+            task_id=str(uuid.uuid4()),
+            user_id=current_user.id,
+            file=file,
+            dry_run=dry_run,
+            current_role=current_role,
+            scoped_owner_id=scoped_owner_id,
+        )
+    {% endif %}
+
+    task_id = str(uuid.uuid4())
+    upload_dir = Path(settings.UPLOAD_DIR) / "imports"
+    upload_dir.mkdir(parents=True, exist_ok=True)
+    filename = Path(file.filename or "upload").name or "upload"
+    filepath = upload_dir / f"{{ model.module_name }}_{task_id}_{filename}"
+    written = 0
+
+    try:
+        with filepath.open("wb") as destination:
+            while chunk := await file.read(1024 * 1024):
+                destination.write(chunk)
+                written += len(chunk)
+    except Exception:
+        filepath.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+
+    execution = BackgroundExecution(
+        id=task_id,
+        kind="import",
+        name="{{ model.module_name }}",
+        trigger="manual",
+        requested_by=current_user.id,
+        status="queued",
+        progress=0,
+        message="queued",
+        inputs_json=json.dumps(
+            {"filename": filename, "size": written, "dry_run": dry_run},
+            ensure_ascii=False,
+            default=str,
+        ),
+    )
+    session.add(execution)
+    try:
+        await session.commit()
+    except Exception:
+        filepath.unlink(missing_ok=True)
+        raise
+
+    try:
+        _publish_{{ model.module_name }}_import(
+            {
+                "task_id": task_id,
+                "user_id": current_user.id,
+                "file_path": str(filepath),
+                "dry_run": dry_run,
+                "current_role": current_role,
+                "scoped_owner_id": scoped_owner_id,
+            }
+        )
+    except Exception as exc:
+        filepath.unlink(missing_ok=True)
+        await mark_failed(task_id, f"Failed to queue import: {exc}")
+        raise HTTPException(status_code=503, detail="Unable to queue import") from exc
+
+    return execution_to_dict(execution)
 
 {% if model.importable and not model.exportable and not model.custom_importable %}
 @router.get("/export/template")

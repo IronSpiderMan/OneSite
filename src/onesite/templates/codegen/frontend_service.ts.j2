@@ -1,4 +1,7 @@
 import request from '../utils/request';
+{% if model.importable or model.exportable %}
+import type { TaskCenterTask } from './task-center';
+{% endif %}
 
 const API_URL = '/{{ model.module_name }}s';
 
@@ -219,8 +222,8 @@ export const get{{ model.name }}{{ rel.source_model }}s = async (id: {{ 'string'
 {% if model.importable or model.exportable %}
 // Import/Export functions
 {% if model.exportable %}
-export const export{{ model.name }}s = async (language: string, filters?: Record<string, any>): Promise<{ task_id: string; status: string }> => {
-    const response = await request.post<{ task_id: string; status: string }>(`${API_URL}/export`, filters, {
+export const export{{ model.name }}s = async (language: string, filters?: Record<string, any>): Promise<TaskCenterTask> => {
+    const response = await request.post<TaskCenterTask>(`${API_URL}/export`, filters, {
         params: { language },
     });
     return response.data;
@@ -235,18 +238,36 @@ export interface ImportResult {
 }
 
 export interface ImportTask {
-    task_id: string;
-    status: string;
+    task_id: TaskCenterTask['task_id'];
+    status: TaskCenterTask['status'];
 }
 
-export const import{{ model.name }}s = async (file: File): Promise<{% if model.custom_importable %}ImportTask{% else %}ImportResult{% endif %}> => {
+export const queueImport{{ model.name }}s = async (file: File): Promise<TaskCenterTask> => {
     const formData = new FormData();
     formData.append('file', file);
-    const response = await request.post<{% if model.custom_importable %}ImportTask{% else %}ImportResult{% endif %}>(`${API_URL}/import`, formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
+    const response = await request.post<TaskCenterTask>(`${API_URL}/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        params: { background: true },
     });
     return response.data;
 };
+
+{% if model.custom_importable %}
+// Custom imports have historically been background-only.
+export const import{{ model.name }}s = async (file: File): Promise<ImportTask> =>
+    queueImport{{ model.name }}s(file);
+{% else %}
+// Keep the synchronous client for API compatibility; generated pages use the
+// queue function above so users can follow long-running work from the task page.
+export const import{{ model.name }}s = async (file: File): Promise<ImportResult> => {
+    const formData = new FormData();
+    formData.append('file', file);
+    const response = await request.post<ImportResult>(`${API_URL}/import`, formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+    });
+    return response.data;
+};
+{% endif %}
 {% endif %}
 
 {% if model.importable and not model.exportable and not model.custom_importable %}

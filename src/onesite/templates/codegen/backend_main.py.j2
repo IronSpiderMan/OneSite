@@ -49,6 +49,12 @@ except ImportError:
 
 # Import background task queue and handlers
 from app.core.task_queue import task_queue
+{% if config.background_tasks_enabled %}
+from app.core.background_execution_cleanup import (
+    cleanup_expired_background_executions,
+    run_background_execution_cleanup,
+)
+{% endif %}
 {% if config.external_resources_enabled %}
 from app.core.external_resources import external_resource_manager
 from app.core.external_resource_provider_registry import init_external_resource_providers
@@ -65,6 +71,9 @@ from app.core.scheduled_task_runtime import recover_scheduled_executions
 {% endif %}
 {% if config.tools %}
 from app.core.tool_runtime import reconcile_interrupted_tool_executions
+{% endif %}
+{% if config.import_export_enabled %}
+from app.core.import_export_runtime import reconcile_interrupted_import_export_executions
 {% endif %}
 {% if config.plugins and "site_logger" in config.plugins %}
 # Import site_logger to register AppLog table with SQLModel.metadata
@@ -113,10 +122,25 @@ async def lifespan(app: FastAPI):
     {% if config.tools %}
     await reconcile_interrupted_tool_executions()
     {% endif %}
+    {% if config.import_export_enabled %}
+    await reconcile_interrupted_import_export_executions()
+    {% endif %}
+    {% if config.background_tasks_enabled %}
+    try:
+        await cleanup_expired_background_executions()
+    except Exception:
+        logger.exception("Initial background task retention cleanup failed")
+    {% endif %}
 
     # Start background task worker
     _task_queue_worker = asyncio.create_task(task_queue.run())
     logger.info("Task queue worker started")
+    {% if config.background_tasks_enabled %}
+    _background_execution_cleanup_worker = asyncio.create_task(
+        run_background_execution_cleanup()
+    )
+    logger.info("Background task retention cleanup started")
+    {% endif %}
 
     try:
         # Initialize application-owned resources
@@ -139,6 +163,17 @@ async def lifespan(app: FastAPI):
             # Shutdown background task worker
             _task_queue_worker.cancel()
             logger.info("Task queue worker stopped")
+            {% if config.background_tasks_enabled %}
+            _background_execution_cleanup_worker.cancel()
+            logger.info("Background task retention cleanup stopped")
+            {% endif %}
+            await asyncio.gather(
+                _task_queue_worker,
+                {% if config.background_tasks_enabled %}
+                _background_execution_cleanup_worker,
+                {% endif %}
+                return_exceptions=True,
+            )
 
             {% if config.scheduled_tasks %}
             # Stop scheduler

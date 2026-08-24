@@ -7,6 +7,9 @@ import ReportsPage from './pages/Reports';
 {% if external_resources_enabled %}
 import ExternalResourcesPage from './pages/ExternalResources';
 {% endif %}
+{% if import_export_enabled %}
+import TaskCenterPage from './pages/TaskCenter';
+{% endif %}
 {% for model in models %}
 {% if not model.is_singleton %}
 import {{ model.name }}Page from './pages/{{ model.module_name }}';
@@ -38,6 +41,12 @@ export const GeneratedRoutes = [
   {
     path: '/external-resources',
     element: <ExternalResourcesPage />,
+  },
+{% endif %}
+{% if import_export_enabled %}
+  {
+    path: '/task-center',
+    element: <TaskCenterPage />,
   },
 {% endif %}
 {% for model in models %}

@@ -1,0 +1,53 @@
+import request from '../utils/request';
+
+const API_URL = '/task-center';
+
+export type TaskCenterTaskKind = 'import' | 'export' | 'tool' | 'scheduled_task';
+
+export type TaskCenterTaskStatus = 'queued' | 'running' | 'succeeded' | 'failed';
+
+export interface TaskCenterTask {
+  task_id: string;
+  kind: TaskCenterTaskKind;
+  name: string;
+  trigger: string;
+  status: TaskCenterTaskStatus;
+  progress: number;
+  message?: string | null;
+  inputs: Record<string, unknown>;
+  result?: unknown | null;
+  download_url?: string | null;
+  error?: string | null;
+  created_at: string;
+  started_at?: string | null;
+  completed_at?: string | null;
+}
+
+export interface TaskCenterTaskListParams {
+  page?: number;
+  size?: number;
+  kind?: TaskCenterTaskKind;
+  name?: string;
+  status?: TaskCenterTaskStatus;
+}
+
+export interface TaskCenterTaskPage {
+  items: TaskCenterTask[];
+  total: number;
+  page: number;
+  size: number;
+}
+
+export const listTaskCenterTasks = async (
+  params: TaskCenterTaskListParams = {},
+): Promise<TaskCenterTaskPage> => {
+  const response = await request.get<TaskCenterTaskPage>(`${API_URL}/`, { params });
+  return response.data;
+};
+
+export const getTaskCenterTask = async (taskId: string): Promise<TaskCenterTask> => {
+  const response = await request.get<TaskCenterTask>(
+    `${API_URL}/${encodeURIComponent(taskId)}`,
+  );
+  return response.data;
+};

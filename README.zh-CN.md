@@ -146,7 +146,7 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
 ## 配置与权限
 
-推荐在 `site_config.py` 中使用带类型的 `SiteConfig`；旧项目的 `site_config.json` 仍然兼容。两种格式都支持 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation` 等配置。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports` 和 `external-resources`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的模型仍可通过路由和 API 访问，但不会出现在侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
+推荐在 `site_config.py` 中使用带类型的 `SiteConfig`；旧项目的 `site_config.json` 仍然兼容。两种格式都支持 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation` 等配置。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports`、`external-resources` 和 `task-center`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的模型仍可通过路由和 API 访问，但不会出现在侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
 
 模型级选项写入 `__onesite__`：
 
@@ -251,6 +251,37 @@ __onesite__ = {
 `标签一;标签二`；导入时执行反向查找。`import_key` 命中已有记录时覆盖，
 否则创建新记录。字段的 `site_props` 可设置 `importable=False` 或
 `exportable=False`，即使模型级 `fields` 包含该字段也会排除。
+
+配置任一导入、导出、仪表盘工具或定时任务后，`site sync` 会自动生成统一的
+“任务中心”页面。页面展示提交到进程内任务队列的导入、导出、工具和定时任务，
+支持按类型、任务名称和状态筛选，并展示进度、时间、结果、错误及下载地址。
+用户主动发起的任务按当前登录用户隔离；定时任务按照其手动执行权限展示。
+刷新页面或错过 WebSocket 通知后仍可恢复状态。完成或失败的任务记录及其托管的
+上传和下载文件保留 24 小时；应用启动时会清理一次，之后每 5 分钟清理一次。
+旧的同步 CSV 导入 API 仍可通过
+不传 `background=true` 保持原行为。
+同步和后台导入都会要求模型级创建、更新权限；标准 CSV 导入还会逐行执行
+字段权限校验，并为非管理员强制套用模型配置的 owner 范围。
+
+可使用精确的 `kind` 与 `name` 组合让指定任务不出现在任务中心的列表和详情接口中。
+隐藏只影响任务中心：任务仍会执行、落库、发送通知，并遵循相同的 24 小时保留策略。
+
+```python
+from onesite.config import HiddenTask, SiteConfig, TaskCenterConfig
+
+config = SiteConfig(
+    task_center=TaskCenterConfig(hidden=[
+        HiddenTask(kind="tool", name="internal_cleanup"),
+        HiddenTask(kind="scheduled_task", name="heartbeat"),
+        HiddenTask(kind="import", name="audit_log"),
+        HiddenTask(kind="export", name="audit_log"),
+    ]),
+)
+```
+自定义格式的导入 hook 需要自行执行内容级权限校验：通过可选的 `context`
+参数读取 `context.current_role` 来过滤字段，并使用
+`context.scoped_owner_id` 强制或验证 owner。生成的入口仍会在排队前要求模型级
+创建和更新权限，但 OneSite 无法自动解析任意文件格式中的字段。
 - `refresh_interval`：自动刷新。模型内的 `visualize` 已弃用，旧配置暂时兼容；
   新图表统一写在项目根目录的 `visualizations.py`：
 

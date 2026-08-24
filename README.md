@@ -128,7 +128,8 @@ datetimes are normalized to UTC before database persistence.
 
 `navigation` is the ordered, declarative sidebar tree. A `model` entry refers
 to the model's `module_name`; a `group` is a non-routable, collapsible second-
-level container; and `builtin` supports `dashboard` and `reports`. Group
+level container; and `builtin` supports `dashboard`, `reports`,
+`external-resources`, and `task-center`. Group
 labels require `zh` and `en` translations. Model
 permissions and `visible` settings still control whether each child is shown;
 empty groups are hidden automatically. Models omitted from an explicitly
@@ -756,6 +757,38 @@ updates the existing row; otherwise a new row is created. Set field-level
 `site_props` `importable=False` or `exportable=False` to exclude a field even
 when it appears in a model-level field list.
 
+When imports, exports, dashboard tools, or scheduled tasks are configured,
+`site sync` also generates a unified **Task Center** page. It lists imports,
+exports, tool executions, and scheduled-task executions submitted to the
+in-process task queue, with kind/name/status filters, progress, timestamps,
+results, errors, and downloadable outputs. User-started work is scoped to the
+signed-in user; scheduled executions are visible according to each task's
+manual permissions. The page continues to work after a browser refresh or a
+missed WebSocket message. Completed and failed executions, along with their
+managed uploads and downloadable outputs, are retained for 24 hours. Cleanup
+runs at application startup and every five minutes. The
+legacy synchronous CSV import API remains available by omitting
+`background=true`. Both paths require model-level create and update
+permissions. Standard CSV imports also enforce the caller's field permissions
+per create/update row and force the configured owner scope for non-admin users.
+
+Hide selected executions from both the Task Center list and detail API with an
+exact `kind` plus `name` pair. Hidden jobs still execute, persist, notify, and
+follow the same 24-hour retention policy.
+
+```python
+from onesite.config import HiddenTask, SiteConfig, TaskCenterConfig
+
+config = SiteConfig(
+    task_center=TaskCenterConfig(hidden=[
+        HiddenTask(kind="tool", name="internal_cleanup"),
+        HiddenTask(kind="scheduled_task", name="heartbeat"),
+        HiddenTask(kind="import", name="audit_log"),
+        HiddenTask(kind="export", name="audit_log"),
+    ]),
+)
+```
+
 | `refresh_interval` | Enables periodic list refresh. |
 | `visualize` | Legacy model-level chart configuration; use project-level `visualizations.py` for new charts. |
 | `dashboard_metrics` | Legacy model-level Dashboard KPI configuration; use project-level `visualizations.py` for new KPIs. |
@@ -783,18 +816,29 @@ Implement the generated hooks as follows:
 from pathlib import Path
 from typing import Any
 
-async def import_product(file: Path) -> dict[str, Any]:
+async def import_product(file: Path, context=None) -> dict[str, Any]:
+    if context:
+        await context.set_progress(50, "Parsing workbook")
     # Return at least success, failed, and errors.
     return {"success": 10, "failed": 0, "errors": []}
 
-async def export_product(filters: dict[str, Any]) -> Path:
+async def export_product(filters: dict[str, Any], context=None) -> Path:
+    if context:
+        await context.set_progress(50, "Writing workbook")
     # Create a file and return its existing path.
     return Path("/tmp/products.xlsx")
 ```
 
 Custom imports do not need `import_key`. The export hook receives the active
 list filters and may produce any file type; OneSite copies it to the export
-directory and notifies the requesting user when it is ready.
+directory and notifies the requesting user when it is ready. The optional
+`context` parameter is backwards compatible; call `await context.set_progress`
+with a value from 0 to 100 to expose custom stages on the task page. Custom
+import code is responsible for content-level authorization because OneSite
+cannot interpret an arbitrary file format. Use `context.current_role` to apply
+field permissions and `context.scoped_owner_id` to force or validate ownership;
+the generated endpoint still requires both model-level create and update
+permission before a custom import is queued.
 
 Useful field-level `site_props` are `permissions`, `is_search_field`, `component`, `create_optional`, `update_optional`, `is_foreign_key`, `reverse_display`, `allow_download`, `group`, `fixed_keys` and `lock_keys`.
 

@@ -10,13 +10,13 @@ from typing import Any
 
 {% if model.custom_importable %}
 async def import_{{ model.module_name }}(file: Path) -> dict[str, Any]:
-    """Import ``file`` and return a result such as ``{"success": 0, "failed": 0, "errors": []}``."""
+    """Return import stats; add an optional ``context`` argument to report progress."""
     raise NotImplementedError("Implement custom import for {{ model.name }}")
 
 
 {% endif %}
 {% if model.custom_exportable %}
 async def export_{{ model.module_name }}(filters: dict[str, Any]) -> Path:
-    """Create an export file for ``filters`` and return its filesystem path."""
+    """Return an output path; add an optional ``context`` argument to report progress."""
     raise NotImplementedError("Implement custom export for {{ model.name }}")
 {% endif %}

@@ -719,7 +719,9 @@ class {{ model.name }}Service:
         user_id: int,
         filters: Optional[dict] = None,
         language: str = "en",
+        current_role: str = "developer",
         ws_manager = None,
+        progress_callback = None,
     ) -> str:
         """
         Export {{ model.name }} records to CSV.
@@ -729,17 +731,38 @@ class {{ model.name }}Service:
         with semicolons.
         """
         import csv
+        import inspect
         from datetime import datetime, time
         from sqlmodel import select
+
+        async def report_progress(progress: int, message: str) -> None:
+            if progress_callback is None:
+                return
+            result = progress_callback(progress, message)
+            if inspect.isawaitable(result):
+                await result
+
+        await report_progress(5, "preparing_export")
         
         upload_dir = settings.UPLOAD_DIR
         export_dir = os.path.join(upload_dir, "exports")
         os.makedirs(export_dir, exist_ok=True)
         
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        filename = f"{{ model.module_name }}_export_{timestamp}.csv"
+        filename = f"{{ model.module_name }}_export_{timestamp}_{task_id}.csv"
         filepath = os.path.join(export_dir, filename)
         language = "zh" if str(language).lower().startswith("zh") else "en"
+        role = str(getattr(current_role, "value", current_role))
+        export_column_permissions = {
+            {% for column in model.export_fields %}
+            "{{ column.column_name }}": {{ column.field.role_permissions | tojson }},
+            {% endfor %}
+        }
+        readable_export_columns = {
+            column_name
+            for column_name, permissions in export_column_permissions.items()
+            if "r" in permissions.get(role, "")
+        }
 
         # Use the same supported filters as the list endpoint.  Exports run in
         # a background task, so date and time values arrive as JSON strings
@@ -760,6 +783,8 @@ class {{ model.name }}Service:
                 {% if fk.name != model.owner_field and fk.name not in search_field_names %}"{{ fk.name }}",
                 {% endif %}
                 {% endfor %}
+                {% if model.owner_field %}"owner_id",
+                {% endif %}
             }
         }
         {% for field in model.fields %}
@@ -776,16 +801,27 @@ class {{ model.name }}Service:
         {% endif %}
         {% endfor %}
 
+        total_items = await crud.count(session, **export_filters)
+        processed_items = 0
+        # Progress is persisted through an isolated session. End this read
+        # transaction first so SQLite does not block the status write.
+        await session.rollback()
+        await report_progress(10, f"exporting_records:0:{total_items}")
+
         # Write CSV with UTF-8 BOM for Excel compatibility
         with open(filepath, 'w', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f)
 
-            headers = [
-                {% for column in model.export_fields %}{{ column.header_labels | tojson }}.get(language, "{{ column.column_name }}"),
-                {% endfor %}{% for m2m in model.export_m2m %}{{ m2m.header_labels | tojson }}.get(language, "{{ m2m.column_name }}"),
+            headers = []
+            {% for column in model.export_fields %}
+            if "{{ column.column_name }}" in readable_export_columns:
+                headers.append({{ column.header_labels | tojson }}.get(language, "{{ column.column_name }}"))
+            {% endfor %}
+            headers.extend([
+                {% for m2m in model.export_m2m %}{{ m2m.header_labels | tojson }}.get(language, "{{ m2m.column_name }}"),
                 {% endfor %}{% for rfk in model.export_reverse_fks %}{{ rfk.header_labels | tojson }}.get(language, "{{ rfk.column_name }}"),
                 {% endfor %}
-            ]
+            ])
             writer.writerow(headers)
             
             {% set export_fks = model.export_fields | selectattr('kind', 'equalto', 'fk') | list %}
@@ -805,6 +841,7 @@ class {{ model.name }}Service:
                     session, page=page, size=batch_size, **export_filters
                 )
                 if not items:
+                    await session.rollback()
                     break
                 
                 {% if export_fks %}
@@ -875,33 +912,34 @@ class {{ model.name }}Service:
                     row = []
                     {% for column in model.export_fields %}
                     {% set field = column.field %}
+                    if "{{ column.column_name }}" in readable_export_columns:
                     {% if column.kind == 'fk' %}
-                    # FK field - export label instead of ID
-                    fk_id = getattr(item, "{{ column.name }}", None)
-                    if fk_id is None:
-                        row.append("")
-                    elif fk_id in {{ column.name }}_label_cache:
-                        row.append({{ column.name }}_label_cache[fk_id])
-                    else:
-                        row.append("")
+                        # FK field - export label instead of ID
+                        fk_id = getattr(item, "{{ column.name }}", None)
+                        if fk_id is None:
+                            row.append("")
+                        elif fk_id in {{ column.name }}_label_cache:
+                            row.append({{ column.name }}_label_cache[fk_id])
+                        else:
+                            row.append("")
                     {% else %}
-                    val = getattr(item, "{{ column.name }}", None)
-                    # Convert to string, handle Enum/datetime specially
-                    if val is None:
-                        row.append("")
+                        val = getattr(item, "{{ column.name }}", None)
+                        # Convert to string, handle Enum/datetime specially
+                        if val is None:
+                            row.append("")
                     {% if field.is_multi_select %}
-                    elif isinstance(val, list):
-                        # Multi-select enum - export as comma-separated
-                        row.append(",".join(str(v) for v in val))
+                        elif isinstance(val, list):
+                            # Multi-select enum - export as comma-separated
+                            row.append(",".join(str(v) for v in val))
                     {% endif %}
-                    elif hasattr(val, 'value'):
-                        # Enum type - get the value
-                        row.append(str(val.value))
-                    elif hasattr(val, 'isoformat'):
-                        # datetime type - use ISO format
-                        row.append(val.isoformat())
-                    else:
-                        row.append(str(val))
+                        elif hasattr(val, 'value'):
+                            # Enum type - get the value
+                            row.append(str(val.value))
+                        elif hasattr(val, 'isoformat'):
+                            # datetime type - use ISO format
+                            row.append(val.isoformat())
+                        else:
+                            row.append(str(val))
                     {% endif %}
                     {% endfor %}
                     {% for m2m in model.export_m2m %}
@@ -911,12 +949,25 @@ class {{ model.name }}Service:
                     row.append(";".join({{ rfk.value_cache_name }}.get(item.id, [])))
                     {% endfor %}
                     writer.writerow(row)
+
+                processed_items += len(items)
+                # All values needed from this batch are materialized above.
+                # Release the read transaction before the separate progress write.
+                await session.rollback()
+                progress = 95 if total_items == 0 else 10 + int(
+                    85 * min(processed_items, total_items) / total_items
+                )
+                await report_progress(
+                    progress,
+                    f"exporting_records:{processed_items}:{total_items}",
+                )
                 
                 page += 1
                 
                 if len(items) < batch_size:
                     break
         
+        await report_progress(98, "finalizing_export")
         return filepath
     {% endif %}
 
@@ -929,28 +980,70 @@ class {{ model.name }}Service:
         user_id: int,
         file: Any,
         dry_run: bool = False,
+        current_role: str = "developer",
+        scoped_owner_id: Any = None,
         ws_manager = None,
+        progress_callback = None,
     ) -> dict:
         """
         Import {{ model.name }} records from CSV.
         Uses upsert logic: if record with same {{ model.import_key }} exists, update it; otherwise create new.
         Configured FK and M2M values must match existing related objects.
         """
+        import asyncio
         import csv
         import io
         import json
         import ast
+        import inspect
+        from pathlib import Path
         from datetime import datetime
         from sqlmodel import select
 
-        contents = await file.read()
+        async def report_progress(progress: int, message: str) -> None:
+            if progress_callback is None:
+                return
+            result = progress_callback(progress, message)
+            if inspect.isawaitable(result):
+                await result
+
+        await report_progress(5, "reading_import_file")
+        if isinstance(file, (str, os.PathLike, Path)):
+            contents = await asyncio.to_thread(Path(file).read_bytes)
+        else:
+            contents = await file.read()
         csv_file = io.StringIO(contents.decode('utf-8-sig'))
         reader = csv.DictReader(csv_file)
 
         rows = list(reader)
+        total_rows = len(rows)
+        await report_progress(10, f"validating_import:0:{total_rows}")
 
-        stats = {"success": 0, "failed": 0, "created": 0, "updated": 0, "errors": []}
+        stats = {
+            "success": 0,
+            "failed": 0,
+            "created": 0,
+            "updated": 0,
+            "error_count": 0,
+            "errors": [],
+            "errors_truncated": False,
+        }
+
+        def record_row_error(message: str) -> None:
+            stats["failed"] += 1
+            stats["error_count"] += 1
+            if len(stats["errors"]) < 200:
+                stats["errors"].append(str(message)[:4000])
+            else:
+                stats["errors_truncated"] = True
+
         import_key = "{{ model.import_key }}"
+        role = str(getattr(current_role, "value", current_role))
+        import_column_permissions = {
+            {% for column in model.import_fields %}
+            "{{ column.column_name }}": {{ column.field.role_permissions | tojson }},
+            {% endfor %}
+        }
 
         {% set import_fks = model.import_fields | selectattr('kind', 'equalto', 'fk') | list %}
         {% for column in import_fks %}
@@ -985,47 +1078,110 @@ class {{ model.name }}Service:
                 {{ m2m.name }}_cache[label] = obj.id
         {% endfor %}
 
+        # FK/M2M caches are now plain dictionaries. Release their read
+        # transaction before progress is written through another session.
+        await session.rollback()
+
+        def convert_import_value(column_name: str, value: str) -> Any:
+            """Convert one authorized CSV value to its schema representation."""
+            {% for column in model.import_fields %}
+            {% set field = column.field %}
+            {% if loop.first %}if{% else %}elif{% endif %} column_name == "{{ column.column_name }}":
+                {% if column.kind == 'fk' %}
+                if not value:
+                    return None
+                if value in {{ column.name }}_ambiguous:
+                    raise ValueError(f"Foreign key '{value}' is ambiguous for field '{{ column.name }}'")
+                if value in {{ column.name }}_cache:
+                    return {{ column.name }}_cache[value]
+                raise ValueError(f"Foreign key '{value}' not found for field '{{ column.name }}'")
+                {% elif field.ui_type == 'int' %}
+                return int(value) if value else None
+                {% elif field.ui_type == 'float' %}
+                return float(value) if value else None
+                {% elif field.ui_type == 'bool' %}
+                return value.lower() in ('true', '1', 'yes', 'on') if value else False
+                {% elif field.ui_type == 'json' %}
+                return ast.literal_eval(value) if value else []
+                {% elif field.is_enum and field.is_multi_select %}
+                return [v.strip() for v in value.split(",") if v.strip()] if value else []
+                {% else %}
+                return value
+                {% endif %}
+            {% endfor %}
+            raise ValueError(f"Unknown import column '{column_name}'")
+
+        import_key_column = import_key
+        {% for column in model.import_fields %}
+        {% if column.field.name == model.import_key %}
+        import_key_column = "{{ column.column_name }}"
+        {% endif %}
+        {% endfor %}
+
+        await report_progress(15, f"importing_records:0:{total_rows}")
+
+        progress_step = max(1, (total_rows + 99) // 100)
         for idx, row in enumerate(rows, 1):
             try:
                 # Get the unique field value
-                key_value = row.get(import_key)
-                if not key_value:
-                    stats["failed"] += 1
-                    stats["errors"].append(f"Row {idx}: Missing import key '{import_key}'")
+                raw_key_value = row.get(import_key_column)
+                if not raw_key_value:
+                    record_row_error(f"Row {idx}: Missing import key '{import_key}'")
                     continue
 
-                # Build data object from row
+                # Convert only the selector before deciding whether this row is
+                # a create or update; all other values are permission-gated first.
+                key_value = convert_import_value(import_key_column, raw_key_value)
+                existing = await crud.get_by_{{ model.import_key }}(session, key_value)
+                {% if model.owner_field %}
+                if (
+                    existing is not None
+                    and scoped_owner_id is not None
+                    and getattr(existing, "{{ model.owner_field }}", None) != scoped_owner_id
+                ):
+                    raise ValueError("Record is not available for import")
+                {% endif %}
+                is_update = existing is not None
+                required_permission = "u" if is_update else "c"
+
+                # Import configuration is the union of fields used by all roles.
+                # Enforce the requesting role again for the concrete row operation.
                 obj_data = {}
                 {% for column in model.import_fields %}
-                {% set field = column.field %}
                 if "{{ column.column_name }}" in row:
                     value = row["{{ column.column_name }}"]
-                    {% if column.kind == 'fk' %}
-                    # FK field - resolve label to ID
-                    if not value:
-                        obj_data["{{ field.name }}"] = None
-                    elif value in {{ column.name }}_ambiguous:
-                        raise ValueError(f"Foreign key '{value}' is ambiguous for field '{{ column.name }}'")
-                    elif value in {{ column.name }}_cache:
-                        obj_data["{{ column.name }}"] = {{ column.name }}_cache[value]
+                    permissions = import_column_permissions["{{ column.column_name }}"].get(role, "")
+                    if (
+                        scoped_owner_id is not None
+                        and "{{ column.field.name }}" == "{{ model.owner_field or '' }}"
+                    ):
+                        # A scoped import always ignores an untrusted owner value.
+                        pass
+                    elif required_permission not in permissions:
+                        if (
+                            not (
+                                is_update
+                                and "{{ column.field.name }}" == import_key
+                                and "r" in permissions
+                            )
+                            and value not in (None, "")
+                        ):
+                            raise ValueError(
+                                "Field '{{ column.column_name }}' is not permitted for "
+                                + ("update" if is_update else "create")
+                            )
                     else:
-                        raise ValueError(f"Foreign key '{value}' not found for field '{{ column.name }}'")
-                    {% elif field.ui_type == 'int' %}
-                    obj_data["{{ field.name }}"] = int(value) if value else None
-                    {% elif field.ui_type == 'float' %}
-                    obj_data["{{ field.name }}"] = float(value) if value else None
-                    {% elif field.ui_type == 'bool' %}
-                    obj_data["{{ field.name }}"] = value.lower() in ('true', '1', 'yes', 'on') if value else False
-                    {% elif field.ui_type == 'json' %}
-                    obj_data["{{ field.name }}"] = ast.literal_eval(value) if value else []
-                    {% elif field.is_enum and field.is_multi_select %}
-                    obj_data["{{ field.name }}"] = [v.strip() for v in value.split(",") if v.strip()] if value else []
-                    {% elif field.is_enum %}
-                    obj_data["{{ field.name }}"] = value
-                    {% else %}
-                    obj_data["{{ field.name }}"] = value
-                    {% endif %}
+                        obj_data["{{ column.field.name }}"] = convert_import_value(
+                            "{{ column.column_name }}",
+                            value,
+                        )
                 {% endfor %}
+
+                {% if model.owner_field %}
+                if scoped_owner_id is not None:
+                    # Never trust an owner value supplied in an imported file.
+                    obj_data["{{ model.owner_field }}"] = scoped_owner_id
+                {% endif %}
 
                 {% for m2m in model.import_m2m %}
                 if "{{ m2m.column_name }}" in row:
@@ -1043,11 +1199,6 @@ class {{ model.name }}Service:
                     obj_data["{{ m2m.write_name }}"] = resolved_ids
                     {% endif %}
                 {% endfor %}
-
-                # Use the converted key value for numeric/enum import keys.
-                key_value = obj_data.get(import_key, key_value)
-                existing = await crud.get_by_{{ model.import_key }}(session, key_value)
-                is_update = existing is not None
 
                 if not dry_run:
                     if is_update:
@@ -1069,9 +1220,19 @@ class {{ model.name }}Service:
 
             except Exception as e:
                 await session.rollback()
-                stats["failed"] += 1
-                stats["errors"].append(f"Row {idx}: {str(e)}")
+                record_row_error(f"Row {idx}: {str(e)}")
+            finally:
+                # Successful dry-runs leave a read transaction open; normal
+                # writes already committed. This is harmless in both cases and
+                # prevents SQLite from blocking the isolated progress session.
+                await session.rollback()
+                if idx == total_rows or idx == 1 or idx % progress_step == 0:
+                    await report_progress(
+                        15 + int(80 * idx / max(1, total_rows)),
+                        f"importing_records:{idx}:{total_rows}",
+                    )
 
+        await report_progress(98, "finalizing_import")
         return stats
     {% endif %}
     {% endif %}

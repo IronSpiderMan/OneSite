@@ -1,0 +1,171 @@
+"""Read-only Task Center API for task-queue executions visible to the user."""
+
+import json
+from datetime import datetime
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import and_, func, or_
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.core.background_execution import BackgroundExecution
+from app.models.user import User
+
+
+router = APIRouter()
+TASK_KINDS = ("import", "export", "tool", "scheduled_task")
+TASK_STATUSES = ("queued", "running", "succeeded", "failed")
+SCHEDULED_TASK_PERMISSIONS = {{ scheduled_task_permissions | default({}) | tojson }}
+HIDDEN_TASKS = {
+    (item["kind"], item["name"])
+    for item in {{ hidden_tasks | default([]) | tojson }}
+}
+
+
+def _validate_filter(value: str | None, allowed: tuple[str, ...], name: str) -> None:
+    if value is not None and value not in allowed:
+        raise HTTPException(
+            status_code=422,
+            detail=f"Invalid {name}; expected one of: {', '.join(allowed)}",
+        )
+
+
+def _decode_json(value: str | None, default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return default
+
+
+def _iso_datetime(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def _execution_dict(
+    execution: BackgroundExecution,
+    *,
+    include_details: bool = True,
+) -> dict[str, Any]:
+    inputs = _decode_json(execution.inputs_json, {}) if include_details else {}
+    if not include_details and execution.kind == "import":
+        raw_inputs = _decode_json(execution.inputs_json, {})
+        if isinstance(raw_inputs, dict):
+            inputs = {
+                key: raw_inputs[key]
+                for key in ("filename", "size", "dry_run")
+                if key in raw_inputs
+            }
+    return {
+        "task_id": execution.id,
+        "kind": execution.kind,
+        "name": execution.name,
+        "trigger": execution.trigger,
+        "status": execution.status,
+        "progress": execution.progress,
+        "message": execution.message,
+        "inputs": inputs,
+        "result": _decode_json(execution.result_json, None) if include_details else None,
+        "download_url": execution.download_url,
+        "error": execution.error if include_details else None,
+        "created_at": _iso_datetime(execution.created_at),
+        "started_at": _iso_datetime(execution.started_at),
+        "completed_at": _iso_datetime(execution.completed_at),
+    }
+
+
+def _role_name(current_user: User) -> str:
+    raw_role = getattr(current_user, "role", "user")
+    return str(getattr(raw_role, "value", raw_role))
+
+
+def _visibility_condition(current_user: User):
+    own_task = and_(
+        BackgroundExecution.kind.in_(("import", "export", "tool")),
+        BackgroundExecution.requested_by == current_user.id,
+    )
+    scheduled_names = [
+        name
+        for name, roles in SCHEDULED_TASK_PERMISSIONS.items()
+        if _role_name(current_user) in roles
+    ]
+    if not scheduled_names:
+        return own_task
+    return or_(
+        own_task,
+        and_(
+            BackgroundExecution.kind == "scheduled_task",
+            BackgroundExecution.name.in_(scheduled_names),
+        ),
+    )
+
+
+def _hidden_task_conditions() -> list:
+    return [
+        or_(
+            BackgroundExecution.kind != kind,
+            BackgroundExecution.name != name,
+        )
+        for kind, name in HIDDEN_TASKS
+    ]
+
+
+@router.get("/")
+async def list_background_tasks(
+    page: int = Query(1, ge=1),
+    size: int = Query(20, ge=1, le=100),
+    kind: str | None = Query(None),
+    status: str | None = Query(None),
+    name: str | None = Query(None),
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict[str, Any]:
+    _validate_filter(kind, TASK_KINDS, "kind")
+    _validate_filter(status, TASK_STATUSES, "status")
+    conditions = [_visibility_condition(current_user), *_hidden_task_conditions()]
+    if kind is not None:
+        conditions.append(BackgroundExecution.kind == kind)
+    if status is not None:
+        conditions.append(BackgroundExecution.status == status)
+    if name is not None:
+        conditions.append(BackgroundExecution.name == name)
+
+    total = (
+        await session.exec(
+            select(func.count()).select_from(BackgroundExecution).where(*conditions)
+        )
+    ).one()
+    statement = (
+        select(BackgroundExecution)
+        .where(*conditions)
+        .order_by(BackgroundExecution.created_at.desc())
+        .offset((page - 1) * size)
+        .limit(size)
+    )
+    executions = (await session.exec(statement)).all()
+    return {
+        "items": [_execution_dict(item, include_details=False) for item in executions],
+        "total": total,
+        "page": page,
+        "size": size,
+    }
+
+
+@router.get("/{task_id}")
+async def get_background_task(
+    task_id: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> dict[str, Any]:
+    statement = select(BackgroundExecution).where(
+        BackgroundExecution.id == task_id,
+        _visibility_condition(current_user),
+        *_hidden_task_conditions(),
+    )
+    execution = (await session.exec(statement)).first()
+    if execution is None:
+        raise HTTPException(status_code=404, detail="Background task not found")
+    return _execution_dict(execution)

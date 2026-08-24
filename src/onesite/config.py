@@ -97,7 +97,12 @@ class NavModel(_ConfigModel):
 
 class NavBuiltin(_ConfigModel):
     type: Literal["builtin"] = "builtin"
-    key: Literal["dashboard", "reports", "external-resources"]
+    key: Literal[
+        "dashboard",
+        "reports",
+        "external-resources",
+        "task-center",
+    ]
 
     @classmethod
     def dashboard(cls) -> "NavBuiltin":
@@ -110,6 +115,10 @@ class NavBuiltin(_ConfigModel):
     @classmethod
     def external_resources(cls) -> "NavBuiltin":
         return cls(key="external-resources")
+
+    @classmethod
+    def task_center(cls) -> "NavBuiltin":
+        return cls(key="task-center")
 
 
 class NavGroup(_ConfigModel):
@@ -197,6 +206,17 @@ class ScheduledTask(_ConfigModel):
         default_factory=lambda: {"on_success": False, "on_failure": True, "roles": ["developer"]}
     )
     params: dict[str, ScheduledTaskParam] = Field(default_factory=dict)
+
+
+class HiddenTask(_ConfigModel):
+    """One task kind/name pair omitted from the generated Task Center."""
+
+    kind: Literal["import", "export", "tool", "scheduled_task"]
+    name: str
+
+
+class TaskCenterConfig(_ConfigModel):
+    hidden: list[HiddenTask] = Field(default_factory=list)
 
 
 # ── Model-level ``__onesite__`` configuration ─────────────────────────────
@@ -355,6 +375,7 @@ class SiteConfig(_ConfigModel):
     providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
+    task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)
 
 
 _MISSING = object()

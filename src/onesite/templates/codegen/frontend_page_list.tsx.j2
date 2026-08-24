@@ -15,7 +15,7 @@ import {
     {% endif %}
     {% endif %}
     {% if model.importable %}
-    , import{{ model.name }}s
+    , queueImport{{ model.name }}s
     {% endif %}
     {% if model.exportable %}
     , export{{ model.name }}s
@@ -345,20 +345,20 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   }, [data]);
   {% endif %}
 
-  {% if model.custom_importable %}
+  {% if model.importable %}
   useEffect(() => {
-    const handleCustomImportComplete = (event: Event) => {
+    const handleImportComplete = (event: Event) => {
       const payload = (event as CustomEvent).detail;
       if (payload?.module !== '{{ model.module_name }}' || payload?.error) return;
       {% if model.is_tree %}
       refreshTree();
       {% else %}
-      fetchData();
+      refreshData();
       {% endif %}
     };
-    window.addEventListener('onesite:import-complete', handleCustomImportComplete);
-    return () => window.removeEventListener('onesite:import-complete', handleCustomImportComplete);
-  }, [fetchData{% if model.is_tree %}, refreshTree{% endif %}]);
+    window.addEventListener('onesite:import-complete', handleImportComplete);
+    return () => window.removeEventListener('onesite:import-complete', handleImportComplete);
+  }, [{% if model.is_tree %}refreshTree{% else %}refreshData{% endif %}]);
   {% endif %}
 
   // Sync page input with current page from store
@@ -432,11 +432,16 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const handleExport = async () => {
     try {
       setIsExporting(true);
-      await export{{ model.name }}s(
+      const task = await export{{ model.name }}s(
         i18n.resolvedLanguage || i18n.language,
         {% if model.is_tree %}treeSearchFiltersRef.current{% else %}use{{ model.name }}Store.getState().filters{% endif %},
       );
-      toast.success(t('common.export_started', 'Export started, you will be notified when complete'));
+      toast.success(t('common.export_started', 'Export started, you will be notified when complete'){% if model.export_task_center_visible is not false %}, {
+        action: {
+          label: t('task_center.view_progress', 'View progress'),
+          onClick: () => navigate(`/task-center?task_id=${task.task_id}`),
+        },
+      }{% endif %});
     } catch (error) {
       toast.error(t('common.export_failed', 'Export failed'));
     } finally {
@@ -459,23 +464,15 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
     try {
       setIsImporting(true);
-      {% if model.custom_importable %}
-      await import{{ model.name }}s(importingFile);
-      toast.success(t('common.import_started', 'Import started, you will be notified when complete'));
+      const task = await queueImport{{ model.name }}s(importingFile);
+      toast.success(t('common.import_started', 'Import started, you will be notified when complete'){% if model.import_task_center_visible is not false %}, {
+        action: {
+          label: t('task_center.view_progress', 'View progress'),
+          onClick: () => navigate(`/task-center?task_id=${task.task_id}`),
+        },
+      }{% endif %});
       setImportModalOpen(false);
       setImportingFile(null);
-      {% else %}
-      const result = await import{{ model.name }}s(importingFile);
-      if (result.failed > 0) {
-        toast.warning(t('import.partial', `Imported ${result.success} records, ${result.failed} failed`));
-      } else {
-        toast.success(t('import.success', `Successfully imported ${result.success} records`));
-      }
-      // Refresh data after import
-      fetchData();
-      setImportModalOpen(false);
-      setImportingFile(null);
-      {% endif %}
     } catch (error) {
       toast.error(t('import.failed', 'Import failed'));
     } finally {
@@ -800,19 +797,23 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% if model.importable or model.exportable %}
           <div className="flex items-center gap-2">
             {% if model.importable %}
-            <Button variant="outline" onClick={handleImportClick}>
-              <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
-            </Button>
+            {hasPermission('c') && hasPermission('u') && (
+              <Button variant="outline" onClick={handleImportClick}>
+                <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
+              </Button>
+            )}
             {% endif %}
             {% if model.exportable %}
-            <Button variant="outline" onClick={handleExport} disabled={isExporting}>
-              {isExporting ? (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              ) : (
-                <Download className="mr-2 h-4 w-4" />
-              )}
-              {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
-            </Button>
+            {hasPermission('r') && (
+              <Button variant="outline" onClick={handleExport} disabled={isExporting}>
+                {isExporting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
+              </Button>
+            )}
             {% endif %}
             {% if model.importable and not model.exportable and not model.custom_importable %}
             <Button variant="outline" onClick={handleDownloadTemplate}>

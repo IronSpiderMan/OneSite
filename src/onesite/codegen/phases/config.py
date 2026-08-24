@@ -13,6 +13,7 @@ from ..config import (
     validate_external_resource_providers_config,
     validate_external_resources_config,
     validate_scheduled_tasks_config,
+    validate_task_center_config,
     validate_tools_config,
     validate_video_stream_config,
 )
@@ -78,6 +79,7 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
     validate_navigation_config(site_config)
     validate_tools_config(site_config)
     validate_scheduled_tasks_config(site_config)
+    validate_task_center_config(site_config)
     validate_video_stream_config(site_config)
 
     paths = get_project_paths(cwd)

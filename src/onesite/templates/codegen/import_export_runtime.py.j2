@@ -1,0 +1,249 @@
+"""Persistent runtime state for generated import and export jobs."""
+
+import json
+import logging
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Callable
+
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core.background_execution import BackgroundExecution
+from app.core.config import settings
+from app.core.db import engine
+from app.core.ws import manager
+
+
+logger = logging.getLogger(__name__)
+
+IMPORT_EXPORT_KINDS = ("import", "export")
+IMPORT_EXPORT_STATUSES = ("queued", "running", "succeeded", "failed")
+
+
+def _decode_json(value: str | None, default: Any) -> Any:
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except (TypeError, ValueError, json.JSONDecodeError):
+        return default
+
+
+def _encode_json(value: Any) -> str | None:
+    if value is None:
+        return None
+    try:
+        return json.dumps(value, ensure_ascii=False, default=str)
+    except (TypeError, ValueError):
+        return json.dumps(str(value), ensure_ascii=False)
+
+
+def _iso_datetime(value: datetime | None) -> str | None:
+    return value.isoformat() if value is not None else None
+
+
+def execution_to_dict(
+    execution: BackgroundExecution,
+    *,
+    include_details: bool = True,
+) -> dict[str, Any]:
+    """Serialize an execution, optionally omitting large detail payloads."""
+    inputs = (
+        _decode_json(execution.inputs_json, {})
+        if include_details or execution.kind == "import"
+        else {}
+    )
+    result = _decode_json(execution.result_json, None) if include_details else None
+    error = execution.error
+    if not include_details:
+        if isinstance(inputs, dict):
+            inputs = {
+                key: inputs[key]
+                for key in ("filename", "size", "dry_run")
+                if key in inputs
+            }
+        else:
+            inputs = {}
+        error = None
+
+    return {
+        "task_id": execution.id,
+        "kind": execution.kind,
+        "model": execution.name,
+        "trigger": execution.trigger,
+        "status": execution.status,
+        "progress": execution.progress,
+        "message": execution.message,
+        "inputs": inputs,
+        "result": result,
+        "download_url": execution.download_url,
+        "error": error,
+        "created_at": _iso_datetime(execution.created_at),
+        "started_at": _iso_datetime(execution.started_at),
+        "completed_at": _iso_datetime(execution.completed_at),
+    }
+
+
+async def _notify(requested_by: int | None, data: dict[str, Any]) -> None:
+    if requested_by is None:
+        return
+    try:
+        await manager.send_personal_message(
+            {"type": "import_export_status", "data": data},
+            requested_by,
+        )
+    except Exception:
+        logger.exception(
+            "Failed to send import/export status for task %s",
+            data.get("task_id"),
+        )
+
+
+async def _update_execution(
+    task_id: str,
+    update: Callable[[BackgroundExecution], None],
+) -> dict[str, Any] | None:
+    """Apply one status mutation in an isolated database transaction."""
+    requested_by: int | None = None
+    data: dict[str, Any] | None = None
+    notification_data: dict[str, Any] | None = None
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        execution = await session.get(BackgroundExecution, task_id)
+        if execution is None or execution.kind not in IMPORT_EXPORT_KINDS:
+            return None
+        update(execution)
+        session.add(execution)
+        await session.commit()
+        requested_by = execution.requested_by
+        data = execution_to_dict(execution)
+        notification_data = execution_to_dict(execution, include_details=False)
+
+    if notification_data is not None:
+        await _notify(requested_by, notification_data)
+    return data
+
+
+@dataclass(frozen=True)
+class ImportExportContext:
+    """Progress reporter plus the authorization scope of the requesting user."""
+
+    task_id: str
+    current_role: str | None = None
+    scoped_owner_id: Any = None
+
+    async def set_progress(
+        self,
+        progress: int,
+        message: str | None = None,
+    ) -> dict[str, Any] | None:
+        normalized = max(0, min(100, int(progress)))
+
+        def update(execution: BackgroundExecution) -> None:
+            execution.progress = max(execution.progress, normalized)
+            if message is not None:
+                execution.message = message
+
+        return await _update_execution(self.task_id, update)
+
+
+async def mark_running(
+    task_id: str,
+    message: str = "running",
+) -> dict[str, Any] | None:
+    now = datetime.now(timezone.utc)
+
+    def update(execution: BackgroundExecution) -> None:
+        execution.status = "running"
+        if execution.started_at is None:
+            execution.started_at = now
+        execution.message = message
+        execution.error = None
+
+    return await _update_execution(task_id, update)
+
+
+async def mark_succeeded(
+    task_id: str,
+    *,
+    result: Any = None,
+    download_url: str | None = None,
+    message: str = "completed",
+) -> dict[str, Any] | None:
+    now = datetime.now(timezone.utc)
+
+    def update(execution: BackgroundExecution) -> None:
+        execution.status = "succeeded"
+        execution.progress = 100
+        execution.message = message
+        execution.result_json = _encode_json(result)
+        execution.download_url = download_url
+        execution.error = None
+        execution.completed_at = now
+
+    return await _update_execution(task_id, update)
+
+
+async def mark_failed(
+    task_id: str,
+    error: str,
+    message: str = "failed",
+) -> dict[str, Any] | None:
+    now = datetime.now(timezone.utc)
+
+    def update(execution: BackgroundExecution) -> None:
+        execution.status = "failed"
+        execution.message = message
+        execution.error = str(error)[:8000]
+        execution.completed_at = now
+
+    return await _update_execution(task_id, update)
+
+
+async def reconcile_interrupted_import_export_executions() -> None:
+    """Close process-local import/export jobs interrupted by an app restart."""
+    notifications: list[tuple[int | None, dict[str, Any]]] = []
+    interrupted_uploads: list[Path] = []
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        statement = select(BackgroundExecution).where(
+            BackgroundExecution.kind.in_(IMPORT_EXPORT_KINDS),
+            BackgroundExecution.status.in_(("queued", "running")),
+        )
+        executions = (await session.exec(statement)).all()
+        completed_at = datetime.now(timezone.utc)
+        for execution in executions:
+            if execution.kind == "import":
+                inputs = _decode_json(execution.inputs_json, {})
+                filename = Path(str(inputs.get("filename") or "upload")).name
+                model_name = Path(str(execution.name)).name
+                task_id = Path(str(execution.id)).name
+                interrupted_uploads.append(
+                    Path(settings.UPLOAD_DIR)
+                    / "imports"
+                    / f"{model_name}_{task_id}_{filename}"
+                )
+            execution.status = "failed"
+            execution.message = "interrupted"
+            execution.error = (
+                "Import/export execution was interrupted by an application restart"
+            )
+            execution.completed_at = completed_at
+            session.add(execution)
+        if executions:
+            await session.commit()
+            notifications = [
+                (
+                    execution.requested_by,
+                    execution_to_dict(execution, include_details=False),
+                )
+                for execution in executions
+            ]
+
+    for requested_by, data in notifications:
+        await _notify(requested_by, data)
+    for upload in interrupted_uploads:
+        try:
+            upload.unlink(missing_ok=True)
+        except OSError:
+            logger.exception("Failed to remove interrupted import upload %s", upload)

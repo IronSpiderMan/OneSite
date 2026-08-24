@@ -42,9 +42,60 @@ _SCHEDULED_PARAM_TYPE_ALIASES = {
 }
 _TOOL_ROLES = {"user", "admin", "developer"}
 _NAVIGATION_TYPES = {"model", "group", "builtin"}
-_NAVIGATION_BUILTINS = {"dashboard", "reports", "external-resources"}
+_NAVIGATION_BUILTINS = {
+    "dashboard",
+    "reports",
+    "external-resources",
+    "task-center",
+}
 _NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_TASK_CENTER_KINDS = {"import", "export", "tool", "scheduled_task"}
+
+
+def validate_task_center_config(config: Dict[str, Any]) -> None:
+    """Validate task kind/name pairs hidden from the unified Task Center."""
+    task_center = config.setdefault("task_center", {"hidden": []})
+    if not isinstance(task_center, dict):
+        raise SiteConfigError(
+            "site_config.json field 'task_center' must be a JSON object."
+        )
+    unknown = set(task_center) - {"hidden"}
+    if unknown:
+        raise SiteConfigError(
+            "site_config.json field 'task_center' contains unsupported keys: "
+            f"{', '.join(sorted(unknown))}."
+        )
+    hidden = task_center.setdefault("hidden", [])
+    if not isinstance(hidden, list):
+        raise SiteConfigError(
+            "site_config.json field 'task_center.hidden' must be a JSON array."
+        )
+
+    seen: set[tuple[str, str]] = set()
+    for index, item in enumerate(hidden):
+        field = f"site_config.json field 'task_center.hidden[{index}]'"
+        if not isinstance(item, dict):
+            raise SiteConfigError(f"{field} must be a JSON object.")
+        unknown = set(item) - {"kind", "name"}
+        if unknown:
+            raise SiteConfigError(
+                f"{field} contains unsupported keys: {', '.join(sorted(unknown))}."
+            )
+        kind = item.get("kind")
+        if kind not in _TASK_CENTER_KINDS:
+            raise SiteConfigError(
+                f"{field}.kind must be import, export, tool, or scheduled_task."
+            )
+        name = item.get("name")
+        if not isinstance(name, str) or not _MODULE_NAME_RE.fullmatch(name):
+            raise SiteConfigError(
+                f"{field}.name must be a valid task or model module name."
+            )
+        key = (kind, name)
+        if key in seen:
+            raise SiteConfigError(f"{field} duplicates hidden task {kind}:{name}.")
+        seen.add(key)
 
 
 def validate_external_resources_config(config: Dict[str, Any]) -> None:
@@ -215,7 +266,10 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
         if node_type == "builtin":
             key = node.get("key")
             if key not in _NAVIGATION_BUILTINS:
-                fail(path + ".key", "must be dashboard, reports, or external-resources")
+                fail(
+                    path + ".key",
+                    "must be dashboard, reports, external-resources, or task-center",
+                )
             if key in seen_builtins:
                 fail(path + ".key", f"references duplicate builtin '{key}'")
             seen_builtins.add(key)

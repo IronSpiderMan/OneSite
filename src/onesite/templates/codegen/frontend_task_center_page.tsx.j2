@@ -1,0 +1,733 @@
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Download, Eye, Loader2, RefreshCw } from 'lucide-react';
+import { useSearchParams } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+
+import { Badge } from '../components/ui/badge';
+import { Button } from '../components/ui/button';
+import { Modal } from '../components/ui/modal';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../components/ui/select';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../components/ui/table';
+import { formatDateTime, getUserTimeZone } from '../lib/datetime';
+import {
+  getTaskCenterTask,
+  listTaskCenterTasks,
+  type TaskCenterTask,
+  type TaskCenterTaskKind,
+  type TaskCenterTaskStatus,
+} from '../services/task-center';
+
+const ALL = '__all__';
+const POLL_INTERVAL_MS = 3000;
+
+const MODEL_LABEL_KEYS: Record<string, string> = {
+{% for model in io_models %}
+  {{ model.module_name | tojson }}: {{ ('models.' ~ model.module_name ~ '.name') | tojson }},
+{% endfor %}
+};
+
+const TASK_NAMES = Array.from(new Set([
+{% if task_names is defined %}
+{% for task_name in task_names %}
+  {{ task_name | tojson }},
+{% endfor %}
+{% else %}
+{% for model in io_models %}
+  {{ model.module_name | tojson }},
+{% endfor %}
+{% for tool in tools %}
+  {{ tool.name | tojson }},
+{% endfor %}
+{% for task in scheduled_tasks %}
+  {{ task.name | tojson }},
+{% endfor %}
+{% endif %}
+]));
+
+function isActive(task: TaskCenterTask): boolean {
+  return task.status === 'queued' || task.status === 'running';
+}
+
+function clampProgress(progress: number): number {
+  if (!Number.isFinite(progress)) return 0;
+  return Math.min(100, Math.max(0, Math.round(progress)));
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null;
+  return value as Record<string, unknown>;
+}
+
+function numericValue(record: Record<string, unknown> | null, key: string): number | null {
+  if (!record) return null;
+  const value = Number(record[key]);
+  return Number.isFinite(value) ? value : null;
+}
+
+function resultErrors(result: Record<string, unknown> | null): string[] {
+  if (!result || !Array.isArray(result.errors)) return [];
+  return result.errors.map((error) => String(error));
+}
+
+function inputFilename(task: TaskCenterTask): string | null {
+  const value = task.inputs?.filename;
+  return typeof value === 'string' && value ? value : null;
+}
+
+const ProgressBar: React.FC<{ progress: number }> = ({ progress }) => {
+  const normalized = clampProgress(progress);
+  return (
+    <div className="flex min-w-[130px] items-center gap-2">
+      <div
+        className="h-2 flex-1 overflow-hidden rounded-full bg-muted"
+        role="progressbar"
+        aria-valuemin={0}
+        aria-valuemax={100}
+        aria-valuenow={normalized}
+      >
+        <div
+          className="h-full rounded-full bg-primary transition-[width] duration-300"
+          {% raw %}style={{ width: `${normalized}%` }}{% endraw %}
+        />
+      </div>
+      <span className="w-9 text-right text-xs tabular-nums text-muted-foreground">
+        {normalized}%
+      </span>
+    </div>
+  );
+};
+
+const TaskCenterPage: React.FC = () => {
+  const { t } = useTranslation();
+  const timeZone = getUserTimeZone();
+  const [searchParams, setSearchParams] = useSearchParams();
+
+  const [items, setItems] = useState<TaskCenterTask[]>([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(20);
+  const [kind, setKind] = useState<typeof ALL | TaskCenterTaskKind>(ALL);
+  const [name, setName] = useState(ALL);
+  const [status, setStatus] = useState<typeof ALL | TaskCenterTaskStatus>(ALL);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const [detailOpen, setDetailOpen] = useState(false);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [selectedTask, setSelectedTask] = useState<TaskCenterTask | null>(null);
+
+  const taskNameLabel = useCallback(
+    (task: Pick<TaskCenterTask, 'kind' | 'name'>) => {
+      const key = task.kind === 'import' || task.kind === 'export'
+        ? MODEL_LABEL_KEYS[task.name]
+        : undefined;
+      return key ? t(key, task.name) : task.name;
+    },
+    [t],
+  );
+
+  const statusLabel = useCallback(
+    (value: TaskCenterTaskStatus) =>
+      t(`task_center.statuses.${value}`, value),
+    [t],
+  );
+
+  const kindLabel = useCallback(
+    (value: TaskCenterTaskKind) =>
+      t(`task_center.kinds.${value}`, value),
+    [t],
+  );
+
+  const stageLabel = useCallback(
+    (message?: string | null) => {
+      if (!message) return '-';
+      const [stage, current, total] = message.split(':');
+      return t(`task_center.stages.${stage}`, {
+        defaultValue: message,
+        current: Number(current || 0),
+        total: Number(total || 0),
+      });
+    },
+    [t],
+  );
+
+  const loadTasks = useCallback(
+    async (silent = false) => {
+      if (!silent) setLoading(true);
+      try {
+        const response = await listTaskCenterTasks({
+          page,
+          size: pageSize,
+          kind: kind === ALL ? undefined : kind,
+          name: name === ALL ? undefined : name,
+          status: status === ALL ? undefined : status,
+        });
+        setItems(response.items);
+        setTotal(response.total);
+        if (response.page !== page) setPage(response.page);
+      } catch (error) {
+        console.error(error);
+        if (!silent) {
+          toast.error(
+            t(
+              'task_center.load_failed',
+              'Unable to load background tasks',
+            ),
+          );
+        }
+      } finally {
+        if (!silent) setLoading(false);
+      }
+    },
+    [kind, name, page, pageSize, status, t],
+  );
+
+  const loadDetail = useCallback(
+    async (taskId: string, silent = false) => {
+      if (!silent) {
+        setDetailOpen(true);
+        setDetailLoading(true);
+      }
+      try {
+        const task = await getTaskCenterTask(taskId);
+        setSelectedTask(task);
+        if (!silent) setDetailOpen(true);
+      } catch (error) {
+        console.error(error);
+        if (!silent) {
+          toast.error(
+            t('task_center.detail_load_failed', 'Unable to load task details'),
+          );
+          setDetailOpen(false);
+        }
+      } finally {
+        if (!silent) setDetailLoading(false);
+      }
+    },
+    [t],
+  );
+
+  useEffect(() => {
+    void loadTasks();
+  }, [loadTasks]);
+
+  const hasActiveTasks = useMemo(() => items.some(isActive), [items]);
+
+  useEffect(() => {
+    if (!hasActiveTasks) return;
+    const timer = window.setInterval(() => {
+      void loadTasks(true);
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [hasActiveTasks, loadTasks]);
+
+  const queryTaskId = searchParams.get('task_id');
+
+  useEffect(() => {
+    if (!queryTaskId) return;
+    void loadDetail(queryTaskId);
+  }, [loadDetail, queryTaskId]);
+
+  useEffect(() => {
+    if (!selectedTask || !detailOpen || !isActive(selectedTask)) return;
+    const timer = window.setInterval(() => {
+      void loadDetail(selectedTask.task_id, true);
+    }, POLL_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [detailOpen, loadDetail, selectedTask]);
+
+  useEffect(() => {
+    const onStatus = () => {
+      void loadTasks(true);
+      if (detailOpen && selectedTask) void loadDetail(selectedTask.task_id, true);
+    };
+    const events = [
+      'onesite:import-export-status',
+      'onesite:tool-status',
+      'onesite:scheduled-task-status',
+    ];
+    events.forEach((eventName) => window.addEventListener(eventName, onStatus));
+    return () => events.forEach((eventName) => window.removeEventListener(eventName, onStatus));
+  }, [detailOpen, loadDetail, loadTasks, selectedTask]);
+
+  const totalPages = Math.max(1, Math.ceil(total / pageSize));
+
+  useEffect(() => {
+    if (page > totalPages) setPage(totalPages);
+  }, [page, totalPages]);
+
+  const handleRefresh = async () => {
+    setRefreshing(true);
+    await loadTasks(true);
+    setRefreshing(false);
+  };
+
+  const showTask = (taskId: string) => {
+    const next = new URLSearchParams(searchParams);
+    next.set('task_id', taskId);
+    setSearchParams(next);
+  };
+
+  const closeDetail = () => {
+    setDetailOpen(false);
+    setSelectedTask(null);
+    const next = new URLSearchParams(searchParams);
+    next.delete('task_id');
+    setSearchParams(next, { replace: true });
+  };
+
+  const updateKind = (value: string) => {
+    setKind(value as typeof ALL | TaskCenterTaskKind);
+    setPage(1);
+  };
+
+  const updateName = (value: string) => {
+    setName(value);
+    setPage(1);
+  };
+
+  const updateStatus = (value: string) => {
+    setStatus(value as typeof ALL | TaskCenterTaskStatus);
+    setPage(1);
+  };
+
+  const statusBadgeClass = (value: TaskCenterTaskStatus): string => {
+    if (value === 'succeeded') return 'border-green-200 bg-green-50 text-green-700';
+    if (value === 'failed') return 'border-red-200 bg-red-50 text-red-700';
+    if (value === 'running') return 'border-blue-200 bg-blue-50 text-blue-700';
+    return 'border-amber-200 bg-amber-50 text-amber-700';
+  };
+
+  const selectedResult = asRecord(selectedTask?.result);
+  const selectedErrors = resultErrors(selectedResult);
+  const selectedSuccess = numericValue(selectedResult, 'success');
+  const selectedFailed = numericValue(selectedResult, 'failed');
+  const selectedCreated = numericValue(selectedResult, 'created');
+  const selectedUpdated = numericValue(selectedResult, 'updated');
+
+  return (
+    <div className="mx-auto flex h-full min-h-0 w-full max-w-[1600px] flex-col gap-4">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">
+            {t('task_center.title', 'Task center')}
+          </h1>
+          <p className="mt-1 text-sm text-muted-foreground">
+            {t(
+              'task_center.description',
+              'Track all work submitted to the background task queue.',
+            )}
+          </p>
+        </div>
+        <Button
+          type="button"
+          variant="outline"
+          onClick={handleRefresh}
+          disabled={loading || refreshing}
+        >
+          <RefreshCw className={`mr-2 h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+          {t('task_center.refresh', 'Refresh')}
+        </Button>
+      </div>
+
+      <div className="grid gap-3 rounded-lg border bg-card p-4 sm:grid-cols-3">
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t('task_center.filters.kind', 'Type')}
+          </div>
+          <Select value={kind} onValueChange={updateKind}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>
+                {t('task_center.filters.all_kinds', 'All types')}
+              </SelectItem>
+              <SelectItem value="import">{kindLabel('import')}</SelectItem>
+              <SelectItem value="export">{kindLabel('export')}</SelectItem>
+              <SelectItem value="tool">{kindLabel('tool')}</SelectItem>
+              <SelectItem value="scheduled_task">{kindLabel('scheduled_task')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t('task_center.filters.model', 'Task')}
+          </div>
+          <Select value={name} onValueChange={updateName}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>
+                {t('task_center.filters.all_models', 'All tasks')}
+              </SelectItem>
+              {TASK_NAMES.map((taskName) => (
+                <SelectItem key={taskName} value={taskName}>{taskName}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1.5">
+          <div className="text-xs font-medium text-muted-foreground">
+            {t('task_center.filters.status', 'Status')}
+          </div>
+          <Select value={status} onValueChange={updateStatus}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>
+                {t('task_center.filters.all_statuses', 'All statuses')}
+              </SelectItem>
+              <SelectItem value="queued">{statusLabel('queued')}</SelectItem>
+              <SelectItem value="running">{statusLabel('running')}</SelectItem>
+              <SelectItem value="succeeded">{statusLabel('succeeded')}</SelectItem>
+              <SelectItem value="failed">{statusLabel('failed')}</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 overflow-auto rounded-lg border bg-card">
+        {loading ? (
+          <div className="flex h-48 items-center justify-center text-muted-foreground">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            {t('task_center.loading', 'Loading tasks...')}
+          </div>
+        ) : items.length === 0 ? (
+          <div className="flex h-48 items-center justify-center px-6 text-center text-sm text-muted-foreground">
+            {t('task_center.empty', 'No background tasks found.')}
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>{t('task_center.columns.kind', 'Type')}</TableHead>
+                <TableHead>{t('task_center.columns.model', 'Task')}</TableHead>
+                <TableHead>{t('task_center.columns.status', 'Status')}</TableHead>
+                <TableHead className="min-w-[180px]">
+                  {t('task_center.columns.progress', 'Progress')}
+                </TableHead>
+                <TableHead className="min-w-[220px]">
+                  {t('task_center.columns.stage', 'Current stage')}
+                </TableHead>
+                <TableHead className="whitespace-nowrap">
+                  {t('task_center.columns.created_at', 'Created')}
+                </TableHead>
+                <TableHead className="text-right">
+                  {t('task_center.columns.actions', 'Actions')}
+                </TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {items.map((task) => (
+                <TableRow key={task.task_id}>
+                  <TableCell className="font-medium">{kindLabel(task.kind)}</TableCell>
+                  <TableCell>
+                    <div>{taskNameLabel(task)}</div>
+                    {inputFilename(task) ? (
+                      <div className="mt-0.5 max-w-[220px] truncate text-xs text-muted-foreground" title={inputFilename(task)!}>
+                        {inputFilename(task)}
+                      </div>
+                    ) : null}
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className={statusBadgeClass(task.status)}>
+                      {statusLabel(task.status)}
+                    </Badge>
+                  </TableCell>
+                  <TableCell>
+                    <ProgressBar progress={task.progress} />
+                  </TableCell>
+                  <TableCell>
+                    <div className="max-w-[300px] truncate text-sm" title={stageLabel(task.message)}>
+                      {stageLabel(task.message)}
+                    </div>
+                  </TableCell>
+                  <TableCell className="whitespace-nowrap text-muted-foreground">
+                    {formatDateTime(task.created_at, timeZone)}
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex justify-end gap-1">
+                      {task.download_url ? (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          title={t('task_center.actions.download', 'Download')}
+                          onClick={() => window.open(task.download_url!, '_blank', 'noopener,noreferrer')}
+                        >
+                          <Download className="h-4 w-4" />
+                        </Button>
+                      ) : null}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        title={t('task_center.actions.details', 'View details')}
+                        onClick={() => showTask(task.task_id)}
+                      >
+                        <Eye className="h-4 w-4" />
+                      </Button>
+                    </div>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </div>
+
+      <div className="flex flex-col gap-3 text-sm sm:flex-row sm:items-center sm:justify-between">
+        <div className="text-muted-foreground">
+          {t('task_center.pagination.summary', {
+            page,
+            totalPages,
+            total,
+            defaultValue: `Page ${page} of ${totalPages} · ${total} tasks`,
+          })}
+        </div>
+        <div className="flex items-center gap-2">
+          <Select
+            value={String(pageSize)}
+            onValueChange={(value) => {
+              setPageSize(Number(value));
+              setPage(1);
+            }}
+          >
+            <SelectTrigger className="w-[92px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {[10, 20, 50, 100].map((size) => (
+                <SelectItem key={size} value={String(size)}>{size}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={page <= 1 || loading}
+            onClick={() => setPage((current) => Math.max(1, current - 1))}
+          >
+            {t('task_center.pagination.previous', 'Previous')}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={page >= totalPages || loading}
+            onClick={() => setPage((current) => Math.min(totalPages, current + 1))}
+          >
+            {t('task_center.pagination.next', 'Next')}
+          </Button>
+        </div>
+      </div>
+
+      <Modal
+        isOpen={detailOpen}
+        onClose={closeDetail}
+        title={t('task_center.details.title', 'Task details')}
+        className="max-w-3xl"
+      >
+        {detailLoading || !selectedTask ? (
+          <div className="flex items-center justify-center py-12 text-muted-foreground">
+            <Loader2 className="mr-2 h-5 w-5 animate-spin" />
+            {t('task_center.details.loading', 'Loading details...')}
+          </div>
+        ) : (
+          <div className="space-y-5">
+            <div className="grid gap-4 sm:grid-cols-2">
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('task_center.details.task_id', 'Task ID')}
+                </div>
+                <div className="mt-1 break-all font-mono text-sm">{selectedTask.task_id}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('task_center.details.trigger', 'Trigger')}
+                </div>
+                <div className="mt-1 text-sm">{selectedTask.trigger || '-'}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('task_center.details.kind', 'Type')}
+                </div>
+                <div className="mt-1 text-sm">{kindLabel(selectedTask.kind)}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('task_center.details.model', 'Task')}
+                </div>
+                <div className="mt-1 text-sm">{taskNameLabel(selectedTask)}</div>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('task_center.details.status', 'Status')}
+                </div>
+                <Badge variant="outline" className={`mt-1 ${statusBadgeClass(selectedTask.status)}`}>
+                  {statusLabel(selectedTask.status)}
+                </Badge>
+              </div>
+              <div>
+                <div className="text-xs font-medium text-muted-foreground">
+                  {t('task_center.details.stage', 'Current stage')}
+                </div>
+                <div className="mt-1 text-sm">{stageLabel(selectedTask.message)}</div>
+              </div>
+            </div>
+
+            <div>
+              <div className="mb-2 text-xs font-medium text-muted-foreground">
+                {t('task_center.details.progress', 'Progress')}
+              </div>
+              <ProgressBar progress={selectedTask.progress} />
+            </div>
+
+            <div className="grid gap-4 rounded-md border bg-muted/20 p-4 sm:grid-cols-3">
+              <div>
+                <div className="text-xs text-muted-foreground">
+                  {t('task_center.details.created_at', 'Created')}
+                </div>
+                <div className="mt-1 text-sm">
+                  {formatDateTime(selectedTask.created_at, timeZone)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">
+                  {t('task_center.details.started_at', 'Started')}
+                </div>
+                <div className="mt-1 text-sm">
+                  {formatDateTime(selectedTask.started_at, timeZone)}
+                </div>
+              </div>
+              <div>
+                <div className="text-xs text-muted-foreground">
+                  {t('task_center.details.completed_at', 'Completed')}
+                </div>
+                <div className="mt-1 text-sm">
+                  {formatDateTime(selectedTask.completed_at, timeZone)}
+                </div>
+              </div>
+            </div>
+
+            {selectedTask.kind === 'import' && selectedResult ? (
+              <div className="space-y-3">
+                <h3 className="font-semibold">
+                  {t('task_center.details.import_result', 'Import result')}
+                </h3>
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">
+                      {t('task_center.details.success', 'Succeeded')}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">{selectedSuccess ?? 0}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">
+                      {t('task_center.details.failed', 'Failed')}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">{selectedFailed ?? 0}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">
+                      {t('task_center.details.created', 'Created')}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">{selectedCreated ?? 0}</div>
+                  </div>
+                  <div className="rounded-md border p-3">
+                    <div className="text-xs text-muted-foreground">
+                      {t('task_center.details.updated', 'Updated')}
+                    </div>
+                    <div className="mt-1 text-xl font-semibold">{selectedUpdated ?? 0}</div>
+                  </div>
+                </div>
+              </div>
+            ) : null}
+
+            {selectedTask.error ? (
+              <div className="rounded-md border border-destructive/30 bg-destructive/5 p-4">
+                <div className="text-sm font-medium text-destructive">
+                  {t('task_center.details.error', 'Error')}
+                </div>
+                <div className="mt-2 whitespace-pre-wrap break-words text-sm">
+                  {selectedTask.error}
+                </div>
+              </div>
+            ) : null}
+
+            {selectedErrors.length > 0 ? (
+              <div>
+                <h3 className="font-semibold">
+                  {t('task_center.details.row_errors', 'Row errors')}
+                </h3>
+                <div className="mt-2 max-h-60 overflow-auto rounded-md border">
+                  <ul className="divide-y text-sm">
+                    {selectedErrors.map((error, index) => (
+                      <li key={`${index}-${error}`} className="break-words px-3 py-2">
+                        {error}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+                {Boolean(selectedResult?.errors_truncated) ? (
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    {t('task_center.details.errors_truncated', {
+                      count: numericValue(selectedResult, 'error_count') ?? selectedErrors.length,
+                    })}
+                  </p>
+                ) : null}
+              </div>
+            ) : null}
+
+            {Object.keys(selectedTask.inputs || {}).length > 0 ? (
+              <div>
+                <h3 className="font-semibold">
+                  {t('task_center.details.inputs', 'Inputs')}
+                </h3>
+                <pre className="mt-2 max-h-60 overflow-auto whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3 text-xs">
+                  {JSON.stringify(selectedTask.inputs, null, 2)}
+                </pre>
+              </div>
+            ) : null}
+
+            {selectedTask.download_url ? (
+              <div className="flex justify-end">
+                <Button
+                  type="button"
+                  onClick={() =>
+                    window.open(selectedTask.download_url!, '_blank', 'noopener,noreferrer')
+                  }
+                >
+                  <Download className="mr-2 h-4 w-4" />
+                  {t('task_center.actions.download', 'Download')}
+                </Button>
+              </div>
+            ) : null}
+          </div>
+        )}
+      </Modal>
+    </div>
+  );
+};
+
+export default TaskCenterPage;

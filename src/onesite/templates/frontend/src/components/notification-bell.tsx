@@ -133,6 +133,11 @@ export function NotificationBell({ onStatusChange }: { onStatusChange?: (online:
           try {
             const payload = JSON.parse(ev.data || '{}');
 
+            if (payload?.type === 'import_export_status' && payload?.data) {
+              window.dispatchEvent(new CustomEvent('onesite:import-export-status', { detail: payload.data }));
+              return;
+            }
+
             // Handle export_complete — works regardless of notification model
             if (payload?.type === 'export_complete') {
               if (payload.download_url) {
