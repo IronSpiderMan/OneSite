@@ -10,6 +10,7 @@ from pathlib import Path
 from rich.console import Console
 
 from .phases import config as phase_config
+from .phases import finalize_standalone as phase_finalize_standalone
 from .phases import generate as phase_generate
 from .phases import introspect_models as phase_introspect
 from .phases import model_tables as phase_model_tables
@@ -98,3 +99,7 @@ def generate_code() -> None:
     phase_generate.phase_generate_aggregated(
         models, api_models, site_config, cwd, backend_path
     )
+
+    # Phase 8 — The generator metadata has served its purpose.  Remove it and
+    # its imports so the generated application can run without OneSite.
+    phase_finalize_standalone.phase_finalize_standalone(backend_path)

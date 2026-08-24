@@ -30,15 +30,23 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
     models_dest_dir.mkdir(parents=True, exist_ok=True)
     write_file_with_status(models_dest_dir / "__init__.py", "")
 
-    # Function-based model actions import this tiny package from model source.
-    # Copy it into the generated backend as well so deployments stay standalone
-    # and do not need the full OneSite generator installed at runtime.
-    runtime_dest_dir = backend_path / "onesite_runtime"
-    runtime_dest_dir.mkdir(parents=True, exist_ok=True)
+    # Model actions are a runtime concern of the generated application.  Keep
+    # their implementation under app.core so the output contains no OneSite
+    # package (or package-shaped compatibility shim).
     copy_file_with_status(
         _ONESITE_RUNTIME_ROOT / "__init__.py",
-        runtime_dest_dir / "__init__.py",
+        backend_path / "app" / "core" / "action_runtime.py",
     )
+
+    # Remove the location used by older generated projects.  It is generated
+    # output and leaving it around makes standalone dependency audits fail.
+    legacy_runtime_dir = backend_path / "onesite_runtime"
+    legacy_runtime_file = legacy_runtime_dir / "__init__.py"
+    if legacy_runtime_file.exists():
+        legacy_runtime_file.unlink()
+        console.print(f"[yellow]Removed stale generated runtime {legacy_runtime_file}[/yellow]")
+    if legacy_runtime_dir.exists() and not any(legacy_runtime_dir.iterdir()):
+        legacy_runtime_dir.rmdir()
 
     source_models = (
         {model_file.name: model_file for model_file in models_src_dir.glob("*.py")}
@@ -62,4 +70,7 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
     for name, model_file in sorted(desired_models.items()):
         if name in source_models and name in template_models:
             console.print(f"[dim]Project model {name} overrides the bundled model[/dim]")
-        copy_file_with_status(model_file, models_dest_dir / name)
+        write_file_with_status(
+            models_dest_dir / name,
+            model_file.read_text(encoding="utf-8"),
+        )

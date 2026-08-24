@@ -32,7 +32,7 @@ from app.cruds import {{ model.module_name }} as crud
 {% endif %}
 from app.models.{{ model.source_module }} import {{ model.name }}
 {% if model.has_function_actions %}
-from onesite_runtime import ActionContext, evaluate_action_state, invoke_action_callable
+from app.core.action_runtime import ActionContext, evaluate_action_state, invoke_action_callable
 {% endif %}
 {% if model.importable or model.exportable %}
 from app.core.task_queue import task_queue
