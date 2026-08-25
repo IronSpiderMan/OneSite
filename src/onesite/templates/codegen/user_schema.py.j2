@@ -1,7 +1,17 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime
-from sqlmodel import SQLModel
+from sqlmodel import SQLModel, Field
 from app.models.{{ model.source_module }} import User{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
+
+{% if model.reports %}
+class UserModelReportQuery(SQLModel):
+    category: str
+    chart: str
+    bindings: Dict[str, Any]
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    limit: Optional[int] = Field(default=None, ge=1)
+
+{% endif %}
 
 # Shared properties
 class UserBase(SQLModel):

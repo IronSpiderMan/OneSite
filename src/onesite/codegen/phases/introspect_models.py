@@ -362,6 +362,7 @@ def _build_model_dict(
         visualize=result.model_site_props.get("visualize"),
         dashboard_metrics=result.model_site_props.get("dashboard_metrics", []),
         data_reports=result.model_site_props.get("data_reports", []),
+        reports=result.model_site_props.get("reports"),
         has_created_at=any(f.name == "created_at" for f in result.fields),
         owner_field=result.owner_field,
         page_edit=result.page_edit,

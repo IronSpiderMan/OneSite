@@ -301,6 +301,26 @@ def _resolve_fk_labels_and_reverse(
             relation["inline_fields"] = inline_fields
             relation["inline_schema"] = inline_schema
 
+    # Report filters use the same resolved relationship metadata as list-page
+    # filters.  Introspection happens before relationship resolution, so refresh
+    # the initially inferred target service and label field here.
+    for model in models:
+        report = model.get("reports") or {}
+        report_filters = report.get("filters", [])
+        for item in report_filters:
+            if not item.get("is_foreign_key"):
+                continue
+            fk = next(
+                (candidate for candidate in model.get("foreign_keys", []) if candidate["name"] == item["field"]),
+                None,
+            )
+            if fk is not None:
+                item["foreign_key"] = {
+                    "target_model": fk["target_model"],
+                    "target_service": fk["target_service"],
+                    "label_field": fk["label_field"],
+                }
+
 
 # ── M2M resolution ───────────────────────────────────────────────────────
 

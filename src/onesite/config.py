@@ -271,6 +271,63 @@ class ExternalResourceConfig(_ConfigModel):
     resource: str
 
 
+ReportCategory = Literal[
+    "cartesian",
+    "multi_cartesian",
+    "composition",
+    "scatter",
+]
+ReportBin = Literal[
+    "none", "auto", "1m", "5m", "15m", "hour", "day", "week", "month",
+]
+ReportAggregation = Literal[
+    "raw", "sum", "avg", "min", "max", "median", "count", "distinct_count",
+]
+
+
+class ReportDimensionInput(_ConfigModel):
+    """A model field that users may bind to a report dimension slot."""
+
+    bins: list[ReportBin] = Field(default_factory=lambda: ["none"])
+
+
+class ReportMeasureInput(_ConfigModel):
+    """A model field that users may bind to a numeric report slot."""
+
+    aggregations: list[ReportAggregation] = Field(default_factory=lambda: ["raw"])
+
+
+class ReportInputs(_ConfigModel):
+    """Field allowlists for the four stable self-service report inputs."""
+
+    x: dict[str, ReportDimensionInput] = Field(default_factory=dict)
+    y: dict[str, ReportMeasureInput] = Field(default_factory=dict)
+    cls: list[str] = Field(default_factory=list)
+    count: list[str] = Field(default_factory=lambda: ["$rows"])
+
+
+class ReportLimits(_ConfigModel):
+    max_rows: int = 5000
+    max_series: int = 20
+    max_categories: int = 100
+    max_span_days: int = 366
+
+
+class ReportsConfig(_ConfigModel):
+    """Self-service reporting capabilities exposed by one model.
+
+    Models enable broad chart categories and field bindings. Concrete chart
+    styles remain owned by OneSite and are selected on the generated page.
+    """
+
+    enabled: bool = True
+    categories: list[ReportCategory]
+    inputs: ReportInputs
+    filters: list[str] = Field(default_factory=list)
+    visible: list[Role] | None = None
+    limits: ReportLimits = Field(default_factory=ReportLimits)
+
+
 class OneSiteConfig(_ConfigModel):
     """Typed, editor-friendly configuration for a model's ``__onesite__``.
 
@@ -316,6 +373,7 @@ class OneSiteConfig(_ConfigModel):
     visualize: dict[str, Any] | list[dict[str, Any]] | None = None
     dashboard_metrics: list[Any] = Field(default_factory=list)
     data_reports: list[dict[str, Any]] = Field(default_factory=list)
+    reports: ReportsConfig | bool = False
 
 
 # A discoverable alias for users who search for "model config" in an editor.

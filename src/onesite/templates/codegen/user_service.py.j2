@@ -1,5 +1,5 @@
 import logging
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.cruds import user as crud
@@ -7,6 +7,9 @@ from app.schemas.user import UserCreate, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
+{% if model.reports %}
+from app.core.reports import get_model_report_catalog, query_model_report
+{% endif %}
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
 from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
@@ -16,6 +19,30 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 logger = logging.getLogger(__name__)
 
 class UserService:
+    {% if model.reports %}
+    async def get_model_report_catalog(self, *, role: str) -> dict:
+        return get_model_report_catalog(
+            report={{ model.reports }}, role=role,
+            model="{{ model.module_name }}", title="{{ model.name }}",
+        )
+
+    async def query_model_report(
+        self,
+        session: AsyncSession,
+        *,
+        role: str,
+        payload: Any,
+        user_id: Any = None,
+    ) -> dict:
+        return await query_model_report(
+            session,
+            source_model=User,
+            report={{ model.reports }},
+            role=role,
+            payload=payload,
+        )
+
+    {% endif %}
     async def get(self, session: AsyncSession, id: int) -> Optional[User]:
         return await crud.get(session, id)
 

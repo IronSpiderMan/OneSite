@@ -21,6 +21,9 @@ from app.models.{{ model.timescaledb_entity_source_module }} import {{ model.tim
 from app.models.{{ model.timescaledb_model_source_module }} import {{ model.timescaledb_model_class }}
 {% endif %}
 {% endif %}
+{% if model.reports %}
+from app.core.reports import get_model_report_catalog, query_model_report
+{% endif %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 from app.schemas.{{ m2m.target_service }} import {{ m2m.target_model }}Read
@@ -144,7 +147,61 @@ class {{ model.name }}Service:
         )
 {% endif %}
 
+    {% if model.reports %}
+    async def get_model_report_catalog(self, *, role: str) -> dict:
+        return get_model_report_catalog(
+            report={{ model.reports }}, role=role,
+            model="{{ model.module_name }}", title="{{ model.name }}",
+        )
+
+    async def query_model_report(
+        self,
+        session: AsyncSession,
+        *,
+        role: str,
+        payload: Any,
+        user_id: Any = None,
+    ) -> dict:
+        return await query_model_report(
+            session,
+            source_model={{ model.name }},
+            report={{ model.reports }},
+            role=role,
+            payload=payload,
+{% if model.owner_field %}
+            scope_filters={"{{ model.owner_field }}": user_id},
+{% endif %}
+        )
+    {% endif %}
+
 {% else %}
+
+    {% if model.reports %}
+    async def get_model_report_catalog(self, *, role: str) -> dict:
+        return get_model_report_catalog(
+            report={{ model.reports }}, role=role,
+            model="{{ model.module_name }}", title="{{ model.name }}",
+        )
+
+    async def query_model_report(
+        self,
+        session: AsyncSession,
+        *,
+        role: str,
+        payload: Any,
+        user_id: Any = None,
+    ) -> dict:
+        return await query_model_report(
+            session,
+            source_model={{ model.name }},
+            report={{ model.reports }},
+            role=role,
+            payload=payload,
+{% if model.owner_field %}
+            scope_filters={"{{ model.owner_field }}": user_id},
+{% endif %}
+        )
+    {% endif %}
 
     async def get(self, session: AsyncSession, id: {{ model.id_type }}) -> Optional[{{ model.name }}Read]:
         obj = await crud.get(session, id)

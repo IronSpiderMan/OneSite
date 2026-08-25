@@ -375,3 +375,14 @@ export const query{{ model.name }}Report = async (reportKey: string, payload: Re
 };
 {% endif %}
 {% endif %}
+
+{% if model.reports %}
+export const get{{ model.name }}ModelReportCatalog = async () => {
+    const response = await request.get(`${API_URL}/reports/catalog`);
+    return response.data;
+};
+export const query{{ model.name }}ModelReport = async (payload: Record<string, any>) => {
+    const response = await request.post(`${API_URL}/reports/query`, payload);
+    return response.data;
+};
+{% endif %}

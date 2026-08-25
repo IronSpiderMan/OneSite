@@ -1,0 +1,310 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import { BarChart3, Download, Loader2, Play, RotateCcw, SlidersHorizontal } from 'lucide-react';
+
+import { ModelReportChart } from '../components/visualization-chart';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { SearchableSelect } from '../components/ui/searchable-select';
+{% for model in report_models %}
+import { get{{ model.name }}ModelReportCatalog, query{{ model.name }}ModelReport } from '../services/{{ model.module_name }}';
+{% endfor %}
+{% set fk_imports = namespace(keys=[]) %}
+{% for model in report_models %}{% for item in model.reports.filters %}{% if item.foreign_key %}
+{% set import_key = item.foreign_key.target_model ~ ':' ~ item.foreign_key.target_service %}
+{% if import_key not in fk_imports.keys %}
+import { get{{ item.foreign_key.target_model }}s } from '../services/{{ item.foreign_key.target_service }}';
+{% set _ = fk_imports.keys.append(import_key) %}
+{% endif %}{% endif %}{% endfor %}{% endfor %}
+
+type FieldOption = {
+  field: string;
+  data_type: string;
+  bins?: string[];
+  aggregations?: string[];
+};
+type FilterOption = FieldOption & {
+  label_key?: string;
+  is_enum?: boolean;
+  is_multi_select?: boolean;
+  enum_values?: Array<string | number>;
+  is_foreign_key?: boolean;
+  foreign_key?: { target_model: string; target_service: string; label_field: string };
+};
+type ChartOption = {
+  key: string;
+  category: string;
+  label: string;
+  y_count?: [number, number];
+  requires_cls?: boolean;
+};
+type Catalog = {
+  model: string;
+  title: string;
+  categories: string[];
+  charts: ChartOption[];
+  inputs: Record<'x' | 'y' | 'cls' | 'count', FieldOption[]>;
+  filters: FilterOption[];
+  limits: Record<string, number>;
+};
+type QueryResult = {
+  category: string;
+  chart: string;
+  dimensions: Array<{ name: string; type: string; label?: string }>;
+  rows: Array<Record<string, any>>;
+  meta: { truncated: boolean; limit: number; timezone: string };
+};
+
+const models = [
+{% for model in report_models %}
+  {
+    key: '{{ model.module_name }}',
+    load: get{{ model.name }}ModelReportCatalog,
+    query: query{{ model.name }}ModelReport,
+  },
+{% endfor %}
+];
+
+const categoryLabels: Record<string, string> = {
+  cartesian: 'Trend & comparison',
+  multi_cartesian: 'Multiple series',
+  composition: 'Composition',
+  scatter: 'Correlation',
+};
+const binLabels: Record<string, string> = {
+  none: 'No bin', auto: 'Auto', '1m': '1 minute', '5m': '5 minutes', '15m': '15 minutes',
+  hour: 'Hour', day: 'Day', week: 'Week', month: 'Month',
+};
+const aggregationLabels: Record<string, string> = {
+  raw: 'Raw', sum: 'Sum', avg: 'Average', min: 'Minimum', max: 'Maximum',
+  median: 'Median', count: 'Count', distinct_count: 'Distinct count',
+};
+
+const loadForeignKeyOptions = async (model: string, field: string, query: string) => {
+  switch (`${model}:${field}`) {
+{% for model in report_models %}{% for item in model.reports.filters %}{% if item.foreign_key %}
+    case '{{ model.module_name }}:{{ item.field }}': {
+      const response = await get{{ item.foreign_key.target_model }}s(1, 20, query ? { {{ item.foreign_key.label_field }}: query } : undefined);
+      return response.items.map((record: any) => ({ label: String(record.{{ item.foreign_key.label_field }} || record.id), value: record.id }));
+    }
+{% endif %}{% endfor %}{% endfor %}
+    default: return [];
+  }
+};
+
+const ReportsPage: React.FC = () => {
+  const { t } = useTranslation();
+  const [modelKey, setModelKey] = useState(models[0]?.key || '');
+  const [catalog, setCatalog] = useState<Catalog | null>(null);
+  const [category, setCategory] = useState('');
+  const [chart, setChart] = useState('');
+  const [xField, setXField] = useState('');
+  const [bin, setBin] = useState('none');
+  const [yFields, setYFields] = useState<string[]>([]);
+  const [aggregations, setAggregations] = useState<Record<string, string>>({});
+  const [clsField, setClsField] = useState('');
+  const [countField, setCountField] = useState('$rows');
+  const [filterValues, setFilterValues] = useState<Record<string, any>>({});
+  const [result, setResult] = useState<QueryResult | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const activeModel = models.find((item) => item.key === modelKey) || models[0];
+  const charts = useMemo(() => catalog?.charts.filter((item) => item.category === category) || [], [catalog, category]);
+  const activeChart = charts.find((item) => item.key === chart);
+  const xOption = catalog?.inputs.x.find((item) => item.field === xField);
+
+  useEffect(() => {
+    if (!activeModel) return;
+    setLoading(true); setError(''); setResult(null);
+    activeModel.load().then((value: Catalog) => {
+      setCatalog(value);
+      const nextCategory = value.categories[0] || '';
+      setCategory(nextCategory);
+      setChart(value.charts.find((item) => item.category === nextCategory)?.key || '');
+      setXField(value.inputs.x[0]?.field || '');
+      setYFields(value.inputs.y[0] ? [value.inputs.y[0].field] : []);
+      setClsField(value.inputs.cls[0]?.field || '');
+      setCountField(value.inputs.count[0]?.field || '$rows');
+      setBin(value.inputs.x[0]?.bins?.[0] || 'none');
+      setAggregations(Object.fromEntries(value.inputs.y.map((item) => [item.field, item.aggregations?.[0] || 'raw'])));
+      setFilterValues({});
+    }).catch((reason: any) => setError(reason?.response?.data?.detail || reason?.message || String(reason))).finally(() => setLoading(false));
+  }, [modelKey]);
+
+  useEffect(() => {
+    if (!catalog) return;
+    const next = catalog.charts.find((item) => item.category === category);
+    setChart(next?.key || '');
+    setResult(null);
+  }, [category]);
+
+  useEffect(() => {
+    if (!activeChart || !catalog) return;
+    const minimum = activeChart.y_count?.[0] || 1;
+    setYFields((current) => {
+      const valid = current.filter((field) => catalog.inputs.y.some((item) => item.field === field));
+      const available = catalog.inputs.y.map((item) => item.field);
+      while (valid.length < minimum && available[valid.length]) valid.push(available[valid.length]);
+      return valid.slice(0, activeChart.y_count?.[1] || 1);
+    });
+  }, [chart]);
+
+  const selectY = (index: number, value: string) => {
+    setYFields((current) => {
+      const next = [...current]; next[index] = value; return next;
+    });
+  };
+
+  const run = async () => {
+    if (!activeModel || !catalog || !activeChart) return;
+    const bindings: Record<string, any> = {};
+    if (category === 'composition') {
+      bindings.cls = { field: clsField };
+      bindings.count = { field: countField };
+    } else {
+      bindings.x = { field: xField, bin };
+      bindings.y = yFields.map((field) => ({ field, aggregation: category === 'scatter' ? 'raw' : aggregations[field] || 'raw' }));
+      if (activeChart.requires_cls) bindings.cls = { field: clsField };
+    }
+    const filters: Record<string, any> = {};
+    for (const item of catalog.filters) {
+      if (item.data_type === 'date' || item.data_type === 'datetime') {
+        const from = filterValues[`${item.field}_from`];
+        const to = filterValues[`${item.field}_to`];
+        if (from || to) {
+          filters[item.field] = {};
+          if (from) filters[item.field].gte = item.data_type === 'datetime' ? `${from}T00:00:00` : from;
+          if (to) filters[item.field].lte = item.data_type === 'datetime' ? `${to}T23:59:59` : to;
+        }
+        continue;
+      }
+      const value = filterValues[item.field];
+      if (value === '' || value == null || (Array.isArray(value) && value.length === 0)) continue;
+      if (item.data_type === 'bool') filters[item.field] = value === true || value === 'true';
+      else if (item.is_foreign_key || item.data_type === 'int' || item.data_type === 'float') filters[item.field] = Number(value);
+      else filters[item.field] = value;
+    }
+    setLoading(true); setError('');
+    try {
+      setResult(await activeModel.query({ category, chart, bindings, filters }));
+    } catch (reason: any) {
+      setError(reason?.response?.data?.detail || reason?.message || String(reason));
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const reset = () => {
+    setResult(null); setError(''); setFilterValues({});
+    if (catalog) {
+      setXField(catalog.inputs.x[0]?.field || '');
+      setYFields(catalog.inputs.y[0] ? [catalog.inputs.y[0].field] : []);
+      setClsField(catalog.inputs.cls[0]?.field || '');
+      setCountField(catalog.inputs.count[0]?.field || '$rows');
+    }
+  };
+
+  const exportCsv = () => {
+    if (!result?.rows.length) return;
+    const columns = Array.from(new Set(result.rows.flatMap((row) => Object.keys(row))));
+    const safe = (value: unknown) => { let text = value == null ? '' : String(value); if (/^[=+\-@]/.test(text)) text = `'${text}`; return `"${text.replace(/"/g, '""')}"`; };
+    const csv = [columns.join(','), ...result.rows.map((row) => columns.map((column) => safe(row[column])).join(','))].join('\n');
+    const url = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = `${modelKey}-report.csv`; link.click(); URL.revokeObjectURL(url);
+  };
+
+  const yCount = activeChart?.y_count?.[0] || 1;
+  const showCls = category === 'composition' || !!activeChart?.requires_cls;
+  const modelLabel = (key: string, fallback = key) => String(t(`models.${key}.name`, fallback));
+  const fieldLabel = (field: string) => field === '$rows'
+    ? String(t('reports.record_count', 'Record count'))
+    : String(t(`models.${modelKey}.fields.${field}`, field));
+  const fieldOptions = (items: FieldOption[]) => items.map((item) => ({ value: item.field, label: fieldLabel(item.field) }));
+  const chartLabel = (key: string, fallback: string) => String(t(`reports.charts.${key.replace(/\./g, '_')}`, fallback));
+  const resultColumnLabel = (column: string) => {
+    if (column === 'x') return fieldLabel(xField);
+    if (column === 'cls') return fieldLabel(clsField);
+    if (column === 'value') return fieldLabel(countField);
+    const yMatch = column.match(/^y(\d+)?$/);
+    if (yMatch) return fieldLabel(yFields[yMatch[1] ? Number(yMatch[1]) - 1 : 0] || column);
+    if (column.endsWith('_label')) return t('common.label', 'Label');
+    return column;
+  };
+
+  return <div className="mx-auto w-full max-w-[1720px] space-y-5 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden" data-page-kind="reports">
+    <header className="flex shrink-0 flex-wrap items-end justify-between gap-4">
+      <div><div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary"><BarChart3 className="h-4 w-4" />{t('reports.builder_kicker', 'Report builder')}</div><h1 className="text-3xl font-bold tracking-tight">{t('reports.builder_title', 'Reports')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('reports.builder_description', 'Choose a model, chart category, style, and field bindings')}</p></div>
+      <Button variant="outline" onClick={exportCsv} disabled={!result?.rows.length}><Download className="mr-2 h-4 w-4" />{t('reports.export_csv', 'Export CSV')}</Button>
+    </header>
+
+    <div className="grid items-start gap-5 xl:min-h-0 xl:flex-1 xl:grid-cols-[340px_minmax(0,1fr)] xl:overflow-hidden">
+      <aside className="flex max-h-[calc(100vh-2rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70 p-4 shadow-sm xl:h-full xl:max-h-full">
+        <div className="mb-5 flex shrink-0 items-center gap-2"><div className="rounded-lg bg-primary/10 p-2 text-primary"><SlidersHorizontal className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{t('reports.builder_settings', 'Report settings')}</h2><p className="text-xs text-muted-foreground">{t('reports.builder_settings_hint', 'Available choices are controlled by the model')}</p></div></div>
+        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
+        <Field label={String(t('reports.model', 'Model'))}><Select value={modelKey} onChange={setModelKey} options={models.map((item) => ({ value: item.key, label: modelLabel(item.key) }))} /></Field>
+        <Field label={String(t('reports.category', 'Chart category'))}><Select value={category} onChange={setCategory} options={(catalog?.categories || []).map((item) => ({ value: item, label: String(t(`reports.categories.${item}`, categoryLabels[item] || item)) }))} /></Field>
+        <Field label={String(t('reports.chart', 'Chart style'))}><Select value={chart} onChange={setChart} options={charts.map((item) => ({ value: item.key, label: chartLabel(item.key, item.label) }))} /></Field>
+
+        {category !== 'composition' && <>
+          <Field label={String(t('reports.x_axis', 'X axis'))}><Select value={xField} onChange={(value) => { setXField(value); const option = catalog?.inputs.x.find((item) => item.field === value); setBin(option?.bins?.[0] || 'none'); }} options={fieldOptions(catalog?.inputs.x || [])} /></Field>
+          {!!xOption?.bins?.length && <Field label={String(t('reports.bin', 'Bin'))}><Select value={bin} onChange={(value) => { setBin(value); if (value !== 'none') setAggregations((current) => Object.fromEntries(Object.entries(current).map(([field, aggregation]) => { const allowed = catalog?.inputs.y.find((item) => item.field === field)?.aggregations || []; return [field, aggregation === 'raw' ? (allowed.find((item) => item !== 'raw') || aggregation) : aggregation]; }))); }} options={xOption.bins.map((item) => ({ value: item, label: String(t(`reports.bins.${item}`, binLabels[item] || item)) }))} /></Field>}
+          {Array.from({ length: yCount }).map((_, index) => <div key={index} className="grid grid-cols-[1fr_120px] gap-2"><Field label={`${t('reports.y_axis', 'Y axis')}${yCount > 1 ? ` ${index + 1}` : ''}`}><Select value={yFields[index] || ''} onChange={(value) => selectY(index, value)} options={fieldOptions(catalog?.inputs.y || [])} /></Field>{category !== 'scatter' && <Field label={String(t('reports.aggregation', 'Aggregation'))}><Select value={aggregations[yFields[index]] || 'raw'} onChange={(value) => setAggregations((current) => ({ ...current, [yFields[index]]: value }))} options={(catalog?.inputs.y.find((item) => item.field === yFields[index])?.aggregations || []).map((item) => ({ value: item, label: String(t(`reports.aggregations.${item}`, aggregationLabels[item] || item)) }))} /></Field>}</div>)}
+        </>}
+        {showCls && <Field label={String(t('reports.classification', 'Classification'))}><Select value={clsField} onChange={setClsField} options={fieldOptions(catalog?.inputs.cls || [])} /></Field>}
+        {category === 'composition' && <Field label={String(t('reports.count', 'Count'))}><Select value={countField} onChange={setCountField} options={fieldOptions(catalog?.inputs.count || [])} /></Field>}
+
+        {!!catalog?.filters.length && <div className="space-y-3 border-t pt-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('reports.filters', 'Filters')}</div>{catalog.filters.map((item) => <Field key={item.field} label={String(t(item.label_key || item.field, item.field))}>
+          {item.is_foreign_key ? <SearchableSelect
+            value={filterValues[item.field] || ''}
+            onValueChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
+            placeholder={String(t('common.all', 'All'))}
+            searchPlaceholder={`${t('common.search', 'Search')}...`}
+            loadOptions={(query) => loadForeignKeyOptions(modelKey, item.field, query)}
+          /> : item.data_type === 'bool' ? <Select
+            value={filterValues[item.field] ?? ''}
+            onChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
+            options={[{ value: '', label: String(t('common.all', 'All')) }, { value: 'true', label: String(t('common.yes', 'Yes')) }, { value: 'false', label: String(t('common.no', 'No')) }]}
+          /> : item.is_enum && item.is_multi_select ? <SearchableSelect
+            multiple
+            value={filterValues[item.field] || []}
+            onValueChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
+            placeholder={String(t('common.all', 'All'))}
+            searchPlaceholder={`${t('common.search', 'Search')}...`}
+            loadOptions={async (query) => (item.enum_values || []).map((value) => ({ label: String(t(`models.${modelKey}.enums.${item.field}.${value}`, String(value))), value })).filter((option) => option.label.toLowerCase().includes(query.toLowerCase()))}
+          /> : item.is_enum ? <Select
+            value={filterValues[item.field] ?? ''}
+            onChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
+            options={[{ value: '', label: String(t('common.all', 'All')) }, ...(item.enum_values || []).map((value) => ({ value: String(value), label: String(t(`models.${modelKey}.enums.${item.field}.${value}`, String(value))) }))]}
+          /> : item.data_type === 'date' || item.data_type === 'datetime' ? <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+            <input type="date" value={filterValues[`${item.field}_from`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_from`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
+            <span className="text-sm text-muted-foreground">-</span>
+            <input type="date" value={filterValues[`${item.field}_to`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_to`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
+          </div> : <input
+            type={item.data_type === 'time' ? 'time' : item.data_type === 'int' || item.data_type === 'float' ? 'number' : 'text'}
+            step={item.data_type === 'float' ? 'any' : undefined}
+            value={filterValues[item.field] || ''}
+            onChange={(event) => setFilterValues((current) => ({ ...current, [item.field]: event.target.value }))}
+            placeholder={item.data_type === 'str' ? String(t('common.search', 'Search')) : undefined}
+            className="h-10 w-full rounded-md border bg-background/50 px-3 text-sm"
+          />}
+        </Field>)}</div>}
+        <Button className="h-11 w-full" onClick={run} disabled={loading || !chart}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{t('reports.run_report', 'Run report')}</Button>
+        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={reset}><RotateCcw className="mr-2 h-3.5 w-3.5" />{t('reports.reset_report', 'Reset')}</Button>
+        </div>
+      </aside>
+
+      <main className="min-w-0 space-y-5 xl:h-full xl:min-h-0 xl:overflow-y-auto xl:overscroll-contain">
+        {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+        {!result?.rows.length ? <section className="flex min-h-[560px] rounded-xl border border-dashed border-border/80 bg-card/30"><div className="m-auto max-w-md px-8 text-center"><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm"><BarChart3 className="h-7 w-7" /></div><h2 className="text-xl font-semibold">{t('reports.builder_empty_title', 'Build a report')}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t('reports.builder_empty_hint', 'Select a model and chart, bind its inputs, then run the query.')}</p></div></section> : <>
+          <section className="rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="text-sm font-semibold">{activeChart ? chartLabel(activeChart.key, activeChart.label) : ''}</h2><p className="mt-1 text-xs text-muted-foreground">{t('reports.result_summary', { model: modelLabel(modelKey, catalog?.title || modelKey), count: result.rows.length })}</p></div>{result.meta.truncated && <Badge variant="outline">{t('reports.truncated_badge', 'Truncated')}</Badge>}</div><div className="h-[440px] p-4"><ModelReportChart chart={result.chart} rows={result.rows} /></div></section>
+          <section className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="border-b px-5 py-4 text-sm font-semibold">{t('reports.details', 'Data details')}</div><div className="max-h-[520px] overflow-auto"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{Object.keys(result.rows[0]).map((column) => <th key={column} className="px-4 py-3 text-left font-medium">{resultColumnLabel(column)}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index} className="border-t">{Object.keys(result.rows[0]).map((column) => <td key={column} className="px-4 py-3">{String(row[column] ?? '')}</td>)}</tr>)}</tbody></table></div></section>
+        </>}
+      </main>
+    </div>
+  </div>;
+};
+
+const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => <label className="block space-y-2"><span className="text-xs font-medium text-muted-foreground">{label}</span>{children}</label>;
+const Select: React.FC<{ value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }> = ({ value, onChange, options }) => <select className="h-10 w-full rounded-md border bg-background/50 px-3 text-sm" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>;
+export default ReportsPage;

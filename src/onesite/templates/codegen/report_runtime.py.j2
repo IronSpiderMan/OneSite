@@ -1,7 +1,7 @@
 """Generic report execution used by generated model services."""
 from __future__ import annotations
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from enum import Enum
 from typing import Any
 
@@ -11,6 +11,311 @@ from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.datetime import to_utc
+
+
+REPORT_CHARTS = {
+    "line.basic": {"category": "cartesian", "label": "Line", "y_count": [1, 1]},
+    "line.smooth": {"category": "cartesian", "label": "Smooth line", "y_count": [1, 1]},
+    "line.area": {"category": "cartesian", "label": "Area", "y_count": [1, 1]},
+    "line.step": {"category": "cartesian", "label": "Step line", "y_count": [1, 1]},
+    "bar.basic": {"category": "cartesian", "label": "Bar", "y_count": [1, 1]},
+    "combo.bar_line": {"category": "cartesian", "label": "Bar + line", "y_count": [2, 2]},
+    "line.multi": {"category": "multi_cartesian", "label": "Multiple lines", "y_count": [1, 4], "requires_cls": True},
+    "line.multi_smooth": {"category": "multi_cartesian", "label": "Multiple smooth lines", "y_count": [1, 4], "requires_cls": True},
+    "area.multi": {"category": "multi_cartesian", "label": "Multiple areas", "y_count": [1, 4], "requires_cls": True},
+    "bar.grouped": {"category": "multi_cartesian", "label": "Grouped bars", "y_count": [1, 4], "requires_cls": True},
+    "bar.stacked": {"category": "multi_cartesian", "label": "Stacked bars", "y_count": [1, 4], "requires_cls": True},
+    "line.multi_step": {"category": "multi_cartesian", "label": "Multiple step lines", "y_count": [1, 4], "requires_cls": True},
+    "combo.multi_bar_line": {"category": "multi_cartesian", "label": "Multiple bars + line", "y_count": [2, 4], "requires_cls": True},
+    "pie.basic": {"category": "composition", "label": "Pie"},
+    "pie.donut": {"category": "composition", "label": "Donut"},
+    "pie.half_donut": {"category": "composition", "label": "Half donut"},
+    "pie.rose": {"category": "composition", "label": "Nightingale rose"},
+    "scatter.basic": {"category": "scatter", "label": "Scatter"},
+    "scatter.category": {"category": "scatter", "label": "Categorized scatter", "requires_cls": True},
+}
+
+
+def get_model_report_catalog(*, report: dict[str, Any], role: str, model: str, title: str) -> dict[str, Any]:
+    """Return only report fields readable by the current role."""
+    if role not in report.get("permitted_roles", []):
+        raise HTTPException(status_code=403, detail="Reports are not available for this role")
+
+    def visible(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        return [
+            {key: value for key, value in item.items() if key != "readable_roles"}
+            for item in items
+            if role in item.get("readable_roles", [])
+        ]
+
+    categories = report["categories"]
+    inputs = {slot: visible(items) for slot, items in report["inputs"].items()}
+    charts = []
+    for key, spec in REPORT_CHARTS.items():
+        if spec["category"] not in categories:
+            continue
+        if spec.get("requires_cls") and not inputs["cls"]:
+            continue
+        if spec["category"] == "composition" and (not inputs["cls"] or not inputs["count"]):
+            continue
+        if spec["category"] != "composition" and len(inputs["y"]) < spec.get("y_count", [1, 1])[0]:
+            continue
+        if spec["category"] != "composition" and not inputs["x"]:
+            continue
+        charts.append({"key": key, **spec})
+    available_categories = [
+        category for category in categories
+        if any(chart["category"] == category for chart in charts)
+    ]
+    return {
+        "model": model,
+        "title": title,
+        "categories": available_categories,
+        "charts": charts,
+        "inputs": inputs,
+        "filters": visible(report.get("filters", [])),
+        "limits": report["limits"],
+    }
+
+
+def _report_binding(value: Any, *, slot: str) -> dict[str, Any]:
+    if not isinstance(value, dict) or not isinstance(value.get("field"), str):
+        raise HTTPException(status_code=400, detail=f"Report input '{slot}' must select a field")
+    return value
+
+
+def _report_allowed(report: dict[str, Any], role: str, slot: str, field: str) -> dict[str, Any]:
+    declaration = next(
+        (
+            item for item in report["inputs"].get(slot, [])
+            if item["field"] == field and role in item.get("readable_roles", [])
+        ),
+        None,
+    )
+    if declaration is None:
+        raise HTTPException(status_code=400, detail=f"Field '{field}' is not allowed for report input '{slot}'")
+    return declaration
+
+
+def _report_bin(column: Any, bin_name: str, dialect_name: str) -> Any:
+    if bin_name == "none":
+        return column
+    if bin_name == "auto":
+        bin_name = "day"
+    if dialect_name == "postgresql":
+        if bin_name in {"1m", "5m", "15m"}:
+            seconds = {"1m": 60, "5m": 300, "15m": 900}[bin_name]
+            epoch = func.extract("epoch", column)
+            return func.to_timestamp(func.floor(epoch / seconds) * seconds)
+        unit = {"hour": "hour", "day": "day", "week": "week", "month": "month"}[bin_name]
+        return func.date_trunc(unit, column)
+    if bin_name in {"1m", "5m", "15m"}:
+        seconds = {"1m": 60, "5m": 300, "15m": 900}[bin_name]
+        epoch = cast(func.strftime("%s", column), Integer)
+        return func.datetime(func.floor(epoch / seconds) * seconds, "unixepoch")
+    formats = {"hour": "%Y-%m-%d %H:00:00", "day": "%Y-%m-%d", "week": "%Y-%W", "month": "%Y-%m"}
+    return func.strftime(formats[bin_name], column)
+
+
+def _report_aggregate(column: Any, aggregation: str, dialect_name: str) -> Any:
+    if aggregation == "sum":
+        return func.sum(column)
+    if aggregation == "avg":
+        return func.avg(column)
+    if aggregation == "min":
+        return func.min(column)
+    if aggregation == "max":
+        return func.max(column)
+    if aggregation == "count":
+        return func.count(column)
+    if aggregation == "distinct_count":
+        return func.count(column.distinct())
+    if aggregation == "median":
+        if dialect_name != "postgresql":
+            raise HTTPException(status_code=400, detail="Median aggregation currently requires PostgreSQL")
+        return func.percentile_cont(0.5).within_group(column)
+    raise HTTPException(status_code=400, detail=f"Unsupported report aggregation '{aggregation}'")
+
+
+def _report_filters(
+    source_model: type,
+    report: dict[str, Any],
+    role: str,
+    raw_filters: Any,
+) -> list[Any]:
+    if raw_filters in (None, {}):
+        return []
+    if not isinstance(raw_filters, dict):
+        raise HTTPException(status_code=400, detail="Report filters must be an object")
+    allowed = {
+        item["field"]: item for item in report.get("filters", [])
+        if role in item.get("readable_roles", [])
+    }
+
+    def coerce(item: dict[str, Any], operand: Any) -> Any:
+        if not isinstance(operand, str):
+            return operand
+        try:
+            if item["data_type"] == "datetime":
+                return datetime.fromisoformat(operand.replace("Z", "+00:00"))
+            if item["data_type"] == "date":
+                return date.fromisoformat(operand)
+            if item["data_type"] == "int":
+                return int(operand)
+            if item["data_type"] == "float":
+                return float(operand)
+            if item["data_type"] == "bool":
+                return operand.lower() in {"true", "1", "yes", "on"}
+        except ValueError:
+            raise HTTPException(status_code=400, detail=f"Invalid value for report filter '{item['field']}'")
+        return operand
+
+    expressions: list[Any] = []
+    for field, value in raw_filters.items():
+        if field not in allowed:
+            raise HTTPException(status_code=400, detail=f"Report filter '{field}' is not allowed")
+        column = getattr(source_model, field)
+        declaration = allowed[field]
+        if isinstance(value, dict):
+            unsupported = set(value) - {"gte", "gt", "lte", "lt", "eq"}
+            if unsupported:
+                raise HTTPException(status_code=400, detail=f"Unsupported operators for report filter '{field}'")
+            for operator, operand in value.items():
+                operand = coerce(declaration, operand)
+                expressions.append({
+                    "gte": column >= operand,
+                    "gt": column > operand,
+                    "lte": column <= operand,
+                    "lt": column < operand,
+                    "eq": column == operand,
+                }[operator])
+        elif isinstance(value, list):
+            expressions.append(column.in_([coerce(declaration, item) for item in value]))
+        else:
+            expressions.append(column == coerce(declaration, value))
+    return expressions
+
+
+async def query_model_report(
+    session: AsyncSession,
+    *,
+    source_model: type,
+    report: dict[str, Any],
+    role: str,
+    payload: Any,
+    scope_filters: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Execute one allowlisted self-service report query."""
+    if role not in report.get("permitted_roles", []):
+        raise HTTPException(status_code=403, detail="Reports are not available for this role")
+    data = payload.model_dump() if hasattr(payload, "model_dump") else dict(payload)
+    category = data.get("category")
+    chart = data.get("chart")
+    spec = REPORT_CHARTS.get(chart)
+    if category not in report["categories"] or not spec or spec["category"] != category:
+        raise HTTPException(status_code=400, detail="Unsupported report category or chart")
+    bindings = data.get("bindings")
+    if not isinstance(bindings, dict):
+        raise HTTPException(status_code=400, detail="Report bindings must be an object")
+
+    dialect = getattr(getattr(session, "bind", None), "dialect", None)
+    dialect_name = dialect.name if dialect else "sqlite"
+    filters = [
+        *_scope_expressions(source_model, scope_filters),
+        *_report_filters(source_model, report, role, data.get("filters")),
+    ]
+    limit = min(max(int(data.get("limit") or report["limits"]["max_rows"]), 1), report["limits"]["max_rows"])
+
+    if category == "composition":
+        cls_binding = _report_binding(bindings.get("cls"), slot="cls")
+        count_binding = _report_binding(bindings.get("count"), slot="count")
+        _report_allowed(report, role, "cls", cls_binding["field"])
+        _report_allowed(report, role, "count", count_binding["field"])
+        cls_col = getattr(source_model, cls_binding["field"])
+        value_expr = func.count() if count_binding["field"] == "$rows" else func.count(getattr(source_model, count_binding["field"]))
+        limit = min(limit, report["limits"]["max_categories"])
+        stmt = select(cls_col, value_expr).where(*filters).group_by(cls_col).order_by(value_expr.desc()).limit(limit + 1)
+        result_rows = (await session.exec(stmt)).all()
+        rows = [{"cls": row[0], "value": row[1]} for row in result_rows[:limit]]
+        dimensions = [{"name": "cls", "type": "category"}, {"name": "value", "type": "number"}]
+    else:
+        x_binding = _report_binding(bindings.get("x"), slot="x")
+        x_allowed = _report_allowed(report, role, "x", x_binding["field"])
+        x_bin = str(x_binding.get("bin", "none"))
+        if x_bin not in x_allowed.get("bins", []):
+            raise HTTPException(status_code=400, detail=f"Bin '{x_bin}' is not allowed for '{x_binding['field']}'")
+        x_expr = _report_bin(getattr(source_model, x_binding["field"]), x_bin, dialect_name)
+        raw_y = bindings.get("y")
+        y_bindings = raw_y if isinstance(raw_y, list) else [raw_y]
+        y_bindings = [_report_binding(item, slot="y") for item in y_bindings]
+        minimum, maximum = spec.get("y_count", [1, 1])
+        if not minimum <= len(y_bindings) <= maximum:
+            raise HTTPException(status_code=400, detail=f"Chart '{chart}' requires {minimum} to {maximum} Y inputs")
+        if len({item["field"] for item in y_bindings}) != len(y_bindings):
+            raise HTTPException(status_code=400, detail="Report Y inputs must use different fields")
+        cls_binding = None
+        cls_col = None
+        if bindings.get("cls") is not None:
+            cls_binding = _report_binding(bindings.get("cls"), slot="cls")
+            _report_allowed(report, role, "cls", cls_binding["field"])
+            cls_col = getattr(source_model, cls_binding["field"])
+        if spec.get("requires_cls") and cls_col is None:
+            raise HTTPException(status_code=400, detail=f"Chart '{chart}' requires input 'cls'")
+
+        selections = [x_expr]
+        if cls_col is not None:
+            selections.append(cls_col)
+        y_meta = []
+        raw_mode = category == "scatter"
+        for binding in y_bindings:
+            allowed = _report_allowed(report, role, "y", binding["field"])
+            aggregation = "raw" if raw_mode else str(binding.get("aggregation", "raw"))
+            if aggregation not in allowed.get("aggregations", []):
+                raise HTTPException(status_code=400, detail=f"Aggregation '{aggregation}' is not allowed for '{binding['field']}'")
+            column = getattr(source_model, binding["field"])
+            selections.append(column if aggregation == "raw" else _report_aggregate(column, aggregation, dialect_name))
+            y_meta.append({"field": binding["field"], "aggregation": aggregation})
+        aggregate_mode = any(item["aggregation"] != "raw" for item in y_meta)
+        if aggregate_mode and any(item["aggregation"] == "raw" for item in y_meta):
+            raise HTTPException(status_code=400, detail="Raw and aggregated Y inputs cannot be mixed")
+        if x_bin != "none" and not aggregate_mode:
+            raise HTTPException(status_code=400, detail="A binned X input requires aggregated Y inputs")
+        if category == "scatter" and any(item["data_type"] not in {"int", "float"} for item in [x_allowed, *[_report_allowed(report, role, "y", item["field"]) for item in y_bindings]]):
+            raise HTTPException(status_code=400, detail="Scatter X and Y inputs must be numeric")
+
+        stmt = select(*selections).where(*filters)
+        if aggregate_mode:
+            groups = [x_expr] + ([cls_col] if cls_col is not None else [])
+            stmt = stmt.group_by(*groups)
+        stmt = stmt.order_by(x_expr).limit(limit + 1)
+        result_rows = (await session.exec(stmt)).all()
+        if cls_col is not None and len({str(row[1]) for row in result_rows}) > report["limits"]["max_series"]:
+            raise HTTPException(status_code=400, detail="Report produces too many series; narrow the filters")
+        rows = []
+        for row in result_rows[:limit]:
+            offset = 1
+            item = {"x": _plain(row[0])}
+            if cls_col is not None:
+                item["cls"] = _plain(row[1])
+                offset = 2
+            for index, meta in enumerate(y_meta):
+                value = row[offset + index]
+                item["y" if len(y_meta) == 1 else f"y{index + 1}"] = _plain(value)
+                if len(y_meta) > 1:
+                    item[f"y{index + 1}_label"] = meta["field"]
+            rows.append(item)
+        dimensions = [{"name": "x", "type": x_allowed["data_type"]}]
+        if cls_col is not None:
+            dimensions.append({"name": "cls", "type": "category"})
+        dimensions.extend({"name": "y" if len(y_meta) == 1 else f"y{index + 1}", "type": "number", "label": meta["field"]} for index, meta in enumerate(y_meta))
+
+    return {
+        "category": category,
+        "chart": chart,
+        "dimensions": dimensions,
+        "rows": rows,
+        "meta": {"truncated": len(result_rows) > limit, "limit": limit, "timezone": "UTC"},
+    }
 
 
 _BUCKET_SECONDS = {

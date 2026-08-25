@@ -828,7 +828,9 @@ def phase_generate_aggregated(
     frontend_path = get_project_paths(cwd).frontend
     theme_name = resolve_theme(site_config)[0]["id"]
     visualizations = site_config.get("_visualizations", [])
-    report_explorer_enabled = any(model.get("data_reports") for model in api_models)
+    report_explorer_enabled = any(
+        model.get("data_reports") or model.get("reports") for model in api_models
+    )
     import_export_models = [
         model
         for model in api_models
@@ -1252,15 +1254,26 @@ def phase_generate_aggregated(
         m for m in api_models
         if not m.get("is_latest_table") and m.get("dashboard_metrics")
     ]
-    report_models = [
+    legacy_report_models = [
         m for m in api_models
         if not m.get("is_latest_table") and m.get("data_reports")
     ]
+    model_report_models = [
+        m for m in api_models
+        if not m.get("is_latest_table") and m.get("reports")
+    ]
+    report_models = [*model_report_models, *legacy_report_models]
     reports_role_visible = {
         role: any(
-            role in report.get("permitted_roles", [])
+            (
+                role in model.get("reports", {}).get("permitted_roles", [])
+                if model.get("reports")
+                else any(
+                    role in report.get("permitted_roles", [])
+                    for report in model.get("data_reports", [])
+                )
+            )
             for model in report_models
-            for report in model.get("data_reports", [])
         )
         for role in ("user", "admin", "developer")
     }
@@ -1395,11 +1408,18 @@ def phase_generate_aggregated(
             {},
             backend_path / "app" / "core" / "reports.py",
         )
-        generate_file(
-            "report_page.tsx.j2",
-            {"report_models": report_models},
-            frontend_path / "src" / "pages" / "Reports.tsx",
-        )
+        if model_report_models:
+            generate_file(
+                "model_report_page.tsx.j2",
+                {"report_models": model_report_models},
+                frontend_path / "src" / "pages" / "Reports.tsx",
+            )
+        else:
+            generate_file(
+                "report_page.tsx.j2",
+                {"report_models": legacy_report_models},
+                frontend_path / "src" / "pages" / "Reports.tsx",
+            )
 
     # ── Feature flags ──
     generate_file(

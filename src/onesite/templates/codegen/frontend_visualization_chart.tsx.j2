@@ -419,4 +419,81 @@ export const ReportExplorerChart: React.FC<{
   return <EChartCanvas option={option} title="Data explorer chart" className="h-full w-full" />;
 };
 
+export type ModelReportRow = Record<string, any>;
+
+const modelReportOption = (chart: string, rows: ModelReportRow[]): EChartsCoreOption => {
+  if (chart.startsWith('pie.')) {
+    const half = chart === 'pie.half_donut';
+    return {
+      color: COLORS,
+      tooltip: { trigger: 'item' },
+      legend: { type: 'scroll', bottom: 0 },
+      series: [{
+        type: 'pie',
+        radius: chart === 'pie.basic' || chart === 'pie.rose' ? ['0%', '72%'] : ['46%', '72%'],
+        center: half ? ['50%', '68%'] : ['50%', '48%'],
+        startAngle: half ? 180 : 90,
+        endAngle: half ? 360 : 'auto',
+        roseType: chart === 'pie.rose' ? 'radius' : undefined,
+        padAngle: 2,
+        itemStyle: { borderRadius: 5 },
+        data: rows.map((row) => ({ name: String(row.cls ?? ''), value: row.value })),
+      }],
+    };
+  }
+
+  if (chart.startsWith('scatter.')) {
+    const names = chart === 'scatter.category' ? unique(rows.map((row) => row.cls)) : ['Data'];
+    return {
+      color: COLORS,
+      tooltip: { trigger: 'item' },
+      legend: chart === 'scatter.category' ? { type: 'scroll', bottom: 0 } : undefined,
+      grid: { left: 48, right: 24, top: 24, bottom: 48, containLabel: true },
+      xAxis: { type: 'value', scale: true },
+      yAxis: { type: 'value', scale: true },
+      series: names.map((name) => ({
+        name,
+        type: 'scatter',
+        symbolSize: 9,
+        data: rows.filter((row) => chart !== 'scatter.category' || String(row.cls) === name).map((row) => [row.x, row.y]),
+      })),
+    };
+  }
+
+  const xValues = unique(rows.map((row) => row.x));
+  const yKeys = Object.keys(rows[0] || {}).filter((key) => /^y\d*$/.test(key));
+  const classes = rows.some((row) => row.cls != null) ? unique(rows.map((row) => row.cls)) : [''];
+  const base = cartesianBase(xValues);
+  const series: any[] = [];
+  classes.forEach((className) => {
+    yKeys.forEach((yKey, yIndex) => {
+      const selected = rows.filter((row) => !className || String(row.cls) === className);
+      const values = new Map(selected.map((row) => [String(row.x), row[yKey]]));
+      const label = selected[0]?.[`${yKey}_label`] || yKey.toUpperCase();
+      const name = className ? `${className} · ${label}` : label;
+      const isCombo = chart.includes('bar_line');
+      const isBar = chart.startsWith('bar.') || (isCombo && yIndex === 0);
+      series.push({
+        name,
+        type: isBar ? 'bar' : 'line',
+        smooth: chart.includes('smooth'),
+        step: chart.includes('step') ? 'middle' : undefined,
+        stack: chart === 'bar.stacked' ? 'total' : undefined,
+        areaStyle: chart.includes('area') ? { opacity: 0.18 } : undefined,
+        showSymbol: xValues.length < 30,
+        data: xValues.map((x) => values.get(x) ?? null),
+      });
+    });
+  });
+  return { ...base, xAxis: { ...(base as any).xAxis, boundaryGap: series.some((item) => item.type === 'bar') }, series };
+};
+
+export const ModelReportChart: React.FC<{
+  chart: string;
+  rows: ModelReportRow[];
+}> = ({ chart, rows }) => {
+  const option = useMemo(() => modelReportOption(chart, rows), [chart, rows]);
+  return <EChartCanvas option={option} title="Self-service report" className="h-full w-full" />;
+};
+
 export default VisualizationChart;

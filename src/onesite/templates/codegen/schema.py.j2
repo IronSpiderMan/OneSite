@@ -114,6 +114,16 @@ class {{ model.name }}ReportQuery(SQLModel):
 
 {% endif %}
 
+{% if model.reports %}
+class {{ model.name }}ModelReportQuery(SQLModel):
+    category: str
+    chart: str
+    bindings: Dict[str, Any]
+    filters: Dict[str, Any] = Field(default_factory=dict)
+    limit: Optional[int] = Field(default=None, ge=1)
+
+{% endif %}
+
 {% macro py_default(v) -%}
 {%- if v is sameas true -%}True
 {%- elif v is sameas false -%}False

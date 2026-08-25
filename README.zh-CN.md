@@ -170,6 +170,63 @@ class Product(SQLModel, table=True):
 - `is_link_table`、`is_singleton`、`frontend_only`、`page_edit`：关系、单例、纯前端和编辑页行为。
 - `actions`、`importable`、`exportable`、`import_key`：自定义操作与 CSV 导入导出。
 
+### 模型自助报表
+
+模型通过 `reports` 开放报表大类和可用字段；基础折线、平滑折线、面积图等具体样式
+由用户在生成的报表页面选择，不写入模型配置。推荐使用带类型的 Pydantic 写法：
+
+```python
+from onesite.config import (
+    OneSiteConfig,
+    ReportDimensionInput,
+    ReportInputs,
+    ReportMeasureInput,
+    ReportsConfig,
+)
+
+class Order(SQLModel, table=True):
+    __onesite__ = OneSiteConfig(
+        reports=ReportsConfig(
+            categories=[
+                "cartesian", "multi_cartesian", "composition", "scatter",
+            ],
+            inputs=ReportInputs(
+                x={
+                    "created_at": ReportDimensionInput(
+                        bins=["none", "auto", "hour", "day", "week", "month"]
+                    ),
+                    "amount": ReportDimensionInput(),
+                },
+                y={
+                    "amount": ReportMeasureInput(
+                        aggregations=["raw", "sum", "avg", "min", "max", "median"]
+                    ),
+                    "quantity": ReportMeasureInput(
+                        aggregations=["raw", "sum", "avg", "min", "max"]
+                    ),
+                },
+                cls=["status", "channel"],
+                count=["$rows", "id"],
+            ),
+            filters=["created_at", "status", "channel"],
+            visible=["admin", "developer"],
+        )
+    )
+```
+
+字典写法使用相同结构。四个大类分别为：
+
+- `cartesian`：单系列折线、平滑折线、面积、柱状、阶梯折线和柱线组合；
+- `multi_cartesian`：按 `cls` 拆分的多折线、多面积、分组/堆叠柱状和多柱线组合；
+- `composition`：饼、环、半环和南丁格尔玫瑰图；
+- `scatter`：基础散点和分类散点。
+
+`x` 配置可用分桶，`y` 配置可用聚合，`cls` 配置分类字段，`count` 配置可计数
+字段。内置 `$rows` 表示 `COUNT(*)`。后端会再次校验图表所属大类、输入数量、字段、
+分桶、聚合、筛选、字段读取权限和模型 owner scope。当前报表输入仅支持模型直接字段；
+关联字段路径将在查询规划器支持显式 JOIN 后开放。旧的 `data_reports` 时序探索器继续
+兼容，但新模型应优先使用 `reports`。
+
 ### 函数式 Action
 
 需要自定义 Python 业务逻辑时，可以直接在 SQLModel 中使用 `@action`。
