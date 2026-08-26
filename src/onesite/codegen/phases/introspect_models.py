@@ -84,13 +84,13 @@ def _normalize_ui_layout(
     model_name: str,
     displayable_fields: list[str],
     view: str,
+    append_fields: list[str] | None = None,
 ) -> list[dict[str, Any]]:
     """Validate and normalize a ``__onesite__[\"ui\"]`` form or detail layout.
 
-    The caller supplies fields appropriate for the target view.  Detail
-    layouts exclude relationship cards and JSON collection tabs because they
-    have their own data loading and pagination behaviour; form layouts include
-    editable model fields.
+    The caller supplies fields appropriate for the target view. Detail layouts
+    may include scalar fields and direct foreign keys, while collection
+    relationships and JSON collection tabs keep their dedicated regions.
 
     The normalized form is consumed by the frontend template.  Doing this in
     the generator gives model authors useful errors for misspelled fields
@@ -211,7 +211,7 @@ def _normalize_ui_layout(
 
     # Preserve existing behaviour for fields omitted from a custom layout by
     # appending them as a final one-column row.
-    for field_name in displayable_fields:
+    for field_name in append_fields if append_fields is not None else displayable_fields:
         if field_name in seen_fields:
             continue
         layout.append({"kind": "row", "columns": 1, "items": [{"kind": "field", "field": field_name, "span": 1}]})
@@ -296,7 +296,12 @@ def _build_model_dict(
         and "r" in field.permissions
     ]
     json_tab_names = {field.name for field in json_array_fields + json_dict_fields}
-    displayable_fields = [
+    detail_layout_fields = [
+        field.name
+        for field in result.fields
+        if field.name not in json_tab_names and "r" in field.permissions
+    ]
+    detail_auto_fields = [
         field.name
         for field in result.fields
         if not field.fk_info and field.name not in json_tab_names and "r" in field.permissions
@@ -304,15 +309,30 @@ def _build_model_dict(
     detail_layout = _normalize_ui_layout(
         result.model_site_props.get("ui"),
         model_name=name,
-        displayable_fields=displayable_fields,
+        displayable_fields=detail_layout_fields,
         view="detail",
+        append_fields=detail_auto_fields,
     )
     form_fields = [
         field.name
         for field in result.fields
         if "c" in field.permissions or "u" in field.permissions
     ]
-    form_layout = _form_layout_from_detail_layout(detail_layout, form_fields)
+    form_layout_fields = [
+        field.name
+        for field in result.fields
+        if "r" in field.permissions or "c" in field.permissions or "u" in field.permissions
+    ]
+    configured_form_layout = _normalize_ui_layout(
+        result.model_site_props.get("ui"),
+        model_name=name,
+        displayable_fields=form_layout_fields,
+        view="form",
+        append_fields=form_fields,
+    )
+    form_layout = configured_form_layout or _form_layout_from_detail_layout(
+        detail_layout, form_fields
+    )
 
     # ── Tree view detection ──────────────────────────────────────────────
     tree_view_config = result.model_site_props.get("tree_view", "auto")

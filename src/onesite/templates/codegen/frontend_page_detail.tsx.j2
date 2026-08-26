@@ -3,7 +3,11 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 <div className="space-y-1">
     <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
     <div className="font-medium">
-        {% if field.ui_type == 'bool' %}
+        {% if field.fk_info %}
+        <span className="block max-w-[250px] truncate" title={String(currentItem.{{ field.name }}_label ?? currentItem.{{ field.name }} ?? '-')}>
+            {String(currentItem.{{ field.name }}_label ?? currentItem.{{ field.name }} ?? '-')}
+        </span>
+        {% elif field.ui_type == 'bool' %}
         <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
             {currentItem.{{ field.name }} ? 'Yes' : 'No'}
         </Badge>
@@ -70,7 +74,25 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
 <div className="space-y-2">
     <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
-    {% if field.ui_type == 'bool' %}
+    {% if field.fk_info %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <SearchableSelect
+            value={value}
+            onValueChange={onChange}
+            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+            searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
+            valueLabels={ edit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+            loadOptions={async (query) => {
+                const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
+                return response.items.map((item: any) => ({
+                    label: item.{{ field.fk_info.label_field }} || item.id,
+                    value: item.id
+                }));
+            }}
+        />
+    )} />
+    {% elif field.ui_type == 'bool' %}
     <div className="flex h-10 items-center justify-end rounded-md border px-3">
         <Controller control={editControl} name="{{ field.name }}" defaultValue={ {{ 'true' if field.default else 'false' }} } render={({ field: { onChange, value } }) => (
             <Switch checked={value} onCheckedChange={onChange} id="edit-{{ field.name }}" />
@@ -966,7 +988,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const renderDetailField = (fieldName: string): React.ReactNode => {
         switch (fieldName) {
             {% for field in model.fields %}
-            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'r' in field.permissions %}
+            {% if field not in model.json_array_fields and field not in model.json_dict_fields and 'r' in field.permissions %}
             case '{{ field.name }}':
                 return ({{ detail_read_field(field) }});
             {% endif %}
@@ -979,9 +1001,15 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const renderDetailEditField = (fieldName: string): React.ReactNode => {
         switch (fieldName) {
             {% for field in model.fields %}
-            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}
+            {% if field not in model.json_array_fields and field not in model.json_dict_fields and ('u' in field.permissions or 'r' in field.permissions) %}
             case '{{ field.name }}':
-                return ({{ detail_edit_field(field) }});
+                {% if 'u' in field.permissions %}
+                return hasFieldPerm('{{ field.name }}', 'u')
+                    ? ({{ detail_edit_field(field) }})
+                    : ({{ detail_read_field(field) }});
+                {% else %}
+                return ({{ detail_read_field(field) }});
+                {% endif %}
             {% endif %}
             {% endfor %}
             default:

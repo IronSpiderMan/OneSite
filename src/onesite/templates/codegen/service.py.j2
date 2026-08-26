@@ -204,7 +204,7 @@ class {{ model.name }}Service:
     {% endif %}
 
     async def get(self, session: AsyncSession, id: {{ model.id_type }}) -> Optional[{{ model.name }}Read]:
-        obj = await crud.get(session, id)
+        obj = await crud.get_with_fk_labels(session, id)
         return {{ model.name }}Read.model_validate(obj) if obj else None
 
     async def get_multi(

@@ -254,8 +254,15 @@ class DetailUIConfig(_ConfigModel):
     layout: list[Any]
 
 
+class FormUIConfig(_ConfigModel):
+    """Editable create/update form layout for a model."""
+
+    layout: list[Any]
+
+
 class ModelUIConfig(_ConfigModel):
     detail: DetailUIConfig | None = None
+    form: FormUIConfig | None = None
 
 
 class TimeSeriesTableConfig(_ConfigModel):

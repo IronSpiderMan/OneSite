@@ -622,6 +622,56 @@ async def get_multi(
     return list(result.all())
 
 
+async def _enrich_with_fk_labels(
+    session: AsyncSession,
+    items: List[{{ model.name }}],
+) -> List[Dict[str, Any]]:
+    """Return serialized items enriched with configured foreign-key labels."""
+    if not items:
+        return []
+
+    {% if model.foreign_keys %}
+    # Collect unique FK IDs for batch fetch
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}_ids = list(set(getattr(item, "{{ fk.name }}") for item in items if getattr(item, "{{ fk.name }}") is not None))
+    {% endfor %}
+
+    # Batch fetch FK targets
+    {% for fk in model.foreign_keys %}
+    {{ fk.name }}_map = {}
+    if {{ fk.name }}_ids:
+        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
+        stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
+        result = await session.exec(stmt)
+        for obj in result.all():
+            {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+    {% endfor %}
+
+    enriched = []
+    for item in items:
+        item_dict = item.model_dump()
+        {% for fk in model.foreign_keys %}
+        fk_id = getattr(item, "{{ fk.name }}", None)
+        item_dict["{{ fk.name }}_label"] = {{ fk.name }}_map.get(fk_id) if fk_id is not None else None
+        {% endfor %}
+        enriched.append(item_dict)
+    return enriched
+    {% else %}
+    return [item.model_dump() for item in items]
+    {% endif %}
+
+
+async def get_with_fk_labels(
+    session: AsyncSession,
+    id: {{ model.id_type }},
+) -> Optional[Dict[str, Any]]:
+    """Get one object with the same FK label enrichment as list responses."""
+    item = await get(session, id)
+    if item is None:
+        return None
+    return (await _enrich_with_fk_labels(session, [item]))[0]
+
+
 async def get_multi_with_fk_labels(
     session: AsyncSession,
     *,
@@ -691,41 +741,7 @@ async def get_multi_with_fk_labels(
         {% endif %}
     )
 
-    if not items:
-        return []
-    
-    {% if model.foreign_keys %}
-    # Collect unique FK IDs for batch fetch
-    {% for fk in model.foreign_keys %}
-    {{ fk.name }}_ids = list(set(getattr(item, "{{ fk.name }}") for item in items if getattr(item, "{{ fk.name }}") is not None))
-    {% endfor %}
-    
-    # Batch fetch FK targets
-    {% for fk in model.foreign_keys %}
-    {{ fk.name }}_map = {}
-    if {{ fk.name }}_ids:
-        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
-        stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
-        result = await session.exec(stmt)
-        for obj in result.all():
-            {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
-    {% endfor %}
-    
-    # Enrich items with labels
-    enriched = []
-    for item in items:
-        item_dict = item.model_dump()
-        {% for fk in model.foreign_keys %}
-        fk_id = getattr(item, "{{ fk.name }}", None)
-        item_dict["{{ fk.name }}_label"] = {{ fk.name }}_map.get(fk_id) if fk_id else None
-        {% endfor %}
-        enriched.append(item_dict)
-    
-    return enriched
-    {% else %}
-    # No FKs, just convert to dicts
-    return [item.model_dump() for item in items]
-    {% endif %}
+    return await _enrich_with_fk_labels(session, items)
 
 
 async def count(
