@@ -11,6 +11,13 @@ services:
       - PROJECT_NAME={{ project_name }}
       - TIMEZONE={{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-{{ config.allowed_origins | tojson }}}
+      {% if config.get('kafka') %}
+      - KAFKA_BROKERS=${KAFKA_BROKERS:-{{ config.kafka.brokers | tojson }}}
+      {% for callback in config.kafka.callbacks %}
+      - KAFKA_CALLBACK_{{ loop.index0 }}_TOPIC=${KAFKA_CALLBACK_{{ loop.index0 }}_TOPIC:-{{ callback.topic }}}
+      - KAFKA_CALLBACK_{{ loop.index0 }}_GROUP_ID=${KAFKA_CALLBACK_{{ loop.index0 }}_GROUP_ID:-{{ callback.group_id }}}
+      {% endfor %}
+      {% endif %}
       # If using PG, override DATABASE_URI
       {% if use_pg %}
       - DATABASE_URI=postgresql+asyncpg://postgres:postgres@db:5432/app

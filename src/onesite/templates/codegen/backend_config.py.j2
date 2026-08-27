@@ -40,6 +40,10 @@ class Settings(BaseSettings):
     {% endif %}
     {% if config.kafka %}
     KAFKA_BROKERS: List[str] = {{ config.kafka.brokers | tojson }}
+    {% for callback in config.kafka.callbacks %}
+    KAFKA_CALLBACK_{{ loop.index0 }}_TOPIC: str = {{ callback.topic | tojson }}
+    KAFKA_CALLBACK_{{ loop.index0 }}_GROUP_ID: str = {{ callback.group_id | tojson }}
+    {% endfor %}
     {% endif %}
 
     {% if config.extra %}

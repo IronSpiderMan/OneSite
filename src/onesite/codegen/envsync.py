@@ -62,6 +62,24 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
             if mqtt_cfg.get("client_id"):
                 new_keys["MQTT_CLIENT_ID"] = mqtt_cfg["client_id"]
 
+    if config.get("kafka"):
+        kafka_cfg = config["kafka"]
+        if isinstance(kafka_cfg, dict):
+            new_keys["KAFKA_BROKERS"] = kafka_cfg.get(
+                "brokers", ["localhost:9092"]
+            )
+            callbacks = kafka_cfg.get("callbacks", [])
+            if isinstance(callbacks, list):
+                for index, callback in enumerate(callbacks):
+                    if not isinstance(callback, dict):
+                        continue
+                    new_keys[f"KAFKA_CALLBACK_{index}_TOPIC"] = callback.get(
+                        "topic", ""
+                    )
+                    new_keys[f"KAFKA_CALLBACK_{index}_GROUP_ID"] = callback.get(
+                        "group_id", "onesite_backend"
+                    )
+
     import json
 
     allowed_origins = config.get("allowed_origins", [])
