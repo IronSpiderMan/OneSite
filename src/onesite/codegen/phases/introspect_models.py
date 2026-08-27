@@ -333,6 +333,16 @@ def _build_model_dict(
     form_layout = configured_form_layout or _form_layout_from_detail_layout(
         detail_layout, form_fields
     )
+    create_fields = [
+        field.name
+        for field in result.fields
+        if "c" in field.permissions
+    ]
+    # A shared form layout may contain update-only or read-only fields for the
+    # list modal and detail editor.  Filter those fields before the standalone
+    # create page computes its grid, otherwise hidden controls still consume
+    # columns and leave visible gaps.
+    create_layout = _form_layout_from_detail_layout(form_layout, create_fields)
 
     # ── Tree view detection ──────────────────────────────────────────────
     tree_view_config = result.model_site_props.get("tree_view", "auto")
@@ -356,6 +366,7 @@ def _build_model_dict(
         fields=result.fields,
         detail_layout=detail_layout,
         form_layout=form_layout,
+        create_layout=create_layout,
         json_array_fields=json_array_fields,
         json_dict_fields=json_dict_fields,
         id_type=id_type,

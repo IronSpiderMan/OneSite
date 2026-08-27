@@ -117,8 +117,8 @@ const Create{{ model.name }}Page: React.FC = () => {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
-            {% for field in model.fields %}
-            {hasFieldPerm('{{ field.name }}', 'c'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+            {% macro create_field(field) -%}
+            hasFieldPerm('{{ field.name }}', 'c'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
             <div className="space-y-2">
               <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}</Label>
               {% if field.ui_type == 'bool' %}
@@ -323,8 +323,60 @@ const Create{{ model.name }}Page: React.FC = () => {
               />
               {% endif %}
             </div>
-            )}
-            {% endfor %}
+            )
+            {%- endmacro %}
+            {(() => {
+              const createLayout = {{ model.create_layout | default(model.form_layout) | default([]) | tojson }} as any[];
+              const rowClasses: Record<number, string> = {
+                1: 'grid grid-cols-1 gap-4',
+                2: 'grid grid-cols-1 gap-4 md:grid-cols-2',
+                3: 'grid grid-cols-1 gap-4 md:grid-cols-3',
+                4: 'grid grid-cols-1 gap-4 md:grid-cols-4',
+              };
+              const spanClasses: Record<number, string> = {
+                1: '',
+                2: 'md:col-span-2',
+                3: 'md:col-span-3',
+                4: 'md:col-span-4',
+              };
+              const renderCreateField = (fieldName: string): React.ReactNode => {
+                switch (fieldName) {
+                  {% for field in model.fields %}
+                  case '{{ field.name }}':
+                    return ({{ create_field(field) }});
+                  {% endfor %}
+                  default:
+                    return null;
+                }
+              };
+              const renderFormLayoutNode = (node: any, key: string): React.ReactNode => {
+                if (node.kind === 'field') {
+                  const content = renderCreateField(node.field);
+                  return content ? <div key={key} className={`min-w-0 ${spanClasses[node.span] || ''}`}>{content}</div> : null;
+                }
+                if (node.kind === 'row') {
+                  const items = node.items
+                    .map((item: any, index: number) => renderFormLayoutNode(item, `${key}-${index}`))
+                    .filter(Boolean);
+                  if (!items.length) return null;
+                  return <div key={key} className={rowClasses[node.columns] || rowClasses[1]}>{items}</div>;
+                }
+                if (node.kind === 'section') {
+                  const items = node.items
+                    .map((item: any, index: number) => renderFormLayoutNode(item, `${key}-${index}`))
+                    .filter(Boolean);
+                  if (!items.length) return null;
+                  return (
+                    <Card key={key} className={spanClasses[node.span] || ''}>
+                      <CardHeader><CardTitle>{node.title}</CardTitle></CardHeader>
+                      <CardContent className="space-y-4">{items}</CardContent>
+                    </Card>
+                  );
+                }
+                return null;
+              };
+              return createLayout.map((node, index) => renderFormLayoutNode(node, `create-layout-${index}`));
+            })()}
 
             {% if model.m2m_fields %}
             {% for m2m in model.m2m_fields %}
