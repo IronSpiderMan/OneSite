@@ -5,7 +5,7 @@ import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } f
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 import { 
-    {{ model.name }}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% if m2m.order_field %}, get{{ model.name }}{{ m2m.target_model }}sWithMeta{% endif %}{% endfor %}{% endif %}
+    {{ model.name }}{% if model.has_embedded_page %}, get{{ model.name }}s, update{{ model.name }}{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% if m2m.order_field %}, get{{ model.name }}{{ m2m.target_model }}sWithMeta{% endif %}{% endfor %}{% endif %}
     {% if model.actions %}
     {% for action_name, action_config in model.actions.items() %}
     , perform{{ model.name }}{{ action_name.capitalize() }}
@@ -41,7 +41,7 @@ import { Drawer as EditContainer } from '../../components/ui/drawer';
 import { Modal as EditContainer } from '../../components/ui/modal';
 {% endif %}
 {% endif %}
-{% if model.importable %}
+{% if model.importable or model.has_embedded_page %}
 import { Modal } from '../../components/ui/modal';
 {% endif %}
 import { Label } from '../../components/ui/label';
@@ -138,12 +138,19 @@ export type {{ model.name }}ListProps = {
   /** Values enforced when records are created or updated from that tab. */
   fixedFields?: Record<string, any>;
   embedded?: boolean;
+  /** Enables reassignment of existing records to the embedded parent. */
+  allowAttachExisting?: boolean;
+  relationField?: string;
+  relationValue?: string | number;
 };
 
 const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   scopeFilters = {},
   fixedFields = {},
   embedded = false,
+  allowAttachExisting = false,
+  relationField,
+  relationValue,
 }) => {
   const { t, i18n } = useTranslation();
   const navigate = useNavigate();
@@ -165,6 +172,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
   const [gotoPageInput, setGotoPageInput] = useState('');
+  {% if model.has_embedded_page %}
+  const [attachExistingOpen, setAttachExistingOpen] = useState(false);
+  const [attachExistingIds, setAttachExistingIds] = useState<{{ 'string[]' if 'str' in model.id_type else 'number[]' }}>([]);
+  const [isAttachingExisting, setIsAttachingExisting] = useState(false);
+  {% endif %}
   {% if model.has_dynamic_action_states %}
   const [actionStates, setActionStates] = useState<Record<string, Record<string, { visible: boolean; enabled: boolean; reason?: string; label?: string }>>>({});
   {% endif %}
@@ -396,6 +408,39 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     Object.entries(fixedFields).forEach(([field, value]) => setValue(field, value));
     {% endif %}
   };
+
+  {% if model.has_embedded_page %}
+  const loadAttachExistingOptions = async (query: string) => {
+    const filters = query ? { {{ model.search_field }}: query } : undefined;
+    const response = await get{{ model.name }}s(1, 20, filters);
+    return response.items
+      .filter((item: any) => !relationField || String(item[relationField]) !== String(relationValue))
+      .map((item: any) => ({
+        label: String(item.{{ model.search_field }} ?? item.id),
+        value: item.id,
+      }));
+  };
+
+  const handleAttachExisting = async () => {
+    if (!relationField || relationValue === undefined || relationValue === null || attachExistingIds.length === 0) return;
+    setIsAttachingExisting(true);
+    try {
+      await Promise.all(
+        attachExistingIds.map((recordId) => update{{ model.name }}(recordId, { [relationField]: relationValue }))
+      );
+      toast.success(t('common.attach_existing_success', 'Existing records added'));
+      setAttachExistingOpen(false);
+      setAttachExistingIds([]);
+      await fetchData(1, use{{ model.name }}Store.getState().size, scopeFilters);
+    } catch (error: any) {
+      const detail = error?.response?.data?.detail || t('common.attach_existing_failed', 'Failed to add existing records');
+      toast.error(detail);
+      console.error(error);
+    } finally {
+      setIsAttachingExisting(false);
+    }
+  };
+  {% endif %}
 
   {% if model.is_tree %}
   const handleCreateChild = (parentNode: any) => {
@@ -857,6 +902,19 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
               <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
             </Button>
           )}
+          {% if model.has_embedded_page %}
+          {embedded && allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+            <Button
+              variant="outline"
+              onClick={() => {
+                setAttachExistingIds([]);
+                setAttachExistingOpen(true);
+              }}
+            >
+              <Plus className="mr-2 h-4 w-4" /> {t('common.add_existing', 'Add existing')}
+            </Button>
+          )}
+          {% endif %}
         </div>
       </div>
 
@@ -1910,6 +1968,35 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         </form>
             </div>
       </EditContainer>
+      {% endif %}
+
+      {% if model.has_embedded_page %}
+      <Modal
+        title={t('common.add_existing', 'Add existing')}
+        isOpen={attachExistingOpen}
+        onClose={() => { if (!isAttachingExisting) setAttachExistingOpen(false); }}
+      >
+        <div className="space-y-4">
+          <SearchableSelect
+            multiple
+            value={attachExistingIds}
+            onValueChange={(value) => setAttachExistingIds(Array.isArray(value) ? value as {{ 'string[]' if 'str' in model.id_type else 'number[]' }} : [])}
+            placeholder={t('common.select_existing', 'Select existing records')}
+            searchPlaceholder={t('common.search', 'Search')}
+            emptyText={t('common.no_result', 'No result')}
+            loadOptions={loadAttachExistingOptions}
+          />
+          <div className="flex justify-end gap-2">
+            <Button type="button" variant="outline" disabled={isAttachingExisting} onClick={() => setAttachExistingOpen(false)}>
+              {t('common.cancel')}
+            </Button>
+            <Button type="button" disabled={isAttachingExisting || attachExistingIds.length === 0} onClick={handleAttachExisting}>
+              {isAttachingExisting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isAttachingExisting ? t('common.adding', 'Adding...') : t('common.add', 'Add')}
+            </Button>
+          </div>
+        </div>
+      </Modal>
       {% endif %}
 
       {% if model.importable %}

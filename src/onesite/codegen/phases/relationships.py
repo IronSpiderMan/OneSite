@@ -243,6 +243,7 @@ def _resolve_fk_labels_and_reverse(
 
             reverse_cfg = fk.get("reverse", {}) or {}
             editor = _normalise_editor(reverse_cfg)
+            allow_existing = bool(reverse_cfg.get("allow_existing", editor == "embedded"))
             on_remove = str(reverse_cfg.get("on_remove", "delete")).lower()
             if on_remove not in {"delete", "nullify"}:
                 console.print(
@@ -275,6 +276,7 @@ def _resolve_fk_labels_and_reverse(
                 "label_field": model.get("unique_search_field") or model["search_field"],
                 "display": editor != "hidden" and fk.get("reverse_display", True),
                 "editor": editor,
+                "allow_existing": allow_existing,
                 "on_remove": on_remove,
                 "inline_fields": inline_fields,
                 "inline_schema": inline_schema,

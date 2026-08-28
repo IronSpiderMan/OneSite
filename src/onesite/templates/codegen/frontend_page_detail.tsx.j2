@@ -2116,6 +2116,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             embedded={true}
                             scopeFilters={{ '{{' }} {{ rfk.source_fk_field }}: {% if 'str' in model.id_type %}id{% else %}parseInt(id!){% endif %} {{ '}}' }}
                             fixedFields={{ '{{' }} {{ rfk.source_fk_field }}: {% if 'str' in model.id_type %}id{% else %}parseInt(id!){% endif %} {{ '}}' }}
+                            {% if rfk.allow_existing %}
+                            allowAttachExisting={true}
+                            relationField="{{ rfk.source_fk_field }}"
+                            relationValue={{ '{' }}{% if 'str' in model.id_type %}id{% else %}parseInt(id!){% endif %}{{ '}' }}
+                            {% endif %}
                         />
                         {% else %}
                         {% if model.page_edit and rfk.editor == 'inline' %}{isEditing ? (
