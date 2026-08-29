@@ -98,19 +98,6 @@ def validate_task_center_config(config: Dict[str, Any]) -> None:
         seen.add(key)
 
 
-def validate_external_resources_config(config: Dict[str, Any]) -> None:
-    """Keep the historical project-level switch well-typed.
-
-    Runtime generation is enabled by model ``external_resource`` declarations;
-    this flag is retained as a backwards-compatible configuration field.
-    """
-    enabled = config.setdefault("external_resources", False)
-    if not isinstance(enabled, bool):
-        raise SiteConfigError(
-            "site_config.json field 'external_resources' must be true or false."
-        )
-
-
 def validate_external_resource_providers_config(config: Dict[str, Any]) -> None:
     """Normalize configured provider names to import-safe source modules."""
     providers = config.setdefault("providers", {})
@@ -216,12 +203,6 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
     structural validation here makes malformed ``site_config.json`` fail before
     it can write generated files or environment configuration.
     """
-    if "nav_order" in config:
-        raise SiteConfigError(
-            "site_config.json field 'nav_order' is no longer supported; "
-            "configure the ordered navigation tree with 'navigation' instead."
-        )
-
     navigation = config.get("navigation")
     if navigation is None:
         return

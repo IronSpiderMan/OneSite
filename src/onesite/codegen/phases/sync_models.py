@@ -38,16 +38,6 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
         backend_path / "app" / "core" / "action_runtime.py",
     )
 
-    # Remove the location used by older generated projects.  It is generated
-    # output and leaving it around makes standalone dependency audits fail.
-    legacy_runtime_dir = backend_path / "onesite_runtime"
-    legacy_runtime_file = legacy_runtime_dir / "__init__.py"
-    if legacy_runtime_file.exists():
-        legacy_runtime_file.unlink()
-        console.print(f"[yellow]Removed stale generated runtime {legacy_runtime_file}[/yellow]")
-    if legacy_runtime_dir.exists() and not any(legacy_runtime_dir.iterdir()):
-        legacy_runtime_dir.rmdir()
-
     source_models = (
         {model_file.name: model_file for model_file in models_src_dir.glob("*.py")}
         if models_src_dir.exists()

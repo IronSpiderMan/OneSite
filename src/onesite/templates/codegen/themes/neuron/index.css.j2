@@ -12,4 +12,23 @@
   [data-codegen-theme="neuron"] [data-page-region="detail-grid"] {
     align-items: start;
   }
+  [data-codegen-theme="neuron"][data-page-kind="detail"] [data-ui="card"] > div:first-child {
+    padding: 0.875rem 1rem;
+    background: hsl(var(--neuron-panel-raised) / 0.55);
+  }
+  [data-codegen-theme="neuron"][data-page-kind="detail"] [data-ui="card"] > div:not(:first-child) {
+    padding: 1rem;
+  }
+  [data-codegen-theme="neuron"][data-page-kind="detail"] [data-ui="card"] label {
+    display: block;
+    margin-bottom: 0.3rem;
+    color: hsl(var(--neuron-ink-faint));
+    font-size: 0.68rem;
+    letter-spacing: 0.035em;
+  }
+  [data-codegen-theme="neuron"][data-page-kind="detail"] [data-ui="card"] label + div {
+    color: hsl(var(--foreground));
+    font-size: 0.82rem;
+    line-height: 1.45;
+  }
 }

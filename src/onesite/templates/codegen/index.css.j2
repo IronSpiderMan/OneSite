@@ -6,7 +6,7 @@
 @layer base {
 {% for tid, t in themes.items() %}
   {# Light mode variables #}
-  [data-theme="{{ tid }}"] {
+  :root[data-theme="{{ tid }}"] {
     --background: {{ t.background }};
     --foreground: {{ t.foreground }};
     --card: {{ t.card }};
@@ -30,7 +30,7 @@
     --shadow-md-style: {{ t.shadow_md }};
   }
   {# Dark mode variables #}
-  [data-theme="{{ tid }}"].dark {
+  :root[data-theme="{{ tid }}"].dark {
     --background: {{ t.dark_background }};
     --foreground: {{ t.dark_foreground }};
     --card: {{ t.dark_card }};

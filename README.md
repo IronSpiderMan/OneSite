@@ -197,9 +197,7 @@ backend reconciliation converges every provider after timeouts, process
 crashes, or external drift. The management page exposes provider-level health
 and aggregate reconciliation counters rather than per-resource tasks.
 
-The old `resource_type` and `identity_field` declaration names remain accepted
-as aliases. Reconciliation-only options (`depends_on`, `reconcile_via`, and
-`health`) are no longer part of External Resources.
+The `resource_type` and `identity_field` declaration names remain accepted as aliases.
 
 `desktop.api_url` must be an absolute HTTP(S) URL because a packaged desktop
 client cannot use Vite's development proxy. `site sync` adds the exact Tauri
@@ -518,10 +516,6 @@ Background work should be submitted to the application's task system from an
 `on_after_commit_*` hook. For reliable external delivery, use a transactional
 outbox or another durable queue.
 
-The former `on_background_after_*`, `on_orm_*`, `on_before_insert`, and
-`on_after_insert` model hooks are no longer supported. `site sync` reports a
-migration error when it finds one instead of silently ignoring it.
-
 | Hook family | Execution | Can roll back the CUD transaction? |
 |---|---|---|
 | `on_before/after_create/update/delete` | Same transaction | Yes |
@@ -564,7 +558,31 @@ class ProductTagLink(SQLModel, table=True):
     tag_id: Optional[int] = Field(default=None, primary_key=True, foreign_key="tag.id")
 ```
 
-Link tables with only relation keys become multi-select fields; extra fields keep standalone CRUD support. Self-referencing FKs can generate a tree view.
+Link tables with only relation keys become multi-select fields; extra fields keep standalone CRUD support. Self-referencing FKs can generate a tree view. A related model can also be rendered as leaf records under each tree node:
+
+```python
+from onesite.config import OneSiteConfig, TreeLeafConfig, TreeViewConfig
+
+
+class AssetFolder(SQLModel, table=True):
+    __onesite__ = OneSiteConfig(
+        tree_view=TreeViewConfig(
+            leaf=TreeLeafConfig(
+                model="AssetDocument",
+                parent_field="folder_id",
+                label_field="name",
+                page_size=20,
+            )
+        )
+    )
+
+
+class AssetDocument(SQLModel, table=True):
+    folder_id: int = Field(foreign_key="asset_folder.id")
+    name: str
+```
+
+The tree loads documents lazily when a folder is expanded. Leaf pagination is independent of folder pagination, and standalone leaf models link to their detail pages.
 
 ## `__onesite__` model configuration
 
@@ -594,6 +612,7 @@ class Product(SQLModel, table=True):
 | `visible` | Navigation visibility by role. |
 | `owner_field` | User-owned resource filtering, e.g. `"owner_id"`. |
 | `is_link_table` | Marks a many-to-many link table. |
+| `tree_view` | Enables a self-referencing tree; an object may configure a related `leaf` model. |
 | `is_singleton` | Creates a single configuration-like record UI/API. |
 | `frontend_only` | Excludes a model from backend persistence. |
 | `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode: "page"`. |

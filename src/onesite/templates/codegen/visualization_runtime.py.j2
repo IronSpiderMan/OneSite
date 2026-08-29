@@ -364,6 +364,14 @@ async def _query_hierarchy_leaf_rows(
         for binding in leaf["inputs"].values()
     ]
     statement = select(*expressions).select_from(leaf_model)
+    # Filter before applying the limit.  Filtering the fetched rows in Python
+    # meant unrelated leaf records could consume the entire query budget and
+    # leave the visible hierarchy with no leaf nodes at all.
+    parent_binding = leaf["inputs"]["parent"]
+    parent_column = getattr(leaf_model, parent_binding["field"])
+    statement = statement.where(
+        parent_column.in_([_coerce(parent_column, parent_id) for parent_id in parent_ids])
+    )
     owner_field = leaf["model"].get("owner_field")
     if owner_field and role == "user":
         statement = statement.where(getattr(leaf_model, owner_field) == getattr(user, "id"))
@@ -484,7 +492,10 @@ async def query_visualization(
             role=role,
             dialect=dialect,
             parent_ids=parent_ids,
-            limit=max(limit - len(rows), 0),
+            # ``limit`` is the per-model query cap.  Giving leaves only the
+            # unused base-model budget made them disappear whenever the base
+            # hierarchy filled its page (the common case for larger trees).
+            limit=limit,
         )
         rows.extend(leaf_rows)
         truncated = truncated or leaf_truncated

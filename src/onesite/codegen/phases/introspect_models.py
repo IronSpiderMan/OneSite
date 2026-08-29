@@ -353,7 +353,11 @@ def _build_model_dict(
         for fk in result.foreign_keys:
             if fk.is_self_referencing:
                 tree_parent_field = fk.name
-                if tree_view_config is True or tree_view_config == "auto":
+                if (
+                    tree_view_config is True
+                    or tree_view_config == "auto"
+                    or isinstance(tree_view_config, dict)
+                ):
                     is_tree = True
                 break
 
@@ -430,21 +434,6 @@ _BULK_DELETE_HOOK_ARGUMENTS = {
     "on_after_bulk_delete": {"cls", "session", "olds", "context"},
     "on_after_commit_bulk_delete": {"cls", "olds", "context"},
 }
-_REMOVED_MODEL_HOOKS = {
-    "on_background_after_create",
-    "on_background_after_update",
-    "on_background_after_delete",
-    "on_orm_before_insert",
-    "on_orm_after_insert",
-    "on_orm_before_update",
-    "on_orm_after_update",
-    "on_orm_before_delete",
-    "on_orm_after_delete",
-    "on_before_insert",
-    "on_after_insert",
-}
-
-
 def _validate_named_hook_signature(
     model_cls: type,
     hook_name: str,
@@ -473,7 +462,7 @@ def _validate_named_hook_signature(
 
 
 def _validate_service_hooks(model_cls: type) -> None:
-    """Validate supported hooks and reject retired hook families."""
+    """Validate supported model lifecycle hooks."""
     for hook_name, supported in _TRANSACTIONAL_HOOK_ARGUMENTS.items():
         method = inspect.getattr_static(model_cls, hook_name, None)
         if method is None:
@@ -495,17 +484,6 @@ def _validate_service_hooks(model_cls: type) -> None:
         _validate_named_hook_signature(
             model_cls, hook_name, method.__func__, supported
         )
-
-    for hook_name in sorted(_REMOVED_MODEL_HOOKS):
-        method = inspect.getattr_static(model_cls, hook_name, None)
-        if method is None:
-            continue
-        raise ValueError(
-            f"{model_cls.__name__}.{hook_name} is no longer supported. "
-            "Use on_after_create/update/delete for transactional work or "
-            "on_after_commit_create/update/delete for post-commit work."
-        )
-
 
 _ACTION_ARGUMENTS = {"self", "context", "session", "current_user"}
 

@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% endif %} } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -26,6 +26,9 @@ import {
 } from '../../services/{{ model.module_name }}';
 {% if model.is_tree %}
 import * as {{ model.module_name }}Service from '../../services/{{ model.module_name }}';
+{% if model.tree_leaf %}
+import * as TreeLeafService from '../../services/{{ model.tree_leaf.service }}';
+{% endif %}
 {% endif %}
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
@@ -191,6 +194,12 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const [childrenTotal, setChildrenTotal] = useState<Record<number, number>>({});
   const [childrenPage, setChildrenPage] = useState<Record<number, number>>({});
   const [loadingChildren, setLoadingChildren] = useState<Record<number, boolean>>({});
+  {% if model.tree_leaf %}
+  const [leafMap, setLeafMap] = useState<Record<number, any[]>>({});
+  const [leafTotal, setLeafTotal] = useState<Record<number, number>>({});
+  const [leafPage, setLeafPage] = useState<Record<number, number>>({});
+  const [loadingLeaves, setLoadingLeaves] = useState<Record<number, boolean>>({});
+  {% endif %}
   const treeSearchFiltersRef = useRef<Record<string, any>>({});
   {% endif %}
   {% if model.importable %}
@@ -250,9 +259,27 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   const loadChildren = async (parentId: number, page: number = 1) => {
     setLoadingChildren(prev => ({ ...prev, [parentId]: true }));
+    {% if model.tree_leaf %}
+    if (page === 1) setLoadingLeaves(prev => ({ ...prev, [parentId]: true }));
+    {% endif %}
     try {
       const filters = { {{ model.tree_parent_field }}: parentId, ...treeSearchFiltersRef.current };
+      {% if model.tree_leaf %}
+      const leafRolePermissions: Record<string, string> = {{ model.tree_leaf.role_permissions | tojson }};
+      const canReadLeaves = (leafRolePermissions[userRole] || '').includes('r');
+      const [result, leafResult] = await Promise.all([
+        {{ model.module_name }}Service.get{{ model.name }}s(page, CHILD_PAGE_SIZE, filters),
+        page === 1 && canReadLeaves
+          ? TreeLeafService.get{{ model.tree_leaf.model }}s(
+              1,
+              {{ model.tree_leaf.page_size }},
+              { {{ model.tree_leaf.parent_field }}: parentId },
+            )
+          : Promise.resolve(null),
+      ]);
+      {% else %}
       const result = await {{ model.module_name }}Service.get{{ model.name }}s(page, CHILD_PAGE_SIZE, filters);
+      {% endif %}
       setChildrenMap(prev => {
         const existing = prev[parentId] || [];
         const merged = page === 1 ? result.items : [...existing, ...result.items];
@@ -260,12 +287,43 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       });
       setChildrenTotal(prev => ({ ...prev, [parentId]: result.total }));
       setChildrenPage(prev => ({ ...prev, [parentId]: page }));
+      {% if model.tree_leaf %}
+      if (page === 1) {
+        setLeafMap(prev => ({ ...prev, [parentId]: leafResult?.items || [] }));
+        setLeafTotal(prev => ({ ...prev, [parentId]: leafResult?.total || 0 }));
+        setLeafPage(prev => ({ ...prev, [parentId]: 1 }));
+      }
+      {% endif %}
     } catch (error) {
       console.error('Failed to load children:', error);
     } finally {
       setLoadingChildren(prev => ({ ...prev, [parentId]: false }));
+      {% if model.tree_leaf %}
+      if (page === 1) setLoadingLeaves(prev => ({ ...prev, [parentId]: false }));
+      {% endif %}
     }
   };
+
+  {% if model.tree_leaf %}
+  const loadMoreLeaves = async (parentId: number) => {
+    const nextPage = (leafPage[parentId] || 1) + 1;
+    setLoadingLeaves(prev => ({ ...prev, [parentId]: true }));
+    try {
+      const result = await TreeLeafService.get{{ model.tree_leaf.model }}s(
+        nextPage,
+        {{ model.tree_leaf.page_size }},
+        { {{ model.tree_leaf.parent_field }}: parentId },
+      );
+      setLeafMap(prev => ({ ...prev, [parentId]: [...(prev[parentId] || []), ...result.items] }));
+      setLeafTotal(prev => ({ ...prev, [parentId]: result.total }));
+      setLeafPage(prev => ({ ...prev, [parentId]: nextPage }));
+    } catch (error) {
+      console.error('Failed to load tree leaf records:', error);
+    } finally {
+      setLoadingLeaves(prev => ({ ...prev, [parentId]: false }));
+    }
+  };
+  {% endif %}
 
   const handleToggleExpand = async (nodeId: number) => {
     if (expandedIds.has(nodeId)) {
@@ -276,7 +334,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       const next = new Set(expandedIds);
       next.add(nodeId);
       setExpandedIds(next);
-      if (!childrenMap[nodeId] || childrenMap[nodeId].length === 0) {
+      if (!Object.prototype.hasOwnProperty.call(childrenMap, nodeId){% if model.tree_leaf %} || !Object.prototype.hasOwnProperty.call(leafMap, nodeId){% endif %}) {
         await loadChildren(nodeId, 1);
       }
     }
@@ -286,6 +344,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     setChildrenMap({});
     setChildrenPage({});
     setChildrenTotal({});
+    {% if model.tree_leaf %}
+    setLeafMap({});
+    setLeafPage({});
+    setLeafTotal({});
+    {% endif %}
     setExpandedIds(new Set());
     await loadRoots(1);
   };
@@ -1399,11 +1462,22 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                   const childPageNum = childrenPage[node.id] || 1;
                   const isLoading = loadingChildren[node.id];
                   const hasMore = children.length > 0 && children.length < childTotal;
+                  {% if model.tree_leaf %}
+                  const leaves = leafMap[node.id] || [];
+                  const leafCount = leafTotal[node.id] || 0;
+                  const leavesLoading = loadingLeaves[node.id];
+                  const hasMoreLeaves = leaves.length > 0 && leaves.length < leafCount;
+                  {% endif %}
                   // An absent entry means this node has not been expanded yet.
                   // Only disable the expander after a completed child request confirms
                   // that the node has no children.
                   const hasLoadedChildren = Object.prototype.hasOwnProperty.call(childrenMap, node.id);
+                  {% if model.tree_leaf %}
+                  const hasLoadedLeaves = Object.prototype.hasOwnProperty.call(leafMap, node.id);
+                  const isLeaf = hasLoadedChildren && hasLoadedLeaves && !isLoading && !leavesLoading && !hasMore && !hasMoreLeaves && children.length === 0 && childTotal === 0 && leaves.length === 0 && leafCount === 0;
+                  {% else %}
                   const isLeaf = hasLoadedChildren && !isLoading && !hasMore && children.length === 0 && childTotal === 0;
+                  {% endif %}
                   const label = node.{{ model.search_field }} || `#${node.id}`;
 
                   elements.push(
@@ -1452,9 +1526,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                       )}
                       <div className="flex min-w-0 flex-1 items-center gap-2">
                         <span className="truncate text-sm font-medium" title={String(label)}>{label}</span>
-                        {childTotal > 0 && (
+                        {childTotal{% if model.tree_leaf %} + leafCount{% endif %} > 0 && (
                           <Badge variant="secondary" className="h-5 shrink-0 px-1.5 text-[10px] font-medium">
-                            {childTotal}
+                            {childTotal{% if model.tree_leaf %} + leafCount{% endif %}}
                           </Badge>
                         )}
                       </div>
@@ -1487,6 +1561,59 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     if (children.length > 0) {
                       elements.push(...renderNodes(children, depth + 1));
                     }
+                    {% if model.tree_leaf %}
+                    for (const leaf of leaves) {
+                      const leafLabel = leaf.{{ model.tree_leaf.label_field }} || `#${leaf.id}`;
+                      elements.push(
+                        <div
+                          key={`leaf-${leaf.id}`}
+                          className="group relative mx-2 flex min-h-10 items-center gap-2 rounded-md px-2 py-1.5 text-muted-foreground transition-colors hover:bg-primary/[0.04] hover:text-foreground"
+                          style={% raw %}{{ paddingLeft: `${(depth + 1) * 28 + 8}px` }}{% endraw %}
+                          data-tree-node-kind="leaf"
+                        >
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute top-0 bottom-0 w-px bg-border"
+                            style={% raw %}{{ left: `${depth * 28 + 21}px` }}{% endraw %}
+                          />
+                          <span
+                            aria-hidden="true"
+                            className="pointer-events-none absolute top-1/2 h-px w-3.5 bg-border"
+                            style={% raw %}{{ left: `${depth * 28 + 21}px` }}{% endraw %}
+                          />
+                          <span className="relative z-[1] h-6 w-6 shrink-0" aria-hidden="true" />
+                          <FileText className="h-4 w-4 shrink-0 text-primary" aria-hidden="true" />
+                          <div className="flex min-w-0 flex-1 items-center gap-2">
+                            <span className="truncate text-sm" title={String(leafLabel)}>{leafLabel}</span>
+                            <Badge variant="outline" className="h-5 shrink-0 px-1.5 text-[10px] font-normal">
+                              {t('models.{{ model.tree_leaf.service }}.name')}
+                            </Badge>
+                          </div>
+                          {% if model.tree_leaf.standalone %}
+                          <div className="flex shrink-0 items-center rounded-md bg-background/80 p-0.5 opacity-70 transition-opacity group-hover:opacity-100">
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-7 w-7"
+                              onClick={() => navigate(`/{{ model.tree_leaf.service }}s/${leaf.id}`)}
+                              aria-label="View leaf record"
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                          {% endif %}
+                        </div>
+                      );
+                    }
+                    if (leavesLoading) {
+                      elements.push(
+                        <div key={`${node.id}-leaves-loading`} className="flex items-center gap-2 py-2 text-xs text-muted-foreground" style={% raw %}{{ paddingLeft: `${(depth + 1) * 28 + 40}px` }}{% endraw %}>
+                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                          {t('common.loading', 'Loading...')}
+                        </div>
+                      );
+                    }
+                    {% endif %}
                     if (children.length === 0 && childTotal === 0) {
                       // No children yet, show load more to fetch empty state? Actually just show nothing
                     }
@@ -1509,6 +1636,22 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         </div>
                       );
                     }
+                    {% if model.tree_leaf %}
+                    if (hasMoreLeaves) {
+                      elements.push(
+                        <div
+                          key={`${node.id}-more-leaves`}
+                          className="flex items-center gap-2 py-1.5 text-muted-foreground"
+                          style={% raw %}{{ paddingLeft: `${(depth + 1) * 28 + 8}px` }}{% endraw %}
+                        >
+                          <FileText className="h-3.5 w-3.5" aria-hidden="true" />
+                          <Button variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => loadMoreLeaves(node.id)}>
+                            {t('common.load_more', 'Load more')} {t('models.{{ model.tree_leaf.service }}.plural')}...
+                          </Button>
+                        </div>
+                      );
+                    }
+                    {% endif %}
                   }
                 }
                 return elements;

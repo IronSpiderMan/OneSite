@@ -278,6 +278,21 @@ class ExternalResourceConfig(_ConfigModel):
     resource: str
 
 
+class TreeLeafConfig(_ConfigModel):
+    """A related model rendered as terminal records in a tree page."""
+
+    model: str
+    parent_field: str | None = None
+    label_field: str | None = None
+    page_size: int = Field(default=20, ge=1)
+
+
+class TreeViewConfig(_ConfigModel):
+    """Typed configuration for a self-referencing model tree."""
+
+    leaf: str | TreeLeafConfig | None = None
+
+
 ReportCategory = Literal[
     "cartesian",
     "multi_cartesian",
@@ -372,7 +387,7 @@ class OneSiteConfig(_ConfigModel):
     timescaledb_time_field: str | None = None
     timescaledb_model_table: str | None = None
     external_resource: ExternalResourceConfig | None = None
-    tree_view: Literal["auto"] | bool = "auto"
+    tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)
     special_me_permissions: ModelPermissions | None = None
     # Deprecated configurations stay typed at the container level while their
@@ -436,7 +451,6 @@ class SiteConfig(_ConfigModel):
     mqtt: MqttConfig | None = None
     kafka: KafkaConfig | None = None
     video_stream: VideoStreamConfig | None = None
-    external_resources: bool = False
     providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)

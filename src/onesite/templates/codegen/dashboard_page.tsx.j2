@@ -1,6 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, ArrowDownRight, ArrowUpRight{% for icon in dashboard_metric_icons | default([]) %}{% if icon not in ['Activity', 'ArrowDownRight', 'ArrowUpRight'] %}, {{ icon }}{% endif %}{% endfor %}{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, ArrowDownRight, ArrowUpRight{% for icon in dashboard_metric_icons | default([]) %}{% if icon not in ['Loader2', 'RefreshCw', 'ChevronLeft', 'ChevronRight', 'CalendarDays', 'BarChart3', 'Activity', 'ArrowDownRight', 'ArrowUpRight', 'Play', 'Pencil', 'Power', 'PowerOff', 'Terminal'] %}, {{ icon }}{% endif %}{% endfor %}{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';

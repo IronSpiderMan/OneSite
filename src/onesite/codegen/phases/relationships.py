@@ -324,6 +324,77 @@ def _resolve_fk_labels_and_reverse(
                 }
 
 
+def _resolve_tree_view_leaves(models: list[ModelDefinition]) -> None:
+    """Resolve an optional second model rendered as terminal tree-page nodes."""
+
+    lookup = {
+        key.lower(): value
+        for model in models
+        for key, value in (
+            (model["name"], model),
+            (model["module_name"], model),
+            (model.get("table_name", ""), model),
+        )
+        if key
+    }
+    for model in models:
+        model["tree_leaf"] = None
+        tree_config = model.get("site_props", {}).get("tree_view", "auto")
+        if not model.get("is_tree") or not isinstance(tree_config, dict):
+            continue
+        raw_leaf = tree_config.get("leaf") or tree_config.get("leaf_model")
+        if raw_leaf is None:
+            continue
+        leaf_config = {"model": raw_leaf} if isinstance(raw_leaf, str) else raw_leaf
+        if not isinstance(leaf_config, dict) or not leaf_config.get("model"):
+            raise ValueError(
+                f"{model['name']} tree_view.leaf must be a model name or configuration object"
+            )
+        leaf_model = lookup.get(str(leaf_config["model"]).lower())
+        if leaf_model is None:
+            raise ValueError(
+                f"{model['name']} tree_view leaf references unknown model "
+                f"'{leaf_config['model']}'"
+            )
+        parent_field = leaf_config.get("parent_field")
+        candidates = [
+            fk
+            for fk in leaf_model.get("foreign_keys", [])
+            if fk.get("target_model") == model["name"]
+            and (parent_field is None or fk.get("name") == parent_field)
+        ]
+        if len(candidates) != 1:
+            detail = f" using parent_field='{parent_field}'" if parent_field else ""
+            raise ValueError(
+                f"{model['name']} tree_view leaf model {leaf_model['name']} must have "
+                f"exactly one direct foreign key to {model['name']}{detail}"
+            )
+        relation = candidates[0]
+        label_field = leaf_config.get("label_field") or leaf_model.get(
+            "unique_search_field"
+        ) or leaf_model["search_field"]
+        if not any(field["name"] == label_field for field in leaf_model.get("fields", [])):
+            raise ValueError(
+                f"{model['name']} tree_view leaf label_field '{label_field}' does not exist "
+                f"on {leaf_model['name']}"
+            )
+        page_size = leaf_config.get("page_size", 20)
+        if isinstance(page_size, bool) or not isinstance(page_size, int) or page_size < 1:
+            raise ValueError(
+                f"{model['name']} tree_view leaf page_size must be a positive integer"
+            )
+        model["tree_leaf"] = {
+            "model": leaf_model["name"],
+            "service": leaf_model["module_name"],
+            "parent_field": relation["name"],
+            "label_field": label_field,
+            "id_type": leaf_model["id_type"],
+            "role_permissions": leaf_model.get("role_permissions", {}),
+            "standalone": leaf_model.get("standalone", True),
+            "page_size": page_size,
+        }
+
+
 # ── M2M resolution ───────────────────────────────────────────────────────
 
 
@@ -1068,6 +1139,7 @@ def phase_resolve_relationships(
     _resolve_timeseries_relations(models)
     _resolve_property_config_relations(models)
     _resolve_fk_labels_and_reverse(models, model_map)
+    _resolve_tree_view_leaves(models)
     _resolve_m2m(models, model_map, module_map)
     _resolve_import_export_config(models, model_map)
 

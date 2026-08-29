@@ -80,10 +80,9 @@ config = SiteConfig(
 `delete(resource, payload)` 和 `reconcile(desired)`。External Resource CUD
 作为框架隐藏的事务内 `on_after_*` 钩子执行；Provider 失败会回滚本地变更。后端定时按
 Provider 全局扫描并修复超时、进程中断或外部漂移造成的不一致。`external-resources`
-管理页只展示 Provider 级健康状态和汇总计数，不再保留逐资源同步任务。
+管理页展示 Provider 级健康状态和汇总计数。
 
-旧字段名 `resource_type`、`identity_field` 仍作为别名兼容；`depends_on`、
-`reconcile_via`、`health` 不再属于 External Resource。
+`resource_type`、`identity_field` 仍作为字段别名兼容。
 
 ## 命令
 
