@@ -140,6 +140,18 @@ def _get_json_model_ui(model: type[BaseModel]) -> Dict[str, Any]:
     return {}
 
 
+def _get_json_model_i18n(model: type[BaseModel]) -> Dict[str, Any]:
+    """Return field translations declared by a structured JSON submodel."""
+    merged: Dict[str, Any] = {}
+    config = normalize_onesite_config(getattr(model, "__onesite__", None))
+    if isinstance(config, dict) and isinstance(config.get("translations"), dict):
+        merged.update(config["translations"])
+    legacy = getattr(model, "__i18n__", None)
+    if isinstance(legacy, dict):
+        merged.update(legacy)
+    return merged
+
+
 def _normalize_json_model_layout(
     raw_ui: Dict[str, Any], *, model_name: str, field_names: List[str], view: str
 ) -> List[Dict[str, Any]]:
@@ -227,12 +239,28 @@ def _build_json_model_schema(
         return {"name": model.__name__, "fields": []}
     visited.add(model)
     fields: List[Dict[str, Any]] = []
+    model_key = _to_snake(model.__name__)
+    model_i18n = _get_json_model_i18n(model)
     for fname, f in model.model_fields.items():
         if fname == "property_key" or fname.startswith("_"):
             continue
         ann = f.annotation
         kind = _json_field_kind_from_annotation(ann)
-        field_schema: Dict[str, Any] = {"name": fname, "kind": kind}
+        field_schema: Dict[str, Any] = {
+            "name": fname,
+            "kind": kind,
+            "labelKey": f"json_models.{model_key}.fields.{fname}",
+        }
+        field_translations: Dict[str, str] = {}
+        for language, pack in model_i18n.items():
+            if not isinstance(pack, dict):
+                continue
+            fields_pack = pack.get("fields") if isinstance(pack.get("fields"), dict) else pack
+            label = fields_pack.get(fname)
+            if isinstance(label, str) and label:
+                field_translations[language] = label
+        if field_translations:
+            field_schema["translations"] = field_translations
         site_props = _get_field_site_props(f)
         visible_when = _normalize_json_condition(
             site_props.get("visible_when"),

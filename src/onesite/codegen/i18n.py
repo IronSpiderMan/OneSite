@@ -848,6 +848,29 @@ def generate_locale_files(
             cur = nxt
         cur[parts[-1]] = value
 
+    def add_json_model_translations(schema: Any) -> None:
+        """Emit labels carried by structured JSON model schemas."""
+        if not isinstance(schema, dict):
+            return
+        for json_field in schema.get("fields", []):
+            if not isinstance(json_field, dict):
+                continue
+            field_name = json_field.get("name")
+            label_key = json_field.get("labelKey")
+            if isinstance(field_name, str) and isinstance(label_key, str):
+                fallback = field_name.replace("_", " ").title()
+                translations = json_field.get("translations")
+                if not isinstance(translations, dict):
+                    translations = {}
+                en_label = translations.get("en", fallback)
+                zh_label = translations.get("zh", fallback)
+                set_by_path(en_translations, label_key, en_label)
+                set_by_path(zh_translations, label_key, zh_label)
+            add_json_model_translations(json_field.get("model"))
+            item = json_field.get("item")
+            if isinstance(item, dict):
+                add_json_model_translations(item.get("model"))
+
     for group in navigation_groups or []:
         key = group["key"].removeprefix("group:")
         labels = group.get("translations", {})
@@ -958,6 +981,9 @@ def generate_locale_files(
                     zh_field_enum[enum_val] = enum_trans.get("zh", {}).get(enum_val) or str(enum_val)
                 en_enums[field_name] = en_field_enum
                 zh_enums[field_name] = zh_field_enum
+
+            add_json_model_translations(field.get("json_model_schema"))
+            add_json_model_translations(field.get("json_item_schema"))
 
         # Visualize filter i18n (dashboard.filter_{name})
         viz = model.get("visualize")

@@ -16,6 +16,7 @@ import { cn } from "../../lib/utils"
 export type JsonFieldSchema = {
   name?: string
   labelKey?: string
+  translations?: Record<string, string>
   kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "foreign_key" | "model" | "array" | "location" | "any"
   default?: unknown
   visibleWhen?: Record<string, Array<string | number | boolean | null>>
@@ -65,6 +66,22 @@ const matchesCondition = (
     return expected.some((option) => String(option) === String(actual))
   })
 }
+
+const isJsonLayoutNodeVisible = (
+  node: JsonLayoutNode,
+  schema: JsonModelSchema,
+  value: Record<string, any>,
+  rootValue?: Record<string, any>,
+): boolean => {
+  if (node.kind === "field") {
+    const field = schema.fields.find((candidate) => candidate.name === node.field)
+    return Boolean(field && matchesCondition(field.visibleWhen, value, rootValue))
+  }
+  return (node.items ?? []).some((item) => isJsonLayoutNodeVisible(item, schema, value, rootValue))
+}
+
+const jsonLayoutColumns = (items: JsonLayoutNode[]) =>
+  Math.max(1, Math.min(4, items.reduce((total, item) => total + (item.span ?? 1), 0)))
 
 const normalizeJsonFieldValue = (field: JsonFieldSchema, value: any, rootValue?: Record<string, any>): any => {
   if (field.kind === "model" && field.model) return normalizeJsonModelValue(field.model, value, rootValue)
@@ -201,16 +218,17 @@ const JsonModelForm: React.FC<{
   const renderLayoutNode = (node: JsonLayoutNode, key: string): React.ReactNode => {
     if (node.kind === "field") {
       const field = schema.fields.find((candidate) => candidate.name === node.field)
-      if (!field) return null
+      if (!field || !matchesCondition(field.visibleWhen, v, rootValue)) return null
       return (
         <div key={key} className={`min-w-0 ${spanClasses[node.span ?? 1] || ""}`}>
           <JsonModelForm schema={{ ...schema, fields: [field] }} value={v} onChange={emitChange} path={path} foreignKeyLoaders={foreignKeyLoaders} layoutDisabled rootValue={rootValue} />
         </div>
       )
     }
-    const items = (node.items ?? []).map((item, index) => renderLayoutNode(item, `${key}-${index}`)).filter(Boolean)
+    const visibleNodes = (node.items ?? []).filter((item) => isJsonLayoutNodeVisible(item, schema, v, rootValue))
+    const items = visibleNodes.map((item, index) => renderLayoutNode(item, `${key}-${index}`)).filter(Boolean)
     if (!items.length) return null
-    if (node.kind === "row") return <div key={key} className={rowClasses[node.columns ?? 1] || rowClasses[1]}>{items}</div>
+    if (node.kind === "row") return <div key={key} className={rowClasses[jsonLayoutColumns(visibleNodes)]}>{items}</div>
     return (
       <fieldset key={key} className={`min-w-0 rounded-md border p-3 ${spanClasses[node.span ?? 1] || ""}`}>
         <legend className="px-1 text-sm font-semibold">{node.title}</legend>
@@ -486,9 +504,10 @@ export const JsonModelDetail: React.FC<{
       const content = field ? renderField(field, `${key}-field`) : null
       return content ? <div key={key} className={`min-w-0 ${spanClasses[node.span ?? 1] || ""}`}>{content}</div> : null
     }
-    const items = (node.items ?? []).map((item, index) => renderLayoutNode(item, `${key}-${index}`)).filter(Boolean)
+    const visibleNodes = (node.items ?? []).filter((item) => isJsonLayoutNodeVisible(item, schema, data, rootValue))
+    const items = visibleNodes.map((item, index) => renderLayoutNode(item, `${key}-${index}`)).filter(Boolean)
     if (!items.length) return null
-    if (node.kind === "row") return <div key={key} className={rowClasses[node.columns ?? 1] || rowClasses[1]}>{items}</div>
+    if (node.kind === "row") return <div key={key} className={rowClasses[jsonLayoutColumns(visibleNodes)]}>{items}</div>
     return (
       <fieldset key={key} className={`min-w-0 rounded-md border p-3 ${spanClasses[node.span ?? 1] || ""}`}>
         <legend className="px-1 text-sm font-semibold">{node.title}</legend>
