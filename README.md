@@ -505,6 +505,41 @@ files. Import utilities in backend code with paths such as
 Project utilities belong in `app/utils/` and are mirrored to
 `generated/backend/app/utils/`.
 
+### Custom backend APIs, services, and CRUDs
+
+Keep developer-owned backend modules in `app/backend/api/`,
+`app/backend/services/`, and `app/backend/cruds/`. `site sync` mirrors them to
+the corresponding custom packages under `generated/backend/app/`:
+
+```text
+generated/backend/app/
+├── api/endpoints/custom/
+├── services/custom/
+└── cruds/custom/
+```
+
+Every module under `app/backend/api/` that directly defines a top-level
+`router` is included automatically. Define its prefix and tags on the router;
+no additional OneSite configuration is required:
+
+```python
+from fastapi import APIRouter
+
+from app.services.custom.health import get_health
+
+router = APIRouter(prefix="/health", tags=["health"])
+
+
+@router.get("")
+async def health():
+    return get_health()
+```
+
+Nested API packages are supported. Helper modules without a top-level `router`
+are copied but are not registered. Removing a source file removes its mirrored
+custom copy on the next sync. Import custom services and CRUDs through
+`app.services.custom.*` and `app.cruds.custom.*`.
+
 ## Model basics
 
 ```python
@@ -1148,6 +1183,10 @@ project/
 │   ├── frontend/
 │   │   ├── features/           # custom frontend feature source
 │   │   └── shared/             # shared custom frontend modules
+│   ├── backend/                # custom backend source
+│   │   ├── api/                # auto-registered APIRouter modules
+│   │   ├── services/
+│   │   └── cruds/
 │   └── utils/                  # reusable developer-owned backend helpers
 ├── generated/                 # replaceable OneSite output
 │   ├── backend/

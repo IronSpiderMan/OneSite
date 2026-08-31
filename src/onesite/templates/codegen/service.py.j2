@@ -560,11 +560,11 @@ class {{ model.name }}Service:
             )
         return len(objects)
 
-    {% if model.property_config_meta %}
-    async def update_properties_config(
-        self, session: AsyncSession, entity_id: {{ model.id_type }}, configs: list[dict],
+    {% if model.definition_binding_meta and model.definition_binding_meta.config_field %}
+    async def update_definition_config(
+        self, session: AsyncSession, entity_id: {{ model.id_type }}, configs: dict[str, Any],
     ) -> dict:
-        return await crud.update_properties_config(session, entity_id, configs)
+        return await crud.update_definition_config(session, entity_id, configs)
     {% endif %}
 
     {% if model.is_notification_table %}

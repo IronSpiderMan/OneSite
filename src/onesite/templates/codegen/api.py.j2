@@ -8,7 +8,7 @@ from pathlib import Path
 {% endif %}
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.definition_binding_meta or model.reverse_definition_bindings or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table or model.has_dynamic_action_states %}
@@ -34,6 +34,8 @@ from app.services.{{ model.module_name }} import service
 from app.cruds import {{ model.module_name }} as crud
 {% endif %}
 from app.models.{{ model.source_module }} import {{ model.name }}
+{% if model.definition_binding_meta %}from app.models.{{ model.definition_binding_meta.definition_module }} import {{ model.definition_binding_meta.definition_model }}
+{% endif -%}
 {% if model.has_function_actions %}
 from app.core.action_runtime import ActionContext, evaluate_action_state, invoke_action_callable
 {% endif %}
@@ -145,31 +147,7 @@ async def read_{{ model.lower_name }}_realtime(
     """
     results = await service.get_realtime_by_entity(session, entity_id)
 
-    # Enrich with DeviceModel properties (filter unknown metrics)
-    properties: dict[str, dict] = {}
-    {% if model.timescaledb_model_table and model.timescaledb_model_class and model.timescaledb_entity_model %}
-    {% if model.timescaledb_entity_sql_type == "INTEGER" %}
-    typed_entity_id = int(entity_id)
-    {% else %}
-    typed_entity_id = entity_id
-    {% endif %}
-    entity = await session.get({{ model.timescaledb_entity_model }}, typed_entity_id)
-    fk_field = "{{ model.timescaledb_model_table }}_id"
-    dm_id = getattr(entity, fk_field, None) if entity else None
-    if dm_id is not None:
-        from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
-        dm = await session.get({{ model.timescaledb_model_class }}, dm_id)
-        if dm and dm.properties:
-            for k, p in dm.properties.items():
-                properties[k] = p.model_dump() if hasattr(p, "model_dump") else dict(p)
-
-    # Filter out metrics not defined in properties
-    if properties:
-        metric_field = "{{ model.timescaledb_metric_field }}"
-        results = [r for r in results if r.get(metric_field) in properties]
-    {% endif %}
-
-    return {"data": results, "properties": properties}
+    return {"data": results}
 
 
 # ── TimescaleDB: get historical data for an entity ──
@@ -674,22 +652,24 @@ async def update_{{ model.lower_name }}(
         if getattr({{ model.lower_name }}, "{{ model.owner_field }}", None) != current_user.id:
             raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% endif %}
-    {% if model.reverse_property_config %}
-    # Lock properties field if entities reference this blueprint
-    if hasattr({{ model.lower_name }}_in, "properties") and getattr({{ model.lower_name }}_in, "properties") is not None:
-        from app.models.{{ model.reverse_property_config.entity_module }} import {{ model.reverse_property_config.entity_model }}
+    {% for binding in model.reverse_definition_bindings %}
+    {% if binding.protect_definitions_when_used %}
+    # Lock the definition field while entities reference this definition.
+    if hasattr({{ model.lower_name }}_in, "{{ binding.definitions_field }}") and getattr({{ model.lower_name }}_in, "{{ binding.definitions_field }}") is not None:
+        from app.models.{{ binding.entity_module }} import {{ binding.entity_model }}
         from sqlmodel import select, func
-        entity_fk = "{{ model.reverse_property_config.entity_fk_field }}"
-        check_stmt = select(func.count()).select_from({{ model.reverse_property_config.entity_model }}).where(
-            getattr({{ model.reverse_property_config.entity_model }}, entity_fk) == id
+        entity_fk = "{{ binding.entity_fk_field }}"
+        check_stmt = select(func.count()).select_from({{ binding.entity_model }}).where(
+            getattr({{ binding.entity_model }}, entity_fk) == id
         )
         check_result = await session.exec(check_stmt)
         if check_result.one() > 0:
             raise HTTPException(
                 status_code=400,
-                detail="Cannot modify properties: {{ model.reverse_property_config.entity_model }} records reference this {{ model.name }}. Remove or reassign them first."
+                detail="Cannot modify definitions: {{ binding.entity_model }} records reference this {{ model.name }}. Remove or reassign them first."
             )
     {% endif %}
+    {% endfor %}
     try:
         {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
         return {{ model.lower_name }}
@@ -785,18 +765,37 @@ async def bulk_delete_{{ model.lower_name }}(
         raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
     return {"deleted": deleted_count}
 
-{% if model.property_config_meta %}
-@router.put("/{id}/properties-config")
-async def update_{{ model.lower_name }}_properties_config(
+{% if model.definition_binding_meta %}
+@router.get("/{id}/definitions")
+async def read_{{ model.lower_name }}_definitions(
     *,
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     id: {{ model.id_type }},
-    configs: dict[str, Any] = Body(..., description="Properties configuration"),
+) -> Any:
+    """Return definitions selected by this entity."""
+    entity = await service.get(session, id)
+    if not entity:
+        raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    definition_id = getattr(entity, "{{ model.definition_binding_meta.definition_fk }}", None)
+    definition = await session.get({{ model.definition_binding_meta.definition_model }}, definition_id) if definition_id is not None else None
+    definitions = getattr(definition, "{{ model.definition_binding_meta.definitions_field }}", None) or {}
+    return {
+        key: value.model_dump() if hasattr(value, "model_dump") else value
+        for key, value in definitions.items()
+    }
+
+{% if model.definition_binding_meta.config_field %}
+@router.put("/{id}/definition-config")
+async def update_{{ model.lower_name }}_definition_config(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    id: {{ model.id_type }},
+    configs: dict[str, Any] = Body(..., description="Definition-backed configuration"),
 ) -> Any:
     """
-    Update the properties_config of a {{ model.name }}.
-    Only values can be modified — the set of property keys must match the blueprint.
+    Update the definition-backed configuration of a {{ model.name }}.
     """
     {{ model.lower_name }} = await service.get(session, id)
     if not {{ model.lower_name }}:
@@ -808,10 +807,11 @@ async def update_{{ model.lower_name }}_properties_config(
             raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% endif %}
     try:
-        result = await service.update_properties_config(session, id, configs)
+        result = await service.update_definition_config(session, id, configs)
         return result
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+{% endif %}
 {% endif %}
 
 {% if model.actions %}

@@ -270,12 +270,44 @@ class ModelUIConfig(_ConfigModel):
     form: FormUIConfig | None = None
 
 
+class TimeSeriesLifecycleConfig(_ConfigModel):
+    model_config = ConfigDict(extra="forbid")
+
+    chunk_interval: str | None = None
+    compress_after: str | None = None
+    retention_after: str | None = None
+    continuous_aggregate: bool = False
+    bucket_interval: str | None = None
+    refresh_start_offset: str | None = None
+    refresh_end_offset: str | None = None
+    refresh_schedule_interval: str | None = None
+
+
 class TimeSeriesTableConfig(_ConfigModel):
+    model_config = ConfigDict(extra="forbid")
+
     entity_field: str
     metric_field: str | None = None
     time_field: str | None = None
-    model_table: str | None = None
-    property_config: dict[str, Any] | None = None
+    lifecycle: TimeSeriesLifecycleConfig | None = None
+
+
+class DefinitionBindingConfig(_ConfigModel):
+    """Bind an entity to a separate model that defines keyed items.
+
+    The target definition model is derived from ``definition_fk``.  When an
+    ``instance_config_field`` is supplied, its value model is derived from the
+    field's ``dict[str, Model]`` annotation rather than repeated in config.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    definition_fk: str
+    definitions_field: str
+    instance_config_field: str | None = None
+    key_policy: Literal["definition", "subset", "free"] = "definition"
+    on_definition_change: Literal["reset", "merge", "keep"] = "reset"
+    protect_definitions_when_used: bool = True
 
 
 class ExternalResourceConfig(_ConfigModel):
@@ -385,12 +417,7 @@ class OneSiteConfig(_ConfigModel):
     import_key: str | None = None
     union_key: list[str] | None = None
     time_series_table: TimeSeriesTableConfig | None = None
-    # Legacy flat TimescaleDB spelling, retained for migration compatibility.
-    is_timescaledb: bool = False
-    timescaledb_entity_field: str | None = None
-    timescaledb_metric_field: str | None = None
-    timescaledb_time_field: str | None = None
-    timescaledb_model_table: str | None = None
+    definition_binding: DefinitionBindingConfig | None = None
     external_resource: ExternalResourceConfig | None = None
     tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)

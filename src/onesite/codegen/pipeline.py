@@ -44,7 +44,7 @@ def generate_code() -> None:
     site_config["_frontend_features"] = frontend_features
 
     # Phase 2 — Generate model tables (into models/, before sync so they are picked up)
-    phase_model_tables.phase_generate_model_tables(cwd, backend_path)
+    phase_model_tables.phase_generate_timeseries_artifacts(cwd, backend_path)
 
     # Phase 2.5 — Sync model files (copies generated + user models to backend)
     phase_sync_models.phase_sync_models(cwd, backend_path)

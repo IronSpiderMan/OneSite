@@ -151,7 +151,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
         {% elif field.json_item_kind %}
         <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
         {% elif field.json_item_schema %}
-        <JsonModelArrayEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue}{% if model.property_config_meta and field.name == model.property_config_meta.field_name %} canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')} canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}{% endif %} />
+        <JsonModelArrayEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue}{% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %} canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} } canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }{% endif %} />
         {% else %}
         <JsonInput value={value} onChange={onChange} jsonKind="{{ field.json_kind or 'object' }}" placeholder={ {% if field.json_kind == 'array' %}"[\\n  \\n]"{% else %}"{\\n  \\n}"{% endif %} } />
         {% endif %}
@@ -266,6 +266,9 @@ import * as {{ rfk.source_model }}{{ field.name|replace('_', ' ')|title|replace(
 {% for ts in model.reverse_timeseries %}
 import { get{{ ts.model_name }}Realtime, get{{ ts.model_name }}History } from '../../services/{{ ts.module_name }}';
 {% endfor %}
+{% if model.definition_binding_meta %}
+import { get{{ model.name }}Definitions } from '../../services/{{ model.module_name }}';
+{% endif %}
 {% if model.reverse_timeseries %}
 import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer } from 'recharts';
 {% endif %}
@@ -757,9 +760,18 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% for ts in model.reverse_timeseries %}
     const fetch{{ ts.model_name }}Realtime = async (itemId: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
         try {
+            {% if model.definition_binding_meta %}
+            const [result, definitions] = await Promise.all([
+                get{{ ts.model_name }}Realtime(itemId),
+                get{{ model.name }}Definitions(itemId),
+            ]);
+            {% else %}
             const result = await get{{ ts.model_name }}Realtime(itemId);
+            {% endif %}
             set{{ ts.model_name }}Realtime(result.data || []);
-            set{{ ts.model_name }}Properties(result.properties || {});
+            {% if model.definition_binding_meta %}
+            set{{ ts.model_name }}Properties(definitions || {});
+            {% endif %}
             setTsLastRefreshed(new Date());
         } catch (error) {
             console.error(error);
@@ -1416,9 +1428,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             value={value}
                                             onChange={onChange}
                                             rootValue={editRootValue}
-                                            {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
-                                            canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
-                                            canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                                            {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
+                                            canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
+                                            canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
                                             {% endif %}
                                         />
                                         {% else %}
@@ -1747,9 +1759,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         value={value}
                                         onChange={onChange}
                                         rootValue={editRootValue}
-                                        {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
-                                        canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
-                                        canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                                        {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
+                                        canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
+                                        canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
                                         {% endif %}
                                     />
                                 {% else %}
@@ -1764,7 +1776,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 <TableHeader>
                                     <TableRow>
                                         {% for item_field in field.json_item_schema.fields %}
-                                        <TableHead>{{ item_field.name }}</TableHead>
+                                        <TableHead>{t('{{ item_field.labelKey or item_field.name }}')}</TableHead>
                                         {% endfor %}
                                     </TableRow>
                                 </TableHeader>
@@ -1855,9 +1867,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         {% if field.json_lock_keys %}
                                         lockKeys
                                         {% endif %}
-                                        {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
-                                        canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
-                                        canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                                        {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
+                                        canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
+                                        canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
                                         {% endif %}
                                     />
                                 {% else %}
@@ -1873,7 +1885,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <TableHead>{t('json_editor.key')}</TableHead>
                                         {% if field.json_item_schema and field.json_item_schema.fields %}
                                         {% for item_field in field.json_item_schema.fields %}
-                                        <TableHead>{{ item_field.name }}</TableHead>
+                                        <TableHead>{t('{{ item_field.labelKey or item_field.name }}')}</TableHead>
                                         {% endfor %}
                                         {% else %}
                                         <TableHead>{t('json_editor.object')}</TableHead>
@@ -2482,8 +2494,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        {% if ts.timescaledb_model_table and ts.timescaledb_model_class %}
-                        {# Card-style display with properties enrichment #}
+                        {% if model.definition_binding_meta %}
+                        {# Card-style display enriched by the entity's definition binding. #}
                         {% if ts.metric_field %}
                         <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                             <div className="relative w-full sm:max-w-xs">
@@ -2659,7 +2671,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     </CardContent>
                 </Card>
 
-                {% if not (ts.timescaledb_model_table and ts.timescaledb_model_class and ts.metric_field) %}
+                {% if not (model.definition_binding_meta and ts.metric_field) %}
                 {/* Timeseries History */}
                 <Card className="col-span-full">
                     <CardHeader className="pb-3">

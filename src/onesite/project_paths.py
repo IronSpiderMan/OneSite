@@ -13,6 +13,7 @@ class ProjectPaths:
     tools: Path
     tasks: Path
     cmd: Path
+    backend_source: Path
     frontend_source: Path
     generated: Path
     backend: Path
@@ -38,6 +39,7 @@ def get_project_paths(root: Path) -> ProjectPaths:
         tools=source / "tools",
         tasks=source / "tasks",
         cmd=source / "cmd",
+        backend_source=source / "backend",
         frontend_source=source / "frontend",
         generated=generated,
         backend=generated / "backend",

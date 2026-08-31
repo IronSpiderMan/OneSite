@@ -984,23 +984,42 @@ def get_model_fields(
     owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
 
     # ── TimescaleDB / time-series config ──────────────────────────────────
-    # New nested format:  __onesite__ = {"time_series_table": {"entity_field": ..., "metric_field": ..., ...}}
-    # Legacy flat format: __onesite__ = {"is_timescaledb": True, "timescaledb_entity_field": ...}
     ts_config = model_site_props.get("time_series_table")
     if ts_config:
         is_timescaledb = True
         timescaledb_entity_field = ts_config.get("entity_field")
         timescaledb_metric_field = ts_config.get("metric_field")
         timescaledb_time_field = ts_config.get("time_field")
-        timescaledb_model_table = ts_config.get("model_table")
-        property_config = ts_config.get("property_config")
     else:
-        is_timescaledb = bool(model_site_props.get("is_timescaledb", False))
-        timescaledb_entity_field = model_site_props.get("timescaledb_entity_field", None)
-        timescaledb_metric_field = model_site_props.get("timescaledb_metric_field", None)
-        timescaledb_time_field = model_site_props.get("timescaledb_time_field", None)
-        timescaledb_model_table = model_site_props.get("timescaledb_model_table", None)
-        property_config = None
+        is_timescaledb = False
+        timescaledb_entity_field = None
+        timescaledb_metric_field = None
+        timescaledb_time_field = None
+
+    removed_timeseries_keys = {
+        "is_timescaledb",
+        "timescaledb_entity_field",
+        "timescaledb_metric_field",
+        "timescaledb_time_field",
+        "timescaledb_model_table",
+    }
+    configured_removed_keys = sorted(removed_timeseries_keys.intersection(model_site_props))
+    if configured_removed_keys:
+        raise ValueError(
+            f"Removed TimescaleDB configuration on {model_cls.__name__}: "
+            + ", ".join(configured_removed_keys)
+            + ". Use time_series_table instead."
+        )
+    if ts_config:
+        removed_nested_keys = sorted({"model_table", "property_config"}.intersection(ts_config))
+        if removed_nested_keys:
+            raise ValueError(
+                f"Removed time_series_table configuration on {model_cls.__name__}: "
+                + ", ".join(removed_nested_keys)
+                + ". Move definition/config behavior to definition_binding on the entity model."
+            )
+
+    definition_binding = model_site_props.get("definition_binding")
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -1541,6 +1560,5 @@ def get_model_fields(
         timescaledb_entity_field=timescaledb_entity_field,
         timescaledb_metric_field=timescaledb_metric_field,
         timescaledb_time_field=timescaledb_time_field,
-        timescaledb_model_table=timescaledb_model_table,
-        property_config=property_config,
+        definition_binding=definition_binding,
     )

@@ -12,6 +12,7 @@ def update_api_router(
     external_resources_enabled: bool = False,
     visualizations_enabled: bool = False,
     import_export_enabled: bool = False,
+    custom_api_modules: List[str] | None = None,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -68,6 +69,16 @@ def update_api_router(
         routers.append(
             f'api_router.include_router({model["module_name"]}.router, prefix="{prefix}", tags=["{tag_name}"])'
         )
+
+    for index, module in enumerate(custom_api_modules or []):
+        module_parts = module.split(".")
+        module_name = module_parts[-1]
+        package = ".".join(
+            ["app", "api", "endpoints", "custom", *module_parts[:-1]]
+        )
+        alias = f"custom_api_{index}"
+        imports.append(f"from {package} import {module_name} as {alias}")
+        routers.append(f"api_router.include_router({alias}.router)")
 
     content = (
         "from fastapi import APIRouter\n"

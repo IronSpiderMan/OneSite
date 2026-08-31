@@ -181,8 +181,7 @@ class ModelIntrospectResult:
     timescaledb_entity_field: str | None
     timescaledb_metric_field: str | None
     timescaledb_time_field: str | None
-    timescaledb_model_table: str | None
-    property_config: dict | None
+    definition_binding: dict | None
 
 
 # ── Pipeline context ────────────────────────────────────────────────────────

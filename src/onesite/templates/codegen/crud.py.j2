@@ -5,12 +5,12 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.datetime import to_utc
 from app.core.db import transactional_write
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
-from app.models.{{ model.source_module }} import {{ model.name }}{% if model.property_config_meta %}, {{ model.property_config_meta.config_class }}{% endif %}
+from app.models.{{ model.source_module }} import {{ model.name }}{% if model.definition_binding_meta and model.definition_binding_meta.config_class %}, {{ model.definition_binding_meta.config_class }}{% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
 from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
 {% endif %}
-{% if model.property_config_meta %}
-from app.models.{{ model.property_config_meta.blueprint_module }} import {{ model.property_config_meta.blueprint_model }}
+{% if model.definition_binding_meta %}
+from app.models.{{ model.definition_binding_meta.definition_module }} import {{ model.definition_binding_meta.definition_model }}
 {% endif %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not model.is_timescaledb %}, {{ model.name }}Update{% endif %}
 {% if model.m2m_fields %}
@@ -228,25 +228,6 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create, *, auto_
     {% endif %}
     {% if datetime_fields %}
     obj_dict = _normalize_datetimes(obj_dict)
-    {% endif %}
-    {% if model.timescaledb_model_table and model.timescaledb_metric_field and model.timescaledb_model_class and model.timescaledb_entity_model %}
-    # Validate metric_key against {{ model.timescaledb_model_class }}.properties
-    entity_id_val = obj_dict.get("{{ model.timescaledb_entity_field }}")
-    if entity_id_val is not None:
-        # Look up entity FK to find which {{ model.timescaledb_model_class }} it uses
-        entity = await session.get({{ model.timescaledb_entity_model }}, entity_id_val)
-        model_table_id = getattr(entity, "{{ model.timescaledb_model_table }}_id", None) if entity else None
-        if model_table_id is not None:
-            from app.models.{{ model.timescaledb_model_table }} import {{ model.timescaledb_model_class }}
-            dm = await session.get({{ model.timescaledb_model_class }}, model_table_id)
-            if dm and dm.properties:
-                valid_keys = set(dm.properties.keys())
-                metric_val = obj_dict.get("{{ model.timescaledb_metric_field }}")
-                if metric_val is not None and metric_val not in valid_keys:
-                    raise ValueError(
-                        "Unknown metric '" + str(metric_val) + "'. "
-                        "Allowed: " + ", ".join(sorted(valid_keys))
-                    )
     {% endif %}
     db_obj = {{ model.name }}(**obj_dict)
     hook_context = ModelHookContext(
@@ -842,33 +823,18 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create, *, auto_
     obj_dict = _normalize_datetimes(obj_dict)
     {% endif %}
 
-    {% if model.property_config_meta %}
-    # Initialize properties_config from blueprint model if not explicitly provided
-    if not obj_dict.get("{{ model.property_config_meta.field_name }}"):
-        blueprint_id = obj_dict.get("{{ model.property_config_meta.blueprint_fk }}")
-        if blueprint_id is not None:
-            blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, blueprint_id)
-            if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
-                props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
-                config_entries: dict[str, Any] = {}
-                for key, p in props.items():
-                    cfg = {{ model.property_config_meta.config_class }}(
-                        {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
-                        {% set ft = field_type.lower() %}
-                        {% if '= true' in ft %}
-                        {{ field_name }}=True,
-                        {% elif '= false' in ft %}
-                        {{ field_name }}=False,
-                        {% elif '= ' in ft %}
-                        {{ field_name }}={{ field_type.split('=', 1)[1].strip() }},
-                        {% elif 'optional' in ft %}
-                        {{ field_name }}=None,
-                        {% else %}
-                        {% endif %}
-                        {% endfor %}
-                    )
-                    config_entries[key] = cfg.model_dump()
-                obj_dict["{{ model.property_config_meta.field_name }}"] = config_entries
+    {% if model.definition_binding_meta and model.definition_binding_meta.config_field %}
+    # Initialize instance configuration from the selected definition.
+    if not obj_dict.get("{{ model.definition_binding_meta.config_field }}"):
+        definition_id = obj_dict.get("{{ model.definition_binding_meta.definition_fk }}")
+        if definition_id is not None:
+            definition = await session.get({{ model.definition_binding_meta.definition_model }}, definition_id)
+            definitions = getattr(definition, "{{ model.definition_binding_meta.definitions_field }}", None) if definition else None
+            if definitions:
+                obj_dict["{{ model.definition_binding_meta.config_field }}"] = {
+                    key: {{ model.definition_binding_meta.config_class }}().model_dump()
+                    for key in definitions
+                }
     {% endif %}
 
     db_obj = {{ model.name }}(**obj_dict)
@@ -1008,56 +974,58 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% endif %}
     {% endfor %}
     
-    {% if model.property_config_meta %}
-    # Capture old blueprint FK before setattr overwrites it
-    _old_blueprint_id = getattr(db_obj, "{{ model.property_config_meta.blueprint_fk }}", None)
+    {% if model.definition_binding_meta %}
+    # Capture the old definition FK before setattr overwrites it.
+    _old_definition_id = getattr(db_obj, "{{ model.definition_binding_meta.definition_fk }}", None)
     {% endif %}
 
     for key, value in obj_data.items():
-        {% if model.property_config_meta %}
-        if key == "{{ model.property_config_meta.field_name }}" and value is not None:
-            # Validate add/delete permissions (dict keys)
-            field_perms = "{{ model.property_config_meta.field_permissions }}"
-            old_configs = getattr(db_obj, "{{ model.property_config_meta.field_name }}", None) or {}
-            old_keys = set(old_configs.keys())
-            new_keys = set(value.keys())
-            added = new_keys - old_keys
-            if added and "a" not in field_perms:
-                raise ValueError("Adding items is not allowed: " + ", ".join(sorted(added)))
-            removed = old_keys - new_keys
-            if removed and "l" not in field_perms:
-                raise ValueError("Deleting items is not allowed: " + ", ".join(sorted(removed)))
-            # Convert Pydantic objects to dicts for JSON storage
+        {% if model.definition_binding_meta and model.definition_binding_meta.config_field %}
+        if key == "{{ model.definition_binding_meta.config_field }}" and value is not None:
             value = {k: (v if isinstance(v, dict) else v.model_dump()) for k, v in value.items()}
+            {% if model.definition_binding_meta.key_policy != "free" %}
+            definition_id = obj_data.get(
+                "{{ model.definition_binding_meta.definition_fk }}",
+                _old_definition_id,
+            )
+            definition = await session.get({{ model.definition_binding_meta.definition_model }}, definition_id) if definition_id is not None else None
+            definition_keys = set(
+                (getattr(definition, "{{ model.definition_binding_meta.definitions_field }}", None) or {}).keys()
+            )
+            config_keys = set(value.keys())
+            {% if model.definition_binding_meta.key_policy == "definition" %}
+            if config_keys != definition_keys:
+                raise ValueError("Configuration keys must exactly match definition keys")
+            {% else %}
+            unknown_keys = config_keys - definition_keys
+            if unknown_keys:
+                raise ValueError("Unknown configuration keys: " + ", ".join(sorted(unknown_keys)))
+            {% endif %}
+            {% endif %}
         {% endif %}
         setattr(db_obj, key, value)
 
-    {% if model.property_config_meta %}
-    # Re-initialize properties_config if blueprint FK changed
-    new_bp = obj_data.get("{{ model.property_config_meta.blueprint_fk }}")
-    if new_bp is not None and new_bp != _old_blueprint_id:
-        blueprint = await session.get({{ model.property_config_meta.blueprint_model }}, new_bp)
-        if blueprint and getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}", None):
-            props = getattr(blueprint, "{{ model.property_config_meta.blueprint_properties_field }}")
-            config_entries: dict[str, Any] = {}
-            for key, p in props.items():
-                cfg = {{ model.property_config_meta.config_class }}(
-                    {% for field_name, field_type in model.property_config_meta.config_fields.items() %}
-                    {% set ft = field_type.lower() %}
-                    {% if '= true' in ft %}
-                    {{ field_name }}=True,
-                    {% elif '= false' in ft %}
-                    {{ field_name }}=False,
-                    {% elif '= ' in ft %}
-                    {{ field_name }}={{ field_type.split('=', 1)[1].strip() }},
-                    {% elif 'optional' in ft %}
-                    {{ field_name }}=None,
-                    {% else %}
-                    {% endif %}
-                    {% endfor %}
-                )
-                config_entries[key] = cfg.model_dump()
-            setattr(db_obj, "{{ model.property_config_meta.field_name }}", config_entries)
+    {% if model.definition_binding_meta and model.definition_binding_meta.config_field %}
+    # Apply the configured policy when the selected definition changes.
+    if "{{ model.definition_binding_meta.definition_fk }}" in obj_data:
+        new_definition_id = obj_data.get("{{ model.definition_binding_meta.definition_fk }}")
+        if new_definition_id != _old_definition_id:
+            definition = await session.get({{ model.definition_binding_meta.definition_model }}, new_definition_id) if new_definition_id is not None else None
+            definitions = getattr(definition, "{{ model.definition_binding_meta.definitions_field }}", None) or {}
+            {% if model.definition_binding_meta.on_definition_change == "reset" %}
+            new_configs = {
+                key: {{ model.definition_binding_meta.config_class }}().model_dump()
+                for key in definitions
+            }
+            setattr(db_obj, "{{ model.definition_binding_meta.config_field }}", new_configs)
+            {% elif model.definition_binding_meta.on_definition_change == "merge" %}
+            old_configs = getattr(db_obj, "{{ model.definition_binding_meta.config_field }}", None) or {}
+            new_configs = {
+                key: old_configs.get(key, {{ model.definition_binding_meta.config_class }}().model_dump())
+                for key in definitions
+            }
+            setattr(db_obj, "{{ model.definition_binding_meta.config_field }}", new_configs)
+            {% endif %}
     {% endif %}
 
     {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
@@ -1323,49 +1291,50 @@ async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id:
 {% endfor %}
 {% endif %}
 
-{% if model.property_config_meta %}
+{% if model.definition_binding_meta and model.definition_binding_meta.config_field %}
 @transactional_write
-async def update_properties_config(
+async def update_definition_config(
     session: AsyncSession,
     entity_id: {{ model.id_type }},
-    configs: list[dict],
+    configs: dict[str, Any],
     *,
     auto_commit: bool = True,
 ) -> dict:
-    """Update properties_config on entity, with add/delete permission checks."""
+    """Validate and update the entity's definition-backed configuration."""
     entity = await session.get({{ model.name }}, entity_id)
     if not entity:
         raise ValueError("{{ model.name }} not found")
 
-    field_perms = "{{ model.property_config_meta.field_permissions }}"
-    old_keys = set(getattr(entity, "{{ model.property_config_meta.field_name }}", {}).keys())
-    new_keys = set(configs.keys())
-
-    # Check add permission
-    added = new_keys - old_keys
-    if added and "a" not in field_perms:
-        raise ValueError(
-            "Adding items is not allowed: " + ", ".join(sorted(added))
-        )
-    # Check delete permission
-    removed = old_keys - new_keys
-    if removed and "l" not in field_perms:
-        raise ValueError(
-            "Deleting items is not allowed: " + ", ".join(sorted(removed))
-        )
+    {% if model.definition_binding_meta.key_policy != "free" %}
+    definition_id = getattr(entity, "{{ model.definition_binding_meta.definition_fk }}", None)
+    definition = await session.get({{ model.definition_binding_meta.definition_model }}, definition_id) if definition_id is not None else None
+    definition_keys = set(
+        (getattr(definition, "{{ model.definition_binding_meta.definitions_field }}", None) or {}).keys()
+    )
+    config_keys = set(configs.keys())
+    {% if model.definition_binding_meta.key_policy == "definition" %}
+    if config_keys != definition_keys:
+        raise ValueError("Configuration keys must exactly match definition keys")
+    {% else %}
+    unknown_keys = config_keys - definition_keys
+    if unknown_keys:
+        raise ValueError("Unknown configuration keys: " + ", ".join(sorted(unknown_keys)))
+    {% endif %}
+    {% endif %}
 
     # Validate config entries with model class
     validated: dict[str, Any] = {}
     for key, c in configs.items():
         if isinstance(c, dict):
-            validated[key] = {{ model.property_config_meta.config_class }}(**c).model_dump()
+            validated[key] = {{ model.definition_binding_meta.config_class }}(**c).model_dump()
         elif hasattr(c, "model_dump"):
             validated[key] = c.model_dump()
         else:
             validated[key] = c
 
-    setattr(entity, "{{ model.property_config_meta.field_name }}", validated)
+    setattr(entity, "{{ model.definition_binding_meta.config_field }}", validated)
     session.add(entity)
+    await session.flush()
     await session.refresh(entity)
     return entity.model_dump()
 {% endif %}

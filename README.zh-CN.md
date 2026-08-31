@@ -629,6 +629,37 @@ from app.utils.formatting import format_alarm
 
 项目工具函数应放在 `app/utils/`，会同步到 `generated/backend/app/utils/`。
 
+### 自定义后端 API、Service 与 CRUD
+
+开发者维护的后端模块放在 `app/backend/api/`、`app/backend/services/` 和
+`app/backend/cruds/`。执行 `site sync` 后，它们会分别镜像到：
+
+```text
+generated/backend/app/api/endpoints/custom/
+generated/backend/app/services/custom/
+generated/backend/app/cruds/custom/
+```
+
+`app/backend/api/` 下每个直接定义顶层 `router` 的模块都会自动注册，不需要在
+`site_config.py` 中重复配置 prefix 或 tag；请直接在 `APIRouter` 上声明：
+
+```python
+from fastapi import APIRouter
+
+from app.services.custom.health import get_health
+
+router = APIRouter(prefix="/health", tags=["health"])
+
+
+@router.get("")
+async def health():
+    return get_health()
+```
+
+支持嵌套 API 包；没有顶层 `router` 的辅助模块只复制、不注册。删除源文件后，
+下次同步也会删除对应的生成副本。自定义 Service 与 CRUD 的导入路径分别为
+`app.services.custom.*` 和 `app.cruds.custom.*`。
+
 ## 已生成能力
 
 - JWT 登录、角色权限、所有者隔离
@@ -696,6 +727,10 @@ pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢�
 │   ├── models/                  # 开发者维护的数据模型
 │   ├── integrations/
 │   │   └── mqtt/                # 开发者维护的 MQTT handler
+│   ├── backend/
+│   │   ├── api/                 # 自动注册的 APIRouter 模块
+│   │   ├── services/
+│   │   └── cruds/
 │   └── utils/                   # 开发者维护的后端工具模块
 ├── generated/
 │   ├── backend/

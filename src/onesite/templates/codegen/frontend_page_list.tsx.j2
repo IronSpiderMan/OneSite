@@ -34,7 +34,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelTableEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 {% if not model.page_edit %}
@@ -1929,7 +1929,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         rootValue={rootValue}
                     />
                     {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
-                    <JsonModelDictEditor
+                    <JsonModelTableEditor
+                        collectionKind="dict"
                         itemSchema={ {{ field.json_item_schema | tojson }} }
                         value={value}
                         onChange={onChange}
@@ -1949,9 +1950,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         value={value}
                         onChange={onChange}
                         rootValue={rootValue}
-                        {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
-                        canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
-                        canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                        {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
+                        canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
+                        canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
                         {% endif %}
                     />
                     {% else %}

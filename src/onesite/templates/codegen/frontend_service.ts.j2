@@ -74,11 +74,17 @@ export const bulkDelete{{ model.name }} = async (ids: {{ 'string[]' if 'str' in 
     return response.data;
 };
 
-{% if model.property_config_meta %}
-export const update{{ model.name }}PropertiesConfig = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, configs: Record<string, any>[]) => {
-    const response = await request.put(`${API_URL}/${id}/properties-config`, configs, { suppressErrorToast: true });
+{% if model.definition_binding_meta %}
+export const get{{ model.name }}Definitions = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
+    const response = await request.get<Record<string, any>>(`${API_URL}/${id}/definitions`);
     return response.data;
 };
+{% if model.definition_binding_meta.config_field %}
+export const update{{ model.name }}DefinitionConfig = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, configs: Record<string, any>) => {
+    const response = await request.put(`${API_URL}/${id}/definition-config`, configs, { suppressErrorToast: true });
+    return response.data;
+};
+{% endif %}
 {% endif %}
 
 {% if model.dashboard_metrics %}
@@ -306,7 +312,6 @@ export interface {{ model.name }} {
 
 export interface {{ model.name }}RealtimeResponse {
     data: {{ model.name }}[];
-    properties: Record<string, Record<string, any>>;
 }
 
 export const create{{ model.name }} = async (data: any) => {

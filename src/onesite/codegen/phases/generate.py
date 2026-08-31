@@ -15,6 +15,7 @@ from typing import Any
 
 from ...project_paths import get_project_paths
 from ..file_utils import copy_file_with_status
+from ..custom_backend import sync_custom_backend
 from ..i18n import generate_locale_files
 from ..render import generate_file, generate_file_if_missing, generate_theme_file
 from ..theme import resolve_theme
@@ -1111,6 +1112,11 @@ def phase_generate_aggregated(
         backend_path / "app" / "main.py",
     )
 
+    # Custom backend source is mirrored after per-model generation so it stays
+    # developer-owned. It lives in a dedicated generated namespace to avoid
+    # collisions with framework and model modules.
+    custom_api_modules = sync_custom_backend(cwd, backend_path)
+
     # ── API router ──
     update_api_router(
         api_models,
@@ -1120,6 +1126,7 @@ def phase_generate_aggregated(
         external_resources_enabled,
         bool(visualizations),
         background_tasks_enabled,
+        custom_api_modules,
     )
 
     if tools or scheduled_tasks or import_export_enabled:

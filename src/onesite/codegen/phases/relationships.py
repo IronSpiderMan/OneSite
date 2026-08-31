@@ -929,131 +929,86 @@ def _resolve_timescaledb_metadata(models: list[ModelDefinition]) -> None:
             model["timescaledb_entity_sql_type"] = "INTEGER"
             model["timescaledb_entity_target_table"] = entity_field.replace("_id", "")
 
-        model_table = model.get("timescaledb_model_table", "")
-        if model_table:
-            from .base import to_pascal
-            model["timescaledb_model_class"] = to_pascal(model_table)
-
-
-def _resolve_property_config_relations(models: list[ModelDefinition]) -> None:
-    """For each timeseries model with property_config, build metadata on entity and blueprint."""
+def _resolve_definition_bindings(models: list[ModelDefinition]) -> None:
+    """Resolve entity-owned definition bindings independently of timeseries."""
     for model in models:
-        model.setdefault("property_config_meta", None)
-        model.setdefault("reverse_property_config", None)
+        model["definition_binding_meta"] = None
+        model["reverse_definition_bindings"] = []
 
-    for ts_model in models:
-        if not ts_model.get("is_timescaledb"):
+    model_by_name = {model["name"]: model for model in models}
+    for entity_model in models:
+        binding = entity_model.get("definition_binding")
+        if not binding:
             continue
 
-        property_config = ts_model.get("property_config")
-        if not property_config:
-            continue
+        definition_fk = binding["definition_fk"]
+        definitions_field = binding["definitions_field"]
+        config_field = binding.get("instance_config_field")
 
-        entity_field = ts_model.get("timescaledb_entity_field")
-        model_table = ts_model.get("timescaledb_model_table")
-        if not entity_field or not model_table:
-            continue
+        fk = next(
+            (item for item in entity_model["foreign_keys"] if item["name"] == definition_fk),
+            None,
+        )
+        if fk is None:
+            raise ValueError(
+                f"{entity_model['name']} definition_binding.definition_fk "
+                f"references non-FK field {definition_fk!r}"
+            )
 
-        # Find the entity model (target of entity_field FK)
-        entity_model_name = None
-        for fk in ts_model["foreign_keys"]:
-            if fk["name"] == entity_field:
-                entity_model_name = fk["target_model"]
-                break
-        if not entity_model_name:
-            continue
+        definition_model = model_by_name.get(fk["target_model"])
+        if definition_model is None:
+            raise ValueError(
+                f"{entity_model['name']} definition binding target "
+                f"{fk['target_model']!r} was not introspected"
+            )
+        if not any(field["name"] == definitions_field for field in definition_model["fields"]):
+            raise ValueError(
+                f"{definition_model['name']} has no definitions field {definitions_field!r}"
+            )
 
-        entity_model = next((m for m in models if m["name"] == entity_model_name), None)
-        if entity_model is None:
-            continue
+        config_class = None
+        config_permissions = ""
+        if config_field:
+            field = next(
+                (item for item in entity_model["fields"] if item["name"] == config_field),
+                None,
+            )
+            if field is None:
+                raise ValueError(
+                    f"{entity_model['name']} has no instance config field {config_field!r}"
+                )
+            schema = field.get("json_item_schema") or {}
+            config_class = schema.get("name")
+            if not config_class:
+                raise ValueError(
+                    f"{entity_model['name']}.{config_field} must be typed as "
+                    "dict[str, SQLModel]"
+                )
+            config_permissions = field["permissions"]
 
-        field_name = property_config.get("field_name", "properties_config")
-        config_fields = property_config.get("config_fields", {})
-        config_model_name = property_config.get("config_model")
-        blueprint_fk = f"{model_table}_id"
-
-        # Resolve config_class and config_fields (config_model takes priority)
-        if config_model_name:
-            config_class = config_model_name
-            if not config_fields:
-                # Introspect the user-defined class at runtime
-                try:
-                    import sys
-                    from enum import Enum
-                    from pydantic_core import PydanticUndefined
-                    # Search both entity and timeseries modules
-                    candidate_modules = [
-                        f"app.models.{entity_model['source_module']}",
-                        f"app.models.{ts_model['source_module']}",
-                    ]
-                    config_cls = None
-                    for module_name in candidate_modules:
-                        if module_name in sys.modules:
-                            module = sys.modules[module_name]
-                            config_cls = getattr(module, config_model_name, None)
-                            if config_cls is not None:
-                                break
-                    if config_cls:
-                        for fn, fi in config_cls.model_fields.items():
-                            if fn == "property_key" or fn.startswith("_"):
-                                continue
-                            anno = fi.annotation
-                            anno_str = anno.__name__ if hasattr(anno, '__name__') else str(anno)
-                            if fi.default is not PydanticUndefined and fi.default is not None:
-                                default = fi.default
-                                if isinstance(default, Enum):
-                                    default = default.value
-                                config_fields[fn] = f"{anno_str} = {repr(default)}"
-                            elif fi.default is not PydanticUndefined:
-                                config_fields[fn] = f"Optional[{anno_str}]"
-                            else:
-                                config_fields[fn] = anno_str
-                except Exception:
-                    pass
-        else:
-            config_class = f"{entity_model['name']}PropertyConfig"
-
-        # Find blueprint model
-        blueprint_model_name = None
-        for fk in entity_model["foreign_keys"]:
-            if fk["name"] == blueprint_fk:
-                blueprint_model_name = fk["target_model"]
-                break
-        if not blueprint_model_name:
-            # Try pascal case
-            from .base import to_pascal
-            blueprint_model_name = to_pascal(model_table)
-
-        blueprint_model = next((m for m in models if m["name"] == blueprint_model_name), None)
-
-        # Get field permissions from the injected properties_config field
-        field_permissions = "ru"  # default
-        for f in entity_model.get("fields", []):
-            if f["name"] == field_name:
-                field_permissions = f["permissions"]
-                break
-
-        # Set property_config_meta on the entity model
-        entity_model["property_config_meta"] = {
-            "field_name": field_name,
-            "config_fields": config_fields,
+        entity_model["definition_binding_meta"] = {
+            "definition_fk": definition_fk,
+            "definition_model": definition_model["name"],
+            "definition_module": definition_model["source_module"],
+            "definitions_field": definitions_field,
+            "config_field": config_field,
             "config_class": config_class,
-            "field_permissions": field_permissions,
-            "blueprint_fk": blueprint_fk,
-            "blueprint_model": blueprint_model_name,
-            "blueprint_module": model_table,
-            "blueprint_properties_field": "properties",
-            "ts_model_name": ts_model["name"],
+            "config_permissions": config_permissions,
+            "key_policy": binding.get("key_policy", "definition"),
+            "on_definition_change": binding.get("on_definition_change", "reset"),
+            "protect_definitions_when_used": binding.get(
+                "protect_definitions_when_used", True
+            ),
         }
-
-        # Set reverse_property_config on the blueprint model
-        if blueprint_model:
-            blueprint_model["reverse_property_config"] = {
-                "entity_model": entity_model["name"],
-                "entity_module": entity_model["module_name"],
-                "entity_fk_field": blueprint_fk,
-                "properties_field": "properties",
-            }
+        definition_model["reverse_definition_bindings"].append({
+            "entity_model": entity_model["name"],
+            "entity_module": entity_model["source_module"],
+            "entity_fk_field": definition_fk,
+            "definitions_field": definitions_field,
+            "protect_definitions_when_used": binding.get(
+                "protect_definitions_when_used", True
+            ),
+        })
 
 
 def _resolve_timeseries_relations(models: list[ModelDefinition]) -> None:
@@ -1084,20 +1039,6 @@ def _resolve_timeseries_relations(models: list[ModelDefinition]) -> None:
                 ts_model["timescaledb_entity_source_module"] = model["source_module"]
                 ts_model["timescaledb_entity_label_field"] = model.get("search_field") or "id"
                 ts_model["timescaledb_entity_id_field"] = "id"
-                blueprint = next(
-                    (
-                        candidate for candidate in models
-                        if candidate["table_name"] == ts_model.get("timescaledb_model_table")
-                    ),
-                    None,
-                )
-                if blueprint is not None:
-                    ts_model["timescaledb_model_source_module"] = blueprint["source_module"]
-                    ts_model["timescaledb_model_id_field"] = "id"
-                    ts_model["timescaledb_model_properties_field"] = "properties"
-                    ts_model["timescaledb_entity_model_field"] = (
-                        f"{ts_model['timescaledb_model_table']}_id"
-                    )
                 model.setdefault("reverse_timeseries", [])
                 model["reverse_timeseries"].append({
                     "model_name": ts_model["name"],
@@ -1111,8 +1052,6 @@ def _resolve_timeseries_relations(models: list[ModelDefinition]) -> None:
                     "entity_model": target_model_name,
                     "metric_field": ts_model.get("timescaledb_metric_field"),
                     "time_field": ts_model.get("timescaledb_time_column", "created_at"),
-                    "timescaledb_model_table": ts_model.get("timescaledb_model_table"),
-                    "timescaledb_model_class": ts_model.get("timescaledb_model_class"),
                     "api_base": f"{ts_model['module_name']}s",
                     "source_module": ts_model["source_module"],
                 })
@@ -1137,7 +1076,7 @@ def phase_resolve_relationships(
     _init_link_table_flags(models)
     _resolve_timescaledb_metadata(models)
     _resolve_timeseries_relations(models)
-    _resolve_property_config_relations(models)
+    _resolve_definition_bindings(models)
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_tree_view_leaves(models)
     _resolve_m2m(models, model_map, module_map)

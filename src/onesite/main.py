@@ -105,6 +105,14 @@ def _ensure_resource_hooks(source_dir: Path) -> None:
     console.print(f"[green]Created {resource_file}[/green]")
 
 
+def _ensure_custom_backend_source(source_dir: Path) -> None:
+    """Create the developer-owned custom backend package layout."""
+    for name in ("api", "services", "cruds"):
+        directory = source_dir / "backend" / name
+        directory.mkdir(parents=True, exist_ok=True)
+        (directory / "__init__.py").touch(exist_ok=True)
+
+
 def _desktop_config_defaults(project_name: str) -> dict[str, object]:
     slug = re.sub(r"[^A-Za-z0-9-]+", "-", project_name).strip("-").lower() or "app"
     if slug[0].isdigit():
@@ -203,6 +211,7 @@ def init():
         utils_init.write_text("", encoding="utf-8")
         console.print("[green]Created utils/__init__.py[/green]")
     _ensure_resource_hooks(paths.source)
+    _ensure_custom_backend_source(paths.source)
 
     visualization_file = base_dir / "visualizations.py"
     if not visualization_file.exists():
@@ -259,6 +268,7 @@ def create(
     utils_dir.mkdir(parents=True)
     (utils_dir / "__init__.py").write_text("", encoding="utf-8")
     _ensure_resource_hooks(paths.source)
+    _ensure_custom_backend_source(paths.source)
     _ensure_deploy_files(target_dir)
 
     for filename in (".gitignore", "icon-reference.html"):

@@ -8,7 +8,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelTableEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
@@ -273,7 +273,8 @@ const Create{{ model.name }}Page: React.FC = () => {
                     rootValue={rootValue}
                   />
                   {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
-                  <JsonModelDictEditor
+                  <JsonModelTableEditor
+                    collectionKind="dict"
                     itemSchema={ {{ field.json_item_schema | tojson }} }
                     value={value}
                     onChange={onChange}
@@ -293,9 +294,9 @@ const Create{{ model.name }}Page: React.FC = () => {
                     value={value}
                     onChange={onChange}
                     rootValue={rootValue}
-                    {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
-                    canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
-                    canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
+                    {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
+                    canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
+                    canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
                     {% endif %}
                   />
                   {% else %}
