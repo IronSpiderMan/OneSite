@@ -86,3 +86,6 @@ class UserRead(UserBase):
 {% for fk in model.foreign_keys %}
     {{ fk.name }}_label: Optional[str] = None
 {% endfor %}
+{% for field in model.extra_fields | default([]) %}
+    {{ field.name }}: {{ field.type }}
+{% endfor %}

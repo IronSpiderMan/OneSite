@@ -8,6 +8,7 @@ from pathlib import Path
 
 from ...project_paths import get_project_paths
 from ..assets import sync_backend_assets, sync_frontend_assets
+from ..frontend_features import sync_frontend_features
 from ..file_utils import copy_file_with_status
 from ..render import generate_theme_file
 from ..theme import THEMES, resolve_theme
@@ -57,5 +58,10 @@ def phase_theme_and_assets(site_config: dict, cwd: Path, backend_path: Path) -> 
         theme_config["id"],
     )
     sync_frontend_assets(cwd, site_config)
+    sync_frontend_features(
+        cwd,
+        frontend_path,
+        site_config.get("_frontend_features", []),
+    )
     sync_backend_assets(cwd, backend_path, site_config)
     _sync_models_assets(site_config, cwd)

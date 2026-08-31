@@ -50,3 +50,6 @@ class {{ model.name }}Update(SQLModel):
 
 class {{ model.name }}Read({{ model.name }}Base):
     id: int
+{% for field in model.extra_fields | default([]) %}
+    {{ field.name }}: {{ field.type }}
+{% endfor %}

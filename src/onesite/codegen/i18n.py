@@ -9,6 +9,7 @@ def generate_locale_files(
     models: List[Dict[str, Any]],
     locale_dir: Path,
     navigation_groups: List[Dict[str, Any]] | None = None,
+    frontend_features: List[Dict[str, Any]] | None = None,
 ):
 
     zh_field_defaults: Dict[str, str] = {
@@ -171,24 +172,11 @@ def generate_locale_files(
             "dashboard": "Dashboard",
             "external_resources": "External Providers",
             "task_center": "Task Center",
-            "reports": "Data Explorer",
+            "reports": "Reports",
         },
         "reports": {
-            "title": "Data Explorer", "description": "Explore, aggregate, visualize, and export time-series data",
-            "export_csv": "Export CSV", "filters": "Filters", "report": "Report", "entities": "Devices",
-            "metrics": "Metrics", "start_time": "Start", "end_time": "End", "bucket": "Interval",
-            "aggregation": "Aggregation", "query": "Query", "trend": "Trend", "results": "Results",
-            "entity": "Device", "metric": "Metric", "time": "Time", "value": "Value",
-            "explorer": "Data explorer", "settings": "Analysis settings", "settings_hint": "Select a range and run the query",
-            "clear": "Clear", "select": "Select {{label}}", "all": "All {{label}}", "selected": "{{count}} selected",
-            "search": "Search {{label}}", "select_all": "Select all", "no_match": "No matching options",
-            "range": "Time range", "run": "Run analysis", "reset": "Reset filters", "connect_error": "Unable to connect to the service",
-            "selection_required": "Select at least one entity and one metric", "empty_title": "Start exploring your data",
-            "empty_hint": "Select dimensions and measures, then choose a time range to produce charts and detailed results.",
-            "select_data": "Select data", "run_analysis": "Run analysis", "export_result": "Export result",
-            "points": "Data points", "minimum": "Minimum", "average": "Average", "maximum": "Maximum",
-            "view": "Data view", "truncated": "The result reached the {{limit}} row limit. Shorten the range or increase the interval.",
-            "details": "Data details", "row_count": "{{count}} results", "raw": "Raw", "aggregate": "Aggregated",
+            "export_csv": "Export CSV", "filters": "Filters", "aggregation": "Aggregation",
+            "details": "Data details",
             "builder_kicker": "Report builder", "builder_title": "Reports",
             "builder_description": "Choose a model, chart category, style, and field bindings",
             "builder_settings": "Report settings", "builder_settings_hint": "Available choices are controlled by the model",
@@ -591,24 +579,11 @@ def generate_locale_files(
             "dashboard": "仪表盘",
             "external_resources": "外部 Provider 同步",
             "task_center": "任务中心",
-            "reports": "数据探索",
+            "reports": "数据报表",
         },
         "reports": {
-            "title": "数据探索", "description": "探索、聚合、可视化和导出时序数据",
-            "export_csv": "导出 CSV", "filters": "筛选条件", "report": "报表", "entities": "设备",
-            "metrics": "点位", "start_time": "开始时间", "end_time": "结束时间", "bucket": "统计周期",
-            "aggregation": "聚合方式", "query": "查询", "trend": "趋势", "results": "查询结果",
-            "entity": "设备", "metric": "点位", "time": "时间", "value": "数值",
-            "explorer": "数据探索", "settings": "分析设置", "settings_hint": "选择范围并运行查询",
-            "clear": "清除", "select": "选择{{label}}", "all": "全部{{label}}", "selected": "已选 {{count}} 个",
-            "search": "搜索{{label}}", "select_all": "全选", "no_match": "没有匹配项",
-            "range": "时间范围", "run": "运行分析", "reset": "重置条件", "connect_error": "无法连接到服务",
-            "selection_required": "请至少选择一个实体和一个指标", "empty_title": "开始探索数据",
-            "empty_hint": "选择维度和指标并设置时间范围，生成图表和详细结果。",
-            "select_data": "选择数据", "run_analysis": "运行分析", "export_result": "导出结果",
-            "points": "数据点", "minimum": "最小值", "average": "平均值", "maximum": "最大值",
-            "view": "数据视图", "truncated": "结果已达到 {{limit}} 条上限，请缩短时间范围或增大统计周期。",
-            "details": "数据明细", "row_count": "共 {{count}} 条结果", "raw": "原始", "aggregate": "聚合",
+            "export_csv": "导出 CSV", "filters": "筛选条件", "aggregation": "聚合方式",
+            "details": "数据明细",
             "builder_kicker": "报表生成器", "builder_title": "数据报表",
             "builder_description": "选择模型、图表大类、具体形式和输入字段",
             "builder_settings": "报表设置", "builder_settings_hint": "可选范围由模型配置控制",
@@ -1027,6 +1002,15 @@ def generate_locale_files(
 
         en_translations["models"][model_name] = en_model
         zh_translations["models"][model_name] = zh_model
+
+    for feature in frontend_features or []:
+        feature_name = feature["name"]
+        en_translations.setdefault("features", {})[feature_name] = feature.get(
+            "locales", {}
+        ).get("en", {})
+        zh_translations.setdefault("features", {})[feature_name] = feature.get(
+            "locales", {}
+        ).get("zh", {})
 
     write_file_with_status(locale_dir / "en.json", json.dumps(en_translations, indent=2))
     write_file_with_status(locale_dir / "zh.json", json.dumps(zh_translations, indent=2, ensure_ascii=False))

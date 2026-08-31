@@ -8,7 +8,7 @@ from pathlib import Path
 {% endif %}
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.dashboard_metrics or model.data_reports or model.reports %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.property_config_meta or model.reverse_property_config or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table or model.has_dynamic_action_states %}
@@ -21,7 +21,7 @@ from app.core import db, deps
 from app.core.config import settings
 {% endif %}
 {% if model.is_timescaledb %}
-from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if model.data_reports %}, {{ model.name }}ReportQuery{% endif %}
+from app.schemas.{{ model.module_name }} import {{ model.name }}Create
 {% else %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Create, {{ model.name }}Update{% if model.module_name == "user" and model.name == "User" %}, UserUpdateMe{% endif %}{% if model.is_notification_table %}, {{ model.name }}Send{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}{% if m2m.order_field %}, {{ model.name }}{{ m2m.target_model }}Meta{% endif %}{% endfor %}{% endif %}
 {% endif %}
@@ -236,7 +236,11 @@ async def inbox(
     total = total_result.one()
     result = await session.exec(statement.offset(skip).limit(size))
     items = result.all()
-    return PaginatedResponse.create(data=items, total=total, page=page, size=size)
+    items_read = [
+        await service.to_read(item, session, current_user=current_user, source="list")
+        for item in items
+    ]
+    return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
 
 @router.put("/{id}/read", response_model={{ model.name }}Read)
 async def mark_read(
@@ -245,7 +249,7 @@ async def mark_read(
     current_user: User = Depends(deps.get_current_user),
     id: {{ model.id_type }},
 ) -> Any:
-    n = await service.get(session, id)
+    n = await service.get(session, id, current_user=current_user)
     if not n:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     if (
@@ -255,7 +259,7 @@ async def mark_read(
     ):
         raise HTTPException(status_code=403, detail="Forbidden")
     if not getattr(n, "is_read", False):
-        n = await service.update(session, id, {{ model.name }}Update(is_read=True))
+        n = await service.update(session, id, {{ model.name }}Update(is_read=True), current_user=current_user)
     return n
 
 @router.put("/mark_all_read")
@@ -320,36 +324,6 @@ async def get_{{ model.lower_name }}_dashboard_metrics(
     return await service.get_dashboard_metrics(session, role=role)
 
 {% endif %}
-
-{% if model.data_reports -%}
-@router.get("/reports/{report_key}/options")
-async def get_{{ model.lower_name }}_report_options(
-    report_key: str,
-    session: AsyncSession = Depends(db.get_session),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    raw_role = getattr(current_user, "role", "user")
-    role = str(getattr(raw_role, "value", raw_role))
-    return await service.get_report_options(
-        session, report_key=report_key, role=role, user_id=getattr(current_user, "id", None)
-    )
-
-
-@router.post("/reports/{report_key}/query")
-async def query_{{ model.lower_name }}_report(
-    report_key: str,
-    payload: {{ model.name }}ReportQuery,
-    session: AsyncSession = Depends(db.get_session),
-    current_user: User = Depends(deps.get_current_user),
-) -> Any:
-    raw_role = getattr(current_user, "role", "user")
-    role = str(getattr(raw_role, "value", raw_role))
-    return await service.query_report(
-        session, report_key=report_key, role=role, payload=payload,
-        user_id=getattr(current_user, "id", None),
-    )
-
-{% endif -%}
 
 {% if model.reports -%}
 @router.get("/reports/catalog")
@@ -468,6 +442,8 @@ async def read_{{ model.lower_name }}s(
     current_user: User = Depends(deps.get_current_user),
     {% elif model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
+    {% elif model.has_read_resolvers %}
+    current_user: User = Depends(deps.get_current_user),
     {% endif %}
 ) -> Any:
     {% if model.module_name == "user" and model.name == "User" %}
@@ -516,13 +492,16 @@ async def read_{{ model.lower_name }}s(
         {% if model.owner_field %}
         owner_id=owner_id,
         {% endif %}
+        {% if model.has_read_resolvers %}
+        current_user=current_user,
+        {% endif %}
     )
 
 @router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))]{% endif %})
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.inline_relations %}
+    {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.inline_relations or model.has_read_resolvers %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     {{ model.lower_name }}_in: {{ model.name }}Create,
@@ -544,7 +523,7 @@ async def create_{{ model.lower_name }}(
     _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=False)
     {% endif %}
     try:
-        return await service.create(session, {{ model.lower_name }}_in)
+        return await service.create(session, {{ model.lower_name }}_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
@@ -552,9 +531,14 @@ async def create_{{ model.lower_name }}(
 @router.get("/me", response_model=UserRead)
 async def read_me(
     *,
+    session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
 ) -> Any:
+    {% if model.has_read_resolvers %}
+    return await service.to_read(current_user, session, current_user=current_user, source="me")
+    {% else %}
     return current_user
+    {% endif %}
 
 @router.put("/me", response_model=UserRead)
 async def update_me(
@@ -572,7 +556,7 @@ async def update_me(
             if not verify_password(user_in.old_password, current_user.hashed_password):
                 raise HTTPException(status_code=400, detail="Old password is incorrect")
 
-        user = await service.update(session, current_user.id, user_in)
+        user = await service.update(session, current_user.id, user_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
         return user
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -583,6 +567,9 @@ async def update_me(
 async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.has_read_resolvers %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     {% for key_field in model.union_key %}
     {{ key_field }}: {% if key_field.endswith('_id') %}int{% else %}str{% endif %} = Query(..., description="Filter by {{ key_field }}"),
     {% endfor %}
@@ -593,9 +580,12 @@ async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
     {{ model.lower_name }} = await service.get_by_{{ model.union_key | join('_') }}(
         session,
         {% for key_field in model.union_key %}
-        {{ key_field }}{% if not loop.last %},
+        {{ key_field }}{% if not loop.last or model.has_read_resolvers %},
         {% endif %}
         {% endfor %}
+        {% if model.has_read_resolvers %}
+        current_user=current_user,
+        {% endif %}
     )
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
@@ -606,12 +596,12 @@ async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
 async def read_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.is_notification_table or (model.module_name == "user" and model.name == "User") or model.owner_field %}
+    {% if model.is_notification_table or (model.module_name == "user" and model.name == "User") or model.owner_field or model.has_read_resolvers %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: {{ model.id_type }},
 ) -> Any:
-    {{ model.lower_name }} = await service.get(session, id)
+    {{ model.lower_name }} = await service.get(session, id{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
     {% if model.is_notification_table %}
@@ -644,7 +634,7 @@ async def update_{{ model.lower_name }}(
     current_user: User = Depends(deps.get_current_user),
     {% elif model.module_name == "user" and model.name == "User" %}
     current_user: User = Depends(deps.get_current_user),
-    {% elif model.owner_field or model.inline_relations %}
+    {% elif model.owner_field or model.inline_relations or model.has_read_resolvers %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     id: {{ model.id_type }},
@@ -701,7 +691,7 @@ async def update_{{ model.lower_name }}(
             )
     {% endif %}
     try:
-        {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in)
+        {{ model.lower_name }} = await service.update(session, id, {{ model.lower_name }}_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
         return {{ model.lower_name }}
     except ValueError as e:
         if "not found" in str(e):
@@ -974,7 +964,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
         session.add(obj)
         await session.commit()
         await session.refresh(obj)
-        return obj
+        return await service.to_read(obj, session, current_user=current_user, source="action")
     except HTTPException:
         await session.rollback()
         raise
@@ -1041,7 +1031,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
 
     try:
         update_obj = {{ model.name }}Update(**resolved_data)
-        return await service.update(session, id, update_obj)
+        return await service.update(session, id, update_obj{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
     except Exception as e:
         raise HTTPException(status_code=400, detail=str(e))
     {% endif %}
@@ -1054,6 +1044,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
 async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
     id: {{ model.id_type }},
     page: int = 1,
     size: int = 20,
@@ -1061,7 +1052,7 @@ async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}(
     """
     Get {{ m2m.target_model }}s related to {{ model.name }}
     """
-    return await service.get_{{ m2m.target_endpoint }}(session, id, page=page, size=size)
+    return await service.get_{{ m2m.target_endpoint }}(session, id, page=page, size=size, current_user=current_user)
 {% endfor %}
 {% endif %}
 
@@ -1090,6 +1081,7 @@ async def read_{{ model.lower_name }}_{{ m2m.target_endpoint }}_with_meta(
 async def read_{{ model.lower_name }}_{{ rel.name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
     id: {{ model.id_type }},
     page: int = 1,
     size: int = 20,
@@ -1097,7 +1089,7 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
     """
     Get {{ rel.source_model }}s related to {{ model.name }} (via M2M)
     """
-    return await service.get_{{ rel.name }}(session, id, page=page, size=size)
+    return await service.get_{{ rel.name }}(session, id, page=page, size=size, current_user=current_user)
 {% endfor %}
 {% endif %}
 

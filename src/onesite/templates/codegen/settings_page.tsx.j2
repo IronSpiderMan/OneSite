@@ -30,7 +30,8 @@ const SettingsPage: React.FC = () => {
   const [isSavingSystem, setIsSavingSystem] = useState(false);
   const [isSavingCustom, setIsSavingCustom] = useState(false);
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
-  const { register, handleSubmit, reset, control } = useForm();
+  const { register, handleSubmit, reset, control, watch } = useForm();
+  const rootValue = watch();
 
   // Role-based field permissions (Layer 2)
   const userRole = (localStorage.getItem('user_role') || 'user') as 'user' | 'admin' | 'developer';
@@ -315,7 +316,7 @@ const SettingsPage: React.FC = () => {
                         name="{{ field.name }}"
                         control={control}
                         render={({ field: { onChange, value } }) => (
-                          <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } />
+                          <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue} />
                         )}
                       />
                           {% else %}
@@ -323,7 +324,7 @@ const SettingsPage: React.FC = () => {
                         name="{{ field.name }}"
                         control={control}
                         render={({ field: { onChange, value } }) => (
-                          <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } />
+                          <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } rootValue={rootValue} />
                         )}
                       />
                           {% endif %}
@@ -477,7 +478,7 @@ const SettingsPage: React.FC = () => {
                 name="{{ field.name }}"
                 control={control}
                 render={({ field: { onChange, value } }) => (
-                  <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } />
+                  <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue} />
                 )}
               />
                   {% else %}
@@ -485,7 +486,7 @@ const SettingsPage: React.FC = () => {
                 name="{{ field.name }}"
                 control={control}
                 render={({ field: { onChange, value } }) => (
-                  <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } />
+                  <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } rootValue={rootValue} />
                 )}
               />
                   {% endif %}

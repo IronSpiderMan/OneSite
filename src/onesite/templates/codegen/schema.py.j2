@@ -19,11 +19,31 @@ _CONDITIONAL_JSON_FIELDS = {
 }
 
 
-def _matches_json_condition(value: dict[str, Any], conditions: dict[str, list[Any]] | None) -> bool:
+_CONDITION_MISSING = object()
+
+
+def _json_condition_value(value: dict[str, Any], root: dict[str, Any], controller: str) -> Any:
+    if not controller.startswith("$root."):
+        return value.get(controller)
+    current: Any = root
+    for part in controller[6:].split("."):
+        if not isinstance(current, dict) or part not in current:
+            return _CONDITION_MISSING
+        current = current[part]
+    return current
+
+
+def _matches_json_condition(
+    value: dict[str, Any], root: dict[str, Any], conditions: dict[str, list[Any]] | None
+) -> Optional[bool]:
     if not conditions:
         return True
     for controller, expected_values in conditions.items():
-        actual = value.get(controller)
+        actual = _json_condition_value(value, root, controller)
+        # Partial update schemas may not include the root controller.  In that
+        # case the condition is unknown, so do not clear or require child data.
+        if actual is _CONDITION_MISSING:
+            return None
         actual = getattr(actual, "value", actual)
         if actual not in expected_values and str(actual) not in {str(item) for item in expected_values}:
             return False
@@ -34,7 +54,9 @@ def _json_value_is_missing(value: Any) -> bool:
     return value is None or value == "" or value == [] or value == {}
 
 
-def _normalize_conditional_json_object(value: Any, schema: dict[str, Any], path: str) -> Any:
+def _normalize_conditional_json_object(
+    value: Any, schema: dict[str, Any], path: str, root: dict[str, Any]
+) -> Any:
     if not isinstance(value, dict):
         return value
     result = dict(value)
@@ -42,30 +64,32 @@ def _normalize_conditional_json_object(value: Any, schema: dict[str, Any], path:
         name = field.get("name")
         if not name:
             continue
-        visible = _matches_json_condition(result, field.get("visibleWhen"))
-        required = _matches_json_condition(result, field.get("requiredWhen"))
-        if not visible:
+        visible = _matches_json_condition(result, root, field.get("visibleWhen"))
+        required = _matches_json_condition(result, root, field.get("requiredWhen"))
+        if visible is False:
             if field.get("clearWhenHidden"):
                 result.pop(name, None)
             continue
-        if required and _json_value_is_missing(result.get(name)):
+        if required is True and _json_value_is_missing(result.get(name)):
             raise ValueError(f"{path}.{name} is required for the selected field values")
         if name in result:
             result[name] = _normalize_conditional_json_field(
-                result[name], field, f"{path}.{name}"
+                result[name], field, f"{path}.{name}", root
             )
     return result
 
 
-def _normalize_conditional_json_field(value: Any, field: dict[str, Any], path: str) -> Any:
+def _normalize_conditional_json_field(
+    value: Any, field: dict[str, Any], path: str, root: dict[str, Any]
+) -> Any:
     if field.get("kind") == "model" and isinstance(field.get("model"), dict):
-        return _normalize_conditional_json_object(value, field["model"], path)
+        return _normalize_conditional_json_object(value, field["model"], path, root)
     item = field.get("item")
     if field.get("kind") == "array" and isinstance(item, dict) and item.get("kind") == "model" and isinstance(item.get("model"), dict):
         if not isinstance(value, list):
             return value
         return [
-            _normalize_conditional_json_object(entry, item["model"], f"{path}[{index}]")
+            _normalize_conditional_json_object(entry, item["model"], f"{path}[{index}]", root)
             for index, entry in enumerate(value)
         ]
     return value
@@ -87,31 +111,18 @@ def _normalize_conditional_json_values(data: Any) -> Any:
         container = config["container"]
         schema = config["schema"]
         if container == "object":
-            result[field_name] = _normalize_conditional_json_object(value, schema, field_name)
+            result[field_name] = _normalize_conditional_json_object(value, schema, field_name, result)
         elif container == "array" and isinstance(value, list):
             result[field_name] = [
-                _normalize_conditional_json_object(entry, schema, f"{field_name}[{index}]")
+                _normalize_conditional_json_object(entry, schema, f"{field_name}[{index}]", result)
                 for index, entry in enumerate(value)
             ]
         elif container == "dict" and isinstance(value, dict):
             result[field_name] = {
-                key: _normalize_conditional_json_object(entry, schema, f"{field_name}.{key}")
+                key: _normalize_conditional_json_object(entry, schema, f"{field_name}.{key}", result)
                 for key, entry in value.items()
             }
     return result
-{% endif %}
-
-{% if model.data_reports %}
-class {{ model.name }}ReportQuery(SQLModel):
-    entity_ids: List[str | int] = Field(min_length=1, max_length=50)
-    metric_ids: List[str | int] = Field(min_length=1, max_length=100)
-    start_time: datetime
-    end_time: datetime
-    bucket: str = "auto"
-    aggregation: str = "avg"
-    target_points: int = Field(default=1000, ge=100, le=5000)
-    limit: int = Field(default=5000, ge=1, le=10000)
-
 {% endif %}
 
 {% if model.reports %}
@@ -333,6 +344,9 @@ class {{ model.name }}Read({{ model.name }}Base):
     {% if not model.is_timescaledb %}id: {{ model.id_type }}{% endif %}
 {% for fk in model.foreign_keys %}
     {{ fk.name }}_label: Optional[str] = None
+{% endfor %}
+{% for field in model.extra_fields | default([]) %}
+    {{ field.name }}: {{ field.type }}
 {% endfor %}
 {% if model.m2m_fields %}
     # For now, we don't return m2m fields in Read schema by default to avoid N+1 queries

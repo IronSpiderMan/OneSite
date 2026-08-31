@@ -1,4 +1,10 @@
 import React from 'react';
+import {
+  applyGeneratedRouteOverrides,
+  GeneratedFeatureRoutes,
+  GeneratedPublicFeatureRoutes,
+  GeneratedRouteDefinition,
+} from './GeneratedFeatureRoutes';
 import SettingsPage from './pages/Settings';
 import DashboardPage from './pages/Dashboard';
 {% if reports_enabled %}
@@ -22,29 +28,34 @@ import {{ model.name }}Page from './pages/{{ model.module_name }}';
 {% endif %}
 {% endfor %}
 
-export const GeneratedRoutes = [
+const GeneratedBaseRoutes: GeneratedRouteDefinition[] = [
   {
+    id: 'builtin.dashboard',
     path: '/dashboard',
     element: <DashboardPage />,
   },
   {
+    id: 'builtin.settings',
     path: '/settings',
     element: <SettingsPage />,
   },
 {% if reports_enabled %}
   {
+    id: 'builtin.reports',
     path: '/reports',
     element: <ReportsPage />,
   },
 {% endif %}
 {% if external_resources_enabled %}
   {
+    id: 'builtin.external-resources',
     path: '/external-resources',
     element: <ExternalResourcesPage />,
   },
 {% endif %}
 {% if import_export_enabled %}
   {
+    id: 'builtin.task-center',
     path: '/task-center',
     element: <TaskCenterPage />,
   },
@@ -52,24 +63,35 @@ export const GeneratedRoutes = [
 {% for model in models %}
 {% if not model.is_singleton %}
   {
+    id: 'model.{{ model.module_name }}.list',
     path: '/{{ model.module_name }}s',
     element: <{{ model.name }}Page />,
   },
   {% if model.page_edit %}
   {
+    id: 'model.{{ model.module_name }}.create',
     path: '/{{ model.module_name }}s/new',
     element: <Create{{ model.name }}Page />,
   },
   {% endif %}
   {
+    id: 'model.{{ model.module_name }}.detail',
     path: '/{{ model.module_name }}s/:id',
     element: <{{ model.name }}DetailPage />,
   },
 {% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
   {
+    id: 'model.{{ model.module_name }}.detail',
     path: '/{{ model.module_name }}',
     element: <{{ model.name }}Page />,
   },
 {% endif %}
 {% endfor %}
 ];
+
+export const GeneratedRoutes: GeneratedRouteDefinition[] = [
+  ...applyGeneratedRouteOverrides(GeneratedBaseRoutes),
+  ...GeneratedFeatureRoutes,
+];
+
+export { GeneratedPublicFeatureRoutes };

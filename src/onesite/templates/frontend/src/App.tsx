@@ -1,6 +1,6 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './components/Layout';
-import { GeneratedRoutes } from './Routes';
+import { GeneratedPublicFeatureRoutes, GeneratedRoutes } from './Routes';
 import LoginPage from './pages/Login';
 import RegisterPage from './pages/Register';
 import ErrorPage from './pages/ErrorPage';
@@ -37,6 +37,9 @@ function App() {
           path="/error/:code"
           element={<ErrorPage />}
         />
+        {GeneratedPublicFeatureRoutes.map((route) => (
+          <Route key={route.id} path={route.path} element={route.element} />
+        ))}
         
         <Route path="/" element={
           <RequireAuth>
@@ -46,7 +49,7 @@ function App() {
           <Route path="profile" element={<ProfilePage />} />
           <Route index element={<Navigate to={GeneratedRoutes[0]?.path || "/"} replace />} />
           {GeneratedRoutes.map((route) => (
-             <Route key={route.path} path={route.path} element={route.element} />
+             <Route key={route.id} path={route.path} element={route.element} />
           ))}
           <Route path="*" element={<Navigate to="/error/404" replace />} />
         </Route>

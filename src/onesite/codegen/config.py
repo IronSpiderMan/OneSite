@@ -41,7 +41,7 @@ _SCHEDULED_PARAM_TYPE_ALIASES = {
     "json": "json",
 }
 _TOOL_ROLES = {"user", "admin", "developer"}
-_NAVIGATION_TYPES = {"model", "group", "builtin"}
+_NAVIGATION_TYPES = {"model", "route", "group", "builtin"}
 _NAVIGATION_BUILTINS = {
     "dashboard",
     "reports",
@@ -50,6 +50,7 @@ _NAVIGATION_BUILTINS = {
 }
 _NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
+_FRONTEND_ROUTE_ID_RE = re.compile(r"[a-z][a-z0-9_.-]*")
 _TASK_CENTER_KINDS = {"import", "export", "tool", "scheduled_task"}
 
 
@@ -210,6 +211,7 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
         raise SiteConfigError("site_config.json field 'navigation' must be an array.")
 
     seen_models: set[str] = set()
+    seen_routes: set[str] = set()
     seen_groups: set[str] = set()
     seen_builtins: set[str] = set()
 
@@ -233,7 +235,7 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
             fail(path, "must be an object")
         node_type = node.get("type")
         if node_type not in _NAVIGATION_TYPES:
-            fail(path + ".type", "must be model, group, or builtin")
+            fail(path + ".type", "must be model, route, group, or builtin")
 
         if node_type == "model":
             model = node.get("model")
@@ -242,6 +244,15 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
             if model in seen_models:
                 fail(path + ".model", f"references duplicate model '{model}'")
             seen_models.add(model)
+            return
+
+        if node_type == "route":
+            route = node.get("route")
+            if not isinstance(route, str) or not _FRONTEND_ROUTE_ID_RE.fullmatch(route):
+                fail(path + ".route", "must be a frontend feature route ID")
+            if route in seen_routes:
+                fail(path + ".route", f"references duplicate route '{route}'")
+            seen_routes.add(route)
             return
 
         if node_type == "builtin":

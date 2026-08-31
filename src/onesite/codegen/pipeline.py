@@ -23,6 +23,7 @@ from .visualizations import (
     load_and_compile_dashboard_metrics,
     load_and_compile_visualizations,
 )
+from .frontend_features import load_frontend_features
 
 console = Console()
 
@@ -36,7 +37,11 @@ def generate_code() -> None:
 
     # Phase 1 — Config. Validate it before creating or modifying generated
     # project files so malformed input cannot be replaced by defaults.
+    # Frontend manifests are developer-owned configuration too. Validate them
+    # before the config phase synchronizes environment files or other output.
+    frontend_features = load_frontend_features(cwd)
     site_config, backend_path = phase_config.phase_load_config(cwd)
+    site_config["_frontend_features"] = frontend_features
 
     # Phase 2 — Generate model tables (into models/, before sync so they are picked up)
     phase_model_tables.phase_generate_model_tables(cwd, backend_path)

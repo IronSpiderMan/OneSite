@@ -82,7 +82,8 @@ const Create{{ model.name }}Page: React.FC = () => {
   {% endfor %}
   {% endif %}
 
-  const { register, handleSubmit, reset, setValue, control } = useForm();
+  const { register, handleSubmit, reset, setValue, control, watch } = useForm();
+  const rootValue = watch();
 
   const onSubmit = async (values: any) => {
     setSubmitting(true);
@@ -269,12 +270,14 @@ const Create{{ model.name }}Page: React.FC = () => {
                     schema={ {{ field.json_model_schema | tojson }} }
                     value={value}
                     onChange={onChange}
+                    rootValue={rootValue}
                   />
                   {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
                   <JsonModelDictEditor
                     itemSchema={ {{ field.json_item_schema | tojson }} }
                     value={value}
                     onChange={onChange}
+                    rootValue={rootValue}
                     {% if field.json_fixed_keys %}
                     fixedKeys={ {{ field.json_fixed_keys | tojson }} }
                     {% endif %}
@@ -289,6 +292,7 @@ const Create{{ model.name }}Page: React.FC = () => {
                     itemSchema={ {{ field.json_item_schema | tojson }} }
                     value={value}
                     onChange={onChange}
+                    rootValue={rootValue}
                     {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
                     canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
                     canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}

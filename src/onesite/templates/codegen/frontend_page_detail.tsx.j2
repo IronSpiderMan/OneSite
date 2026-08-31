@@ -52,6 +52,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         {% elif field.ui_type == 'json' and field.json_model_schema %}
         <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} }
             value={currentItem.{{ field.name }}}
+            rootValue={currentItem}
             className="max-h-80 overflow-auto overscroll-contain rounded-md border bg-muted/20 p-3"
         />
         {% elif field.ui_type == 'json' %}
@@ -144,13 +145,13 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
     {% elif field.ui_type == 'json' %}
     <Controller control={editControl} name="{{ field.name }}" defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} } render={({ field: { onChange, value } }) => (
         {% if field.json_model_schema %}
-        <JsonModelEditor schema={ {{ field.json_model_schema | tojson }} } value={value} onChange={onChange} />
+        <JsonModelEditor schema={ {{ field.json_model_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue} />
         {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
-        <JsonModelDictEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
+        <JsonModelDictEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
         {% elif field.json_item_kind %}
         <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
         {% elif field.json_item_schema %}
-        <JsonModelArrayEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange}{% if model.property_config_meta and field.name == model.property_config_meta.field_name %} canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')} canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}{% endif %} />
+        <JsonModelArrayEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue}{% if model.property_config_meta and field.name == model.property_config_meta.field_name %} canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')} canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}{% endif %} />
         {% else %}
         <JsonInput value={value} onChange={onChange} jsonKind="{{ field.json_kind or 'object' }}" placeholder={ {% if field.json_kind == 'array' %}"[\\n  \\n]"{% else %}"{\\n  \\n}"{% endif %} } />
         {% endif %}
@@ -452,7 +453,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
     {% if model.page_edit %}
     const [isEditing, setIsEditing] = useState(false);
     const [isSaving, setIsSaving] = useState(false);
-    const { register, handleSubmit: handleEditSubmit, reset, setValue: setEditValue, control: editControl } = useForm();
+    const { register, handleSubmit: handleEditSubmit, reset, setValue: setEditValue, control: editControl, watch: watchEdit } = useForm();
+    const editRootValue = watchEdit();
 
     {% for field in model.fields %}
     {% if field.fk_info %}
@@ -1391,12 +1393,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             schema={ {{ field.json_model_schema | tojson }} }
                                             value={value}
                                             onChange={onChange}
+                                            rootValue={editRootValue}
                                         />
                                         {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
                                         <JsonModelDictEditor
                                             itemSchema={ {{ field.json_item_schema | tojson }} }
                                             value={value}
                                             onChange={onChange}
+                                            rootValue={editRootValue}
                                             {% if field.json_fixed_keys %}
                                             fixedKeys={ {{ field.json_fixed_keys | tojson }} }
                                             {% endif %}
@@ -1411,6 +1415,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             itemSchema={ {{ field.json_item_schema | tojson }} }
                                             value={value}
                                             onChange={onChange}
+                                            rootValue={editRootValue}
                                             {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
                                             canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
                                             canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
@@ -1644,6 +1649,25 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     {% endif %}
                 )}
 
+                {% set detail_extra_fields = model.extra_fields | default([]) | selectattr('show_in_detail') | list %}
+                {% if detail_extra_fields %}
+                {activeTab === 'detail' && (
+                <Card>
+                    <CardHeader><CardTitle>{t('common.additional_information', 'Additional information')}</CardTitle></CardHeader>
+                    <CardContent className="space-y-4">
+                        {% for field in detail_extra_fields %}
+                        <div className="space-y-1">
+                            <Label className="text-muted-foreground">{{ field.label if field.label is string else field.name }}</Label>
+                            <div className="font-medium break-words">
+                                {currentItem.{{ field.name }} == null ? '-' : (typeof currentItem.{{ field.name }} === 'object' ? JSON.stringify(currentItem.{{ field.name }}) : String(currentItem.{{ field.name }}))}
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </CardContent>
+                </Card>
+                )}
+                {% endif %}
+
                 {% if model.foreign_keys %}
                 {activeTab === 'detail' && (
                 <Card>
@@ -1722,6 +1746,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         itemSchema={ {{ field.json_item_schema | tojson }} }
                                         value={value}
                                         onChange={onChange}
+                                        rootValue={editRootValue}
                                         {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
                                         canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
                                         canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}
@@ -1823,6 +1848,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         itemSchema={ {{ field.json_item_schema | tojson }} }
                                         value={value}
                                         onChange={onChange}
+                                        rootValue={editRootValue}
                                         {% if field.json_fixed_keys %}
                                         fixedKeys={ {{ field.json_fixed_keys | tojson }} }
                                         {% endif %}

@@ -223,8 +223,7 @@ class Order(SQLModel, table=True):
 `x` 配置可用分桶，`y` 配置可用聚合，`cls` 配置分类字段，`count` 配置可计数
 字段。内置 `$rows` 表示 `COUNT(*)`。后端会再次校验图表所属大类、输入数量、字段、
 分桶、聚合、筛选、字段读取权限和模型 owner scope。当前报表输入仅支持模型直接字段；
-关联字段路径将在查询规划器支持显式 JOIN 后开放。旧的 `data_reports` 时序探索器继续
-兼容，但新模型应优先使用 `reports`。
+关联字段路径将在查询规划器支持显式 JOIN 后开放。
 
 ### 函数式 Action
 
@@ -415,34 +414,34 @@ dashboard_metrics = [
 
 相对时间范围支持 `today`、`yesterday`、`this_week`、`last_week`、`this_month`、`last_month`、`last_7_days`、`last_30_days`。指标角色范围会和模型读取权限取交集，后端不会向无权限角色返回指标。旧的 `time_field + period` 与 `__onesite__.dashboard_metrics` 暂时兼容；后者会在 `site sync` 时提示迁移。
 - `is_notification_table`、`time_series_table`：通知/WebSocket 与时序表配置。
-- `data_reports`：为时序模型生成通用数据探索器。最简配置为 `"data_reports": True`；
-  OneSite 会从 `time_series_table` 推导实体、指标、时间和值字段，并从相关模型表推导
-  指标名称、单位、数据类型、枚举和量程。单报表可用对象覆盖标题等少量行为：
-
-```python
-__onesite__ = {
-    "time_series_table": {
-        "entity_field": "device_id",
-        "metric_field": "metric",
-        "time_field": "reported_at",
-        "model_table": "device_model",
-    },
-    "data_reports": {
-        "title": "设备数据探索",
-        "entity_label": "设备",
-        "views": "auto",
-    },
-}
-```
-
-  数据探索器与 Dashboard 共用 ECharts 图表运行时。`views="auto"` 会按指标语义开放适用图表，包括折线、面积、分组/堆叠柱状、
-  环形、散点、直方、热力和状态图。`bucket="auto"` 会按时间跨度自动控制点数；
-  查询响应会显式返回截断状态，避免把部分数据误认为完整结果。只有需要多个报表或
-  明确限制视图、权限、时间跨度时才需要使用列表和更多覆盖项。
-
 权限分三层：模型级 `c/r/u/d`，字段级 `c/r/u`，以及 `visible` 菜单可见性。角色由低到高为 `user`、`admin`、`developer`。字段权限未配置时会继承模型权限（移除 `d`）；默认 `id` 隐藏、`created_at` 只读、`updated_at` 可读写。用字段 `site_props.permissions` 显式配置即可覆盖默认值。
 
 字段 `site_props` 还支持 `is_search_field`、`component`（`image`/`images`/`file`/`textarea`/`json`/`location`）、`create_optional`、`update_optional`、`reverse_display`、`allow_download`、`group`、`fixed_keys`、`lock_keys` 等。
+
+结构化 JSON 子字段支持条件显示、条件必填和隐藏后清理。条件键默认引用 JSON
+内部的同级字段；使用 `$root.<字段名>` 可以引用所属 SQLModel 记录的顶层字段：
+
+```python
+def only_for(kind: str):
+    return {"info": {"site_props": {
+        "visible_when": {"$root.type": [kind]},
+        "clear_when_hidden": True,
+    }}}
+
+class Properties(SQLModel):
+    a: str | None = Field(default=None, sa_column_kwargs=only_for("none"))
+    b: str | None = Field(default=None, sa_column_kwargs=only_for("none"))
+    c: str | None = Field(default=None, sa_column_kwargs=only_for("password"))
+    d: str | None = Field(default=None, sa_column_kwargs=only_for("password"))
+
+class Connector(SQLModel, table=True):
+    type: str
+    properties: Properties = Field(sa_column=Column(JSON))
+```
+
+如果字段显示时必须有值，可再配置相同条件的 `required_when`。生成的创建、编辑、
+详情页面会即时应用规则，API schema 也会重复执行隐藏字段清理和必填校验。
+`$root` 引用的字段必须存在于所属模型中。
 
 定位字段使用内置的 `Location` 值对象、JSON 列和 `location` 组件：
 
@@ -473,6 +472,95 @@ localhost 外，定位功能通常要求 HTTPS。现有项目需要执行一次 
 Leaflet 依赖。
 地图默认使用 OpenStreetMap 官方瓦片地址；部署时可以通过前端构建环境变量
 `VITE_MAP_TILE_URL` 和 `VITE_MAP_ATTRIBUTION` 切换瓦片服务。
+
+## 通用前端 Feature 与自定义 Dashboard Widget
+
+开发者维护的前端 Feature 放在 `app/frontend/features/<feature_name>/`。
+每个 Feature 通过相邻的 `feature.py` 导出带类型的声明；执行 `site sync` 时，
+其组件、service、store、多语言文件和其他资源会单向镜像到
+`generated/frontend/src/custom/`。
+
+```python
+from onesite.frontend import (
+    DashboardWidget,
+    FrontendFeature,
+    FrontendMenu,
+    FrontendOverride,
+    FrontendRoute,
+)
+
+feature = FrontendFeature(
+    name="operations",
+    routes=[
+        FrontendRoute(
+            id="workspace",
+            path="/operations",
+            component="pages/Workspace.tsx",
+            access=["admin", "developer"],
+            menu=FrontendMenu(
+                title={"zh": "运营工作台", "en": "Operations"},
+                icon="Activity",
+            ),
+        ),
+        FrontendRoute(
+            id="public_status",
+            path="/public/status",
+            component="pages/PublicStatus.tsx",
+            layout="public",
+        ),
+    ],
+    overrides=[
+        FrontendOverride(
+            target="model.sync_task.detail",
+            component="pages/CustomSyncTask.tsx",
+        ),
+    ],
+    dashboard_widgets=[
+        DashboardWidget(
+            id="health",
+            component="components/HealthWidget.tsx",
+            title={"zh": "运行健康度", "en": "Operations Health"},
+            span={"md": 12, "xl": 6},
+            access=["admin", "developer"],
+        ),
+    ],
+    dependencies={"dayjs": "^1.11.0"},
+)
+```
+
+默认的 `layout="app"` 路由会挂载在需要登录的生成应用外壳内，并支持通过
+`access` 限制前端角色。`layout="public"` 路由位于应用外壳之外，不要求 token。
+如果项目显式配置了导航树，可以通过带命名空间的 route ID 放置菜单入口：
+
+```python
+from onesite.config import NavGroup, NavRoute
+
+NavGroup(
+    key="operations",
+    label={"zh": "运营", "en": "Operations"},
+    children=[NavRoute(route="operations.workspace")],
+)
+```
+
+生成路由提供稳定的替换目标，例如 `builtin.dashboard`、`builtin.settings`、
+`model.device.list`、`model.device.detail` 和 `model.device.create`。Override
+只替换页面组件，原 URL 与导航契约保持不变。同步时会校验 route ID、路径、组件
+文件、菜单引用、角色声明及 override 目标。
+前端 `access` 只控制导航与路由渲染；Feature 涉及的数据和操作仍必须由后端 API
+权限作为真正的安全边界。
+
+Widget 的最终 ID 为 `<feature>.<widget>`。生成的 Dashboard 会按照 `order`
+排序、按当前角色过滤，并使用 12 列响应式布局。默认由当前主题提供标题和 Card
+外壳；如果组件自行绘制完整容器，可设置 `frame=False`。
+
+约定位置的 `locales/en.json` 与 `locales/zh.json` 会合并到
+`features.<feature_name>` 命名空间，因此组件可以直接调用
+`t('features.operations.status')`。Feature 声明的 npm 依赖会合并到生成的
+`package.json`；依赖版本冲突会在同步时直接报错。
+
+完整示例位于 `examples/datahub/app/frontend/features/ops_dashboard/`，包含登录内
+多页面、公开页面、生成页面替换、两个 Dashboard Widget、共享 Zustand store、
+service、多语言和固定模拟数据。
 
 ## MQTT 回调
 
@@ -594,7 +682,7 @@ site compose up -d
 site compose logs -f
 ```
 
-`site build` 会生成 `deploy/docker-compose.yml`；`site create`、`site init` 和 `site sync` 会确保 `deploy/.env.example` 存在。部署时可复制为 `deploy/.env` 并填写环境差异，`site compose` 会自动加载它。若 `database_url` 以 `postgresql` 开头，会加入 PostgreSQL 服务。项目的开发源码位于 `app/models/` 和 `app/integrations/`；可重新生成的后端、前端与各自的 Dockerfile 位于 `generated/backend/` 和 `generated/frontend/`。
+`site build` 会生成 `deploy/docker-compose.yml`；`site create`、`site init` 和 `site sync` 会确保 `deploy/.env.example` 存在。部署时可复制为 `deploy/.env` 并填写环境差异，`site compose` 会自动加载它。若 `database_url` 以 `postgresql` 开头，会加入 PostgreSQL 服务。项目的开发源码位于 `app/models/`、`app/integrations/` 和 `app/frontend/`；可重新生成的后端、前端与各自的 Dockerfile 位于 `generated/backend/` 和 `generated/frontend/`。
 
 生成的后端 Dockerfile 默认使用清华 TUNA PyPI 镜像，并在安装依赖前升级
 pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢的容器网络。

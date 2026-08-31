@@ -49,43 +49,52 @@ export type JsonModelSchema = {
   layout?: JsonLayoutNode[]
 }
 
-const matchesCondition = (conditions: JsonFieldSchema["visibleWhen"], value: Record<string, any>) => {
+const conditionValue = (controller: string, value: Record<string, any>, rootValue?: Record<string, any>) => {
+  if (!controller.startsWith("$root.")) return value[controller]
+  return controller.slice(6).split(".").reduce<any>((current, part) => current?.[part], rootValue)
+}
+
+const matchesCondition = (
+  conditions: JsonFieldSchema["visibleWhen"],
+  value: Record<string, any>,
+  rootValue?: Record<string, any>,
+) => {
   if (!conditions) return true
   return Object.entries(conditions).every(([controller, expected]) => {
-    const actual = value[controller]
+    const actual = conditionValue(controller, value, rootValue)
     return expected.some((option) => String(option) === String(actual))
   })
 }
 
-const normalizeJsonFieldValue = (field: JsonFieldSchema, value: any): any => {
-  if (field.kind === "model" && field.model) return normalizeJsonModelValue(field.model, value)
+const normalizeJsonFieldValue = (field: JsonFieldSchema, value: any, rootValue?: Record<string, any>): any => {
+  if (field.kind === "model" && field.model) return normalizeJsonModelValue(field.model, value, rootValue)
   if (field.kind === "array" && field.item?.kind === "model" && field.item.model) {
-    return Array.isArray(value) ? value.map((item) => normalizeJsonModelValue(field.item!.model!, item)) : value
+    return Array.isArray(value) ? value.map((item) => normalizeJsonModelValue(field.item!.model!, item, rootValue)) : value
   }
   return value
 }
 
 /** Remove stale values from child fields that no longer match their controller. */
-const normalizeJsonModelValue = (schema: JsonModelSchema, value: any) => {
+const normalizeJsonModelValue = (schema: JsonModelSchema, value: any, rootValue?: Record<string, any>) => {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {}
   const result: Record<string, any> = { ...source }
   for (const field of schema.fields) {
     if (!field.name) continue
-    if (!matchesCondition(field.visibleWhen, result)) {
+    if (!matchesCondition(field.visibleWhen, result, rootValue)) {
       if (field.clearWhenHidden) delete result[field.name]
       continue
     }
-    if (field.name in result) result[field.name] = normalizeJsonFieldValue(field, result[field.name])
+    if (field.name in result) result[field.name] = normalizeJsonFieldValue(field, result[field.name], rootValue)
   }
   return result
 }
 
-const normalizeJsonCollection = (collectionKind: "array" | "dict", schema: JsonModelSchema, value: any) => {
+const normalizeJsonCollection = (collectionKind: "array" | "dict", schema: JsonModelSchema, value: any, rootValue?: Record<string, any>) => {
   if (collectionKind === "array") {
-    return Array.isArray(value) ? value.map((item) => normalizeJsonModelValue(schema, item)) : []
+    return Array.isArray(value) ? value.map((item) => normalizeJsonModelValue(schema, item, rootValue)) : []
   }
   const source = value && typeof value === "object" && !Array.isArray(value) ? value : {}
-  return Object.fromEntries(Object.entries(source).map(([key, item]) => [key, normalizeJsonModelValue(schema, item)]))
+  return Object.fromEntries(Object.entries(source).map(([key, item]) => [key, normalizeJsonModelValue(schema, item, rootValue)]))
 }
 
 const EditorModeSwitch: React.FC<{
@@ -119,23 +128,23 @@ const EditorModeSwitch: React.FC<{
   )
 }
 
-const buildDefaultValue = (schema: JsonModelSchema) => {
+const buildDefaultValue = (schema: JsonModelSchema, rootValue?: Record<string, any>) => {
   const obj: Record<string, any> = {}
   for (const f of schema.fields) {
     if (!f.name) continue
-    if (!matchesCondition(f.visibleWhen, obj)) continue
+    if (!matchesCondition(f.visibleWhen, obj, rootValue)) continue
     if (f.default !== undefined) obj[f.name] = f.default
     else if (f.kind === "bool") obj[f.name] = false
     else if (f.kind === "int") obj[f.name] = 0
     else if (f.kind === "float") obj[f.name] = 0
     else if (f.kind === "foreign_key") obj[f.name] = ""
     else if (f.kind === "enum") obj[f.name] = f.enumValues?.[0]
-    else if (f.kind === "model" && f.model) obj[f.name] = buildDefaultValue(f.model)
+    else if (f.kind === "model" && f.model) obj[f.name] = buildDefaultValue(f.model, rootValue)
     else if (f.kind === "array") obj[f.name] = []
     else if (f.kind === "location") obj[f.name] = { latitude: null, longitude: null }
     else obj[f.name] = ""
   }
-  return normalizeJsonModelValue(schema, obj)
+  return normalizeJsonModelValue(schema, obj, rootValue)
 }
 
 const setPathValue = (value: any, path: string[], next: any) => {
@@ -164,11 +173,12 @@ const JsonModelForm: React.FC<{
   path?: string[]
   foreignKeyLoaders?: JsonForeignKeyLoaders
   layoutDisabled?: boolean
-}> = ({ schema, value, onChange, path = [], foreignKeyLoaders, layoutDisabled = false }) => {
+  rootValue?: Record<string, any>
+}> = ({ schema, value, onChange, path = [], foreignKeyLoaders, layoutDisabled = false, rootValue }) => {
   const { t } = useTranslation()
   const [collapsedArrayItems, setCollapsedArrayItems] = React.useState<Set<string>>(() => new Set())
   const v = value && typeof value === "object" && !Array.isArray(value) ? value : {}
-  const emitChange = (next: any) => onChange(normalizeJsonModelValue(schema, next))
+  const emitChange = (next: any) => onChange(normalizeJsonModelValue(schema, next, rootValue))
 
   const toggleArrayItem = (itemId: string) => {
     setCollapsedArrayItems((previous) => {
@@ -194,7 +204,7 @@ const JsonModelForm: React.FC<{
       if (!field) return null
       return (
         <div key={key} className={`min-w-0 ${spanClasses[node.span ?? 1] || ""}`}>
-          <JsonModelForm schema={{ ...schema, fields: [field] }} value={v} onChange={emitChange} path={path} foreignKeyLoaders={foreignKeyLoaders} layoutDisabled />
+          <JsonModelForm schema={{ ...schema, fields: [field] }} value={v} onChange={emitChange} path={path} foreignKeyLoaders={foreignKeyLoaders} layoutDisabled rootValue={rootValue} />
         </div>
       )
     }
@@ -218,7 +228,7 @@ const JsonModelForm: React.FC<{
       {schema.fields.map((f) => {
         if (!f.name) return null
         const key = f.name
-        if (!matchesCondition(f.visibleWhen, v)) return null
+        if (!matchesCondition(f.visibleWhen, v, rootValue)) return null
         const fieldPath = [...path, key]
         const cur = v[key]
         if (f.kind === "bool") {
@@ -279,6 +289,7 @@ const JsonModelForm: React.FC<{
                 value={cur}
                 onChange={(nv) => emitChange(setPathValue(v, fieldPath.slice(path.length), nv))}
                 foreignKeyLoaders={foreignKeyLoaders}
+                rootValue={rootValue}
               />
             </div>
           )
@@ -305,7 +316,7 @@ const JsonModelForm: React.FC<{
                   size="sm"
                   onClick={() => {
                     const arr = Array.isArray(cur) ? [...cur] : []
-                    if (f.item?.kind === "model" && f.item.model) arr.push(buildDefaultValue(f.item.model))
+                    if (f.item?.kind === "model" && f.item.model) arr.push(buildDefaultValue(f.item.model, rootValue))
                     else arr.push("")
                     emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
                     toast.success(t("json_editor.item_added"))
@@ -356,6 +367,7 @@ const JsonModelForm: React.FC<{
                               emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
                             }}
                             foreignKeyLoaders={foreignKeyLoaders}
+                            rootValue={rootValue}
                           />
                         )}
                       </div>
@@ -417,17 +429,18 @@ export const JsonModelEditor: React.FC<{
   onChange: (v: any) => void
   className?: string
   foreignKeyLoaders?: JsonForeignKeyLoaders
-}> = ({ schema, value, onChange, className, foreignKeyLoaders }) => {
+  rootValue?: Record<string, any>
+}> = ({ schema, value, onChange, className, foreignKeyLoaders, rootValue }) => {
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
-  const objValue = value && typeof value === "object" && !Array.isArray(value) ? value : buildDefaultValue(schema)
+  const objValue = value && typeof value === "object" && !Array.isArray(value) ? value : buildDefaultValue(schema, rootValue)
 
   return (
     <div className={cn("space-y-3", className)}>
       <EditorModeSwitch mode={mode} onChange={setMode} />
       {mode === "ui" ? (
-        <JsonModelForm schema={schema} value={objValue} onChange={(next) => onChange(normalizeJsonModelValue(schema, next))} foreignKeyLoaders={foreignKeyLoaders} />
+        <JsonModelForm schema={schema} value={objValue} onChange={(next) => onChange(normalizeJsonModelValue(schema, next, rootValue))} foreignKeyLoaders={foreignKeyLoaders} rootValue={rootValue} />
       ) : (
-      <JsonInput value={objValue} onChange={(next) => onChange(normalizeJsonModelValue(schema, next))} jsonKind="object" />
+      <JsonInput value={objValue} onChange={(next) => onChange(normalizeJsonModelValue(schema, next, rootValue))} jsonKind="object" />
       )}
     </div>
   )
@@ -438,7 +451,8 @@ export const JsonModelDetail: React.FC<{
   schema: JsonModelSchema
   value: any
   className?: string
-}> = ({ schema, value, className }) => {
+  rootValue?: Record<string, any>
+}> = ({ schema, value, className, rootValue }) => {
   const { t } = useTranslation()
   const data = value && typeof value === "object" && !Array.isArray(value) ? value : {}
   const rowClasses: Record<number, string> = {
@@ -451,11 +465,11 @@ export const JsonModelDetail: React.FC<{
     1: "", 2: "md:col-span-2", 3: "md:col-span-3", 4: "md:col-span-4",
   }
   const renderField = (field: JsonFieldSchema, key: string): React.ReactNode => {
-    if (!field.name || !matchesCondition(field.visibleWhen, data)) return null
+    if (!field.name || !matchesCondition(field.visibleWhen, data, rootValue)) return null
     const fieldValue = data[field.name]
     let content: React.ReactNode
     if (field.kind === "bool") content = fieldValue ? t("common.yes", "Yes") : t("common.no", "No")
-    else if (field.kind === "model" && field.model) content = <JsonModelDetail schema={field.model} value={fieldValue} />
+    else if (field.kind === "model" && field.model) content = <JsonModelDetail schema={field.model} value={fieldValue} rootValue={rootValue} />
     else if (field.kind === "array" || (fieldValue && typeof fieldValue === "object")) {
       content = <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">{JSON.stringify(fieldValue ?? (field.kind === "array" ? [] : {}), null, 2)}</pre>
     } else content = String(fieldValue ?? "-")
@@ -549,22 +563,23 @@ export const JsonModelTableEditor: React.FC<{
   canRemove?: boolean
   fixedKeys?: string[]
   lockKeys?: boolean
-}> = ({ collectionKind, itemSchema, value, onChange, canAdd = true, canRemove = true, fixedKeys, lockKeys = false }) => {
+  rootValue?: Record<string, any>
+}> = ({ collectionKind, itemSchema, value, onChange, canAdd = true, canRemove = true, fixedKeys, lockKeys = false, rootValue }) => {
   const { t } = useTranslation()
   const arrayValue = Array.isArray(value) ? value : []
   const dictValue = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}
   const keys = fixedKeys ?? Object.keys(dictValue)
   const rows = collectionKind === "array"
     ? arrayValue.map((item, index) => ({ key: String(index), item, index }))
-    : keys.map((key, index) => ({ key, item: dictValue[key] ?? buildDefaultValue(itemSchema), index }))
+    : keys.map((key, index) => ({ key, item: dictValue[key] ?? buildDefaultValue(itemSchema, rootValue), index }))
 
   const updateItem = (rowIndex: number, next: any) => {
     if (collectionKind === "array") {
       const result = [...arrayValue]
-      result[rowIndex] = normalizeJsonModelValue(itemSchema, next)
+      result[rowIndex] = normalizeJsonModelValue(itemSchema, next, rootValue)
       onChange(result)
     } else {
-      onChange({ ...dictValue, [rows[rowIndex].key]: normalizeJsonModelValue(itemSchema, next) })
+      onChange({ ...dictValue, [rows[rowIndex].key]: normalizeJsonModelValue(itemSchema, next, rootValue) })
     }
   }
   const removeItem = (rowIndex: number) => {
@@ -586,7 +601,7 @@ export const JsonModelTableEditor: React.FC<{
     onChange(result)
   }
   const addItem = () => {
-    const next = buildDefaultValue(itemSchema)
+    const next = buildDefaultValue(itemSchema, rootValue)
     if (collectionKind === "array") {
       onChange([...arrayValue, next])
       toast.success(t("json_editor.item_added"))
@@ -631,7 +646,7 @@ export const JsonModelTableEditor: React.FC<{
                 )}
                 {itemSchema.fields.map((field) => (
                   <TableCell key={field.name} className="align-top">
-                    {matchesCondition(field.visibleWhen, row.item ?? {}) ? (
+                    {matchesCondition(field.visibleWhen, row.item ?? {}, rootValue) ? (
                       <JsonTableCellEditor
                         field={field}
                         value={field.name ? row.item?.[field.name] : undefined}
@@ -721,7 +736,8 @@ export const JsonModelDictEditor: React.FC<{
   fixedKeys?: string[]
   lockKeys?: boolean
   showJsonMode?: boolean
-}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, fixedKeys, lockKeys, showJsonMode = true }) => {
+  rootValue?: Record<string, any>
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, fixedKeys, lockKeys, showJsonMode = true, rootValue }) => {
   const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
 
@@ -742,7 +758,7 @@ export const JsonModelDictEditor: React.FC<{
     if (isFixed && effectiveKeys) {
       const result = { ...v }
       for (const k of effectiveKeys) {
-        if (!(k in result)) result[k] = buildDefaultValue(itemSchema)
+        if (!(k in result)) result[k] = buildDefaultValue(itemSchema, rootValue)
       }
       return result
     }
@@ -784,7 +800,7 @@ export const JsonModelDictEditor: React.FC<{
             <Button
               type="button"
               size="sm"
-              onClick={() => onChange(toDict([...arrValue, { __key: makeNewKey(), ...buildDefaultValue(itemSchema) }]))}
+              onClick={() => onChange(toDict([...arrValue, { __key: makeNewKey(), ...buildDefaultValue(itemSchema, rootValue) }]))}
             >
               <Plus className="mr-1.5 h-3.5 w-3.5" />
               {t("json_editor.add_entry")}
@@ -793,7 +809,7 @@ export const JsonModelDictEditor: React.FC<{
           )}
           {isFixed
             ? effectiveKeys!.map((key) => {
-                const item = dictValue[key] ?? buildDefaultValue(itemSchema)
+                const item = dictValue[key] ?? buildDefaultValue(itemSchema, rootValue)
                 return (
                   <div key={key} className="rounded-md border p-3">
                     <div className="mb-2 flex items-center justify-between">
@@ -806,6 +822,7 @@ export const JsonModelDictEditor: React.FC<{
                         const next = { ...dictValue, [key]: nv }
                         onChange(next)
                       }}
+                      rootValue={rootValue}
                     />
                   </div>
                 )
@@ -848,15 +865,16 @@ export const JsonModelDictEditor: React.FC<{
                 value={item}
                 onChange={(nv: any) => {
                   const next = [...arrValue]
-                  next[idx] = { ...normalizeJsonModelValue(itemSchema, nv), __key: next[idx].__key }
+                  next[idx] = { ...normalizeJsonModelValue(itemSchema, nv, rootValue), __key: next[idx].__key }
                   onChange(toDict(next))
-                }}
+              }}
+              rootValue={rootValue}
               />
             </div>
           ))}
         </div>
       ) : (
-        <JsonInput value={dictValue} onChange={(next) => onChange(normalizeJsonCollection("dict", itemSchema, next))} jsonKind="object" />
+        <JsonInput value={dictValue} onChange={(next) => onChange(normalizeJsonCollection("dict", itemSchema, next, rootValue))} jsonKind="object" />
       )}
     </div>
   )
@@ -871,7 +889,8 @@ export const JsonModelArrayEditor: React.FC<{
   canRemove?: boolean
   showJsonMode?: boolean
   foreignKeyLoaders?: JsonForeignKeyLoaders
-}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, showJsonMode = true, foreignKeyLoaders }) => {
+  rootValue?: Record<string, any>
+}> = ({ itemSchema, value, onChange, className, canAdd = true, canRemove = true, showJsonMode = true, foreignKeyLoaders, rootValue }) => {
   const { t } = useTranslation()
   const [mode, setMode] = React.useState<"ui" | "json">("ui")
   // Items are expanded by default; retaining only collapsed indexes keeps newly
@@ -889,7 +908,7 @@ export const JsonModelArrayEditor: React.FC<{
   }
 
   const addItem = () => {
-    onChange([...arrValue, buildDefaultValue(itemSchema)])
+    onChange([...arrValue, buildDefaultValue(itemSchema, rootValue)])
     toast.success(t("json_editor.item_added"))
   }
 
@@ -961,13 +980,14 @@ export const JsonModelArrayEditor: React.FC<{
                     onChange(next)
                   }}
                   foreignKeyLoaders={foreignKeyLoaders}
+                  rootValue={rootValue}
                 />
               )}
             </div>
           ))}
         </div>
       ) : (
-        <JsonInput value={arrValue} onChange={(next) => onChange(normalizeJsonCollection("array", itemSchema, next))} jsonKind="array" />
+        <JsonInput value={arrValue} onChange={(next) => onChange(normalizeJsonCollection("array", itemSchema, next, rootValue))} jsonKind="array" />
       )}
     </div>
   )

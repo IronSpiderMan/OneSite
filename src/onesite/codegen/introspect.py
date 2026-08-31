@@ -114,6 +114,11 @@ def _normalize_json_condition(
             raise ValueError(
                 f"{model_name}.{field_name} site_props.{rule_name} keys must be non-empty strings"
             )
+        if controller.startswith("$root.") and not controller[6:]:
+            raise ValueError(
+                f"{model_name}.{field_name} site_props.{rule_name} root references "
+                "must use $root.<field>"
+            )
         values = expected if isinstance(expected, (list, tuple, set)) else [expected]
         if not values or any(isinstance(item, (dict, list, tuple, set)) for item in values):
             raise ValueError(
@@ -297,6 +302,23 @@ def _json_schema_has_conditions(schema: Dict[str, Any] | None) -> bool:
     return False
 
 
+def _json_schema_root_controllers(schema: Dict[str, Any] | None) -> Set[str]:
+    """Collect top-level model fields referenced by ``$root.<field>`` rules."""
+    controllers: Set[str] = set()
+    if not schema:
+        return controllers
+    for field in schema.get("fields", []):
+        for rule_name in ("visibleWhen", "requiredWhen"):
+            for controller in (field.get(rule_name) or {}):
+                if controller.startswith("$root."):
+                    controllers.add(controller[6:].split(".", 1)[0])
+        controllers.update(_json_schema_root_controllers(field.get("model")))
+        item = field.get("item")
+        if isinstance(item, dict):
+            controllers.update(_json_schema_root_controllers(item.get("model")))
+    return controllers
+
+
 # ═══════════════════════════════════════════════════════════════════════════
 # Three-layer permission system
 # ═══════════════════════════════════════════════════════════════════════════
@@ -308,13 +330,6 @@ DASHBOARD_METRIC_AGGREGATIONS = {
     "count", "sum", "avg", "min", "max", "distinct_count",
 }
 DASHBOARD_METRIC_PERIODS = {*RELATIVE_TIME_PERIODS, "all"}
-
-DATA_REPORT_BUCKETS = {"raw", "auto", "1m", "5m", "15m", "1h", "6h", "1d", "1w"}
-DATA_REPORT_AGGREGATIONS = {"avg", "min", "max", "sum", "count"}
-DATA_REPORT_VIEWS = {
-    "auto", "line", "area", "bar", "stacked_bar", "pie", "scatter",
-    "histogram", "heatmap", "status",
-}
 
 REPORT_CATEGORIES = {
     "cartesian", "multi_cartesian", "composition", "scatter",
@@ -544,98 +559,6 @@ def _normalize_reports(
         "permitted_roles": permitted_roles,
         "limits": normalized_limits,
     }
-
-
-def _normalize_data_reports(
-    raw: Any,
-    *,
-    model_name: str,
-    fields: list[FieldDefinition],
-    role_permissions: dict[str, str],
-    timeseries_config: dict[str, Any] | None,
-) -> list[dict[str, Any]]:
-    """Validate report declarations and resolve their time-series fields."""
-    if raw in (None, False):
-        return []
-    if not timeseries_config:
-        raise ValueError(f"Model '{model_name}': data_reports currently require time_series_table")
-
-    # The common case is intentionally one line: ``data_reports = True``.
-    # A dict customises the inferred report; a list remains available for
-    # models that expose more than one report.
-    if raw is True:
-        raw = [{}]
-    elif isinstance(raw, dict):
-        raw = [raw]
-    elif not isinstance(raw, list):
-        raise ValueError(f"Model '{model_name}': data_reports must be true, an object, or a list")
-
-    field_map = {field.name: field for field in fields}
-    readable_roles = {role for role, perms in role_permissions.items() if "r" in perms}
-    seen_keys: set[str] = set()
-    normalized: list[dict[str, Any]] = []
-    for index, item in enumerate(raw):
-        prefix = f"Model '{model_name}': data_reports[{index}]"
-        if not isinstance(item, dict):
-            raise ValueError(f"{prefix} must be an object")
-        report = dict(item)
-        key = report.get("key", _to_snake(model_name))
-        if not isinstance(key, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
-            raise ValueError(f"{prefix}.key must be a valid identifier")
-        if key in seen_keys:
-            raise ValueError(f"{prefix}.key duplicates '{key}'")
-        seen_keys.add(key)
-        title = report.get("title", model_name)
-        if not isinstance(title, str) or not title.strip():
-            raise ValueError(f"{prefix}.title must be a non-empty string")
-
-        resolved_fields = {
-            "entity_field": report.get("entity_field", timeseries_config.get("entity_field")),
-            "metric_field": report.get("metric_field", timeseries_config.get("metric_field")),
-            "time_field": report.get("time_field", timeseries_config.get("time_field")),
-            "value_field": report.get("value_field", "value"),
-        }
-        for name, field_name in resolved_fields.items():
-            if not isinstance(field_name, str) or field_name not in field_map:
-                raise ValueError(f"{prefix}.{name} references unknown field '{field_name}'")
-        if field_map[resolved_fields["time_field"]].ui_type != "datetime":
-            raise ValueError(f"{prefix}.time_field must reference a datetime field")
-
-        value_path = report.get("value_path", "value")
-        if not isinstance(value_path, str) or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value_path):
-            raise ValueError(f"{prefix}.value_path must be a simple JSON key")
-        buckets = report.get("buckets", ["raw", "auto", "5m", "1h", "1d"])
-        aggregations = report.get("aggregations", ["avg", "min", "max", "count"])
-        if not isinstance(buckets, list) or not buckets or any(v not in DATA_REPORT_BUCKETS for v in buckets):
-            raise ValueError(f"{prefix}.buckets contains an unsupported bucket")
-        if not isinstance(aggregations, list) or not aggregations or any(v not in DATA_REPORT_AGGREGATIONS for v in aggregations):
-            raise ValueError(f"{prefix}.aggregations contains an unsupported aggregation")
-        views = report.get("views", "auto")
-        if isinstance(views, str):
-            views = [views]
-        if not isinstance(views, list) or not views or any(v not in DATA_REPORT_VIEWS for v in views):
-            raise ValueError(f"{prefix}.views contains an unsupported report view")
-        visible = report.get("visible", sorted(readable_roles, key=ROLE_ORDER.index))
-        if not isinstance(visible, list) or any(role not in ROLE_ORDER for role in visible):
-            raise ValueError(f"{prefix}.visible must contain only user, admin, or developer")
-        permitted_roles = [role for role in ROLE_ORDER if role in visible and role in readable_roles]
-        max_span_days = report.get("max_span_days", 90)
-        if isinstance(max_span_days, bool) or not isinstance(max_span_days, int) or max_span_days <= 0:
-            raise ValueError(f"{prefix}.max_span_days must be a positive integer")
-        report.update(
-            key=key,
-            title=title,
-            **resolved_fields,
-            value_path=value_path,
-            buckets=buckets,
-            aggregations=aggregations,
-            views=views,
-            visible=visible,
-            permitted_roles=permitted_roles,
-            max_span_days=max_span_days,
-        )
-        normalized.append(report)
-    return normalized
 
 
 def _normalize_dashboard_metric_calculation(
@@ -1484,6 +1407,18 @@ def get_model_fields(
             )
         )
 
+    model_field_names = {field.name for field in fields}
+    for field in fields:
+        root_controllers = _json_schema_root_controllers(
+            field.json_model_schema or field.json_item_schema
+        )
+        unknown_controllers = sorted(root_controllers - model_field_names)
+        if unknown_controllers:
+            raise ValueError(
+                f"{model_cls.__name__}.{field.name} conditional JSON rules reference "
+                f"unknown root field(s): {', '.join(unknown_controllers)}"
+            )
+
     has_explicit_search = any(f.get("is_search_field") for f in fields)
     if not has_explicit_search:
         guess_candidates = ["name", "title", "label", "slug", "email", "username", "full_name"]
@@ -1542,13 +1477,6 @@ def get_model_fields(
         model_name=model_cls.__name__,
         fields=fields,
         role_permissions=role_permissions,
-    )
-    model_site_props["data_reports"] = _normalize_data_reports(
-        model_site_props.get("data_reports"),
-        model_name=model_cls.__name__,
-        fields=fields,
-        role_permissions=role_permissions,
-        timeseries_config=ts_config,
     )
     model_site_props["reports"] = _normalize_reports(
         model_site_props.get("reports"),

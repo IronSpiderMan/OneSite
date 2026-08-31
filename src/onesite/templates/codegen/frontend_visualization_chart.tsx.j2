@@ -4,23 +4,23 @@ import * as echarts from 'echarts/core';
 import type { EChartsCoreOption } from 'echarts/core';
 {% set renderers = visualizations | map(attribute='renderer') | list %}
 import {
-  {% if report_explorer_enabled %}BarChart,{% endif %}
-  {% if report_explorer_enabled or 'heatmap' in renderers %}HeatmapChart,{% endif %}
-  {% if report_explorer_enabled or 'line' in renderers %}LineChart,{% endif %}
-  {% if report_explorer_enabled or 'pie' in renderers %}PieChart,{% endif %}
+  {% if model_reports_enabled %}BarChart,{% endif %}
+  {% if 'heatmap' in renderers %}HeatmapChart,{% endif %}
+  {% if model_reports_enabled or 'line' in renderers %}LineChart,{% endif %}
+  {% if model_reports_enabled or 'pie' in renderers %}PieChart,{% endif %}
   {% if 'radar' in renderers %}RadarChart,{% endif %}
   {% if 'sankey' in renderers %}SankeyChart,{% endif %}
-  {% if report_explorer_enabled or 'scatter' in renderers %}ScatterChart,{% endif %}
+  {% if model_reports_enabled or 'scatter' in renderers %}ScatterChart,{% endif %}
   {% if 'sunburst' in renderers %}SunburstChart,{% endif %}
   {% if 'tree' in renderers %}TreeChart,{% endif %}
   {% if 'treemap' in renderers %}TreemapChart,{% endif %}
 } from 'echarts/charts';
 import {
-  {% if report_explorer_enabled or 'line' in renderers or 'scatter' in renderers or 'heatmap' in renderers %}GridComponent,{% endif %}
-  {% if report_explorer_enabled or 'line' in renderers or 'scatter' in renderers or 'pie' in renderers or 'radar' in renderers %}LegendComponent,{% endif %}
+  {% if model_reports_enabled or 'line' in renderers or 'scatter' in renderers or 'heatmap' in renderers %}GridComponent,{% endif %}
+  {% if model_reports_enabled or 'line' in renderers or 'scatter' in renderers or 'pie' in renderers or 'radar' in renderers %}LegendComponent,{% endif %}
   {% if 'radar' in renderers %}RadarComponent,{% endif %}
   TooltipComponent,
-  {% if report_explorer_enabled or 'heatmap' in renderers %}VisualMapComponent,{% endif %}
+  {% if 'heatmap' in renderers %}VisualMapComponent,{% endif %}
 } from 'echarts/components';
 import { LabelLayout, UniversalTransition } from 'echarts/features';
 import { CanvasRenderer } from 'echarts/renderers';
@@ -28,21 +28,21 @@ import { CanvasRenderer } from 'echarts/renderers';
 import type { VisualizationData, VisualizationSpec } from '../services/visualizations';
 
 echarts.use([
-  {% if report_explorer_enabled %}BarChart,{% endif %}
-  {% if report_explorer_enabled or 'line' in renderers %}LineChart,{% endif %}
-  {% if report_explorer_enabled or 'scatter' in renderers %}ScatterChart,{% endif %}
-  {% if report_explorer_enabled or 'pie' in renderers %}PieChart,{% endif %}
-  {% if report_explorer_enabled or 'heatmap' in renderers %}HeatmapChart,{% endif %}
+  {% if model_reports_enabled %}BarChart,{% endif %}
+  {% if model_reports_enabled or 'line' in renderers %}LineChart,{% endif %}
+  {% if model_reports_enabled or 'scatter' in renderers %}ScatterChart,{% endif %}
+  {% if model_reports_enabled or 'pie' in renderers %}PieChart,{% endif %}
+  {% if 'heatmap' in renderers %}HeatmapChart,{% endif %}
   {% if 'radar' in renderers %}RadarChart,{% endif %}
   {% if 'tree' in renderers %}TreeChart,{% endif %}
   {% if 'treemap' in renderers %}TreemapChart,{% endif %}
   {% if 'sunburst' in renderers %}SunburstChart,{% endif %}
   {% if 'sankey' in renderers %}SankeyChart,{% endif %}
-  {% if report_explorer_enabled or 'line' in renderers or 'scatter' in renderers or 'heatmap' in renderers %}GridComponent,{% endif %}
-  {% if report_explorer_enabled or 'line' in renderers or 'scatter' in renderers or 'pie' in renderers or 'radar' in renderers %}LegendComponent,{% endif %}
+  {% if model_reports_enabled or 'line' in renderers or 'scatter' in renderers or 'heatmap' in renderers %}GridComponent,{% endif %}
+  {% if model_reports_enabled or 'line' in renderers or 'scatter' in renderers or 'pie' in renderers or 'radar' in renderers %}LegendComponent,{% endif %}
   {% if 'radar' in renderers %}RadarComponent,{% endif %}
   TooltipComponent,
-  {% if report_explorer_enabled or 'heatmap' in renderers %}VisualMapComponent,{% endif %}
+  {% if 'heatmap' in renderers %}VisualMapComponent,{% endif %}
   LabelLayout, UniversalTransition, CanvasRenderer,
 ]);
 
@@ -296,127 +296,6 @@ export const VisualizationChart: React.FC<{
   );
   const option = useMemo(() => buildVisualizationOption(localizedSpec, data), [localizedSpec, data]);
   return <EChartCanvas option={option} title={spec.title} className={className} />;
-};
-
-// Data exploration deliberately shares the ECharts canvas, colors, resize
-// behavior and rendering library with configured visualizations.  Its input
-// remains dynamic because users choose entities and metrics at runtime.
-export type ReportRow = { entity_id: string | number; metric_id: string; time: string; value: unknown };
-export type ReportMeasure = {
-  id: string | number; label: string; data_type?: string; unit?: string | null;
-  enum_values?: Array<string | number | boolean>; min?: number | null; max?: number | null;
-};
-export type ReportChartType = 'line' | 'area' | 'bar' | 'stacked_bar' | 'pie' | 'scatter' | 'histogram' | 'heatmap' | 'status';
-
-const reportNumber = (value: unknown) => {
-  const number = typeof value === 'number' ? value : Number(value);
-  return Number.isFinite(number) ? number : null;
-};
-
-const reportSeries = (rows: ReportRow[], measures: ReportMeasure[]) => {
-  const labels = new Map(measures.map((item) => [String(item.id), item.label]));
-  const valuesByTime = new Map<string, Record<string, unknown>>();
-  const names = new Set<string>();
-  rows.forEach((row) => {
-    const value = reportNumber(row.value);
-    if (value === null) return;
-    const name = `${row.entity_id} · ${labels.get(String(row.metric_id)) || row.metric_id}`;
-    const point = valuesByTime.get(String(row.time)) || { time: String(row.time) };
-    point[name] = value;
-    valuesByTime.set(String(row.time), point);
-    names.add(name);
-  });
-  return { names: Array.from(names), points: Array.from(valuesByTime.values()) };
-};
-
-const reportCartesian = (points: Array<Record<string, unknown>>): EChartsCoreOption => ({
-  ...cartesianBase(points.map((point) => String(point.time))),
-  xAxis: {
-    type: 'category', data: points.map((point) => String(point.time)), boundaryGap: false,
-    axisLabel: { formatter: (value: string) => {
-      const date = new Date(value);
-      return Number.isNaN(date.getTime()) ? value : date.toLocaleString(undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' });
-    } },
-  },
-});
-
-const reportOption = (type: ReportChartType, rows: ReportRow[], measures: ReportMeasure[]): EChartsCoreOption => {
-  const numericRows = rows.filter((row) => reportNumber(row.value) !== null);
-  if (['line', 'area', 'bar', 'stacked_bar'].includes(type)) {
-    const { names, points } = reportSeries(numericRows, measures);
-    const area = type === 'area';
-    const bar = type === 'bar' || type === 'stacked_bar';
-    return {
-      ...reportCartesian(points),
-      series: names.map((name, index) => ({
-        name, type: bar ? 'bar' : 'line', data: points.map((point) => point[name] ?? null),
-        stack: type === 'stacked_bar' ? 'total' : undefined,
-        smooth: !bar, showSymbol: points.length < 30, connectNulls: true,
-        itemStyle: { color: COLORS[index % COLORS.length] },
-        lineStyle: { color: COLORS[index % COLORS.length], width: 2 },
-        areaStyle: area ? { color: COLORS[index % COLORS.length], opacity: 0.16 } : undefined,
-      })),
-    };
-  }
-  if (type === 'pie') {
-    const labels = new Map(measures.map((item) => [String(item.id), item.label]));
-    const totals = new Map<string, number>();
-    numericRows.forEach((row) => {
-      const name = labels.get(String(row.metric_id)) || String(row.metric_id);
-      totals.set(name, (totals.get(name) || 0) + reportNumber(row.value)!);
-    });
-    return { color: COLORS, tooltip: { trigger: 'item' }, legend: { type: 'scroll', bottom: 0 }, series: [{ type: 'pie', radius: ['48%', '72%'], label: { formatter: '{b}: {d}%' }, data: Array.from(totals, ([name, value]) => ({ name, value })) }] };
-  }
-  if (type === 'scatter') {
-    const selected = new Set(rows.map((row) => String(row.metric_id)));
-    const ids = measures.filter((item) => selected.has(String(item.id))).map((item) => String(item.id)).slice(0, 2);
-    const pairs = new Map<string, Record<string, number>>();
-    numericRows.forEach((row) => {
-      const id = String(row.metric_id);
-      if (!ids.includes(id)) return;
-      const point = pairs.get(`${row.entity_id}:${row.time}`) || {};
-      point[id] = reportNumber(row.value)!;
-      pairs.set(`${row.entity_id}:${row.time}`, point);
-    });
-    return { color: COLORS, tooltip: { trigger: 'item' }, grid: { left: 48, right: 24, top: 24, bottom: 48, containLabel: true }, xAxis: { type: 'value', scale: true }, yAxis: { type: 'value', scale: true }, series: [{ type: 'scatter', symbolSize: 10, data: Array.from(pairs.values()).filter((point) => ids.every((id) => id in point)).map((point) => [point[ids[0]], point[ids[1]]]) }] };
-  }
-  if (type === 'histogram') {
-    const values = numericRows.map((row) => reportNumber(row.value)!);
-    const min = Math.min(...values), max = Math.max(...values), count = Math.max(5, Math.min(24, Math.ceil(Math.sqrt(values.length))));
-    const width = (max - min || 1) / count;
-    const bins = Array.from({ length: count }, (_, index) => ({ label: (min + index * width).toPrecision(3), value: 0 }));
-    values.forEach((value) => { bins[Math.min(Math.floor((value - min) / width), count - 1)].value += 1; });
-    return { color: COLORS, tooltip: { trigger: 'axis' }, grid: { left: 48, right: 24, top: 24, bottom: 48, containLabel: true }, xAxis: { type: 'category', data: bins.map((bin) => bin.label) }, yAxis: { type: 'value' }, series: [{ type: 'bar', data: bins.map((bin) => bin.value) }] };
-  }
-  if (type === 'heatmap') {
-    const xValues = unique(numericRows.map((row) => row.time));
-    const yValues = unique(numericRows.map((row) => row.entity_id));
-    const values = numericRows.map((row) => reportNumber(row.value)!);
-    return { color: COLORS, tooltip: { position: 'top' }, grid: { left: 72, right: 32, top: 24, bottom: 72, containLabel: true }, xAxis: { type: 'category', data: xValues }, yAxis: { type: 'category', data: yValues }, visualMap: { min: Math.min(...values), max: Math.max(...values), calculable: true, orient: 'horizontal', left: 'center', bottom: 0 }, series: [{ type: 'heatmap', data: numericRows.map((row) => [xValues.indexOf(String(row.time)), yValues.indexOf(String(row.entity_id)), reportNumber(row.value)]) }] };
-  }
-  const categories = unique(rows.map((row) => row.value));
-  return { ...reportCartesian(rows.map((row) => ({ time: row.time }))), yAxis: { type: 'category', data: categories }, series: [{ type: 'line', step: 'end', data: rows.map((row) => categories.indexOf(String(row.value))), showSymbol: false }] };
-};
-
-export const supportedReportCharts = (measures: ReportMeasure[], rows: ReportRow[]): ReportChartType[] => {
-  const selected = new Set(rows.map((row) => String(row.metric_id)));
-  const active = measures.filter((item) => selected.has(String(item.id)));
-  const numericMeasures = active.filter((item) => !item.data_type || ['number', 'float', 'int'].includes(item.data_type));
-  const categorical = active.some((item) => ['boolean', 'bool', 'enum', 'category', 'string'].includes(item.data_type || ''));
-  const charts: ReportChartType[] = [];
-  if (numericMeasures.length) charts.push('line', 'area', 'bar', 'stacked_bar', 'pie', 'histogram', 'heatmap');
-  if (numericMeasures.length >= 2) charts.push('scatter');
-  if (categorical) charts.push('status');
-  return charts;
-};
-
-export const ReportExplorerChart: React.FC<{
-  type: ReportChartType;
-  rows: ReportRow[];
-  measures: ReportMeasure[];
-}> = ({ type, rows, measures }) => {
-  const option = useMemo(() => reportOption(type, rows, measures), [type, rows, measures]);
-  return <EChartCanvas option={option} title="Data explorer chart" className="h-full w-full" />;
 };
 
 export type ModelReportRow = Record<string, any>;

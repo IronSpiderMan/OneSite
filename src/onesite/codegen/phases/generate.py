@@ -510,6 +510,22 @@ def _model_menu_node(model: ModelDefinition) -> dict[str, Any]:
     }
 
 
+def _custom_route_menu_node(route: dict[str, Any]) -> dict[str, Any]:
+    menu = route.get("menu")
+    if menu is None:
+        raise ValueError(
+            f"Frontend route '{route['id']}' is referenced by navigation but has no menu metadata."
+        )
+    return {
+        "type": "item",
+        "key": route["path"],
+        "icon": menu["icon"],
+        "label": menu["label"],
+        "my_label": None,
+        "visible": menu["visible"],
+    }
+
+
 def _builtin_menu_node(
     key: str,
     *,
@@ -559,6 +575,7 @@ def _builtin_menu_node(
 def _build_navigation(
     navigation: Any,
     frontend_models: list[ModelDefinition],
+    custom_routes: list[dict[str, Any]] | None = None,
     *,
     reports_enabled: bool,
     reports_role_visible: dict[str, bool],
@@ -572,11 +589,13 @@ def _build_navigation(
     it is present, its declarations lead the menu in tree order; menu-eligible
     models omitted from the tree are appended afterward in their default order.
     """
+    custom_routes = custom_routes or []
     model_by_module = {
         model["module_name"]: model
         for model in frontend_models
         if _is_menu_model(model)
     }
+    route_by_id = {route["id"]: route for route in custom_routes}
 
     def build_node(declaration: dict[str, Any], path: str) -> dict[str, Any] | None:
         node_type = declaration["type"]
@@ -590,6 +609,16 @@ def _build_navigation(
                     f"but its module name is not menu-eligible. Available models: {available}."
                 )
             return _model_menu_node(model)
+        if node_type == "route":
+            route_id = declaration["route"]
+            route = route_by_id.get(route_id)
+            if route is None:
+                available = ", ".join(sorted(route_by_id)) or "(none)"
+                raise ValueError(
+                    f"site_config.navigation {path} references frontend route "
+                    f"'{route_id}', but it does not exist. Available routes: {available}."
+                )
+            return _custom_route_menu_node(route)
         if node_type == "builtin":
             return _builtin_menu_node(
                 declaration["key"],
@@ -630,6 +659,11 @@ def _build_navigation(
             )
         ]
         default_nodes.extend(_model_menu_node(model) for model in model_by_module.values())
+        default_nodes.extend(
+            _custom_route_menu_node(route)
+            for route in custom_routes
+            if route.get("menu") is not None
+        )
         for key in ("reports", "external-resources", "task-center"):
             node = _builtin_menu_node(
                 key,
@@ -664,6 +698,23 @@ def _build_navigation(
         _model_menu_node(model)
         for module_name, model in model_by_module.items()
         if module_name not in declared_models
+    )
+    declared_routes = {
+        declaration["route"]
+        for declaration in navigation
+        if declaration["type"] == "route"
+    }
+    declared_routes.update(
+        child["route"]
+        for declaration in navigation
+        if declaration["type"] == "group"
+        for child in declaration["children"]
+        if child["type"] == "route"
+    )
+    declared_nodes.extend(
+        _custom_route_menu_node(route)
+        for route in custom_routes
+        if route.get("menu") is not None and route["id"] not in declared_routes
     )
     declared_builtins = {
         declaration["key"]
@@ -806,11 +857,28 @@ def phase_generate_aggregated(
 ) -> None:
     """Generate cross-cutting files: router, routes, menu, dashboard, i18n, etc."""
     frontend_path = get_project_paths(cwd).frontend
+    frontend_features = site_config.get("_frontend_features", [])
+    frontend_routes = [
+        {**route, "feature_name": feature["name"]}
+        for feature in frontend_features
+        for route in feature.get("routes", [])
+    ]
+    frontend_overrides = [
+        {**override, "feature_name": feature["name"]}
+        for feature in frontend_features
+        for override in feature.get("overrides", [])
+    ]
+    dashboard_widgets = sorted(
+        [
+            {**widget, "feature_name": feature["name"]}
+            for feature in frontend_features
+            for widget in feature.get("dashboard_widgets", [])
+        ],
+        key=lambda widget: (widget["order"], widget["id"]),
+    )
     theme_name = resolve_theme(site_config)[0]["id"]
     visualizations = site_config.get("_visualizations", [])
-    report_explorer_enabled = any(
-        model.get("data_reports") or model.get("reports") for model in api_models
-    )
+    model_reports_enabled = any(model.get("reports") for model in api_models)
     import_export_models = [
         model
         for model in api_models
@@ -1013,10 +1081,9 @@ def phase_generate_aggregated(
             visualization_context,
             backend_path / "app" / "api" / "endpoints" / "visualizations.py",
         )
-    # The explorer uses the same ECharts canvas and option builders as
-    # configured dashboard visualizations.  It must be generated even when a
-    # project only declares ``data_reports`` and no fixed visualizations.
-    if visualizations or report_explorer_enabled:
+    # Model reports share the ECharts canvas and option builders with
+    # configured dashboard visualizations.
+    if visualizations or model_reports_enabled:
         visualization_context = {"visualizations": visualizations}
         generate_file(
             "frontend_visualization_service.ts.j2",
@@ -1027,7 +1094,7 @@ def phase_generate_aggregated(
             "frontend_visualization_chart.tsx.j2",
             {
                 "visualizations": visualizations,
-                "report_explorer_enabled": report_explorer_enabled,
+                "model_reports_enabled": model_reports_enabled,
             },
             frontend_path / "src" / "components" / "visualization-chart.tsx",
         )
@@ -1211,29 +1278,65 @@ def phase_generate_aggregated(
         and not m.get("is_latest_table")
         and m.get("standalone", True)
     ]
+    visualize_models = [
+        m for m in api_models
+        if not m.get("is_latest_table")
+        and bool((m.get("visualize") or {}).get("show"))
+    ]
     dashboard_models = [
         m for m in api_models
         if not m.get("is_latest_table") and m.get("dashboard_metrics")
-    ]
-    legacy_report_models = [
-        m for m in api_models
-        if not m.get("is_latest_table") and m.get("data_reports")
     ]
     model_report_models = [
         m for m in api_models
         if not m.get("is_latest_table") and m.get("reports")
     ]
-    report_models = [*model_report_models, *legacy_report_models]
+    report_models = model_report_models
+    generated_route_paths = {
+        "builtin.dashboard": "/dashboard",
+        "builtin.settings": "/settings",
+    }
+    if report_models:
+        generated_route_paths["builtin.reports"] = "/reports"
+    if external_resources_enabled:
+        generated_route_paths["builtin.external-resources"] = "/external-resources"
+    if background_tasks_enabled:
+        generated_route_paths["builtin.task-center"] = "/task-center"
+    for model in frontend_models:
+        module_name = model["module_name"]
+        if model.get("is_singleton"):
+            generated_route_paths[f"model.{module_name}.detail"] = f"/{module_name}"
+            continue
+        generated_route_paths[f"model.{module_name}.list"] = f"/{module_name}s"
+        generated_route_paths[f"model.{module_name}.detail"] = f"/{module_name}s/:id"
+        if model.get("page_edit"):
+            generated_route_paths[f"model.{module_name}.create"] = f"/{module_name}s/new"
+
+    reserved_route_paths = {
+        "/login", "/register", "/error/:code", "/profile",
+        *generated_route_paths.values(),
+    }
+    for route in frontend_routes:
+        if route["path"] in reserved_route_paths:
+            raise ValueError(
+                f"Frontend route '{route['id']}' conflicts with generated path "
+                f"'{route['path']}'. Use a FrontendOverride for generated pages."
+            )
+    unknown_overrides = sorted(
+        override["target"]
+        for override in frontend_overrides
+        if override["target"] not in generated_route_paths
+    )
+    if unknown_overrides:
+        raise ValueError(
+            "Frontend overrides reference unavailable generated routes: "
+            + ", ".join(unknown_overrides)
+            + ". Available targets: "
+            + ", ".join(sorted(generated_route_paths))
+        )
     reports_role_visible = {
         role: any(
-            (
-                role in model.get("reports", {}).get("permitted_roles", [])
-                if model.get("reports")
-                else any(
-                    role in report.get("permitted_roles", [])
-                    for report in model.get("data_reports", [])
-                )
-            )
+            role in model.get("reports", {}).get("permitted_roles", [])
             for model in report_models
         )
         for role in ("user", "admin", "developer")
@@ -1273,6 +1376,7 @@ def phase_generate_aggregated(
     navigation = _build_navigation(
         site_config.get("navigation"),
         frontend_models,
+        frontend_routes,
         reports_enabled=bool(report_models),
         reports_role_visible=reports_role_visible,
         external_resources_enabled=external_resources_enabled,
@@ -1311,6 +1415,11 @@ def phase_generate_aggregated(
             frontend_path / "src" / "pages" / "TaskCenter.tsx",
         )
     generate_file(
+        "frontend_feature_routes.tsx.j2",
+        {"routes": frontend_routes, "overrides": frontend_overrides},
+        frontend_path / "src" / "GeneratedFeatureRoutes.tsx",
+    )
+    generate_file(
         "frontend_routes.tsx.j2",
         {
             "models": frontend_models,
@@ -1334,6 +1443,11 @@ def phase_generate_aggregated(
         {"navigation": navigation, "used_icons": used_icons},
         frontend_path / "src" / "Menu.tsx",
     )
+    generate_file(
+        "frontend_dashboard_widgets.tsx.j2",
+        {"widgets": dashboard_widgets},
+        frontend_path / "src" / "GeneratedDashboardWidgets.tsx",
+    )
     site_logger_enabled = "site_logger" in site_config.get("plugins", [])
     show_dashboard_announcement = bool(
         system_model
@@ -1351,7 +1465,7 @@ def phase_generate_aggregated(
     generate_theme_file(
         "dashboard_page.tsx.j2",
         {
-            "models": frontend_models,
+            "models": visualize_models,
             "dashboard_models": dashboard_models,
             "scheduled_tasks": scheduled_tasks,
             "site_logger": site_logger_enabled,
@@ -1359,6 +1473,7 @@ def phase_generate_aggregated(
             "tools": tools,
             "dashboard_metric_icons": dashboard_metric_icons,
             "visualizations": visualizations,
+            "dashboard_widgets": dashboard_widgets,
         },
         frontend_path / "src" / "pages" / "Dashboard.tsx",
         theme_name,
@@ -1369,18 +1484,11 @@ def phase_generate_aggregated(
             {},
             backend_path / "app" / "core" / "reports.py",
         )
-        if model_report_models:
-            generate_file(
-                "model_report_page.tsx.j2",
-                {"report_models": model_report_models},
-                frontend_path / "src" / "pages" / "Reports.tsx",
-            )
-        else:
-            generate_file(
-                "report_page.tsx.j2",
-                {"report_models": legacy_report_models},
-                frontend_path / "src" / "pages" / "Reports.tsx",
-            )
+        generate_file(
+            "model_report_page.tsx.j2",
+            {"report_models": model_report_models},
+            frontend_path / "src" / "pages" / "Reports.tsx",
+        )
 
     # ── Feature flags ──
     generate_file(
@@ -1417,7 +1525,12 @@ def phase_generate_aggregated(
 
     # ── Locale files ──
     navigation_groups = [node for node in navigation if node["type"] == "group"]
-    generate_locale_files(models, frontend_path / "src" / "locales", navigation_groups)
+    generate_locale_files(
+        models,
+        frontend_path / "src" / "locales",
+        navigation_groups,
+        frontend_features,
+    )
 
     # ── Background task handlers __init__.py ──
     # Match the models that received a routed API and the shared I/O runtime;

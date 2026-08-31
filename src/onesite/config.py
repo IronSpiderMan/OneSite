@@ -95,6 +95,11 @@ class NavModel(_ConfigModel):
     model: str
 
 
+class NavRoute(_ConfigModel):
+    type: Literal["route"] = "route"
+    route: str
+
+
 class NavBuiltin(_ConfigModel):
     type: Literal["builtin"] = "builtin"
     key: Literal[
@@ -128,10 +133,10 @@ class NavGroup(_ConfigModel):
     icon: str = "Folder"
     default_open: bool = False
     visible: list[Role] | dict[Role, bool] | None = None
-    children: list[NavModel | NavBuiltin]
+    children: list[NavModel | NavRoute | NavBuiltin]
 
 
-NavigationItem = NavModel | NavBuiltin | NavGroup
+NavigationItem = NavModel | NavRoute | NavBuiltin | NavGroup
 
 
 class ToolExecution(_ConfigModel):
@@ -390,11 +395,10 @@ class OneSiteConfig(_ConfigModel):
     tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)
     special_me_permissions: ModelPermissions | None = None
-    # Deprecated configurations stay typed at the container level while their
-    # detailed schemas continue to live in the visualization/report modules.
+    # Deprecated visualization configuration stays typed at the container
+    # level while its detailed schema lives in the visualization module.
     visualize: dict[str, Any] | list[dict[str, Any]] | None = None
     dashboard_metrics: list[Any] = Field(default_factory=list)
-    data_reports: list[dict[str, Any]] = Field(default_factory=list)
     reports: ReportsConfig | bool = False
 
 

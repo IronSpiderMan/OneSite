@@ -8,6 +8,7 @@ import { Button } from '../components/ui/button';
 import { SearchableSelect } from '../components/ui/searchable-select';
 import { useSystemConfigStore } from '../stores/useSystemConfigStore';
 import Markdown from 'react-markdown';
+import { GeneratedDashboardWidgets, isDashboardWidgetVisible } from '../GeneratedDashboardWidgets';
 {% if visualizations | default([]) %}
 import VisualizationChart from '../components/visualization-chart';
 import {
@@ -236,6 +237,10 @@ const DashboardPage: React.FC = () => {
     const [chartsData, setChartsData] = useState<Record<string, ChartData>>({});
     const [dashboardMetrics, setDashboardMetrics] = useState<DashboardMetric[]>([]);
     const [loading, setLoading] = useState(true);
+    const userRole = localStorage.getItem('user_role') || 'user';
+    const customDashboardWidgets = GeneratedDashboardWidgets.filter((widget) =>
+        isDashboardWidgetVisible(widget, userRole)
+    );
     {% if visualizations | default([]) %}
     const [visualizationSpecs, setVisualizationSpecs] = useState<VisualizationSpec[]>([]);
     const [visualizationData, setVisualizationData] = useState<Record<string, VisualizationData>>({});
@@ -548,7 +553,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0 && dashboardMetrics.length === 0 {% if visualizations | default([]) %}&& visualizationSpecs.length === 0{% endif %}{% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
+    if (chartModels.length === 0 && dashboardMetrics.length === 0 && customDashboardWidgets.length === 0 {% if visualizations | default([]) %}&& visualizationSpecs.length === 0{% endif %}{% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -834,6 +839,33 @@ const DashboardPage: React.FC = () => {
                 </div>
             )}
             {% endif %}
+
+            {customDashboardWidgets.length > 0 && (
+                <div className="grid grid-cols-12 gap-5" data-dashboard-section="custom-widgets">
+                    {customDashboardWidgets.map(({ Component, ...widget }) => (
+                        <section
+                            key={widget.id}
+                            className={`${widget.spanClass} ${widget.frame ? 'overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm' : ''}`}
+                            data-dashboard-widget={widget.id}
+                        >
+                            {widget.frame ? (
+                                <>
+                                    <div className="border-b border-border/60 px-5 py-4">
+                                        <h2 className="text-base font-semibold">
+                                            {t(widget.titleKey, widget.fallbackTitle)}
+                                        </h2>
+                                    </div>
+                                    <div className="p-5">
+                                        <Component />
+                                    </div>
+                                </>
+                            ) : (
+                                <Component />
+                            )}
+                        </section>
+                    ))}
+                </div>
+            )}
 
             {dashboardMetrics.length > 0 && (
                 <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">

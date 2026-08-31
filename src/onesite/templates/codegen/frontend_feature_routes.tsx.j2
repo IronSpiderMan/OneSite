@@ -1,0 +1,83 @@
+import type { ComponentType, ReactNode } from 'react';
+import { Navigate } from 'react-router-dom';
+{% for route in routes %}
+import RouteComponent{{ loop.index }} from './custom/features/{{ route.feature_name }}/{{ route.component }}';
+{% endfor %}
+{% for override in overrides %}
+import OverrideComponent{{ loop.index }} from './custom/features/{{ override.feature_name }}/{{ override.component }}';
+{% endfor %}
+
+export type GeneratedRouteDefinition = {
+  id: string;
+  path: string;
+  element: ReactNode;
+};
+
+function FeatureRouteGuard({
+  access,
+  children,
+}: {
+  access: string[];
+  children: ReactNode;
+}) {
+  const role = localStorage.getItem('user_role') || 'user';
+  return access.includes(role) ? <>{children}</> : <Navigate to="/error/403" replace />;
+}
+
+export const GeneratedFeatureRoutes: GeneratedRouteDefinition[] = [
+{% for route in routes %}
+{% if route.layout == 'app' %}
+  {
+    id: {{ route.id | tojson }},
+    path: {{ route.path | tojson }},
+    element: (
+      <FeatureRouteGuard access={ {{ route.access | tojson }} }>
+        <RouteComponent{{ loop.index }} />
+      </FeatureRouteGuard>
+    ),
+  },
+{% endif %}
+{% endfor %}
+];
+
+export const GeneratedPublicFeatureRoutes: GeneratedRouteDefinition[] = [
+{% for route in routes %}
+{% if route.layout == 'public' %}
+  {
+    id: {{ route.id | tojson }},
+    path: {{ route.path | tojson }},
+    element: <RouteComponent{{ loop.index }} />,
+  },
+{% endif %}
+{% endfor %}
+];
+
+const GeneratedRouteOverrides: Record<string, {
+  Component: ComponentType;
+  access: string[] | null;
+}> = {
+{% for override in overrides %}
+  {{ override.target | tojson }}: {
+    Component: OverrideComponent{{ loop.index }},
+    access: {{ override.access | tojson }},
+  },
+{% endfor %}
+};
+
+export function applyGeneratedRouteOverrides(
+  routes: GeneratedRouteDefinition[],
+): GeneratedRouteDefinition[] {
+  return routes.map((route) => {
+    const override = GeneratedRouteOverrides[route.id];
+    if (!override) return route;
+    const Component = override.Component;
+    const element = override.access === null
+      ? <Component />
+      : (
+          <FeatureRouteGuard access={override.access}>
+            <Component />
+          </FeatureRouteGuard>
+        );
+    return { ...route, element };
+  });
+}

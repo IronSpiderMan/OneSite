@@ -376,7 +376,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   {% endfor %}
   {% endif %}
 
-  const { register, handleSubmit, reset, setValue, control } = useForm();
+  const { register, handleSubmit, reset, setValue, control, watch } = useForm();
+  const rootValue = watch();
 
   {% if model.refresh_interval %}
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -1117,6 +1118,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       <div className="flex-1 min-h-0 overflow-hidden border rounded-md border-t-2 border-t-accent/30 [&>[data-ui=table-container]]:h-full">
         <Table>
           <TableHeader className="sticky top-0 z-20 bg-card shadow-sm">
+            {% set list_extra_fields = model.extra_fields | default([]) | selectattr('show_in_list') | list %}
             <TableRow>
               <TableHead className="w-[40px]">
                 <input
@@ -1131,19 +1133,22 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
               <TableHead>{t('{{ field.label_key }}')}</TableHead>
               )}{% endif %}
               {% endfor %}
+              {% for field in list_extra_fields %}
+              <TableHead>{{ field.label if field.label is string else field.name }}</TableHead>
+              {% endfor %}
               <TableHead className="w-[100px] sticky right-0 bg-card z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]">{t('common.actions')}</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
             {loading ? (
                 <TableRow>
-                    <TableCell colSpan={ {{ model.fields|length + 2 }} } className="h-24 text-center">
+                    <TableCell colSpan={ {{ model.fields|length + list_extra_fields|length + 2 }} } className="h-24 text-center">
                         <Loader2 className="h-6 w-6 animate-spin mx-auto" />
                     </TableCell>
                 </TableRow>
             ) : data.length === 0 ? (
                 <TableRow>
-                    <TableCell colSpan={ {{ model.fields|length + 2 }} } className="h-24 text-center">
+                    <TableCell colSpan={ {{ model.fields|length + list_extra_fields|length + 2 }} } className="h-24 text-center">
                         {t('common.no_result')}
                     </TableCell>
                 </TableRow>
@@ -1252,6 +1257,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         {% endif %}
                     </TableCell>
                     )}{% endif %}
+                    {% endfor %}
+                    {% for field in list_extra_fields %}
+                    <TableCell>
+                        <span className="block max-w-[250px] truncate" title={String(item.{{ field.name }} ?? '')}>
+                            {item.{{ field.name }} == null ? '-' : String(item.{{ field.name }})}
+                        </span>
+                    </TableCell>
                     {% endfor %}
                     <TableCell className="sticky right-0 bg-card z-10">
                         <div className="flex items-center gap-2">
@@ -1914,12 +1926,14 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         schema={ {{ field.json_model_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                        rootValue={rootValue}
                     />
                     {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
                     <JsonModelDictEditor
                         itemSchema={ {{ field.json_item_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                        rootValue={rootValue}
                         {% if field.json_fixed_keys %}
                         fixedKeys={ {{ field.json_fixed_keys | tojson }} }
                         {% endif %}
@@ -1934,6 +1948,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         itemSchema={ {{ field.json_item_schema | tojson }} }
                         value={value}
                         onChange={onChange}
+                        rootValue={rootValue}
                         {% if model.property_config_meta and field.name == model.property_config_meta.field_name %}
                         canAdd={'{{ model.property_config_meta.field_permissions }}'.includes('a')}
                         canRemove={'{{ model.property_config_meta.field_permissions }}'.includes('l')}

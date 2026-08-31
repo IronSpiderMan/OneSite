@@ -322,6 +322,100 @@ Dashboard immediately, while the status API lets the UI recover after refresh
 or reconnection. The current queue remains process-local, so queued work does
 not provide distributed delivery across multiple backend instances.
 
+### Custom frontend features and Dashboard widgets
+
+Developer-owned frontend features live in
+`app/frontend/features/<feature_name>/`. Each feature exports a typed manifest
+from `feature.py`; its components, services, stores, locale files, and other
+assets are mirrored to `generated/frontend/src/custom/` during `site sync`.
+
+```python
+from onesite.frontend import (
+    DashboardWidget,
+    FrontendFeature,
+    FrontendMenu,
+    FrontendOverride,
+    FrontendRoute,
+)
+
+feature = FrontendFeature(
+    name="operations",
+    routes=[
+        FrontendRoute(
+            id="workspace",
+            path="/operations",
+            component="pages/Workspace.tsx",
+            access=["admin", "developer"],
+            menu=FrontendMenu(
+                title={"zh": "运营工作台", "en": "Operations"},
+                icon="Activity",
+            ),
+        ),
+        FrontendRoute(
+            id="public_status",
+            path="/public/status",
+            component="pages/PublicStatus.tsx",
+            layout="public",
+        ),
+    ],
+    overrides=[
+        FrontendOverride(
+            target="model.sync_task.detail",
+            component="pages/CustomSyncTask.tsx",
+        ),
+    ],
+    dashboard_widgets=[
+        DashboardWidget(
+            id="health",
+            component="components/HealthWidget.tsx",
+            title={"zh": "运行健康度", "en": "Operations Health"},
+            span={"md": 12, "xl": 6},
+            access=["admin", "developer"],
+        ),
+    ],
+    dependencies={"dayjs": "^1.11.0"},
+)
+```
+
+Application routes are mounted inside the authenticated generated layout and
+can restrict frontend access by role. Public routes are mounted outside that
+layout and do not require a token. To place a menu-enabled custom route in an
+explicit navigation tree, reference its namespaced ID:
+
+```python
+from onesite.config import NavGroup, NavRoute
+
+NavGroup(
+    key="operations",
+    label={"zh": "运营", "en": "Operations"},
+    children=[NavRoute(route="operations.workspace")],
+)
+```
+
+Generated routes have stable override targets such as `builtin.dashboard`,
+`builtin.settings`, `model.device.list`, `model.device.detail`, and
+`model.device.create`. Overrides replace only the rendered component, keeping
+the generated URL and navigation contract. Route IDs, paths, referenced
+components, navigation references, role declarations, and override targets
+are validated during sync.
+Frontend `access` only controls navigation and route rendering; backend API
+permissions remain the security boundary for feature data and operations.
+
+Widget IDs are namespaced as `<feature>.<widget>`. The generated Dashboard
+orders widgets by `order`, filters them by the current role, provides a
+theme-owned card frame by default, and uses the declared responsive 12-column
+span. Set `frame=False` when the component supplies its own complete surface.
+Locale files at `locales/en.json` and `locales/zh.json` are automatically merged
+below `features.<feature_name>`, so feature components can use keys such as
+`t('features.operations.status')`. Declared npm dependencies are merged into the
+generated `package.json`; incompatible versions fail during sync instead of
+silently replacing generator dependencies.
+
+See `examples/datahub/app/frontend/features/ops_dashboard/` for a complete
+multi-page feature with authenticated and public routes, a generated-page
+override, two Dashboard widgets, a shared Zustand store, a service,
+translations, and deterministic mock data.
+
 ### Scheduled tasks
 
 Scheduled tasks use the same developer-owned source and background execution
@@ -687,6 +781,33 @@ class AuthConfig(BaseModel):
     enabled: bool = True
 ```
 
+Structured JSON child fields can be shown, required, or cleared conditionally.
+Controller names normally refer to sibling JSON fields; use `$root.<field>` to
+refer to a field on the containing SQLModel record:
+
+```python
+def only_for(kind: str):
+    return {"info": {"site_props": {
+        "visible_when": {"$root.type": [kind]},
+        "clear_when_hidden": True,
+    }}}
+
+class Properties(SQLModel):
+    a: str | None = Field(default=None, sa_column_kwargs=only_for("none"))
+    b: str | None = Field(default=None, sa_column_kwargs=only_for("none"))
+    c: str | None = Field(default=None, sa_column_kwargs=only_for("password"))
+    d: str | None = Field(default=None, sa_column_kwargs=only_for("password"))
+
+class Connector(SQLModel, table=True):
+    type: str
+    properties: Properties = Field(sa_column=Column(JSON))
+```
+
+Add `required_when` with the same condition when a visible child must be
+present. Generated create/edit/detail UIs apply the rule immediately, and API
+schemas repeat the cleanup and required-field checks. A `$root` reference must
+name a field on the containing model.
+
 ### Enable / disable actions
 
 For a boolean field, use the `toggle` shorthand instead of defining separate
@@ -1024,7 +1145,10 @@ project/
 │   │   └── mqtt/              # MQTT handler implementations
 │   ├── tools/                  # Dashboard tool implementations
 │   ├── tasks/                  # scheduled task implementations
-│   └── utils/                 # reusable developer-owned backend helpers
+│   ├── frontend/
+│   │   ├── features/           # custom frontend feature source
+│   │   └── shared/             # shared custom frontend modules
+│   └── utils/                  # reusable developer-owned backend helpers
 ├── generated/                 # replaceable OneSite output
 │   ├── backend/
 │   │   ├── Dockerfile
@@ -1037,7 +1161,8 @@ project/
 │       ├── src-tauri/          # generated Tauri 2 desktop shell
 │       └── src/
 │           ├── pages/ services/ stores/
-│           └── components/
+│           ├── components/
+│           └── custom/         # mirrored developer-owned frontend source
 ├── deploy/
 │   ├── .env.example
 │   ├── .env                   # optional, developer-created and gitignored

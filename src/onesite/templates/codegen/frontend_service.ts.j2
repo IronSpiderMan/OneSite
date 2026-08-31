@@ -17,6 +17,9 @@ export interface {{ model.name }} {
     {% endif %}
     {% endif %}
 {% endfor %}
+{% for field in model.extra_fields | default([]) %}
+    {{ field.name }}: {{ 'string[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+{% endfor %}
 }
 
 export interface PaginatedResponse<T> {
@@ -104,6 +107,8 @@ export const get{{ model.name }}DashboardMetrics = async () => {
 
 {% endif %}
 
+{% endif %}
+
 {% if model.visualize %}
 export interface {{ model.name }}StatsSeries {
     name: string;
@@ -153,6 +158,8 @@ export const get{{ model.name }}StatsFilters = async (filterName: string): Promi
 {% endif %}
 
 {% endif %}
+
+{% if not model.is_timescaledb %}
 
 {% if model.actions %}
 {% if model.has_dynamic_action_states %}
@@ -349,31 +356,6 @@ export const get{{ model.name }}DashboardMetrics = async () => {
 };
 {% endif %}
 
-{% if model.data_reports %}
-export interface {{ model.name }}ReportOption { id: string | number; label: string }
-export interface {{ model.name }}ReportOptions {
-    report: { key: string; title: string; buckets: string[]; aggregations: string[]; views: string[]; default_range?: string };
-    dimensions: Array<{ key: string; label: string; data_type: string }>;
-    measures: Array<{{ model.name }}ReportOption & { data_type?: string; unit?: string | null; enum_values?: Array<string | number | boolean>; min?: number | null; max?: number | null }>;
-    entities: {{ model.name }}ReportOption[];
-    metrics: {{ model.name }}ReportOption[];
-    metric_entities: Record<string, Array<string | number>>;
-}
-export interface {{ model.name }}ReportRow {
-    entity_id: string | number;
-    metric_id: string;
-    time: string;
-    value: unknown;
-}
-export const get{{ model.name }}ReportOptions = async (reportKey: string) => {
-    const response = await request.get<{{ model.name }}ReportOptions>(`${API_URL}/reports/${reportKey}/options`);
-    return response.data;
-};
-export const query{{ model.name }}Report = async (reportKey: string, payload: Record<string, any>) => {
-    const response = await request.post<{ mode: string; rows: {{ model.name }}ReportRow[]; meta: { bucket: string; requested_bucket: string; truncated: boolean; limit: number; timezone: string } }>(`${API_URL}/reports/${reportKey}/query`, payload);
-    return response.data;
-};
-{% endif %}
 {% endif %}
 
 {% if model.reports %}

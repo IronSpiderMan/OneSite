@@ -9,14 +9,21 @@ the downstream code generation phases.
 import importlib
 import inspect
 from pathlib import Path
-from typing import Any
+from typing import Any, get_args, get_origin
 
 from pydantic_core import PydanticUndefined
 import sqlmodel.main
 from sqlmodel import SQLModel
 
 from onesite.config import normalize_onesite_config
-from onesite_runtime import ACTION_METADATA_ATTRIBUTE, ActionMetadata
+from onesite_runtime import (
+    ACTION_METADATA_ATTRIBUTE,
+    EXTRA_FIELD_METADATA_ATTRIBUTE,
+    OVERRIDE_FIELD_METADATA_ATTRIBUTE,
+    ActionMetadata,
+    ExtraFieldMetadata,
+    OverrideFieldMetadata,
+)
 
 from ..introspect import get_model_fields
 from ..model_imports import ModelIntrospectionError, isolated_project_imports
@@ -396,7 +403,6 @@ def _build_model_dict(
         import_key=result.import_key,
         visualize=result.model_site_props.get("visualize"),
         dashboard_metrics=result.model_site_props.get("dashboard_metrics", []),
-        data_reports=result.model_site_props.get("data_reports", []),
         reports=result.model_site_props.get("reports"),
         has_created_at=any(f.name == "created_at" for f in result.fields),
         owner_field=result.owner_field,
@@ -486,6 +492,121 @@ def _validate_service_hooks(model_cls: type) -> None:
         )
 
 _ACTION_ARGUMENTS = {"self", "context", "session", "current_user"}
+_EXTRA_FIELD_ARGUMENTS = {"self", "context", "session", "current_user", "values"}
+_OVERRIDE_FIELD_ARGUMENTS = {*_EXTRA_FIELD_ARGUMENTS, "value"}
+
+
+def _read_annotation(annotation: Any) -> tuple[str, list[str]]:
+    """Render a resolver return annotation for a generated Read schema."""
+
+    if isinstance(annotation, str):
+        return annotation.replace("typing.", ""), []
+    origin = get_origin(annotation)
+    args = get_args(annotation)
+    if origin is list:
+        item, imports = _read_annotation(args[0] if args else Any)
+        return f"List[{item}]", imports
+    if origin is dict:
+        key, key_imports = _read_annotation(args[0] if args else str)
+        value, value_imports = _read_annotation(args[1] if len(args) > 1 else Any)
+        return f"Dict[{key}, {value}]", sorted(set(key_imports + value_imports))
+    if origin is not None and str(origin).endswith("Union"):
+        members: list[str] = []
+        imports: list[str] = []
+        for item in args:
+            if item is type(None):
+                members.append("None")
+            else:
+                rendered, item_imports = _read_annotation(item)
+                members.append(rendered)
+                imports.extend(item_imports)
+        return f"Union[{', '.join(members)}]", sorted(set(imports))
+    if annotation is Any:
+        return "Any", []
+    if annotation in {str, int, float, bool, bytes}:
+        return annotation.__name__, []
+    name = getattr(annotation, "__name__", None)
+    if name:
+        # Model modules already import their own declared types.  The schema
+        # template imports these names alongside the model class.
+        return name, [name]
+    return str(annotation).replace("typing.", ""), []
+
+
+def _extract_read_resolvers(
+    model_cls: type,
+    fields: list[FieldDefinition],
+    *,
+    owner_field: str | None,
+    union_key: list[str] | None,
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Extract and validate ``@extra_field`` and ``@override_field`` methods."""
+
+    fields_by_name = {field.name: field for field in fields}
+    reserved_overrides = {"id", owner_field, *(union_key or [])}
+    reserved_overrides.update(field.name for field in fields if field.fk_info is not None)
+    extra_fields: list[dict[str, Any]] = []
+    overrides: list[dict[str, Any]] = []
+    names: set[str] = set()
+    targets: set[str] = set()
+
+    for method_name, raw_method in vars(model_cls).items():
+        if isinstance(raw_method, (classmethod, staticmethod)):
+            if (
+                getattr(raw_method.__func__, EXTRA_FIELD_METADATA_ATTRIBUTE, None) is not None
+                or getattr(raw_method.__func__, OVERRIDE_FIELD_METADATA_ATTRIBUTE, None) is not None
+            ):
+                raise ValueError(f"{model_cls.__name__}.{method_name} must be an instance method")
+            continue
+        extra_metadata = getattr(raw_method, EXTRA_FIELD_METADATA_ATTRIBUTE, None)
+        override_metadata = getattr(raw_method, OVERRIDE_FIELD_METADATA_ATTRIBUTE, None)
+        if extra_metadata is not None and override_metadata is not None:
+            raise ValueError(f"{model_cls.__name__}.{method_name} cannot be both extra_field and override_field")
+        if extra_metadata is None and override_metadata is None:
+            continue
+        if not inspect.isfunction(raw_method):
+            raise ValueError(f"Invalid read resolver on {model_cls.__name__}.{method_name}")
+        parameters = list(inspect.signature(raw_method).parameters.values())
+        if not parameters or parameters[0].name != "self":
+            raise ValueError(f"{model_cls.__name__}.{method_name} must be an instance method whose first parameter is 'self'")
+        if extra_metadata is not None:
+            if not isinstance(extra_metadata, ExtraFieldMetadata):
+                raise ValueError(f"Invalid extra_field metadata on {model_cls.__name__}.{method_name}")
+            _validate_named_hook_signature(model_cls, method_name, raw_method, _EXTRA_FIELD_ARGUMENTS)
+            annotation = inspect.signature(raw_method).return_annotation
+            if annotation is inspect.Signature.empty:
+                raise ValueError(f"{model_cls.__name__}.{method_name} extra_field must declare a return type")
+            field_name = extra_metadata.name or method_name
+            if field_name in fields_by_name or field_name in names:
+                raise ValueError(f"{model_cls.__name__}.{method_name} extra field name {field_name!r} conflicts with an existing field")
+            type_name, py_imports = _read_annotation(annotation)
+            extra_fields.append({
+                "name": field_name,
+                "type": type_name,
+                "handler": method_name,
+                "label": extra_metadata.label,
+                "show_in_list": extra_metadata.show_in_list,
+                "show_in_detail": extra_metadata.show_in_detail,
+                "py_imports": py_imports,
+            })
+            names.add(field_name)
+        else:
+            if not isinstance(override_metadata, OverrideFieldMetadata):
+                raise ValueError(f"Invalid override_field metadata on {model_cls.__name__}.{method_name}")
+            _validate_named_hook_signature(model_cls, method_name, raw_method, _OVERRIDE_FIELD_ARGUMENTS)
+            if "value" not in inspect.signature(raw_method).parameters:
+                raise ValueError(f"{model_cls.__name__}.{method_name} override_field must accept a 'value' parameter")
+            target = override_metadata.field
+            if target in reserved_overrides:
+                raise ValueError(f"{model_cls.__name__}.{method_name} cannot override identity, ownership, union-key, or foreign-key field {target!r}")
+            field = fields_by_name.get(target)
+            if field is None or "r" not in field.permissions:
+                raise ValueError(f"{model_cls.__name__}.{method_name} overrides unknown or unreadable field {target!r}")
+            if target in targets:
+                raise ValueError(f"{model_cls.__name__} defines more than one override_field for {target!r}")
+            overrides.append({"field": target, "handler": method_name})
+            targets.add(target)
+    return extra_fields, overrides
 
 
 def _validate_action_method_signature(
@@ -607,6 +728,19 @@ def _process_introspected_class(
         module_name,
         result,
         table_name=getattr(obj, "__tablename__", None),
+    )
+    extra_fields, override_fields = _extract_read_resolvers(
+        obj,
+        result.fields,
+        owner_field=result.owner_field,
+        union_key=result.union_key,
+    )
+    mdl["extra_fields"] = extra_fields
+    mdl["override_fields"] = override_fields
+    mdl["has_read_resolvers"] = bool(extra_fields or override_fields)
+    mdl["schema_imports"] = sorted(
+        set(mdl["schema_imports"])
+        | {item for field in extra_fields for item in field["py_imports"]}
     )
 
     table = getattr(obj, "__table__", None)

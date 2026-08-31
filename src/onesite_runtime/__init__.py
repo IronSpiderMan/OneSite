@@ -9,10 +9,12 @@ from __future__ import annotations
 
 import inspect
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, TypeVar, overload
+from typing import Any, Callable, Literal, Mapping, TypeVar, overload
 
 
 ACTION_METADATA_ATTRIBUTE = "__onesite_action__"
+EXTRA_FIELD_METADATA_ATTRIBUTE = "__onesite_extra_field__"
+OVERRIDE_FIELD_METADATA_ATTRIBUTE = "__onesite_override_field__"
 
 
 @dataclass
@@ -62,7 +64,107 @@ class ActionMetadata:
     availability_handler: str | None = None
 
 
+@dataclass(frozen=True)
+class ReadContext:
+    """Request-scoped values available while building a Read response.
+
+    ``values`` is a snapshot of the database-backed response data before any
+    override or extra-field resolver runs.  Resolvers must treat it as read
+    only; their return values are merged into a separate response dictionary.
+    """
+
+    session: Any
+    current_user: Any | None = None
+    source: str = "detail"
+    values: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
+class ExtraFieldMetadata:
+    """Metadata attached to an instance method by :func:`extra_field`."""
+
+    name: str | None = None
+    label: str | dict[str, str] | None = None
+    show_in_list: bool = True
+    show_in_detail: bool = True
+
+
+@dataclass(frozen=True)
+class OverrideFieldMetadata:
+    """Metadata attached to an instance method by :func:`override_field`."""
+
+    field: str
+
+
 ActionFunction = TypeVar("ActionFunction", bound=Callable[..., Any])
+
+
+@overload
+def extra_field(function: ActionFunction, /) -> ActionFunction: ...
+
+
+@overload
+def extra_field(
+    function: None = None,
+    /,
+    *,
+    name: str | None = None,
+    label: str | dict[str, str] | None = None,
+    show_in_list: bool = True,
+    show_in_detail: bool = True,
+) -> Callable[[ActionFunction], ActionFunction]: ...
+
+
+def extra_field(
+    function: ActionFunction | None = None,
+    /,
+    *,
+    name: str | None = None,
+    label: str | dict[str, str] | None = None,
+    show_in_list: bool = True,
+    show_in_detail: bool = True,
+) -> ActionFunction | Callable[[ActionFunction], ActionFunction]:
+    """Declare a developer-computed, read-only response field.
+
+    The method name becomes the field name unless ``name=`` is provided.  The
+    generator requires a return annotation and emits that field only on the
+    generated ``XxxRead`` schema.
+    """
+
+    if name is not None and (not isinstance(name, str) or not name):
+        raise ValueError("extra_field name must be a non-empty string")
+    if not isinstance(show_in_list, bool) or not isinstance(show_in_detail, bool):
+        raise ValueError("extra_field show_in_list and show_in_detail must be booleans")
+
+    def decorate(handler: ActionFunction) -> ActionFunction:
+        setattr(
+            handler,
+            EXTRA_FIELD_METADATA_ATTRIBUTE,
+            ExtraFieldMetadata(
+                name=name,
+                label=label,
+                show_in_list=show_in_list,
+                show_in_detail=show_in_detail,
+            ),
+        )
+        return handler
+
+    if function is not None:
+        return decorate(function)
+    return decorate
+
+
+def override_field(field: str) -> Callable[[ActionFunction], ActionFunction]:
+    """Declare a response-only override for one persisted readable field."""
+
+    if not isinstance(field, str) or not field:
+        raise ValueError("override_field field must be a non-empty string")
+
+    def decorate(handler: ActionFunction) -> ActionFunction:
+        setattr(handler, OVERRIDE_FIELD_METADATA_ATTRIBUTE, OverrideFieldMetadata(field=field))
+        return handler
+
+    return decorate
 
 
 @overload
@@ -136,6 +238,22 @@ def get_action_metadata(function: Any) -> ActionMetadata | None:
     return metadata if isinstance(metadata, ActionMetadata) else None
 
 
+def get_extra_field_metadata(function: Any) -> ExtraFieldMetadata | None:
+    """Return metadata from an unbound or bound extra-field resolver."""
+
+    raw_function = getattr(function, "__func__", function)
+    metadata = getattr(raw_function, EXTRA_FIELD_METADATA_ATTRIBUTE, None)
+    return metadata if isinstance(metadata, ExtraFieldMetadata) else None
+
+
+def get_override_field_metadata(function: Any) -> OverrideFieldMetadata | None:
+    """Return metadata from an unbound or bound override-field resolver."""
+
+    raw_function = getattr(function, "__func__", function)
+    metadata = getattr(raw_function, OVERRIDE_FIELD_METADATA_ATTRIBUTE, None)
+    return metadata if isinstance(metadata, OverrideFieldMetadata) else None
+
+
 async def invoke_action_callable(function: Callable[..., Any], context: ActionContext) -> Any:
     """Invoke a validated action/guard with supported named dependencies."""
 
@@ -158,6 +276,78 @@ async def invoke_action_callable(function: Callable[..., Any], context: ActionCo
     result = function(**kwargs)
     if inspect.isawaitable(result):
         return await result
+    return result
+
+
+async def invoke_read_callable(
+    function: Callable[..., Any],
+    context: ReadContext,
+    *,
+    value: Any = None,
+    include_value: bool = False,
+) -> Any:
+    """Invoke a validated read resolver with its declared dependencies."""
+
+    signature = inspect.signature(function)
+    parameters = signature.parameters
+    has_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    values = {
+        "context": context,
+        "session": context.session,
+        "current_user": context.current_user,
+        "values": context.values,
+    }
+    if include_value:
+        values["value"] = value
+    kwargs = {
+        name: resolved
+        for name, resolved in values.items()
+        if has_kwargs or name in parameters
+    }
+    result = function(**kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def resolve_read_data(
+    obj: Any,
+    data: Mapping[str, Any],
+    context: ReadContext,
+) -> dict[str, Any]:
+    """Apply all decorators declared on ``obj`` without mutating the ORM row."""
+
+    result = dict(data)
+    snapshot = dict(data)
+    resolver_context = ReadContext(
+        session=context.session,
+        current_user=context.current_user,
+        source=context.source,
+        values=snapshot,
+    )
+    methods = vars(type(obj)).items()
+    for _, raw_method in methods:
+        metadata = get_override_field_metadata(raw_method)
+        if metadata is None:
+            continue
+        resolver = getattr(obj, raw_method.__name__)
+        result[metadata.field] = await invoke_read_callable(
+            resolver,
+            resolver_context,
+            value=result.get(metadata.field),
+            include_value=True,
+        )
+    for method_name, raw_method in methods:
+        metadata = get_extra_field_metadata(raw_method)
+        if metadata is None:
+            continue
+        resolver = getattr(obj, method_name)
+        result[metadata.name or method_name] = await invoke_read_callable(
+            resolver, resolver_context
+        )
     return result
 
 
@@ -199,12 +389,23 @@ async def evaluate_action_state(
 
 __all__ = [
     "ACTION_METADATA_ATTRIBUTE",
+    "EXTRA_FIELD_METADATA_ATTRIBUTE",
+    "OVERRIDE_FIELD_METADATA_ATTRIBUTE",
     "ActionContext",
     "ActionMetadata",
     "ActionState",
+    "ExtraFieldMetadata",
+    "OverrideFieldMetadata",
+    "ReadContext",
     "action",
+    "extra_field",
     "evaluate_action_state",
     "get_action_metadata",
+    "get_extra_field_metadata",
+    "get_override_field_metadata",
     "invoke_action_callable",
+    "invoke_read_callable",
     "normalize_action_state",
+    "override_field",
+    "resolve_read_data",
 ]

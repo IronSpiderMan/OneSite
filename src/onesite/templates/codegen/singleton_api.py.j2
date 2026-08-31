@@ -2,6 +2,9 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import db, deps
+{% if model.has_read_resolvers %}
+from app.models.user import User
+{% endif %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.name }}Update
 from app.services.{{ model.module_name }} import service
 
@@ -12,13 +15,19 @@ router = APIRouter(
 @router.get("/", response_model={{ model.name }}Read)
 async def get_{{ model.lower_name }}(
     session: AsyncSession = Depends(db.get_session),
+    {% if model.has_read_resolvers %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
 ) -> Any:
-    return await service.get(session)
+    return await service.get(session{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
 
 @router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))])
 async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
+    {% if model.has_read_resolvers %}
+    current_user: User = Depends(deps.get_current_user),
+    {% endif %}
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
-    return await service.update(session, {{ model.lower_name }}_in)
+    return await service.update(session, {{ model.lower_name }}_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
