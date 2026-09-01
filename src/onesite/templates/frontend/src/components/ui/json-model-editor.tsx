@@ -93,10 +93,12 @@ export const validateJsonModelCollectionValue = (
   value: any,
   rootValue?: Record<string, any>,
 ): true | string => {
-  const entries = Array.isArray(value)
+  const isArray = Array.isArray(value)
+  const entries = isArray
     ? value.map((item, index) => [String(index + 1), item] as const)
     : Object.entries(value && typeof value === "object" ? value : {})
   for (const [key, item] of entries) {
+    if (!isArray && (!key.trim() || key.startsWith("__new_"))) return "Key is required"
     const result = validateJsonModelValue(itemSchema, item, rootValue)
     if (result !== true) return `${key}: ${result}`
   }
@@ -806,8 +808,13 @@ export const JsonModelTableEditor: React.FC<{
         <Table>
           <TableHeader>
             <TableRow>
-              {collectionKind === "dict" && <TableHead className="min-w-[10rem]">{t("json_editor.key")}</TableHead>}
-              {itemSchema.fields.map((field) => <TableHead key={field.name}>{t(field.labelKey || field.name || "")}</TableHead>)}
+              {collectionKind === "dict" && <TableHead className="min-w-[10rem]">{t("json_editor.key")}<span className="text-destructive"> *</span></TableHead>}
+              {itemSchema.fields.map((field) => (
+                <TableHead key={field.name}>
+                  {t(field.labelKey || field.name || "")}
+                  {field.required && <span className="text-destructive"> *</span>}
+                </TableHead>
+              ))}
               {canRemove && <TableHead className="w-[5rem]" />}
             </TableRow>
           </TableHeader>
@@ -818,6 +825,7 @@ export const JsonModelTableEditor: React.FC<{
                   <TableCell>
                     <Input
                       defaultValue={row.key}
+                      required
                       disabled={Boolean(fixedKeys) || lockKeys}
                       onBlur={(event) => renameKey(rowIndex, event.target.value.trim())}
                     />
@@ -1028,8 +1036,9 @@ export const JsonModelDictEditor: React.FC<{
                 )}
               </div>
               <div className="mb-3 space-y-2">
-                <Label>{t("json_editor.key")}</Label>
+                <Label>{t("json_editor.key")}<span className="text-destructive"> *</span></Label>
                 <Input
+                  required
                   value={item.__key ?? ""}
                   onChange={(e) => {
                     const next = [...arrValue]

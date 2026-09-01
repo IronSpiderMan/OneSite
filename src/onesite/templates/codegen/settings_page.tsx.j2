@@ -6,7 +6,7 @@ import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { JsonInput } from '../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../components/ui/json-model-editor';
 import { Label } from '../components/ui/label';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -312,16 +312,6 @@ const SettingsPage: React.FC = () => {
                       />
                       {% elif field.ui_type == 'json' %}
                         {% if field.json_model_schema %}
-                          {% if field.json_kind == 'array' %}
-                      <Controller
-                        name="{{ field.name }}"
-                        control={control}
-                        rules={ { required: {{ 'true' if field.required and not field.update_optional else 'false' }}, validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue) } }
-                        render={({ field: { onChange, value } }) => (
-                          <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue} />
-                        )}
-                      />
-                          {% else %}
                       <Controller
                         name="{{ field.name }}"
                         control={control}
@@ -330,7 +320,19 @@ const SettingsPage: React.FC = () => {
                           <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } rootValue={rootValue} />
                         )}
                       />
+                        {% elif field.json_item_schema %}
+                      <Controller
+                        name="{{ field.name }}"
+                        control={control}
+                        rules={ { required: {{ 'true' if field.required and not field.update_optional else 'false' }}, validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue) } }
+                        render={({ field: { onChange, value } }) => (
+                          {% if field.get('type', '').startswith('Dict[str,') %}
+                          <JsonModelDictEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
+                          {% else %}
+                          <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue} />
                           {% endif %}
+                        )}
+                      />
                         {% else %}
                       <Controller
                         name="{{ field.name }}"
@@ -479,16 +481,6 @@ const SettingsPage: React.FC = () => {
               />
               {% elif field.ui_type == 'json' %}
                 {% if field.json_model_schema %}
-                  {% if field.json_kind == 'array' %}
-              <Controller
-                name="{{ field.name }}"
-                control={control}
-                rules={ { required: {{ 'true' if field.required and not field.update_optional else 'false' }}, validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue) } }
-                render={({ field: { onChange, value } }) => (
-                  <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue} />
-                )}
-              />
-                  {% else %}
               <Controller
                 name="{{ field.name }}"
                 control={control}
@@ -497,7 +489,19 @@ const SettingsPage: React.FC = () => {
                   <JsonModelEditor value={value} onChange={onChange} schema={ {{ field.json_model_schema | tojson }} } rootValue={rootValue} />
                 )}
               />
+                {% elif field.json_item_schema %}
+              <Controller
+                name="{{ field.name }}"
+                control={control}
+                rules={ { required: {{ 'true' if field.required and not field.update_optional else 'false' }}, validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue) } }
+                render={({ field: { onChange, value } }) => (
+                  {% if field.get('type', '').startswith('Dict[str,') %}
+                  <JsonModelDictEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
+                  {% else %}
+                  <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={ {{ field.json_item_schema | tojson }} } rootValue={rootValue} />
                   {% endif %}
+                )}
+              />
                 {% else %}
               <Controller
                 name="{{ field.name }}"

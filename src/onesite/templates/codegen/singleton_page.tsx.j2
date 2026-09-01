@@ -6,7 +6,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
@@ -160,7 +160,11 @@ const {{ model.name }}Page: React.FC = () => {
               {% elif field.json_model_schema %}
                 <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} rootValue={rootValue} />
               {% elif field.json_item_schema %}
+                {% if field.get('type', '').startswith('Dict[str,') %}
+                <JsonModelDictEditor value={value} onChange={onChange} itemSchema={{ field.json_item_schema | tojson }} rootValue={rootValue}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
+                {% else %}
                 <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={{ field.json_item_schema | tojson }} rootValue={rootValue} />
+                {% endif %}
               {% else %}
                 <JsonInput value={value} onChange={onChange} />
               {% endif %}
