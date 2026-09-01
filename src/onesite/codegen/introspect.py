@@ -1,5 +1,6 @@
 import inspect
 import re
+from types import UnionType
 from datetime import date as date_type, datetime as datetime_type, time as time_type
 from enum import Enum
 from typing import Any, Dict, List, Set, Union, get_args, get_origin
@@ -35,7 +36,22 @@ def _is_pydantic_model(cls: Any) -> bool:
     )
 
 
+def _unwrap_optional(annotation: Any) -> tuple[Any, bool]:
+    """Return the value type inside ``Optional[T]``/``T | None``.
+
+    ``typing.Optional`` and the PEP 604 ``| None`` syntax have different
+    origins at runtime.  Treating only ``typing.Union`` as optional caused
+    otherwise typed JSON fields to fall through to the string fallback.
+    """
+    if get_origin(annotation) in (Union, UnionType):
+        value_types = [item for item in get_args(annotation) if item is not type(None)]
+        if len(value_types) == 1 and len(value_types) != len(get_args(annotation)):
+            return value_types[0], True
+    return annotation, False
+
+
 def _json_field_kind_from_annotation(annotation: Any) -> str:
+    annotation, _ = _unwrap_optional(annotation)
     if annotation is bool:
         return "bool"
     if annotation is int:
@@ -44,9 +60,12 @@ def _json_field_kind_from_annotation(annotation: Any) -> str:
         return "float"
     if annotation is str:
         return "str"
-    type_str = str(annotation)
-    if "datetime" in type_str:
+    if annotation is datetime_type:
         return "datetime"
+    if annotation is date_type:
+        return "date"
+    if annotation is time_type:
+        return "time"
     if inspect.isclass(annotation) and issubclass(annotation, Enum):
         return "enum"
     if inspect.isclass(annotation) and _is_pydantic_model(annotation):
@@ -54,7 +73,20 @@ def _json_field_kind_from_annotation(annotation: Any) -> str:
     origin = get_origin(annotation)
     if origin is list or annotation is list:
         return "array"
+    if origin is dict or annotation is dict:
+        return "object"
     return "any"
+
+
+def _get_numeric_bounds(field: Any) -> tuple[Any, Any]:
+    """Extract inclusive Pydantic ``ge``/``le`` constraints from FieldInfo."""
+    minimum = maximum = None
+    for constraint in getattr(field, "metadata", ()) or ():
+        if getattr(constraint, "ge", None) is not None:
+            minimum = constraint.ge
+        if getattr(constraint, "le", None) is not None:
+            maximum = constraint.le
+    return minimum, maximum
 
 
 def _get_field_site_props(field: Any) -> Dict[str, Any]:
@@ -244,13 +276,20 @@ def _build_json_model_schema(
     for fname, f in model.model_fields.items():
         if fname == "property_key" or fname.startswith("_"):
             continue
-        ann = f.annotation
+        ann, nullable = _unwrap_optional(f.annotation)
         kind = _json_field_kind_from_annotation(ann)
         field_schema: Dict[str, Any] = {
             "name": fname,
             "kind": kind,
             "labelKey": f"json_models.{model_key}.fields.{fname}",
+            "required": f.is_required(),
+            "nullable": nullable,
         }
+        minimum, maximum = _get_numeric_bounds(f)
+        if minimum is not None:
+            field_schema["minimum"] = minimum
+        if maximum is not None:
+            field_schema["maximum"] = maximum
         field_translations: Dict[str, str] = {}
         for language, pack in model_i18n.items():
             if not isinstance(pack, dict):
@@ -295,9 +334,9 @@ def _build_json_model_schema(
         elif kind == "array":
             origin = get_origin(ann)
             args = get_args(ann) if origin is list else ()
-            item_ann = args[0] if args else Any
+            item_ann, item_nullable = _unwrap_optional(args[0] if args else Any)
             item_kind = _json_field_kind_from_annotation(item_ann)
-            item_schema: Dict[str, Any] = {"kind": item_kind}
+            item_schema: Dict[str, Any] = {"kind": item_kind, "nullable": item_nullable}
             if item_kind == "enum" and inspect.isclass(item_ann) and issubclass(item_ann, Enum):
                 item_schema["enumValues"] = [e.value for e in item_ann]
             elif item_kind == "model" and inspect.isclass(item_ann) and _is_pydantic_model(item_ann):
@@ -1117,12 +1156,9 @@ def get_model_fields(
         type_annotation = field.annotation
         type_str = str(type_annotation)
 
-        # Unwrap Optional[X] → X for enum detection
-        _inner = type_annotation
-        if get_origin(type_annotation) is Union:
-            _union_args = [a for a in get_args(type_annotation) if a is not type(None)]
-            if len(_union_args) == 1:
-                _inner = _union_args[0]
+        # Unwrap both Optional[X] and the Python 3.10+ X | None syntax before
+        # deciding whether this is a structured JSON field.
+        _inner, is_optional = _unwrap_optional(type_annotation)
 
         is_enum = False
         is_multi_select = False
@@ -1138,11 +1174,19 @@ def get_model_fields(
             enum_values = [e.value for e in _inner]
             type_str = "str"
 
-        resolved_annotation = type_annotation
+        resolved_annotation = _inner
         origin = get_origin(resolved_annotation)
         args = get_args(resolved_annotation)
 
-        if site_props.get("component") == "json":
+        if (
+            site_props.get("component") == "json"
+            and not _is_pydantic_model(_inner)
+            and resolved_annotation not in (dict, list)
+            and origin not in (dict, list)
+        ):
+            # ``component=json`` remains a way to opt an otherwise scalar
+            # field into a generic JSON editor.  A typed model/collection is
+            # authoritative, however, and must retain its Pydantic schema.
             json_kind = site_props.get("json_kind", "object")
             if json_kind == "array":
                 type_str = "List[Any]"
@@ -1151,7 +1195,7 @@ def get_model_fields(
         elif resolved_annotation in (dict, list) or origin in (dict, list):
             if resolved_annotation is list or origin is list:
                 json_kind = "array"
-                item_type = args[0] if args else Any
+                item_type, item_optional = _unwrap_optional(args[0] if args else Any)
                 item_origin = get_origin(item_type)
                 item_args = get_args(item_type)
                 if inspect.isclass(item_type) and issubclass(item_type, (str, int)) and hasattr(item_type, "__members__"):
@@ -1192,15 +1236,21 @@ def get_model_fields(
                         json_item_kind = "time"
                     else:
                         type_str = "List[Any]"
+                if item_optional:
+                    type_str = f"List[Optional[{type_str[5:-1]}]]"
             else:
                 json_kind = "object"
-                value_type = args[1] if len(args) >= 2 else Any
+                value_type, value_optional = _unwrap_optional(
+                    args[1] if len(args) >= 2 else Any
+                )
                 if inspect.isclass(value_type) and _is_pydantic_model(value_type):
                     type_str = f"Dict[str, {value_type.__name__}]"
                     json_py_imports.append(value_type.__name__)
                     json_item_schema = _build_json_model_schema(value_type)
                 else:
                     type_str = "Dict[str, Any]"
+                if value_optional:
+                    type_str = f"Dict[str, Optional[{type_str[10:-1]}]]"
         elif inspect.isclass(_inner) and _is_pydantic_model(_inner):
             json_kind = "object"
             type_str = _inner.__name__
@@ -1352,9 +1402,6 @@ def get_model_fields(
                 is_self_referencing=is_self_referencing,
             )
 
-        origin = get_origin(resolved_annotation)
-        args = get_args(resolved_annotation)
-        is_optional = origin is Union and any(a is type(None) for a in args)
         if is_optional:
             type_str = f"Optional[{type_str}]"
 
@@ -1404,6 +1451,8 @@ def get_model_fields(
         if is_enum and default_value is not None and hasattr(default_value, "value"):
             default_value = default_value.value
 
+        minimum, maximum = _get_numeric_bounds(field)
+
         fields.append(
             FieldDefinition(
                 name=name,
@@ -1422,6 +1471,8 @@ def get_model_fields(
                 create_optional=create_optional,
                 update_optional=update_optional,
                 required=field.is_required(),
+                minimum=minimum,
+                maximum=maximum,
                 default=default_value,
                 default_factory=(
                     "list"

@@ -74,6 +74,8 @@ class FieldDefinition:
     create_optional: bool = False
     update_optional: bool = False
     required: bool = True
+    minimum: int | float | None = None
+    maximum: int | float | None = None
     default: Any = None
     default_factory: str | None = None
     is_enum: bool = False

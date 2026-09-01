@@ -17,8 +17,12 @@ export type JsonFieldSchema = {
   name?: string
   labelKey?: string
   translations?: Record<string, string>
-  kind: "str" | "int" | "float" | "bool" | "enum" | "datetime" | "foreign_key" | "model" | "array" | "location" | "any"
+  kind: "str" | "int" | "float" | "bool" | "enum" | "date" | "datetime" | "time" | "foreign_key" | "model" | "array" | "object" | "location" | "any"
   default?: unknown
+  required?: boolean
+  nullable?: boolean
+  minimum?: number
+  maximum?: number
   visibleWhen?: Record<string, Array<string | number | boolean | null>>
   requiredWhen?: Record<string, Array<string | number | boolean | null>>
   clearWhenHidden?: boolean
@@ -48,6 +52,55 @@ export type JsonModelSchema = {
   name: string
   fields: JsonFieldSchema[]
   layout?: JsonLayoutNode[]
+}
+
+const isMissingJsonValue = (value: any) => value === undefined || value === null || value === ""
+
+/** Validate a typed JSON value before a generated form is submitted. */
+export const validateJsonModelValue = (
+  schema: JsonModelSchema,
+  value: any,
+  rootValue?: Record<string, any>,
+): true | string => {
+  const data = value && typeof value === "object" && !Array.isArray(value) ? value : {}
+  for (const field of schema.fields) {
+    if (!field.name || !matchesCondition(field.visibleWhen, data, rootValue)) continue
+    const fieldValue = data[field.name]
+    const required = Boolean(field.required || (field.requiredWhen && matchesCondition(field.requiredWhen, data, rootValue)))
+    const label = field.translations?.en || field.name
+    if (required && isMissingJsonValue(fieldValue)) return `${label} is required`
+    if (isMissingJsonValue(fieldValue)) continue
+    if ((field.kind === "int" || field.kind === "float") && typeof fieldValue === "number") {
+      if (field.minimum !== undefined && fieldValue < field.minimum) return `${label} must be at least ${field.minimum}`
+      if (field.maximum !== undefined && fieldValue > field.maximum) return `${label} must be at most ${field.maximum}`
+    }
+    if (field.kind === "model" && field.model) {
+      const result = validateJsonModelValue(field.model, fieldValue, rootValue)
+      if (result !== true) return `${label}: ${result}`
+    }
+    if (field.kind === "array" && field.item?.kind === "model" && field.item.model && Array.isArray(fieldValue)) {
+      for (let index = 0; index < fieldValue.length; index += 1) {
+        const result = validateJsonModelValue(field.item.model, fieldValue[index], rootValue)
+        if (result !== true) return `${label}[${index + 1}]: ${result}`
+      }
+    }
+  }
+  return true
+}
+
+export const validateJsonModelCollectionValue = (
+  itemSchema: JsonModelSchema,
+  value: any,
+  rootValue?: Record<string, any>,
+): true | string => {
+  const entries = Array.isArray(value)
+    ? value.map((item, index) => [String(index + 1), item] as const)
+    : Object.entries(value && typeof value === "object" ? value : {})
+  for (const [key, item] of entries) {
+    const result = validateJsonModelValue(itemSchema, item, rootValue)
+    if (result !== true) return `${key}: ${result}`
+  }
+  return true
 }
 
 const conditionValue = (controller: string, value: Record<string, any>, rootValue?: Record<string, any>) => {
@@ -252,7 +305,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "bool") {
           return (
             <div key={key} className="flex items-center justify-between gap-4 rounded-md border p-3">
-              <Label className="font-medium">{t(f.labelKey || key)}</Label>
+              <Label className="font-medium">{t(f.labelKey || key)}{f.required && <span className="text-destructive"> *</span>}</Label>
               <Switch
                 checked={Boolean(cur)}
                 onCheckedChange={(checked) => emitChange(setPathValue(v, fieldPath.slice(path.length), checked))}
@@ -264,7 +317,7 @@ const JsonModelForm: React.FC<{
           const stringValue = cur === undefined || cur === null ? "" : String(cur)
           return (
             <div key={key} className="space-y-2">
-              <Label>{t(f.labelKey || key)}</Label>
+              <Label>{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</Label>
               <Select
                 value={stringValue}
                 onValueChange={(nv) => emitChange(setPathValue(v, fieldPath.slice(path.length), nv))}
@@ -286,7 +339,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "foreign_key" && foreignKeyLoaders?.[key]) {
           return (
             <div key={key} className="space-y-2">
-              <Label>{t(f.labelKey || key)}</Label>
+              <Label>{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</Label>
               <SearchableSelect
                 value={cur}
                 onValueChange={(next) => emitChange(setPathValue(v, fieldPath.slice(path.length), next))}
@@ -301,7 +354,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "model" && f.model) {
           return (
             <div key={key} className="space-y-2 rounded-md border p-3">
-              <div className="text-sm font-semibold">{t(f.labelKey || key)}</div>
+              <div className="text-sm font-semibold">{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</div>
               <JsonModelForm
                 schema={f.model}
                 value={cur}
@@ -315,7 +368,7 @@ const JsonModelForm: React.FC<{
         if (f.kind === "location") {
           return (
             <div key={key} className="space-y-2">
-              <Label>{t(f.labelKey || key)}</Label>
+              <Label>{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</Label>
               <LocationInput
                 value={cur}
                 onChange={(next) => emitChange(setPathValue(v, fieldPath.slice(path.length), next))}
@@ -327,7 +380,7 @@ const JsonModelForm: React.FC<{
           return (
             <div key={key} className="space-y-2 rounded-md border p-3">
               <div className="flex items-center justify-between">
-                <div className="text-sm font-semibold">{t(f.labelKey || key)}</div>
+                <div className="text-sm font-semibold">{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</div>
                 <Button
                   type="button"
                   variant="outline"
@@ -335,6 +388,9 @@ const JsonModelForm: React.FC<{
                   onClick={() => {
                     const arr = Array.isArray(cur) ? [...cur] : []
                     if (f.item?.kind === "model" && f.item.model) arr.push(buildDefaultValue(f.item.model, rootValue))
+                    else if (f.item?.kind === "bool") arr.push(false)
+                    else if (f.item?.kind === "array") arr.push([])
+                    else if (f.item?.kind === "object") arr.push({})
                     else arr.push("")
                     emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
                     toast.success(t("json_editor.item_added"))
@@ -391,13 +447,87 @@ const JsonModelForm: React.FC<{
                       </div>
                     )
                   }
+                  if (f.item?.kind === "bool") {
+                    return (
+                      <div key={itemKey} className="flex items-center justify-between gap-2 rounded-md border px-3 py-2">
+                        <Switch
+                          checked={Boolean(itemVal)}
+                          onCheckedChange={(checked) => {
+                            const arr = Array.isArray(cur) ? [...cur] : []
+                            arr[idx] = checked
+                            emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
+                          }}
+                        />
+                        <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={remove}>
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          {t("common.remove")}
+                        </Button>
+                      </div>
+                    )
+                  }
+                  if (f.item?.kind === "enum") {
+                    return (
+                      <div key={itemKey} className="flex items-center gap-2">
+                        <Select
+                          value={itemVal == null ? "" : String(itemVal)}
+                          onValueChange={(nextValue) => {
+                            const arr = Array.isArray(cur) ? [...cur] : []
+                            arr[idx] = nextValue
+                            emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
+                          }}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {(f.item.enumValues ?? []).map((option) => <SelectItem key={String(option)} value={String(option)}>{String(option)}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                        <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={remove}>
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          {t("common.remove")}
+                        </Button>
+                      </div>
+                    )
+                  }
+                  if (f.item?.kind === "object" || f.item?.kind === "array") {
+                    return (
+                      <div key={itemKey} className="flex items-start gap-2">
+                        <JsonInput
+                          className="flex-1"
+                          value={itemVal}
+                          jsonKind={f.item.kind === "array" ? "array" : "object"}
+                          onChange={(nextValue) => {
+                            const arr = Array.isArray(cur) ? [...cur] : []
+                            arr[idx] = nextValue
+                            emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
+                          }}
+                        />
+                        <Button type="button" variant="ghost" size="sm" className="text-destructive" onClick={remove}>
+                          <Trash2 className="mr-1.5 h-3.5 w-3.5" />
+                          {t("common.remove")}
+                        </Button>
+                      </div>
+                    )
+                  }
+                  const itemInputType = f.item?.kind === "int" || f.item?.kind === "float"
+                    ? "number"
+                    : f.item?.kind === "datetime"
+                      ? "datetime-local"
+                      : f.item?.kind === "date" || f.item?.kind === "time"
+                        ? f.item.kind
+                        : "text"
                   return (
                     <div key={itemKey} className="flex items-center gap-2">
                       <Input
+                        type={itemInputType}
                         value={itemVal ?? ""}
                         onChange={(e) => {
                           const arr = Array.isArray(cur) ? [...cur] : []
-                          arr[idx] = e.target.value
+                          const raw = e.target.value
+                          arr[idx] = f.item?.kind === "int"
+                            ? (raw === "" ? "" : Number.parseInt(raw, 10))
+                            : f.item?.kind === "float"
+                              ? (raw === "" ? "" : Number.parseFloat(raw))
+                              : raw
                           emitChange(setPathValue(v, fieldPath.slice(path.length), arr))
                         }}
                       />
@@ -412,12 +542,33 @@ const JsonModelForm: React.FC<{
             </div>
           )
         }
-        const inputType = f.kind === "int" || f.kind === "float" || f.kind === "foreign_key" ? "number" : "text"
+        if (f.kind === "object") {
+          return (
+            <div key={key} className="space-y-2">
+              <Label>{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</Label>
+              <JsonInput
+                value={cur ?? {}}
+                onChange={(next) => emitChange(setPathValue(v, fieldPath.slice(path.length), next))}
+                jsonKind="object"
+              />
+            </div>
+          )
+        }
+        const inputType = f.kind === "int" || f.kind === "float" || f.kind === "foreign_key"
+          ? "number"
+          : f.kind === "datetime"
+            ? "datetime-local"
+            : f.kind === "date" || f.kind === "time"
+              ? f.kind
+              : "text"
         return (
           <div key={key} className="space-y-2">
-            <Label>{t(f.labelKey || key)}</Label>
+            <Label>{t(f.labelKey || key)}{(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue))) && <span className="text-destructive"> *</span>}</Label>
             <Input
               type={inputType}
+              required={Boolean(f.required || (f.requiredWhen && matchesCondition(f.requiredWhen, v, rootValue)))}
+              min={f.minimum}
+              max={f.maximum}
               value={cur ?? ""}
               onChange={(e) => {
                 const raw = e.target.value
@@ -545,7 +696,7 @@ const JsonTableCellEditor: React.FC<{
       </Select>
     )
   }
-  if (field.kind === "model" || field.kind === "array" || (value !== null && typeof value === "object")) {
+  if (field.kind === "model" || field.kind === "array" || field.kind === "object" || (value !== null && typeof value === "object")) {
     return (
       <JsonInput
         value={value ?? (field.kind === "array" ? [] : {})}
@@ -558,10 +709,19 @@ const JsonTableCellEditor: React.FC<{
   if (field.kind === "location") {
     return <div className="min-w-[18rem]"><LocationInput value={value} onChange={onChange} /></div>
   }
-  const type = field.kind === "int" || field.kind === "float" ? "number" : field.kind === "datetime" ? "datetime-local" : "text"
+  const type = field.kind === "int" || field.kind === "float"
+    ? "number"
+    : field.kind === "datetime"
+      ? "datetime-local"
+      : field.kind === "date" || field.kind === "time"
+        ? field.kind
+        : "text"
   return (
     <Input
       type={type}
+      required={field.required}
+      min={field.minimum}
+      max={field.maximum}
       className="min-w-[8rem]"
       value={value ?? ""}
       onChange={(event) => {

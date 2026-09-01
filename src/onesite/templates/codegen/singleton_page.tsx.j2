@@ -6,7 +6,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
 import { Label } from '../../components/ui/label';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
@@ -79,6 +79,7 @@ const {{ model.name }}Page: React.FC = () => {
           <div className="space-y-2">
             <Label htmlFor="{{ field.name }}">
               {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+              {% if field.required and not field.update_optional %}<span className="text-destructive"> *</span>{% endif %}
               {% if field.is_local_storage %}
               <span className="ml-2 text-xs text-gray-500 font-normal">({t('common.local_storage', 'Local Storage')})</span>
               {% endif %}
@@ -99,6 +100,10 @@ const {{ model.name }}Page: React.FC = () => {
             <Controller
               name="{{ field.name }}"
               control={control}
+              rules={ {
+                required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+                {% if field.json_model_schema %}validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, rootValue),{% elif field.json_item_schema %}validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue),{% endif %}
+              } }
               render={({ field: { onChange, value } }) => (
                 <ImageUpload value={value} onChange={onChange} />
               )}
@@ -142,41 +147,25 @@ const {{ model.name }}Page: React.FC = () => {
             />
 
             {% elif field.ui_type == 'json' %}
+            <Controller
+              name="{{ field.name }}"
+              control={control}
+              rules={ {
+                required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+                {% if field.json_model_schema %}validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, rootValue),{% elif field.json_item_schema %}validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue),{% endif %}
+              } }
+              render={({ field: { onChange, value } }) => (
               {% if field.json_item_kind %}
-            <Controller
-              name="{{ field.name }}"
-              control={control}
-              render={({ field: { onChange, value } }) => (
                 <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
-              )}
-            />
               {% elif field.json_model_schema %}
-                {% if field.json_kind == 'array' %}
-            <Controller
-              name="{{ field.name }}"
-              control={control}
-              render={({ field: { onChange, value } }) => (
-                <JsonModelArrayEditor value={value} onChange={onChange} schema={{ field.json_item_schema | tojson }} rootValue={rootValue} />
-              )}
-            />
-                {% else %}
-            <Controller
-              name="{{ field.name }}"
-              control={control}
-              render={({ field: { onChange, value } }) => (
                 <JsonModelEditor value={value} onChange={onChange} schema={{ field.json_model_schema | tojson }} rootValue={rootValue} />
-              )}
-            />
-                {% endif %}
+              {% elif field.json_item_schema %}
+                <JsonModelArrayEditor value={value} onChange={onChange} itemSchema={{ field.json_item_schema | tojson }} rootValue={rootValue} />
               {% else %}
-            <Controller
-              name="{{ field.name }}"
-              control={control}
-              render={({ field: { onChange, value } }) => (
                 <JsonInput value={value} onChange={onChange} />
+              {% endif %}
               )}
             />
-              {% endif %}
 
             {% elif field.ui_type == 'time' %}
             <Controller
@@ -215,7 +204,14 @@ const {{ model.name }}Page: React.FC = () => {
             <Input
               id="{{ field.name }}"
               type="{{ 'number' if field.ui_type in ['int', 'float'] else 'date' if field.ui_type == 'date' else 'datetime-local' if field.ui_type == 'datetime' else 'text' }}"
-              {...register('{{ field.name }}'{% if field.ui_type in ['int', 'float'] %}, { valueAsNumber: true }{% endif %})}
+              {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
+              {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
+              {...register('{{ field.name }}', {
+                required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+                {% if field.ui_type in ['int', 'float'] %}valueAsNumber: true,{% endif %}
+                {% if field.minimum is not none %}min: {{ field.minimum }},{% endif %}
+                {% if field.maximum is not none %}max: {{ field.maximum }},{% endif %}
+              })}
             />
             {% endif %}
           </div>

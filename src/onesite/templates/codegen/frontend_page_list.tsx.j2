@@ -34,7 +34,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelTableEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelTableEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../components/ui/table';
 import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/popover';
 {% if not model.page_edit %}
@@ -1773,7 +1773,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% macro modal_form_field(field, as_expression=false) -%}
           {% if not as_expression %}{{ '{' }}{% endif %}(!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
           <div className="space-y-2">
-            <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}</Label>
+            <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{((!editingId && {{ 'true' if field.required and not field.create_optional else 'false' }}) || (Boolean(editingId) && {{ 'true' if field.required and not field.update_optional else 'false' }})) && <span className="text-destructive"> *</span>}</Label>
             {% if field.ui_type == 'bool' %}
             <div className="flex items-center space-x-2">
                 <Controller
@@ -1920,6 +1920,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 control={control}
                 name="{{ field.name }}"
                 defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} }
+                rules={ {
+                    required: !editingId ? {{ 'true' if field.required and not field.create_optional else 'false' }} : {{ 'true' if field.required and not field.update_optional else 'false' }},
+                    {% if field.json_model_schema %}validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, rootValue),{% elif field.json_item_schema %}validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue),{% endif %}
+                } }
                 render={({ field: { onChange, value } }) => (
                     {% if field.json_model_schema %}
                     <JsonModelEditor
@@ -1970,6 +1974,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 id="{{ field.name }}"
                 {% if field.ui_type == 'int' or field.ui_type == 'float' %}
                 type="number"
+                {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
+                {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
                 {% elif field.ui_type == 'datetime' %}
                 type="datetime-local"
                 {% elif field.ui_type == 'date' %}
@@ -1980,7 +1986,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 {% else %}
                 type="text"
                 {% endif %}
-                {...register('{{ field.name }}', { required: !editingId ? {{ 'true' if field.required and not field.create_optional else 'false' }} : {{ 'true' if field.required and not field.update_optional else 'false' }} })}
+                {...register('{{ field.name }}', {
+                    required: !editingId ? {{ 'true' if field.required and not field.create_optional else 'false' }} : {{ 'true' if field.required and not field.update_optional else 'false' }},
+                    {% if field.minimum is not none %}min: {{ field.minimum }},{% endif %}
+                    {% if field.maximum is not none %}max: {{ field.maximum }},{% endif %}
+                })}
             />
             {% endif %}
           </div>

@@ -12,6 +12,8 @@ import { VideoStreamPlayer } from '../components/ui/video-stream-player';
 import { Switch } from '../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { LocationInput } from '../components/ui/location-input';
+import { JsonInput } from '../components/ui/json-input';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonModelDetail, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../components/ui/json-model-editor';
 import { getMe, updateMe } from '../services/user';
 import { toast } from 'sonner';
 
@@ -76,6 +78,39 @@ export default function ProfilePage() {
 
   const handleSave = async () => {
     if (!me) return;
+{% for field in model.fields %}
+  {% if 'u' in field.permissions and field.name not in ['password', 'hashed_password'] %}
+    {% if field.required and not field.update_optional %}
+    if (me.{{ field.name }} === undefined || me.{{ field.name }} === null || me.{{ field.name }} === '') {
+      toast.error(`${t('{{ field.label_key }}')} ${t('common.required', 'is required')}`);
+      return;
+    }
+    {% endif %}
+    {% if field.minimum is not none %}
+    if (typeof me.{{ field.name }} === 'number' && me.{{ field.name }} < {{ field.minimum }}) {
+      toast.error(`${t('{{ field.label_key }}')} >= {{ field.minimum }}`);
+      return;
+    }
+    {% endif %}
+    {% if field.maximum is not none %}
+    if (typeof me.{{ field.name }} === 'number' && me.{{ field.name }} > {{ field.maximum }}) {
+      toast.error(`${t('{{ field.label_key }}')} <= {{ field.maximum }}`);
+      return;
+    }
+    {% endif %}
+    {% if field.json_model_schema %}
+    {
+      const validation = validateJsonModelValue({{ field.json_model_schema | tojson }}, me.{{ field.name }}, me);
+      if (validation !== true) { toast.error(validation); return; }
+    }
+    {% elif field.json_item_schema %}
+    {
+      const validation = validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, me.{{ field.name }}, me);
+      if (validation !== true) { toast.error(validation); return; }
+    }
+    {% endif %}
+  {% endif %}
+{% endfor %}
     try {
       setSaving(true);
 
@@ -147,7 +182,7 @@ export default function ProfilePage() {
 {% for field in model.fields %}
   {% if 'r' in field.permissions and field.name not in ['hashed_password', 'password', 'id'] %}{hasFieldPerm('{{ field.name }}', 'r') && (
               <div className="space-y-2">
-                <Label>{t('{{ field.label_key }}')}</Label>
+                <Label>{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
     {% if 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u') ? (
       {% if field.ui_type == 'image' %}
                 <ImageUpload
@@ -213,6 +248,8 @@ export default function ProfilePage() {
       {% elif field.ui_type == 'int' or field.ui_type == 'float' %}
                 <Input
                   type="number"
+                  {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
+                  {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
                   value={me.{{ field.name }} ?? ''}
                   onChange={(e) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: Number(e.target.value) } : prev))}
                 />
@@ -222,17 +259,42 @@ export default function ProfilePage() {
                   onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
                 />
       {% elif field.ui_type == 'json' %}
-                <Input
-                  value={me.{{ field.name }} ? (typeof me.{{ field.name }} === 'object' ? JSON.stringify(me.{{ field.name }}) : String(me.{{ field.name }})) : ''}
-                  onChange={(e) => {
-                    try {
-                      const parsed = JSON.parse(e.target.value);
-                      setMe((prev) => (prev ? { ...prev, {{ field.name }}: parsed } : prev));
-                    } catch {
-                      setMe((prev) => (prev ? { ...prev, {{ field.name }}: e.target.value } : prev));
-                    }
-                  }}
+        {% if field.json_model_schema %}
+                <JsonModelEditor
+                  schema={ {{ field.json_model_schema | tojson }} }
+                  value={me.{{ field.name }}}
+                  onChange={(value) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: value } : prev))}
+                  rootValue={me}
                 />
+        {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
+                <JsonModelDictEditor
+                  itemSchema={ {{ field.json_item_schema | tojson }} }
+                  value={me.{{ field.name }}}
+                  onChange={(value) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: value } : prev))}
+                  rootValue={me}
+                  {% if field.json_fixed_keys %}fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}
+                  {% if field.json_lock_keys %}lockKeys{% endif %}
+                />
+        {% elif field.json_item_kind %}
+                <JsonScalarArrayEditor
+                  itemKind="{{ field.json_item_kind }}"
+                  value={me.{{ field.name }}}
+                  onChange={(value) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: value } : prev))}
+                />
+        {% elif field.json_item_schema %}
+                <JsonModelArrayEditor
+                  itemSchema={ {{ field.json_item_schema | tojson }} }
+                  value={me.{{ field.name }}}
+                  onChange={(value) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: value } : prev))}
+                  rootValue={me}
+                />
+        {% else %}
+                <JsonInput
+                  value={me.{{ field.name }}}
+                  onChange={(value) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: value } : prev))}
+                  jsonKind="{{ field.json_kind or 'object' }}"
+                />
+        {% endif %}
       {% else %}
                 <Input
                   value={me.{{ field.name }} || ''}
@@ -289,11 +351,15 @@ export default function ProfilePage() {
                     : '-'}
                 </div>
       {% elif field.ui_type == 'json' %}
+        {% if field.json_model_schema %}
+                <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} } value={me.{{ field.name }}} rootValue={me} />
+        {% else %}
                 <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
                   {me.{{ field.name }} !== undefined && me.{{ field.name }} !== null
                     ? JSON.stringify(me.{{ field.name }}, null, 2)
                     : '-'}
                 </pre>
+        {% endif %}
       {% else %}
                 <Input value={me.{{ field.name }} || ''} disabled />
       {% endif %}
@@ -344,11 +410,15 @@ export default function ProfilePage() {
                     : '-'}
                 </div>
       {% elif field.ui_type == 'json' %}
+        {% if field.json_model_schema %}
+                <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} } value={me.{{ field.name }}} rootValue={me} />
+        {% else %}
                 <pre className="whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
                   {me.{{ field.name }} !== undefined && me.{{ field.name }} !== null
                     ? JSON.stringify(me.{{ field.name }}, null, 2)
                     : '-'}
                 </pre>
+        {% endif %}
       {% else %}
                 <Input value={me.{{ field.name }} || ''} disabled />
       {% endif %}

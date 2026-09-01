@@ -74,7 +74,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 {% macro detail_edit_field(field) -%}
 hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
 <div className="space-y-2">
-    <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
+    <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
     {% if field.fk_info %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
         <SearchableSelect
@@ -143,7 +143,12 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
         <LocationInput value={value} onChange={onChange} />
     )} />
     {% elif field.ui_type == 'json' %}
-    <Controller control={editControl} name="{{ field.name }}" defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} } render={({ field: { onChange, value } }) => (
+    <Controller control={editControl} name="{{ field.name }}" defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} }
+        rules={ {
+            required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+            {% if field.json_model_schema %}validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, editRootValue),{% elif field.json_item_schema %}validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, editRootValue),{% endif %}
+        } }
+        render={({ field: { onChange, value } }) => (
         {% if field.json_model_schema %}
         <JsonModelEditor schema={ {{ field.json_model_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue} />
         {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
@@ -157,7 +162,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
         {% endif %}
     )} />
     {% else %}
-    <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })} />
+    <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% if field.minimum is not none %} min={ {{ field.minimum }} }{% endif %}{% if field.maximum is not none %} max={ {{ field.maximum }} }{% endif %}{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }},{% if field.minimum is not none %} min: {{ field.minimum }},{% endif %}{% if field.maximum is not none %} max: {{ field.maximum }},{% endif %} })} />
     {% endif %}
 </div>
 )
@@ -195,7 +200,7 @@ import { JsonModelDetail } from '../../components/ui/json-model-editor';
 {% if model.page_edit %}
 import { useForm, Controller } from 'react-hook-form';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonModelTableEditor, JsonDynamicTableEditor, JsonScalarArrayEditor } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonModelTableEditor, JsonDynamicTableEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
 import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
 import { LocationInput } from '../../components/ui/location-input';
@@ -1281,7 +1286,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             {% for field in model.fields %}
                             {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
                             <div className="space-y-2">
-                                <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}</Label>
+                                <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
                                 {% if field.ui_type == 'bool' %}
                                 <div className="flex h-10 items-center justify-end rounded-md border px-3">
                                     <Controller
@@ -1399,6 +1404,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     control={editControl}
                                     name="{{ field.name }}"
                                     defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} }
+                                    rules={ {
+                                        required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+                                        {% if field.json_model_schema %}validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, editRootValue),{% elif field.json_item_schema %}validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, editRootValue),{% endif %}
+                                    } }
                                     render={({ field: { onChange, value } }) => (
                                         {% if field.json_model_schema %}
                                         <JsonModelEditor
@@ -1448,6 +1457,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     id="edit-{{ field.name }}"
                                     {% if field.ui_type == 'int' or field.ui_type == 'float' %}
                                     type="number"
+                                    {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
+                                    {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
                                     {% elif field.ui_type == 'datetime' %}
                                     type="datetime-local"
                                     {% elif field.ui_type == 'date' %}
@@ -1455,7 +1466,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     {% else %}
                                     type="text"
                                     {% endif %}
-                                    {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })}
+                                    {...register('{{ field.name }}', {
+                                        required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+                                        {% if field.minimum is not none %}min: {{ field.minimum }},{% endif %}
+                                        {% if field.maximum is not none %}max: {{ field.maximum }},{% endif %}
+                                    })}
                                 />
                                 {% endif %}
                             </div>

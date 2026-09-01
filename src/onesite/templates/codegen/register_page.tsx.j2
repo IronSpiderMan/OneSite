@@ -12,12 +12,14 @@ import { ImagesUpload } from '../components/ui/images-upload';
 import { FileUpload } from '../components/ui/file-upload';
 import { VideoStreamInput } from '../components/ui/video-stream-input';
 import { JsonInput } from '../components/ui/json-input';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelTableEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../components/ui/json-model-editor';
 import request from '../utils/request';
 
 export default function RegisterPage() {
   const { t } = useTranslation();
   const navigate = useNavigate();
-  const { register, handleSubmit, control } = useForm();
+  const { register, handleSubmit, control, watch } = useForm();
+  const rootValue = watch();
   const fallbackProjectName = (window as any).__ENV__?.PROJECT_NAME
     || import.meta.env.VITE_PROJECT_NAME
     || 'OneSite';
@@ -166,6 +168,7 @@ export default function RegisterPage() {
                 <div className="grid gap-2">
                   <Label htmlFor="{{ field.name }}">
                     {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
+                    <span className="text-destructive"> *</span>
                   </Label>
 {% if field.ui_type == 'bool' %}
                   <Controller
@@ -180,7 +183,11 @@ export default function RegisterPage() {
                   <Controller
                     control={control}
                     name="{{ field.name }}"
-                    rules={ { required: true } }
+                    rules={ {
+                      required: true,
+{% if field.json_model_schema %}                      validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, rootValue),
+{% elif field.json_item_schema %}                      validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue),
+{% endif %}                    } }
                     render={({ field: { onChange, value } }) => (
                       <ImageUpload value={value} onChange={onChange} />
                     )}
@@ -216,9 +223,41 @@ export default function RegisterPage() {
                   <Controller
                     control={control}
                     name="{{ field.name }}"
-                    rules={ { required: true } }
+                    rules={ {
+                      required: true,
+{% if field.json_model_schema %}                      validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, rootValue),
+{% elif field.json_item_schema %}                      validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, rootValue),
+{% endif %}                    } }
                     render={({ field: { onChange, value } }) => (
+{% if field.json_model_schema %}
+                      <JsonModelEditor
+                        schema={ {{ field.json_model_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                        rootValue={rootValue}
+                      />
+{% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
+                      <JsonModelTableEditor
+                        collectionKind="dict"
+                        itemSchema={ {{ field.json_item_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                        rootValue={rootValue}
+                        {% if field.json_fixed_keys %}fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}
+                        {% if field.json_lock_keys %}lockKeys{% endif %}
+                      />
+{% elif field.json_item_kind %}
+                      <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
+{% elif field.json_item_schema %}
+                      <JsonModelArrayEditor
+                        itemSchema={ {{ field.json_item_schema | tojson }} }
+                        value={value}
+                        onChange={onChange}
+                        rootValue={rootValue}
+                      />
+{% else %}
                       <JsonInput value={value} onChange={onChange} jsonKind="{{ field.json_kind or 'object' }}" />
+{% endif %}
                     )}
                   />
 {% elif field.is_enum %}
@@ -239,6 +278,8 @@ export default function RegisterPage() {
                     disabled={submitting}
 {% if field.ui_type in ['int', 'float'] %}
                     type="number"
+                    {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
+                    {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
 {% elif field.ui_type == 'date' %}
                     type="date"
 {% elif field.ui_type == 'datetime' %}
@@ -248,7 +289,9 @@ export default function RegisterPage() {
 {% endif %}
                     {...register('{{ field.name }}', {
                       required: true{% if field.ui_type in ['int', 'float'] %},
-                      valueAsNumber: true{% endif %}
+                      valueAsNumber: true{% if field.minimum is not none or field.maximum is not none %},{% endif %}
+                      {% if field.minimum is not none %}min: {{ field.minimum }}{% if field.maximum is not none %},{% endif %}{% endif %}
+                      {% if field.maximum is not none %}max: {{ field.maximum }}{% endif %}{% endif %}
                     })}
                   />
 {% endif %}
