@@ -324,34 +324,35 @@ not provide distributed delivery across multiple backend instances.
 
 ### Custom frontend features and Dashboard widgets
 
-Developer-owned frontend features live in
-`app/frontend/features/<feature_name>/`. Each feature exports a typed manifest
-from `feature.py`; its components, services, stores, locale files, and other
-assets are mirrored to `generated/frontend/src/custom/` during `site sync`.
+Custom features are declared in `SiteConfig.custom_features`. On the first
+`site sync`, OneSite scaffolds safe developer-owned frontend page/store/service
+and backend API/service/CRUD source below `app/frontend/` and `app/backend/`. Existing
+source is never overwritten; it is mirrored into `generated/` on every sync.
 
 ```python
-from onesite.frontend import (
-    DashboardWidget,
-    FrontendFeature,
-    FrontendMenu,
-    FrontendOverride,
-    FrontendRoute,
+from onesite.config import (
+    CustomDashboardWidget,
+    CustomFeature,
+    CustomFeatureMenu,
+    CustomOverride,
+    CustomPage,
+    SiteConfig,
 )
 
-feature = FrontendFeature(
+feature = CustomFeature(
     name="operations",
-    routes=[
-        FrontendRoute(
+    pages=[
+        CustomPage(
             id="workspace",
             path="/operations",
             component="pages/Workspace.tsx",
             access=["admin", "developer"],
-            menu=FrontendMenu(
+            menu=CustomFeatureMenu(
                 title={"zh": "运营工作台", "en": "Operations"},
                 icon="Activity",
             ),
         ),
-        FrontendRoute(
+        CustomPage(
             id="public_status",
             path="/public/status",
             component="pages/PublicStatus.tsx",
@@ -359,13 +360,13 @@ feature = FrontendFeature(
         ),
     ],
     overrides=[
-        FrontendOverride(
+        CustomOverride(
             target="model.sync_task.detail",
             component="pages/CustomSyncTask.tsx",
         ),
     ],
     dashboard_widgets=[
-        DashboardWidget(
+        CustomDashboardWidget(
             id="health",
             component="components/HealthWidget.tsx",
             title={"zh": "运行健康度", "en": "Operations Health"},
@@ -375,7 +376,14 @@ feature = FrontendFeature(
     ],
     dependencies={"dayjs": "^1.11.0"},
 )
+
+config = SiteConfig(custom_features=[feature])
 ```
+
+The default mode scaffolds both sides. Set `frontend_only=True` to scaffold
+only frontend source with a local empty-data service, or `backend_only=True`
+to scaffold only API/service/CRUD source. The two flags are mutually exclusive.
+The old `app/frontend/features/*/feature.py` manifest format is not supported.
 
 Application routes are mounted inside the authenticated generated layout and
 can restrict frontend access by role. Public routes are mounted outside that
@@ -518,9 +526,10 @@ generated/backend/app/
 └── cruds/custom/
 ```
 
-Every module under `app/backend/api/` that directly defines a top-level
-`router` is included automatically. Define its prefix and tags on the router;
-no additional OneSite configuration is required:
+Only backend modules declared by `SiteConfig.custom_features` are registered.
+The first sync creates one top-level `router` module per full-stack or
+backend-only feature; developers then own its prefix, tags, dependencies, and
+implementation:
 
 ```python
 from fastapi import APIRouter
@@ -535,9 +544,9 @@ async def health():
     return get_health()
 ```
 
-Nested API packages are supported. Helper modules without a top-level `router`
-are copied but are not registered. Removing a source file removes its mirrored
-custom copy on the next sync. Import custom services and CRUDs through
+Unconfigured helper modules are copied but never registered as API routes.
+Removing a source file removes its mirrored custom copy on the next sync.
+Import custom services and CRUDs through
 `app.services.custom.*` and `app.cruds.custom.*`.
 
 ## Model basics
@@ -1232,7 +1241,7 @@ project/
 │   │   ├── features/           # custom frontend feature source
 │   │   └── shared/             # shared custom frontend modules
 │   ├── backend/                # custom backend source
-│   │   ├── api/                # auto-registered APIRouter modules
+│   │   ├── api/                # configured custom-feature APIRouter modules
 │   │   ├── services/
 │   │   └── cruds/
 │   └── utils/                  # reusable developer-owned backend helpers

@@ -3,10 +3,13 @@
 from __future__ import annotations
 
 import ast
+import keyword
+import re
 from pathlib import Path
 
 from ..project_paths import get_project_paths
 from .assets import _mirror_source_tree
+from .render import generate_file_if_missing
 
 
 class CustomBackendError(ValueError):
@@ -43,22 +46,47 @@ def _defines_router(path: Path) -> bool:
     return False
 
 
-def _discover_api_modules(api_source: Path) -> list[str]:
+def _scaffold_custom_backend(source_root: Path, features: list[dict]) -> list[str]:
     modules: list[str] = []
-    for path in sorted(api_source.rglob("*.py")):
-        if path.name == "__init__.py" or "__pycache__" in path.parts:
+    for feature in features:
+        if feature.get("frontend_only"):
             continue
-        relative = path.relative_to(api_source).with_suffix("")
-        if not all(part.isidentifier() for part in relative.parts):
+        name = feature["name"]
+        if not re.fullmatch(r"[a-z][a-z0-9_]*", name) or keyword.iskeyword(name):
             raise CustomBackendError(
-                f"Custom API path must use valid Python identifiers: {relative}"
+                f"Custom feature name {name!r} must be a lowercase Python module name."
             )
-        if _defines_router(path):
-            modules.append(".".join(relative.parts))
+        class_name = "".join(part.title() for part in name.split("_"))
+        context = {
+            "feature_name": name,
+            "class_name": class_name,
+            "api_path": name.replace("_", "-"),
+        }
+        generate_file_if_missing(
+            "custom_feature_backend_crud.py.j2",
+            context,
+            source_root / "cruds" / f"{name}.py",
+        )
+        generate_file_if_missing(
+            "custom_feature_backend_service.py.j2",
+            context,
+            source_root / "services" / f"{name}.py",
+        )
+        api_file = source_root / "api" / f"{name}.py"
+        generate_file_if_missing(
+            "custom_feature_backend_api.py.j2", context, api_file
+        )
+        if not _defines_router(api_file):
+            raise CustomBackendError(
+                f"Configured custom feature API {api_file} must define a top-level router."
+            )
+        modules.append(name)
     return modules
 
 
-def sync_custom_backend(cwd: Path, backend_path: Path) -> list[str]:
+def sync_custom_backend(
+    cwd: Path, backend_path: Path, features: list[dict] | None = None
+) -> list[str]:
     """Mirror custom API/service/CRUD trees and return API router modules.
 
     Developer source is kept under ``app/backend``. Generated copies live in a
@@ -66,6 +94,7 @@ def sync_custom_backend(cwd: Path, backend_path: Path) -> list[str]:
     overwrite developer-owned modules with the same filename.
     """
     source_root = get_project_paths(cwd).backend_source
+    configured_modules = _scaffold_custom_backend(source_root, features or [])
     mappings = {
         "api": backend_path / "app" / "api" / "endpoints" / "custom",
         "services": backend_path / "app" / "services" / "custom",
@@ -78,5 +107,4 @@ def sync_custom_backend(cwd: Path, backend_path: Path) -> list[str]:
             _ensure_python_packages(source)
         _mirror_source_tree(source, destination, f"custom backend {name}")
 
-    api_source = source_root / "api"
-    return _discover_api_modules(api_source) if api_source.exists() else []
+    return configured_modules

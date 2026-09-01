@@ -1,0 +1,13 @@
+"""Developer-owned API for the {{ feature_name }} custom feature."""
+
+from fastapi import APIRouter
+
+from app.services.custom.{{ feature_name }} import get_{{ feature_name }}_data
+
+
+router = APIRouter(prefix="/custom/{{ api_path }}", tags=["custom:{{ feature_name }}"])
+
+
+@router.get("")
+async def list_items() -> dict:
+    return await get_{{ feature_name }}_data()

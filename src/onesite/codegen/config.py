@@ -7,6 +7,10 @@ from pathlib import Path
 from typing import Any, Dict
 from urllib.parse import urlparse
 
+from pydantic import TypeAdapter, ValidationError
+
+from onesite.config import CustomFeature
+
 
 class SiteConfigError(ValueError):
     """Raised when a project configuration cannot be loaded or validated."""
@@ -52,6 +56,38 @@ _NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
 _FRONTEND_ROUTE_ID_RE = re.compile(r"[a-z][a-z0-9_.-]*")
 _TASK_CENTER_KINDS = {"import", "export", "tool", "scheduled_task"}
+
+
+def validate_custom_features_config(config: Dict[str, Any]) -> None:
+    """Validate and normalize SiteConfig-owned custom feature declarations."""
+    raw_features = config.setdefault("custom_features", [])
+    if not isinstance(raw_features, list):
+        raise SiteConfigError(
+            "site_config field 'custom_features' must be an array."
+        )
+    try:
+        features = TypeAdapter(list[CustomFeature]).validate_python(raw_features)
+    except ValidationError as exc:
+        raise SiteConfigError(f"Invalid custom_features configuration: {exc}") from exc
+
+    seen: set[str] = set()
+    for feature in features:
+        if (
+            not re.fullmatch(r"[a-z][a-z0-9_]*", feature.name)
+            or keyword.iskeyword(feature.name)
+        ):
+            raise SiteConfigError(
+                f"Custom feature name {feature.name!r} must use lowercase snake_case "
+                "and be a valid Python module name."
+            )
+        if feature.name in seen:
+            raise SiteConfigError(
+                f"Custom feature name {feature.name!r} is declared more than once."
+            )
+        seen.add(feature.name)
+    config["custom_features"] = [
+        feature.model_dump(mode="json", exclude_none=True) for feature in features
+    ]
 
 
 def validate_task_center_config(config: Dict[str, Any]) -> None:

@@ -1,0 +1,28 @@
+import { create } from 'zustand';
+
+import { get{{ class_name }}Data, type CustomFeatureData } from '../services/{{ feature_name }}';
+
+type {{ class_name }}State = {
+  data: CustomFeatureData | null;
+  loading: boolean;
+  error: string | null;
+  load: () => Promise<void>;
+};
+
+export const use{{ class_name }}Store = create<{{ class_name }}State>((set, get) => ({
+  data: null,
+  loading: false,
+  error: null,
+  load: async () => {
+    if (get().loading) return;
+    set({ loading: true, error: null });
+    try {
+      set({ data: await get{{ class_name }}Data(), loading: false });
+    } catch (error) {
+      set({
+        loading: false,
+        error: error instanceof Error ? error.message : 'Unable to load custom feature',
+      });
+    }
+  },
+}));

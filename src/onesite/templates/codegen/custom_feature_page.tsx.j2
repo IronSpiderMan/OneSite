@@ -1,0 +1,30 @@
+import { useEffect } from 'react';
+import { Loader2 } from 'lucide-react';
+import { useParams } from 'react-router-dom';
+
+import { {{ store_name }} } from '{{ store_import }}';
+
+export default function {{ class_name }}() {
+  const params = useParams();
+  const { data, loading, error, load } = {{ store_name }}();
+
+  useEffect(() => { void load(); }, [load]);
+
+  return (
+    <div className="mx-auto max-w-6xl space-y-6">
+      <div className="rounded-2xl border border-border/60 bg-card p-7 shadow-sm">
+        <h1 className="text-3xl font-bold tracking-tight">{{ title }}</h1>
+        <p className="mt-2 text-sm text-muted-foreground">
+          Customize this page in app/frontend/features/{{ feature_name }}.
+        </p>
+      </div>
+      {loading && <div className="flex h-40 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>}
+      {error && <div className="rounded-xl border border-destructive/30 p-4 text-sm text-destructive">{error}</div>}
+      {!loading && !error && (
+        <pre className="overflow-auto rounded-xl border bg-muted/30 p-4 text-sm">
+          {JSON.stringify({ params, data }, null, 2)}
+        </pre>
+      )}
+    </div>
+  );
+}

@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-import importlib.util
 import json
+import posixpath
 import re
-import sys
 from pathlib import Path, PurePosixPath
+from types import SimpleNamespace
 from typing import Any
 
 from .config import SiteConfigError
 from .file_utils import copy_file_with_status, write_file_with_status
-from ..frontend import FrontendFeature
+from .render import generate_file_if_missing
 from ..project_paths import get_project_paths
 
 
@@ -24,20 +24,98 @@ _IGNORED_PARTS = {"__pycache__", "node_modules", ".git", ".DS_Store"}
 _SPAN_BREAKPOINTS = ("sm", "md", "lg", "xl", "2xl")
 
 
-def _load_feature_module(path: Path) -> Any:
-    module_name = f"_onesite_frontend_feature_{abs(hash(path.resolve()))}"
-    spec = importlib.util.spec_from_file_location(module_name, path)
-    if spec is None or spec.loader is None:
-        raise SiteConfigError(f"Unable to load frontend feature manifest {path}.")
-    module = importlib.util.module_from_spec(spec)
-    sys.modules[module_name] = module
-    try:
-        spec.loader.exec_module(module)
-    except Exception as exc:
-        raise SiteConfigError(f"Unable to import frontend feature manifest {path}: {exc}") from exc
-    finally:
-        sys.modules.pop(module_name, None)
-    return module
+def _pascal_case(value: str) -> str:
+    return "".join(part[:1].upper() + part[1:] for part in re.split(r"[^A-Za-z0-9]+", value) if part)
+
+
+def _override_component(target: str) -> str:
+    parts = target.split(".")
+    if parts and parts[0] in {"model", "builtin"}:
+        parts = parts[1:]
+    return f"pages/{_pascal_case('_'.join(parts))}Override.tsx"
+
+
+def _as_namespace(raw: dict[str, Any]) -> SimpleNamespace:
+    values = dict(raw)
+    if isinstance(values.get("menu"), dict):
+        menu = dict(values["menu"])
+        menu.setdefault("visible", None)
+        values["menu"] = SimpleNamespace(**menu)
+    return SimpleNamespace(**values)
+
+
+def _scaffold_frontend_feature(feature_dir: Path, feature: SimpleNamespace) -> None:
+    """Create safe developer-owned frontend source files only when absent."""
+    feature_name = feature.name
+    class_name = _pascal_case(feature_name)
+    store_module = f"stores/use{class_name}Store"
+
+    def store_import(component: str) -> str:
+        relative = posixpath.relpath(store_module, str(PurePosixPath(component).parent))
+        return relative if relative.startswith(".") else f"./{relative}"
+
+    def ensure_component_template(component: str, template: str, context: dict[str, Any]) -> None:
+        output = feature_dir / component
+        if not output.exists() and output.suffix not in {".tsx", ".jsx"}:
+            raise SiteConfigError(
+                f"Cannot scaffold React component {output}; use a .tsx or .jsx path."
+            )
+        generate_file_if_missing(template, context, output)
+
+    for route in feature.routes:
+        ensure_component_template(
+            route.component,
+            "custom_feature_page.tsx.j2",
+            {
+                "feature_name": feature_name,
+                "class_name": _pascal_case(route.id),
+                "title": route.id.replace("_", " ").title(),
+                "store_name": f"use{class_name}Store",
+                "store_import": store_import(route.component),
+            },
+        )
+    for override in feature.overrides:
+        ensure_component_template(
+            override.component,
+            "custom_feature_page.tsx.j2",
+            {
+                "feature_name": feature_name,
+                "class_name": Path(override.component).stem,
+                "title": f"{feature_name.replace('_', ' ').title()} Override",
+                "store_name": f"use{class_name}Store",
+                "store_import": store_import(override.component),
+            },
+        )
+    for widget in feature.dashboard_widgets:
+        ensure_component_template(
+            widget.component,
+            "custom_feature_widget.tsx.j2",
+            {
+                "class_name": Path(widget.component).stem,
+                "store_name": f"use{class_name}Store",
+                "store_import": store_import(widget.component),
+            },
+        )
+    generate_file_if_missing(
+        "custom_feature_store.ts.j2",
+        {"class_name": class_name, "feature_name": feature_name},
+        feature_dir / "stores" / f"use{class_name}Store.ts",
+    )
+    generate_file_if_missing(
+        "custom_feature_frontend_service.ts.j2",
+        {
+            "feature_name": feature_name,
+            "function_name": f"get{class_name}Data",
+            "frontend_only": feature.frontend_only,
+        },
+        feature_dir / "services" / f"{feature_name}.ts",
+    )
+    for language in ("en", "zh"):
+        generate_file_if_missing(
+            "custom_feature_locale.json.j2",
+            {"feature_name": feature_name, "language": language},
+            feature_dir / "locales" / f"{language}.json",
+        )
 
 
 def _safe_relative_file(feature_dir: Path, raw: str, field: str) -> Path:
@@ -50,6 +128,15 @@ def _safe_relative_file(feature_dir: Path, raw: str, field: str) -> Path:
     if not resolved.is_file():
         raise SiteConfigError(f"{field} references missing file {resolved}.")
     return resolved
+
+
+def _validate_scaffold_path(feature_dir: Path, raw: str, field: str) -> None:
+    """Reject unsafe component paths before scaffolding can write source."""
+    if not isinstance(raw, str) or not raw:
+        raise SiteConfigError(f"{field} must be a non-empty relative file path.")
+    posix = PurePosixPath(raw)
+    if posix.is_absolute() or ".." in posix.parts:
+        raise SiteConfigError(f"{field} must stay inside {feature_dir}.")
 
 
 def _span_classes(value: int | dict[str, int], field: str) -> str:
@@ -75,7 +162,7 @@ def _span_classes(value: int | dict[str, int], field: str) -> str:
     return " ".join(classes)
 
 
-def _load_locales(feature_dir: Path, feature: FrontendFeature) -> dict[str, dict[str, Any]]:
+def _load_locales(feature_dir: Path, feature: SimpleNamespace) -> dict[str, dict[str, Any]]:
     locale_paths = dict(feature.locales)
     for language in ("en", "zh"):
         conventional = feature_dir / "locales" / f"{language}.json"
@@ -114,25 +201,18 @@ def _validate_dependencies(
         aggregate[package] = (version, field)
 
 
-def load_frontend_features(cwd: Path) -> list[dict[str, Any]]:
-    """Discover and validate every ``app/frontend/features/*/feature.py``."""
+def load_frontend_features(
+    cwd: Path, configured_features: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Scaffold and compile SiteConfig-owned custom frontend features."""
 
     features_root = get_project_paths(cwd).frontend_source / "features"
-    if not features_root.is_dir():
-        return []
-
-    missing_manifests = [
-        directory
-        for directory in sorted(features_root.iterdir())
-        if directory.is_dir()
-        and not directory.name.startswith(".")
-        and not (directory / "feature.py").is_file()
-    ]
-    if missing_manifests:
+    legacy_manifests = sorted(features_root.glob("*/feature.py")) if features_root.is_dir() else []
+    if legacy_manifests:
         raise SiteConfigError(
-            "Every frontend feature directory must contain feature.py; missing: "
-            + ", ".join(str(path) for path in missing_manifests)
-            + "."
+            "Frontend feature.py manifests are no longer supported; move these "
+            "declarations to SiteConfig.custom_features and remove: "
+            + ", ".join(str(path) for path in legacy_manifests)
         )
 
     compiled: list[dict[str, Any]] = []
@@ -143,23 +223,59 @@ def load_frontend_features(cwd: Path) -> list[dict[str, Any]]:
     dependencies: dict[str, tuple[str, str]] = {}
     dev_dependencies: dict[str, tuple[str, str]] = {}
 
-    for manifest in sorted(features_root.glob("*/feature.py")):
-        feature_dir = manifest.parent
-        module = _load_feature_module(manifest)
-        feature = getattr(module, "feature", None)
-        if not isinstance(feature, FrontendFeature):
-            raise SiteConfigError(
-                f"{manifest} must export `feature = FrontendFeature(...)`."
-            )
+    for raw_feature in configured_features:
+        if raw_feature.get("backend_only"):
+            continue
+        feature_dir = features_root / str(raw_feature.get("name", ""))
+        routes = []
+        for raw_route in raw_feature.get("pages", []):
+            route = dict(raw_route)
+            route.setdefault("component", f"pages/{_pascal_case(route['id'])}.tsx")
+            routes.append(_as_namespace(route))
+        overrides = []
+        for raw_override in raw_feature.get("overrides", []):
+            override = dict(raw_override)
+            override.setdefault("component", _override_component(override["target"]))
+            override.setdefault("access", None)
+            overrides.append(_as_namespace(override))
+        widgets = []
+        for raw_widget in raw_feature.get("dashboard_widgets", []):
+            widget = dict(raw_widget)
+            widget.setdefault("component", f"components/{_pascal_case(widget['id'])}Widget.tsx")
+            widgets.append(_as_namespace(widget))
+        feature = SimpleNamespace(
+            name=raw_feature["name"],
+            frontend_only=bool(raw_feature.get("frontend_only")),
+            routes=routes,
+            overrides=overrides,
+            dashboard_widgets=widgets,
+            dependencies=raw_feature.get("dependencies", {}),
+            dev_dependencies=raw_feature.get("dev_dependencies", {}),
+            locales=raw_feature.get("locales", {}),
+        )
         if not _NAME_RE.fullmatch(feature.name):
             raise SiteConfigError(
                 f"Frontend feature name {feature.name!r} must use lowercase snake_case."
             )
-        if feature.name != feature_dir.name:
-            raise SiteConfigError(
-                f"Frontend feature {manifest} declares name {feature.name!r}; "
-                f"it must match directory {feature_dir.name!r}."
+        for index, route in enumerate(feature.routes):
+            _validate_scaffold_path(
+                feature_dir,
+                route.component,
+                f"frontend feature '{feature.name}' pages[{index}].component",
             )
+        for index, override in enumerate(feature.overrides):
+            _validate_scaffold_path(
+                feature_dir,
+                override.component,
+                f"frontend feature '{feature.name}' overrides[{index}].component",
+            )
+        for index, widget in enumerate(feature.dashboard_widgets):
+            _validate_scaffold_path(
+                feature_dir,
+                widget.component,
+                f"frontend feature '{feature.name}' dashboard_widgets[{index}].component",
+            )
+        _scaffold_frontend_feature(feature_dir, feature)
 
         _validate_dependencies(
             feature.dependencies, f"frontend feature '{feature.name}' dependencies", dependencies

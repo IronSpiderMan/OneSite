@@ -1,0 +1,11 @@
+import { useEffect } from 'react';
+
+import { {{ store_name }} } from '{{ store_import }}';
+
+export default function {{ class_name }}() {
+  const { data, loading, error, load } = {{ store_name }}();
+  useEffect(() => { void load(); }, [load]);
+  if (loading) return <div className="text-sm text-muted-foreground">Loading...</div>;
+  if (error) return <div className="text-sm text-destructive">{error}</div>;
+  return <pre className="overflow-auto text-xs">{JSON.stringify(data, null, 2)}</pre>;
+}

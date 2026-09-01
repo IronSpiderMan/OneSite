@@ -35,12 +35,12 @@ def generate_code() -> None:
     """
     cwd = Path(os.getcwd())
 
-    # Phase 1 — Config. Validate it before creating or modifying generated
-    # project files so malformed input cannot be replaced by defaults.
-    # Frontend manifests are developer-owned configuration too. Validate them
-    # before the config phase synchronizes environment files or other output.
-    frontend_features = load_frontend_features(cwd)
+    # Phase 1 — Load typed configuration, then scaffold and compile the
+    # SiteConfig-owned custom feature declarations.
     site_config, backend_path = phase_config.phase_load_config(cwd)
+    frontend_features = load_frontend_features(
+        cwd, site_config.get("custom_features", [])
+    )
     site_config["_frontend_features"] = frontend_features
 
     # Phase 2 — Generate model tables (into models/, before sync so they are picked up)

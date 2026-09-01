@@ -475,34 +475,35 @@ Leaflet 依赖。
 
 ## 通用前端 Feature 与自定义 Dashboard Widget
 
-开发者维护的前端 Feature 放在 `app/frontend/features/<feature_name>/`。
-每个 Feature 通过相邻的 `feature.py` 导出带类型的声明；执行 `site sync` 时，
-其组件、service、store、多语言文件和其他资源会单向镜像到
-`generated/frontend/src/custom/`。
+自定义 Feature 在 `SiteConfig.custom_features` 中声明。第一次执行 `site sync`
+时，OneSite 会在 `app/frontend/` 和 `app/backend/` 下创建可安全运行的 page、
+store、service、API 与 CRUD 源码；已有源码永不覆盖，之后每次同步只镜像到
+`generated/`。
 
 ```python
-from onesite.frontend import (
-    DashboardWidget,
-    FrontendFeature,
-    FrontendMenu,
-    FrontendOverride,
-    FrontendRoute,
+from onesite.config import (
+    CustomDashboardWidget,
+    CustomFeature,
+    CustomFeatureMenu,
+    CustomOverride,
+    CustomPage,
+    SiteConfig,
 )
 
-feature = FrontendFeature(
+feature = CustomFeature(
     name="operations",
-    routes=[
-        FrontendRoute(
+    pages=[
+        CustomPage(
             id="workspace",
             path="/operations",
             component="pages/Workspace.tsx",
             access=["admin", "developer"],
-            menu=FrontendMenu(
+            menu=CustomFeatureMenu(
                 title={"zh": "运营工作台", "en": "Operations"},
                 icon="Activity",
             ),
         ),
-        FrontendRoute(
+        CustomPage(
             id="public_status",
             path="/public/status",
             component="pages/PublicStatus.tsx",
@@ -510,13 +511,13 @@ feature = FrontendFeature(
         ),
     ],
     overrides=[
-        FrontendOverride(
+        CustomOverride(
             target="model.sync_task.detail",
             component="pages/CustomSyncTask.tsx",
         ),
     ],
     dashboard_widgets=[
-        DashboardWidget(
+        CustomDashboardWidget(
             id="health",
             component="components/HealthWidget.tsx",
             title={"zh": "运行健康度", "en": "Operations Health"},
@@ -526,7 +527,13 @@ feature = FrontendFeature(
     ],
     dependencies={"dayjs": "^1.11.0"},
 )
+
+config = SiteConfig(custom_features=[feature])
 ```
+
+默认同时创建前后端。`frontend_only=True` 只创建前端，并提供返回空数据的本地
+service；`backend_only=True` 只创建 API、service 和 CRUD。两个选项不能同时为
+`True`。旧的 `app/frontend/features/*/feature.py` 声明格式不再支持。
 
 默认的 `layout="app"` 路由会挂载在需要登录的生成应用外壳内，并支持通过
 `access` 限制前端角色。`layout="public"` 路由位于应用外壳之外，不要求 token。
@@ -640,8 +647,9 @@ generated/backend/app/services/custom/
 generated/backend/app/cruds/custom/
 ```
 
-`app/backend/api/` 下每个直接定义顶层 `router` 的模块都会自动注册，不需要在
-`site_config.py` 中重复配置 prefix 或 tag；请直接在 `APIRouter` 上声明：
+只有 `SiteConfig.custom_features` 声明的后端模块会注册。首次同步会为完整模式或
+`backend_only` Feature 创建带顶层 `router` 的模块；之后 prefix、tag、依赖和实现
+均由开发者维护：
 
 ```python
 from fastapi import APIRouter
@@ -656,7 +664,7 @@ async def health():
     return get_health()
 ```
 
-支持嵌套 API 包；没有顶层 `router` 的辅助模块只复制、不注册。删除源文件后，
+未配置的辅助模块只复制、不会注册为 API。删除源文件后，
 下次同步也会删除对应的生成副本。自定义 Service 与 CRUD 的导入路径分别为
 `app.services.custom.*` 和 `app.cruds.custom.*`。
 
@@ -728,7 +736,7 @@ pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢�
 │   ├── integrations/
 │   │   └── mqtt/                # 开发者维护的 MQTT handler
 │   ├── backend/
-│   │   ├── api/                 # 自动注册的 APIRouter 模块
+│   │   ├── api/                 # 配置声明的自定义 Feature APIRouter
 │   │   ├── services/
 │   │   └── cruds/
 │   └── utils/                   # 开发者维护的后端工具模块

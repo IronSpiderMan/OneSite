@@ -1115,7 +1115,9 @@ def phase_generate_aggregated(
     # Custom backend source is mirrored after per-model generation so it stays
     # developer-owned. It lives in a dedicated generated namespace to avoid
     # collisions with framework and model modules.
-    custom_api_modules = sync_custom_backend(cwd, backend_path)
+    custom_api_modules = sync_custom_backend(
+        cwd, backend_path, site_config.get("custom_features", [])
+    )
 
     # ── API router ──
     update_api_router(
@@ -1327,7 +1329,7 @@ def phase_generate_aggregated(
         if route["path"] in reserved_route_paths:
             raise ValueError(
                 f"Frontend route '{route['id']}' conflicts with generated path "
-                f"'{route['path']}'. Use a FrontendOverride for generated pages."
+                f"'{route['path']}'. Use a CustomOverride for generated pages."
             )
     unknown_overrides = sorted(
         override["target"]

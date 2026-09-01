@@ -1,0 +1,8 @@
+"""Developer-owned business logic for the {{ feature_name }} custom feature."""
+
+from app.cruds.custom.{{ feature_name }} import list_{{ feature_name }}_items
+
+
+async def get_{{ feature_name }}_data() -> dict:
+    items = await list_{{ feature_name }}_items()
+    return {"items": items, "total": len(items)}

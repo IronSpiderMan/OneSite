@@ -12,7 +12,7 @@ import os
 from enum import Enum
 from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 
 Role = Literal["user", "admin", "developer"]
@@ -22,6 +22,12 @@ class _ConfigModel(BaseModel):
     """Base model that keeps compatible, as-yet-untyped configuration keys."""
 
     model_config = ConfigDict(extra="allow")
+
+
+class _StrictConfigModel(BaseModel):
+    """Strict base for new declarations that have no legacy keys."""
+
+    model_config = ConfigDict(extra="forbid")
 
 
 class Theme(str, Enum):
@@ -141,6 +147,81 @@ class NavGroup(_ConfigModel):
     default_open: bool = False
     visible: list[Role] | dict[Role, bool] | None = None
     children: list[NavModel | NavRoute | NavBuiltin]
+
+
+class CustomFeatureMenu(_StrictConfigModel):
+    """Navigation metadata for one custom application page."""
+
+    title: dict[Literal["zh", "en"], str]
+    icon: str = "PanelsTopLeft"
+    visible: list[Role] | None = None
+
+
+class CustomPage(_StrictConfigModel):
+    """A developer-owned page scaffolded and mounted by OneSite."""
+
+    id: str
+    path: str
+    component: str | None = None
+    layout: Literal["app", "public"] = "app"
+    access: list[Role] = Field(
+        default_factory=lambda: ["user", "admin", "developer"]
+    )
+    menu: CustomFeatureMenu | None = None
+
+
+class CustomOverride(_StrictConfigModel):
+    """Replace one stable generated route with a developer-owned page."""
+
+    target: str
+    component: str | None = None
+    access: list[Role] | None = None
+
+
+class CustomDashboardWidget(_StrictConfigModel):
+    """A developer-owned Dashboard widget scaffolded by OneSite."""
+
+    id: str
+    title: dict[Literal["zh", "en"], str]
+    component: str | None = None
+    span: int | dict[Literal["sm", "md", "lg", "xl", "2xl"], int] = 12
+    order: int = 100
+    access: list[Role] = Field(
+        default_factory=lambda: ["user", "admin", "developer"]
+    )
+    frame: bool = True
+
+
+class CustomFeature(_StrictConfigModel):
+    """A custom full-stack, frontend-only, or backend-only feature."""
+
+    name: str
+    frontend_only: bool = False
+    backend_only: bool = False
+    pages: list[CustomPage] = Field(default_factory=list)
+    overrides: list[CustomOverride] = Field(default_factory=list)
+    dashboard_widgets: list[CustomDashboardWidget] = Field(default_factory=list)
+    dependencies: dict[str, str] = Field(default_factory=dict)
+    dev_dependencies: dict[str, str] = Field(default_factory=dict)
+    locales: dict[Literal["zh", "en"], str] = Field(default_factory=dict)
+
+    @model_validator(mode="after")
+    def validate_mode(self) -> "CustomFeature":
+        if self.frontend_only and self.backend_only:
+            raise ValueError("frontend_only and backend_only cannot both be true")
+        if self.backend_only and (
+            self.pages
+            or self.overrides
+            or self.dashboard_widgets
+            or self.dependencies
+            or self.dev_dependencies
+            or self.locales
+        ):
+            raise ValueError(
+                "backend_only custom features cannot declare pages, overrides, "
+                "dashboard_widgets, frontend dependencies, or locales"
+            )
+        return self
 
 
 NavigationItem = NavModel | NavRoute | NavBuiltin | NavGroup
@@ -525,6 +606,7 @@ class SiteConfig(_ConfigModel):
     )
     desktop: DesktopConfig = Field(default_factory=DesktopConfig)
     navigation: list[NavigationItem] | None = None
+    custom_features: list[CustomFeature] = Field(default_factory=list)
     plugins: list[str] = Field(default_factory=list)
     redis: RedisConfig | None = None
     rabbitmq: RabbitMQConfig | None = None

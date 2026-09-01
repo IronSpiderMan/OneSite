@@ -1,0 +1,12 @@
+{% if not frontend_only %}import request from '../../../../utils/request';
+
+{% endif %}export type CustomFeatureData = {
+  items: unknown[];
+  total: number;
+};
+
+export async function {{ function_name }}(): Promise<CustomFeatureData> {
+{% if frontend_only %}  return { items: [], total: 0 };
+{% else %}  const response = await request.get<CustomFeatureData>('/custom/{{ feature_name | replace('_', '-') }}');
+  return response.data;
+{% endif %}}
