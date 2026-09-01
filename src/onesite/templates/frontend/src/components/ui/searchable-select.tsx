@@ -108,18 +108,18 @@ export function SearchableSelect({
     } else {
         if (value) {
             const found = options.find(o => String(o.value) === String(value))
-            if (found) {
-                setSelectedLabel(found.label)
-            } else if (valueLabels?.[String(value)]) {
-                setSelectedLabel(valueLabels[String(value)])
-            } else if (!selectedLabel && defaultLabel) {
-                setSelectedLabel(defaultLabel)
+            const nextLabel = found?.label
+                || valueLabels?.[String(value)]
+                || defaultLabel
+                || String(value)
+            if (selectedLabel !== nextLabel) {
+                setSelectedLabel(nextLabel)
             }
         } else {
             setSelectedLabel("")
         }
     }
-  }, [value, options, defaultLabel, valueLabels, multiple])
+  }, [value, options, defaultLabel, valueLabels, multiple, selectedLabel])
 
   const handleSelect = (optionValue: string | number, optionLabel: string) => {
     if (multiple) {
