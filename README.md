@@ -748,6 +748,7 @@ class Product(SQLModel, table=True):
 | `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode: "page"`. |
 | `edit_mode` | Create/edit container: `"modal"` (default), `"page"`, or right-side `"drawer"`. |
 | `list_mode` | Collection layout: `"list"` (default table) or responsive card `"grid"`. |
+| `multi_display` | Adds a selectable multi-item media view alongside the normal collection layout. |
 | `actions` | Adds permission-controlled custom action buttons. |
 | `ui.detail.layout` | Shared layout for detail views and create/edit fields. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
@@ -764,6 +765,45 @@ For a responsive card grid instead of the default table:
 ```python
 __onesite__ = {"list_mode": "grid"}
 ```
+
+For a list/multi-display switcher, configure the fields that should be shown
+for every selected item. The field renderer is inferred from its existing UI
+component (`image`, `images`, `video_stream`, or `location`):
+
+```python
+class Camera(SQLModel, table=True):
+    __onesite__ = {
+        "multi_display": {
+            "fields": ["snapshot_image", "stream_url", "location"],
+            "label_field": "name",
+            "default_view": "list",
+            "max_selected": 4,
+            "columns": 2,
+        }
+    }
+```
+
+Each field also accepts an object form when the inferred renderer or layout
+needs to be customized:
+
+```python
+"multi_display": {
+    "fields": [
+        {"field": "snapshot_image", "fit": "cover"},
+        {"field": "stream_url", "renderer": "video", "span": 4},
+        {"field": "location", "renderer": "map", "zoom": 15},
+    ],
+    "label_field": "name",
+    "default_view": "multi",
+    "max_selected": 4,  # 1..9
+    "columns": 2,       # 1..4
+}
+```
+
+Display selection is separate from the list's bulk-action selection. Selected
+items remain visible while paging through the selector, and configured field
+read permissions are still enforced at runtime. Tree views do not currently
+support `multi_display`.
 
 ### Detail page layout
 

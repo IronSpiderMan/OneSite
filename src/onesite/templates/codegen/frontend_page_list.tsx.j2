@@ -61,6 +61,11 @@ import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-s
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../components/ui/alert-dialog';
 import { TimePicker } from '../../components/ui/time-picker';
 import { LocationInput } from '../../components/ui/location-input';
+{% if model.multi_display %}
+import { MultiDisplayView } from '../../components/ui/multi-display-view';
+import { VideoStreamPlayer } from '../../components/ui/video-stream-player';
+import { LocationDisplayMap } from '../../components/ui/location-display-map';
+{% endif %}
 import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
@@ -175,6 +180,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
   const [searchValues, setSearchValues] = useState<Record<string, any>>({});
   const [gotoPageInput, setGotoPageInput] = useState('');
+  {% if model.multi_display %}
+  const [viewMode, setViewMode] = useState<'list' | 'multi'>('{{ model.multi_display.default_view }}');
+  const [displayItems, setDisplayItems] = useState<Map<{{ 'string' if 'str' in model.id_type else 'number' }}, {{ model.name }}>>(new Map());
+  const selectedDisplayItems = Array.from(displayItems.values());
+  {% endif %}
   {% if model.has_embedded_page %}
   const [attachExistingOpen, setAttachExistingOpen] = useState(false);
   const [attachExistingIds, setAttachExistingIds] = useState<{{ 'string[]' if 'str' in model.id_type else 'number[]' }}>([]);
@@ -402,6 +412,28 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     {% endif %}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
+
+  {% if model.multi_display %}
+  useEffect(() => {
+    if (displayItems.size === 0 || data.length === 0) return;
+    const refreshedById = new Map<{{ 'string' if 'str' in model.id_type else 'number' }}, {{ model.name }}>(
+      data.map((item) => [item.id, item]),
+    );
+    setDisplayItems((previous) => {
+      let changed = false;
+      const next = new Map(previous);
+      previous.forEach((_item, id) => {
+        const refreshed = refreshedById.get(id);
+        if (refreshed) {
+          next.set(id, refreshed);
+          changed = true;
+        }
+      });
+      return changed ? next : previous;
+    });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [data]);
+  {% endif %}
 
   {% if model.has_dynamic_action_states %}
   useEffect(() => {
@@ -701,6 +733,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     try {
       await deleteItem(deleteId);
       toast.success(t('toast.delete_success', 'Deleted'));
+      {% if model.multi_display %}
+      setDisplayItems((previous) => {
+        const next = new Map(previous);
+        next.delete(deleteId);
+        return next;
+      });
+      {% endif %}
       {% if model.is_tree %}
       await refreshTree();
       {% endif %}
@@ -729,12 +768,37 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     );
   };
 
+  {% if model.multi_display %}
+  const toggleDisplayItem = (item: {{ model.name }}) => {
+    setDisplayItems((previous) => {
+      const next = new Map(previous);
+      if (next.has(item.id)) {
+        next.delete(item.id);
+        return next;
+      }
+      if (next.size >= {{ model.multi_display.max_selected }}) {
+        toast.warning(t('multi_display.max_selected', '{% raw %}You can display up to {{max}} items.{% endraw %}', { max: {{ model.multi_display.max_selected }} }));
+        return previous;
+      }
+      next.set(item.id, item);
+      return next;
+    });
+  };
+  {% endif %}
+
   const confirmBulkDelete = async () => {
     if (selectedIds.length === 0) return;
     setIsBulkDeleting(true);
     try {
       await bulkDeleteItem(selectedIds);
       toast.success(t('toast.delete_success', 'Deleted'));
+      {% if model.multi_display %}
+      setDisplayItems((previous) => {
+        const next = new Map(previous);
+        selectedIds.forEach((id) => next.delete(id));
+        return next;
+      });
+      {% endif %}
       setSelectedIds([]);
       {% if model.is_tree %}
       await refreshTree();
@@ -887,6 +951,67 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   };
   {% endif %}
 
+  {% if model.multi_display %}
+  const renderMultiDisplayItem = (item: {{ model.name }}) => (
+    <>
+      {% for display in model.multi_display.fields %}
+      {hasFieldPerm('{{ display.field }}', 'r') && (
+        <section className="col-span-{{ display.span }} min-w-0 space-y-2 rounded-md border bg-card p-2">
+          <Label className="block truncate text-xs text-muted-foreground" title={String(t('{{ display.label_key }}'))}>
+            {t('{{ display.label_key }}')}
+          </Label>
+          {% if display.renderer == 'image' %}
+          {item.{{ display.field }} ? (
+            <img
+              src={item.{{ display.field }}}
+              alt={String(t('{{ display.label_key }}'))}
+              loading="lazy"
+              className="aspect-video w-full rounded-md border bg-muted object-{{ display.fit }}"
+            />
+          ) : <div className="flex aspect-video items-center justify-center rounded-md bg-muted/30 text-sm text-muted-foreground">-</div>}
+          {% elif display.renderer == 'gallery' %}
+          {Array.isArray(item.{{ display.field }}) && item.{{ display.field }}.length ? (
+            <div className="grid grid-cols-2 gap-2">
+              {item.{{ display.field }}.slice(0, 4).map((url: string, index: number) => (
+                <img key={`${url}-${index}`} src={url} alt={`${String(t('{{ display.label_key }}'))} ${index + 1}`} loading="lazy" className="aspect-video w-full rounded-md border object-{{ display.fit }}" />
+              ))}
+            </div>
+          ) : <div className="flex aspect-video items-center justify-center rounded-md bg-muted/30 text-sm text-muted-foreground">-</div>}
+          {% elif display.renderer == 'video' %}
+          <VideoStreamPlayer
+            src={item.{{ display.field }}}
+            protocol="{{ display.stream_protocol }}"
+            autoPlay={ {{ "true" if display.stream_autoplay else "false" }} }
+            muted={ {{ "true" if display.stream_muted else "false" }} }
+            controls={ {{ "true" if display.stream_controls else "false" }} }
+            reconnect={ {{ "true" if display.stream_reconnect else "false" }} }
+          />
+          {% elif display.renderer == 'map' %}
+          <LocationDisplayMap value={item.{{ display.field }}} zoom={ {{ display.zoom }} } />
+          {% elif display.is_foreign_key %}
+          <span className="block break-words text-sm">{item.{{ display.field }}_label || (item.{{ display.field }} ? `ID: ${item.{{ display.field }}}` : '-')}</span>
+          {% elif display.ui_type == 'bool' %}
+          <Badge variant={item.{{ display.field }} ? 'default' : 'secondary'}>{item.{{ display.field }} ? t('common.yes', 'Yes') : t('common.no', 'No')}</Badge>
+          {% elif display.is_enum and display.is_multi_select %}
+          <div className="flex flex-wrap gap-1">{Array.isArray(item.{{ display.field }}) && item.{{ display.field }}.map((value: string) => <Badge key={value}>{String(t(`models.{{ model.module_name }}.enums.{{ display.field }}.${value}`, value))}</Badge>)}</div>
+          {% elif display.is_enum %}
+          {item.{{ display.field }} != null ? <Badge>{String(t(`models.{{ model.module_name }}.enums.{{ display.field }}.${item.{{ display.field }}}`, item.{{ display.field }}))}</Badge> : '-'}
+          {% elif display.ui_type == 'datetime' %}
+          <span className="break-words text-sm">{formatDateTime(item.{{ display.field }}, timeZone)}</span>
+          {% elif display.ui_type == 'time' %}
+          <span className="break-words text-sm">{formatTime(item.{{ display.field }})}</span>
+          {% elif display.ui_type == 'json' %}
+          <JsonPreview value={item.{{ display.field }}} />
+          {% else %}
+          <span className="block break-words text-sm">{item.{{ display.field }} == null || item.{{ display.field }} === '' ? '-' : String(item.{{ display.field }})}</span>
+          {% endif %}
+        </section>
+      )}
+      {% endfor %}
+    </>
+  );
+  {% endif %}
+
   return (
     <div
       className="{{ page_shell_class | default('flex h-full min-h-0 flex-col gap-6') }}"
@@ -1023,6 +1148,17 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         </div>
       </div>
 
+      {% if model.multi_display %}
+      <div className="flex w-fit items-center rounded-md border bg-muted/30 p-1" role="tablist" aria-label={t('multi_display.view_mode', 'View mode')}>
+        <Button type="button" size="sm" variant={viewMode === 'list' ? 'default' : 'ghost'} role="tab" aria-selected={viewMode === 'list'} onClick={() => setViewMode('list')}>
+          {t('multi_display.list_view', 'List')}
+        </Button>
+        <Button type="button" size="sm" variant={viewMode === 'multi' ? 'default' : 'ghost'} role="tab" aria-selected={viewMode === 'multi'} onClick={() => setViewMode('multi')}>
+          {t('multi_display.multi_view', 'Multi-display')}
+        </Button>
+      </div>
+      {% endif %}
+
       {% set ns = namespace(has_search_fields=false) %}
       {% for field in model.fields %}
           {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
@@ -1156,6 +1292,21 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% endif %}
 
 {% if not model.is_tree %}
+      {% if model.multi_display %}
+      {viewMode === 'multi' ? (
+        <MultiDisplayView
+          items={data}
+          selectedItems={selectedDisplayItems}
+          loading={loading}
+          maxSelected={ {{ model.multi_display.max_selected }} }
+          columns={ {{ model.multi_display.columns }} }
+          getLabel={(item) => String(item.{{ model.multi_display.label_field }} ?? item.id)}
+          onToggle={toggleDisplayItem}
+          renderItem={renderMultiDisplayItem}
+        />
+      ) : (
+      <>
+      {% endif %}
       {% if model.list_mode == 'grid' %}
       <div className="min-h-0 flex-1 overflow-y-auto pr-1" data-page-region="grid-list">
         {!loading && data.length > 0 && (
@@ -1518,6 +1669,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </TableBody>
         </Table>
       </div>
+      {% endif %}
+      {% if model.multi_display %}
+      </>
+      )}
       {% endif %}
 
       {/* Pagination Controls */}

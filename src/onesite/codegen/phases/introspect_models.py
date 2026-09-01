@@ -368,6 +368,11 @@ def _build_model_dict(
                     is_tree = True
                 break
 
+    if is_tree and result.multi_display:
+        raise ValueError(
+            f"Model {name!r} cannot combine tree_view with multi_display yet"
+        )
+
     return ModelDefinition(
         name=name,
         module_name=module_name,
@@ -409,6 +414,7 @@ def _build_model_dict(
         page_edit=result.page_edit,
         edit_mode=result.edit_mode,
         list_mode=result.list_mode,
+        multi_display=result.multi_display,
         standalone=bool(result.model_site_props.get("standalone", True)),
         is_timescaledb=result.is_timescaledb,
         is_latest_table=result.model_site_props.get("is_latest_table", False),

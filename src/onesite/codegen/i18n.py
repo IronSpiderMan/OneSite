@@ -120,6 +120,16 @@ def generate_locale_files(
             "timeout": "Getting the current location timed out.",
             "unavailable": "Unable to get the current location.",
         },
+        "multi_display": {
+            "view_mode": "View mode",
+            "list_view": "List",
+            "multi_view": "Multi-display",
+            "search_items": "Search items",
+            "selection_count": "Selected {{count}} / {{max}}",
+            "empty_title": "Select items to display",
+            "empty_description": "Use the checkboxes to add items to this view.",
+            "max_selected": "You can display up to {{max}} items.",
+        },
         "video_stream": {
             "stream": "Video stream",
             "url_placeholder": "Enter a video stream URL",
@@ -527,6 +537,16 @@ def generate_locale_files(
             "permission_denied": "定位权限被拒绝。",
             "timeout": "获取当前位置超时。",
             "unavailable": "无法获取当前位置。",
+        },
+        "multi_display": {
+            "view_mode": "浏览方式",
+            "list_view": "普通列表",
+            "multi_view": "多项展示",
+            "search_items": "搜索项目",
+            "selection_count": "已选择 {{count}} / {{max}}",
+            "empty_title": "请选择要展示的项目",
+            "empty_description": "使用复选框将项目添加到展示区域。",
+            "max_selected": "最多可同时展示 {{max}} 项。",
         },
         "video_stream": {
             "stream": "视频流",

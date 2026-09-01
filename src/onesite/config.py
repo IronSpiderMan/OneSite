@@ -259,6 +259,27 @@ class ImportExportConfig(_ConfigModel):
     m2m: dict[str, str] = Field(default_factory=dict)
 
 
+class MultiDisplayFieldConfig(_ConfigModel):
+    """One model field rendered in the optional multi-item display view."""
+
+    field: str
+    renderer: Literal["auto", "image", "gallery", "video", "map", "text"] = "auto"
+    span: int = Field(default=4, ge=1, le=4)
+    fit: Literal["cover", "contain"] = "contain"
+    zoom: int = Field(default=15, ge=1, le=18)
+
+
+class MultiDisplayConfig(_ConfigModel):
+    """A selectable media-oriented companion view for a model collection."""
+
+    enabled: bool = True
+    fields: list[str | MultiDisplayFieldConfig] = Field(default_factory=list)
+    label_field: str | None = None
+    default_view: Literal["list", "multi"] = "list"
+    max_selected: int = Field(default=4, ge=1, le=9)
+    columns: int = Field(default=2, ge=1, le=4)
+
+
 class DetailUIConfig(_ConfigModel):
     # Layout nodes are deliberately open: the recursive layout grammar accepts
     # field names, rows, and nested section objects, and is validated against
@@ -432,6 +453,7 @@ class OneSiteConfig(_ConfigModel):
     page_edit: bool = False
     edit_mode: Literal["modal", "page", "drawer"] | None = None
     list_mode: ListMode = ListMode.LIST
+    multi_display: MultiDisplayConfig | None = None
     refresh_interval: int = 0
     reverse_fk_display: bool = True
     actions: dict[str, ModelAction] = Field(default_factory=dict)

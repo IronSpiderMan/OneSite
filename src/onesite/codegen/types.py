@@ -181,6 +181,7 @@ class ModelIntrospectResult:
     page_edit: bool
     edit_mode: str
     list_mode: str
+    multi_display: dict | None
     is_timescaledb: bool
     timescaledb_entity_field: str | None
     timescaledb_metric_field: str | None
