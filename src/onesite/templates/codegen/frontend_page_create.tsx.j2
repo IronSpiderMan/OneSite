@@ -105,19 +105,29 @@ const Create{{ model.name }}Page: React.FC = () => {
       data-codegen-theme="{{ codegen_theme | default('normal') }}"
       data-page-kind="create"
     >
-      <div className="flex flex-wrap items-center gap-4" data-page-region="page-header">
-        <Button variant="ghost" size="icon" onClick={() => navigate('/{{ model.module_name }}s')}>
-          <ArrowLeft className="h-4 w-4" />
-        </Button>
-        <h1 className="text-3xl font-bold tracking-tight">{t('common.create')} {t('models.{{ model.module_name }}.name')}</h1>
+      <div className="flex flex-wrap items-center justify-between gap-3" data-page-region="page-header">
+        <div className="flex min-w-0 items-center gap-4">
+          <Button variant="ghost" size="icon" onClick={() => navigate('/{{ model.module_name }}s')}>
+            <ArrowLeft className="h-4 w-4" />
+          </Button>
+          <h1 className="text-3xl font-bold tracking-tight">{t('common.create')} {t('models.{{ model.module_name }}.name')}</h1>
+        </div>
+
+        <div className="flex min-w-0 flex-wrap items-center justify-end gap-3" data-page-region="page-controls">
+          <Button variant="outline" type="button" onClick={() => navigate('/{{ model.module_name }}s')}>
+            {t('common.cancel')}
+          </Button>
+          <Button type="submit" form="create-form" disabled={submitting}>
+            {submitting ? (
+              <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.saving', 'Saving...')}</>
+            ) : (
+              <><Save className="mr-2 h-4 w-4" /> {t('common.save')}</>
+            )}
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t('models.{{ model.module_name }}.name')}</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+      <form id="create-form" onSubmit={handleSubmit(onSubmit)} className="space-y-4" data-page-region="create-form">
             {% macro create_field(field) -%}
             hasFieldPerm('{{ field.name }}', 'c'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
             <div className="space-y-2">
@@ -489,21 +499,7 @@ const Create{{ model.name }}Page: React.FC = () => {
             {% endif %}
             {% endfor %}
 
-            <div className="flex min-w-0 flex-wrap items-center justify-end gap-2 pt-4" data-page-region="form-actions">
-              <Button variant="outline" type="button" onClick={() => navigate('/{{ model.module_name }}s')}>
-                {t('common.cancel')}
-              </Button>
-              <Button type="submit" disabled={submitting}>
-                {submitting ? (
-                  <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.saving', 'Saving...')}</>
-                ) : (
-                  <><Save className="mr-2 h-4 w-4" /> {t('common.save')}</>
-                )}
-              </Button>
-            </div>
-          </form>
-        </CardContent>
-      </Card>
+      </form>
     </div>
   );
 };

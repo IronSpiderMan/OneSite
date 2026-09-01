@@ -39,12 +39,20 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
     )
 
     source_models = (
-        {model_file.name: model_file for model_file in models_src_dir.glob("*.py")}
+        {
+            model_file.relative_to(models_src_dir): model_file
+            for model_file in models_src_dir.rglob("*.py")
+            if model_file.is_file() and "__pycache__" not in model_file.parts
+        }
         if models_src_dir.exists()
         else {}
     )
     template_models = (
-        {model_file.name: model_file for model_file in template_models_dir.glob("*.py")}
+        {
+            model_file.relative_to(template_models_dir): model_file
+            for model_file in template_models_dir.rglob("*.py")
+            if model_file.is_file() and "__pycache__" not in model_file.parts
+        }
         if template_models_dir.exists()
         else {}
     )
@@ -52,15 +60,25 @@ def phase_sync_models(cwd: Path, backend_path: Path) -> None:
     # Project models override bundled models with the same name.
     desired_models = {**template_models, **source_models}
 
-    for model_file in models_dest_dir.glob("*.py"):
-        if model_file.name != "__init__.py" and model_file.name not in desired_models:
+    for model_file in models_dest_dir.rglob("*.py"):
+        relative = model_file.relative_to(models_dest_dir)
+        if relative != Path("__init__.py") and relative not in desired_models:
             model_file.unlink()
             console.print(f"[yellow]Removed stale generated model {model_file}[/yellow]")
 
-    for name, model_file in sorted(desired_models.items()):
-        if name in source_models and name in template_models:
-            console.print(f"[dim]Project model {name} overrides the bundled model[/dim]")
+    for relative, model_file in sorted(desired_models.items()):
+        if relative in source_models and relative in template_models:
+            console.print(
+                f"[dim]Project model {relative} overrides the bundled model[/dim]"
+            )
         write_file_with_status(
-            models_dest_dir / name,
+            models_dest_dir / relative,
             model_file.read_text(encoding="utf-8"),
         )
+
+    for directory in sorted(
+        (path for path in models_dest_dir.rglob("*") if path.is_dir()),
+        reverse=True,
+    ):
+        if not any(directory.iterdir()):
+            directory.rmdir()
