@@ -97,6 +97,7 @@ class FieldDefinition:
     group: str | None = None
     importable: bool = True
     exportable: bool = True
+    dict_key_reference: dict | None = None
 
     # ── Dict-compatible access for Jinja2 templates & pipeline code ─────────
 
@@ -185,6 +186,7 @@ class ModelIntrospectResult:
     timescaledb_metric_field: str | None
     timescaledb_time_field: str | None
     definition_binding: dict | None
+    dict_key_references: dict[str, dict]
 
 
 # ── Pipeline context ────────────────────────────────────────────────────────

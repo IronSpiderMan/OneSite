@@ -1067,6 +1067,11 @@ def get_model_fields(
             )
 
     definition_binding = model_site_props.get("definition_binding")
+    dict_key_references = model_site_props.get("dict_key_references", {}) or {}
+    if not isinstance(dict_key_references, dict):
+        raise ValueError(
+            f"{model_cls.__name__} dict_key_references must be an object"
+        )
 
     # ── Layer 1: Model-level CRUD permissions ─────────────────────────────
     # Config formats:
@@ -1621,4 +1626,5 @@ def get_model_fields(
         timescaledb_metric_field=timescaledb_metric_field,
         timescaledb_time_field=timescaledb_time_field,
         definition_binding=definition_binding,
+        dict_key_references=dict_key_references,
     )

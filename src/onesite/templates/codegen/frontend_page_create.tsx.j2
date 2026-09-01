@@ -21,6 +21,13 @@ import { SearchableSelect } from '../../components/ui/searchable-select';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 import { TimePicker } from '../../components/ui/time-picker';
 import { LocationInput } from '../../components/ui/location-input';
+{% if model.dict_key_reference_meta %}
+import {
+{% for reference in model.dict_key_reference_meta %}
+  get{{ model.name }}{{ reference.field|replace('_', ' ')|title|replace(' ', '') }}KeyOptions,
+{% endfor %}
+} from '../../services/{{ model.module_name }}';
+{% endif %}
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
 {% endfor %}
@@ -182,6 +189,30 @@ const Create{{ model.name }}Page: React.FC = () => {
                   <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
                 )}
               />
+              {% elif field.dict_key_reference %}
+              <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                  <SearchableSelect
+                    value={value}
+                    onValueChange={onChange}
+                    disabled={!rootValue?.{{ field.dict_key_reference.owner_fk }}}
+                    optionsKey={rootValue?.{{ field.dict_key_reference.owner_fk }}}
+                    placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                    searchPlaceholder={`${t('common.search')}...`}
+                    loadOptions={async (query) => {
+                      const ownerId = rootValue?.{{ field.dict_key_reference.owner_fk }};
+                      if (ownerId === undefined || ownerId === null || ownerId === '') return [];
+                      const options = await get{{ model.name }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}KeyOptions(ownerId);
+                      const normalizedQuery = query.trim().toLocaleLowerCase();
+                      return options.filter((option) => !normalizedQuery
+                        || option.label.toLocaleLowerCase().includes(normalizedQuery)
+                        || option.value.toLocaleLowerCase().includes(normalizedQuery));
+                    }}
+                  />
+                )}
+              />
               {% elif field.is_enum and field.is_multi_select %}
               <Controller
                 control={control}
@@ -233,7 +264,14 @@ const Create{{ model.name }}Page: React.FC = () => {
                 render={({ field: { onChange, value } }) => (
                   <SearchableSelect
                     value={value}
-                    onValueChange={onChange}
+                    onValueChange={(nextValue) => {
+                      onChange(nextValue);
+                      {% for reference in model.dict_key_reference_meta %}
+                      {% if reference.owner_fk == field.name %}
+                      setValue('{{ reference.field }}', '');
+                      {% endif %}
+                      {% endfor %}
+                    }}
                     placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
                     searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
                     valueLabels={ {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }

@@ -1011,6 +1011,122 @@ def _resolve_definition_bindings(models: list[ModelDefinition]) -> None:
         })
 
 
+def _resolve_dict_key_references(models: list[ModelDefinition]) -> None:
+    """Resolve logical references to keys of FK-owned JSON dictionaries."""
+    for model in models:
+        model["dict_key_reference_meta"] = []
+        model["reverse_dict_key_references"] = []
+        for field in model.get("fields", []):
+            field["dict_key_reference"] = None
+
+    model_by_name = {model["name"]: model for model in models}
+    for model in models:
+        raw_references = model.get("dict_key_references") or {}
+        if not isinstance(raw_references, dict):
+            raise ValueError(
+                f"{model['name']} dict_key_references must be an object"
+            )
+
+        fields_by_name = {field["name"]: field for field in model["fields"]}
+        fks_by_name = {fk["name"]: fk for fk in model["foreign_keys"]}
+        for reference_field_name, raw_config in raw_references.items():
+            if hasattr(raw_config, "model_dump"):
+                raw_config = raw_config.model_dump(mode="python")
+            if not isinstance(raw_config, dict):
+                raise ValueError(
+                    f"{model['name']}.dict_key_references.{reference_field_name} "
+                    "must be an object"
+                )
+
+            reference_field = fields_by_name.get(reference_field_name)
+            if reference_field is None:
+                raise ValueError(
+                    f"{model['name']} dict_key_references references unknown field "
+                    f"{reference_field_name!r}"
+                )
+            if reference_field.get("type") not in {"str", "Optional[str]"}:
+                raise ValueError(
+                    f"{model['name']}.{reference_field_name} must be a string field"
+                )
+
+            owner_fk_name = raw_config.get("owner_fk")
+            owner_fk = fks_by_name.get(owner_fk_name)
+            if owner_fk is None:
+                raise ValueError(
+                    f"{model['name']}.{reference_field_name} owner_fk "
+                    f"{owner_fk_name!r} must be a foreign key field"
+                )
+
+            owner_model = model_by_name.get(owner_fk["target_model"])
+            if owner_model is None:
+                raise ValueError(
+                    f"{model['name']}.{reference_field_name} owner target "
+                    f"{owner_fk['target_model']!r} was not introspected"
+                )
+
+            source_field_name = raw_config.get("source_field")
+            source_field = next(
+                (
+                    field
+                    for field in owner_model["fields"]
+                    if field["name"] == source_field_name
+                ),
+                None,
+            )
+            if source_field is None:
+                raise ValueError(
+                    f"{owner_model['name']} has no source field "
+                    f"{source_field_name!r}"
+                )
+            if (
+                source_field.get("json_kind") != "object"
+                or not source_field.get("json_item_schema")
+            ):
+                raise ValueError(
+                    f"{owner_model['name']}.{source_field_name} must be typed as "
+                    "dict[str, SQLModel]"
+                )
+
+            item_schema = source_field["json_item_schema"]
+            display_field = raw_config.get("display_field")
+            item_field_names = {
+                item.get("name") for item in item_schema.get("fields", [])
+            }
+            if display_field is not None and display_field not in item_field_names:
+                raise ValueError(
+                    f"{model['name']}.{reference_field_name} display_field "
+                    f"{display_field!r} does not exist on {item_schema.get('name')}"
+                )
+            if raw_config.get("on_source_change", "restrict") != "restrict":
+                raise ValueError(
+                    f"{model['name']}.{reference_field_name} only supports "
+                    "on_source_change='restrict'"
+                )
+
+            meta = {
+                "field": reference_field_name,
+                "owner_fk": owner_fk_name,
+                "owner_model": owner_model["name"],
+                "owner_module": owner_model["source_module"],
+                "owner_id_type": owner_model["id_type"],
+                "owner_field": owner_model.get("owner_field"),
+                "source_field": source_field_name,
+                "value_model": item_schema.get("name"),
+                "display_field": display_field,
+                "on_source_change": "restrict",
+            }
+            model["dict_key_reference_meta"].append(meta)
+            reference_field["dict_key_reference"] = meta
+            owner_model["reverse_dict_key_references"].append({
+                "source_model": model["name"],
+                "source_module": model["source_module"],
+                "owner_fk": owner_fk_name,
+                "reference_field": reference_field_name,
+                "source_field": source_field_name,
+                "on_source_change": "restrict",
+            })
+
+
 def _resolve_timeseries_relations(models: list[ModelDefinition]) -> None:
     """For each timeseries model, build ``reverse_timeseries`` on the parent entity."""
     for model in models:
@@ -1077,6 +1193,7 @@ def phase_resolve_relationships(
     _resolve_timescaledb_metadata(models)
     _resolve_timeseries_relations(models)
     _resolve_definition_bindings(models)
+    _resolve_dict_key_references(models)
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_tree_view_leaves(models)
     _resolve_m2m(models, model_map, module_map)

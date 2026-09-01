@@ -27,6 +27,8 @@ export interface SearchableSelectProps {
   defaultLabel?: string
   valueLabels?: Record<string, string>
   multiple?: boolean
+  disabled?: boolean
+  optionsKey?: string | number
 }
 
 export function SearchableSelect({
@@ -39,13 +41,24 @@ export function SearchableSelect({
   loadOptions,
   defaultLabel,
   valueLabels,
-  multiple = false
+  multiple = false,
+  disabled = false,
+  optionsKey
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
   const [selectedLabel, setSelectedLabel] = React.useState<string>(defaultLabel || "")
   const [selectedItems, setSelectedItems] = React.useState<{ label: string; value: string | number }[]>([])
   const [options, setOptions] = React.useState<{ label: string; value: string | number; description?: string }[]>([])
   const [loading, setLoading] = React.useState(false)
+  const previousOptionsKey = React.useRef(optionsKey)
+
+  React.useEffect(() => {
+    if (previousOptionsKey.current === optionsKey) return
+    previousOptionsKey.current = optionsKey
+    setOptions([])
+    setSelectedLabel("")
+    setOpen(false)
+  }, [optionsKey])
   
   // Initial load or when opened
   React.useEffect(() => {
@@ -148,12 +161,13 @@ export function SearchableSelect({
 
   return (
     <div className="relative min-w-0 w-full">
-    <Popover open={open} onOpenChange={setOpen}>
+    <Popover open={open} onOpenChange={(nextOpen) => !disabled && setOpen(nextOpen)}>
       <PopoverTrigger asChild>
         <Button
           variant="outline"
           role="combobox"
           aria-expanded={open}
+          disabled={disabled}
           className={cn(
             "min-w-0 w-full justify-between overflow-hidden font-normal hover:bg-background hover:text-foreground",
             hasValue ? "pr-8" : "",

@@ -8,7 +8,7 @@ from pathlib import Path
 {% endif %}
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable %}, UploadFile, File{% endif %}
-{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.definition_binding_meta or model.reverse_definition_bindings or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
+{% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.definition_binding_meta or model.reverse_definition_bindings or model.dict_key_reference_meta or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
 from app.models.user import User
 {% endif %}
 {% if model.is_notification_table or model.has_dynamic_action_states %}
@@ -36,6 +36,8 @@ from app.cruds import {{ model.module_name }} as crud
 from app.models.{{ model.source_module }} import {{ model.name }}
 {% if model.definition_binding_meta %}from app.models.{{ model.definition_binding_meta.definition_module }} import {{ model.definition_binding_meta.definition_model }}
 {% endif -%}
+{% for reference in model.dict_key_reference_meta %}from app.models.{{ reference.owner_module }} import {{ reference.owner_model }}
+{% endfor -%}
 {% if model.has_function_actions %}
 from app.core.action_runtime import ActionContext, evaluate_action_state, invoke_action_callable
 {% endif %}
@@ -570,6 +572,39 @@ async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
     return {{ model.lower_name }}
 {% endif %}
 
+{% for reference in model.dict_key_reference_meta %}
+@router.get("/dict-key-options/{{ reference.field }}")
+async def read_{{ reference.field }}_key_options(
+    *,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+    owner_id: {{ reference.owner_id_type }} = Query(...),
+) -> Any:
+    """Return valid keys for {{ model.name }}.{{ reference.field }}."""
+    owner = await session.get({{ reference.owner_model }}, owner_id)
+    if owner is None:
+        raise HTTPException(status_code=404, detail="{{ reference.owner_model }} not found")
+    {% if reference.owner_field %}
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
+    if (
+        user_level < deps.ROLE_HIERARCHY.get("admin", 1)
+        and getattr(owner, "{{ reference.owner_field }}", None) != current_user.id
+    ):
+        raise HTTPException(status_code=404, detail="{{ reference.owner_model }} not found")
+    {% endif %}
+    source = getattr(owner, "{{ reference.source_field }}", None) or {}
+    options = []
+    for key, raw_value in source.items():
+        value = raw_value.model_dump() if hasattr(raw_value, "model_dump") else raw_value
+        {% if reference.display_field %}
+        label = value.get("{{ reference.display_field }}") if isinstance(value, dict) else getattr(raw_value, "{{ reference.display_field }}", None)
+        {% else %}
+        label = key
+        {% endif %}
+        options.append({"value": key, "label": str(label or key)})
+    return options
+
+{% endfor %}
 @router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def read_{{ model.lower_name }}(
     *,

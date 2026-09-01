@@ -317,6 +317,22 @@ class DefinitionBindingConfig(_ConfigModel):
     protect_definitions_when_used: bool = True
 
 
+class DictKeyReferenceConfig(_ConfigModel):
+    """Reference a key in a JSON ``dict[str, Model]`` through an FK owner.
+
+    The referenced model is derived from ``owner_fk`` and the JSON value model
+    is derived from ``source_field``.  This is an application-level relation;
+    the database continues to enforce only the real owner foreign key.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    owner_fk: str
+    source_field: str
+    display_field: str | None = None
+    on_source_change: Literal["restrict"] = "restrict"
+
+
 class ExternalResourceConfig(_ConfigModel):
     provider: str
     resource: str
@@ -426,6 +442,9 @@ class OneSiteConfig(_ConfigModel):
     union_key: list[str] | None = None
     time_series_table: TimeSeriesTableConfig | None = None
     definition_binding: DefinitionBindingConfig | None = None
+    dict_key_references: dict[str, DictKeyReferenceConfig] = Field(
+        default_factory=dict
+    )
     external_resource: ExternalResourceConfig | None = None
     tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)

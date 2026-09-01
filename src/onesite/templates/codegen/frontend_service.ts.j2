@@ -74,6 +74,21 @@ export const bulkDelete{{ model.name }} = async (ids: {{ 'string[]' if 'str' in 
     return response.data;
 };
 
+{% for reference in model.dict_key_reference_meta %}
+export interface {{ model.name }}{{ reference.field|replace('_', ' ')|title|replace(' ', '') }}KeyOption {
+    value: string;
+    label: string;
+}
+
+export const get{{ model.name }}{{ reference.field|replace('_', ' ')|title|replace(' ', '') }}KeyOptions = async (ownerId: {{ 'string' if 'str' in reference.owner_id_type else 'number' }}) => {
+    const response = await request.get<{{ model.name }}{{ reference.field|replace('_', ' ')|title|replace(' ', '') }}KeyOption[]>(
+        `${API_URL}/dict-key-options/{{ reference.field }}`,
+        { params: { owner_id: ownerId } },
+    );
+    return response.data;
+};
+
+{% endfor %}
 {% if model.definition_binding_meta %}
 export const get{{ model.name }}Definitions = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     const response = await request.get<Record<string, any>>(`${API_URL}/${id}/definitions`);

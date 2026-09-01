@@ -75,11 +75,38 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
 <div className="space-y-2">
     <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
-    {% if field.fk_info %}
+    {% if field.dict_key_reference %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
         <SearchableSelect
             value={value}
             onValueChange={onChange}
+            disabled={!editRootValue?.{{ field.dict_key_reference.owner_fk }}}
+            optionsKey={editRootValue?.{{ field.dict_key_reference.owner_fk }}}
+            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+            searchPlaceholder={`${t('common.search')}...`}
+            loadOptions={async (query) => {
+                const ownerId = editRootValue?.{{ field.dict_key_reference.owner_fk }};
+                if (ownerId === undefined || ownerId === null || ownerId === '') return [];
+                const options = await get{{ model.name }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}KeyOptions(ownerId);
+                const normalizedQuery = query.trim().toLocaleLowerCase();
+                return options.filter((option) => !normalizedQuery
+                    || option.label.toLocaleLowerCase().includes(normalizedQuery)
+                    || option.value.toLocaleLowerCase().includes(normalizedQuery));
+            }}
+        />
+    )} />
+    {% elif field.fk_info %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <SearchableSelect
+            value={value}
+            onValueChange={(nextValue) => {
+                onChange(nextValue);
+                {% for reference in model.dict_key_reference_meta %}
+                {% if reference.owner_fk == field.name %}
+                setEditValue('{{ reference.field }}', '');
+                {% endif %}
+                {% endfor %}
+            }}
             placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
             searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
             valueLabels={ edit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
@@ -188,6 +215,13 @@ import { Popover, PopoverContent, PopoverTrigger } from '../../components/ui/pop
 import { Input } from '../../components/ui/input';
 import { TimePicker } from '../../components/ui/time-picker';
 import { SearchableSelect } from '../../components/ui/searchable-select';
+{% if model.dict_key_reference_meta %}
+import {
+{% for reference in model.dict_key_reference_meta %}
+    get{{ model.name }}{{ reference.field|replace('_', ' ')|title|replace(' ', '') }}KeyOptions,
+{% endfor %}
+} from '../../services/{{ model.module_name }}';
+{% endif %}
 {% set json_detail = namespace(has_model_schema=false) %}
 {% for field in model.fields %}
 {% if field.json_model_schema %}

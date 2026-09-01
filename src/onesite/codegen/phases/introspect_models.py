@@ -416,6 +416,7 @@ def _build_model_dict(
         timescaledb_metric_field=result.timescaledb_metric_field,
         timescaledb_time_field=result.timescaledb_time_field,
         definition_binding=result.definition_binding,
+        dict_key_references=result.dict_key_references,
         is_tree=is_tree,
         tree_parent_field=tree_parent_field,
         icon=result.model_site_props.get("icon", "LayoutDashboard"),

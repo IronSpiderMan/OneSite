@@ -12,6 +12,12 @@ from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.time
 {% if model.definition_binding_meta %}
 from app.models.{{ model.definition_binding_meta.definition_module }} import {{ model.definition_binding_meta.definition_model }}
 {% endif %}
+{% for reference in model.dict_key_reference_meta %}
+from app.models.{{ reference.owner_module }} import {{ reference.owner_model }}
+{% endfor %}
+{% for reference in model.reverse_dict_key_references %}
+from app.models.{{ reference.source_module }} import {{ reference.source_model }}
+{% endfor %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not model.is_timescaledb %}, {{ model.name }}Update{% endif %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
@@ -32,6 +38,40 @@ from app.models.{{ rfk.source_module }} import {{ rfk.source_model }}
 
 {% set scalar_json_arrays = model.fields | selectattr('json_item_kind') | list %}
 {% set datetime_fields = model.fields | selectattr('ui_type', 'equalto', 'datetime') | list %}
+{% if model.dict_key_reference_meta %}
+async def _validate_dict_key_references(
+    session: AsyncSession,
+    values: dict[str, Any],
+    current: {{ model.name }} | None = None,
+) -> None:
+    """Validate application-level references to keys in FK-owned JSON maps."""
+    {% for reference in model.dict_key_reference_meta %}
+    owner_id = values.get(
+        "{{ reference.owner_fk }}",
+        getattr(current, "{{ reference.owner_fk }}", None),
+    )
+    reference_key = values.get(
+        "{{ reference.field }}",
+        getattr(current, "{{ reference.field }}", None),
+    )
+    if reference_key is not None:
+        if owner_id is None:
+            raise ValueError(
+                "{{ model.name }}.{{ reference.field }} requires {{ reference.owner_fk }}"
+            )
+        owner = await session.get({{ reference.owner_model }}, owner_id)
+        if owner is None:
+            raise ValueError("{{ reference.owner_model }} not found")
+        source = getattr(owner, "{{ reference.source_field }}", None) or {}
+        if reference_key not in source:
+            raise ValueError(
+                f"Unknown {{ reference.source_field }} key {reference_key!r} "
+                f"for {{ reference.owner_model }}({owner_id})"
+            )
+    {% endfor %}
+
+
+{% endif %}
 {% if datetime_fields %}
 def _datetime_column_uses_timezone(field_name: str) -> bool:
     column = {{ model.name }}.__table__.columns.get(field_name)
@@ -228,6 +268,9 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create, *, auto_
     {% endif %}
     {% if datetime_fields %}
     obj_dict = _normalize_datetimes(obj_dict)
+    {% endif %}
+    {% if model.dict_key_reference_meta %}
+    await _validate_dict_key_references(session, obj_dict)
     {% endif %}
     db_obj = {{ model.name }}(**obj_dict)
     hook_context = ModelHookContext(
@@ -823,6 +866,10 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create, *, auto_
     obj_dict = _normalize_datetimes(obj_dict)
     {% endif %}
 
+    {% if model.dict_key_reference_meta %}
+    await _validate_dict_key_references(session, obj_dict)
+    {% endif %}
+
     {% if model.definition_binding_meta and model.definition_binding_meta.config_field %}
     # Initialize instance configuration from the selected definition.
     if not obj_dict.get("{{ model.definition_binding_meta.config_field }}"):
@@ -910,6 +957,33 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% if datetime_fields %}
     obj_data = _normalize_datetimes(obj_data)
     {% endif %}
+    {% if model.dict_key_reference_meta %}
+    await _validate_dict_key_references(session, obj_data, db_obj)
+    {% endif %}
+    {% for reference in model.reverse_dict_key_references %}
+    if "{{ reference.source_field }}" in obj_data:
+        old_keys = set((getattr(db_obj, "{{ reference.source_field }}", None) or {}).keys())
+        new_value = obj_data.get("{{ reference.source_field }}") or {}
+        new_keys = set(new_value.keys())
+        removed_keys = old_keys - new_keys
+        if removed_keys:
+            statement = (
+                select({{ reference.source_model }})
+                .where(
+                    {{ reference.source_model }}.{{ reference.owner_fk }} == db_obj.id,
+                    col({{ reference.source_model }}.{{ reference.reference_field }}).in_(removed_keys),
+                )
+                .limit(1)
+            )
+            result = await session.exec(statement)
+            referenced = result.first()
+            if referenced is not None:
+                removed = ", ".join(sorted(removed_keys))
+                raise ValueError(
+                    f"Cannot remove {{ reference.source_field }} key(s) {removed}: "
+                    "they are referenced by {{ reference.source_model }} records"
+                )
+    {% endfor %}
     inline_reverse_data = {}
     {% for rfk in model.reverse_foreign_keys %}
     {% if rfk.editor == 'inline' %}
