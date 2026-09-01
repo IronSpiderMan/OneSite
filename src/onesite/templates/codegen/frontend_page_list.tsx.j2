@@ -846,6 +846,47 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchValues]);
 
+  {% if model.list_mode == 'grid' and not model.is_tree %}
+  const renderGridValue = (fieldName: string, item: any) => {
+    switch (fieldName) {
+      {% for field in model.fields %}
+      {% if 'r' in field.permissions %}
+      case '{{ field.name }}':
+        {% if field.fk_info %}
+        return item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-');
+        {% elif field.ui_type == 'bool' %}
+        return <Badge variant={item.{{ field.name }} ? 'default' : 'secondary'}>{item.{{ field.name }} ? t('common.yes', 'Yes') : t('common.no', 'No')}</Badge>;
+        {% elif field.ui_type == 'image' %}
+        return item.{{ field.name }} ? <img src={item.{{ field.name }}} alt="{{ field.name }}" className="h-24 w-full rounded-md border object-cover" /> : <span className="text-muted-foreground">-</span>;
+        {% elif field.ui_type == 'images' %}
+        return Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length ? <div className="flex items-center gap-2"><img src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-16 w-16 rounded-md border object-cover" />{item.{{ field.name }}.length > 1 && <span className="text-xs text-muted-foreground">+{item.{{ field.name }}.length - 1}</span>}</div> : <span className="text-muted-foreground">-</span>;
+        {% elif field.ui_type == 'file' %}
+        return item.{{ field.name }} ? <a href={item.{{ field.name }}} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline">{t('common.download', 'Download')}</a> : <span className="text-muted-foreground">-</span>;
+        {% elif field.ui_type == 'video_stream' %}
+        return item.{{ field.name }} ? <Badge variant="secondary">{t('video_stream.stream')}</Badge> : <span className="text-muted-foreground">-</span>;
+        {% elif field.is_enum and field.is_multi_select %}
+        return <div className="flex flex-wrap gap-1">{Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.map((value: string) => <Badge key={value}>{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${value}`, value))}</Badge>)}</div>;
+        {% elif field.is_enum %}
+        return item.{{ field.name }} != null ? <Badge>{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge> : <span className="text-muted-foreground">-</span>;
+        {% elif field.ui_type == 'datetime' %}
+        return formatDateTime(item.{{ field.name }}, timeZone);
+        {% elif field.ui_type == 'time' %}
+        return formatTime(item.{{ field.name }});
+        {% elif field.ui_type == 'location' %}
+        return item.{{ field.name }}?.latitude != null && item.{{ field.name }}?.longitude != null ? `${item.{{ field.name }}.latitude}, ${item.{{ field.name }}.longitude}` : '-';
+        {% elif field.ui_type == 'json' %}
+        return <JsonPreview value={item.{{ field.name }}} />;
+        {% else %}
+        return item.{{ field.name }} == null || item.{{ field.name }} === '' ? '-' : String(item.{{ field.name }});
+        {% endif %}
+      {% endif %}
+      {% endfor %}
+      default:
+        return '-';
+    }
+  };
+  {% endif %}
+
   return (
     <div
       className="{{ page_shell_class | default('flex h-full min-h-0 flex-col gap-6') }}"
@@ -1115,6 +1156,126 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% endif %}
 
 {% if not model.is_tree %}
+      {% if model.list_mode == 'grid' %}
+      <div className="min-h-0 flex-1 overflow-y-auto pr-1" data-page-region="grid-list">
+        {!loading && data.length > 0 && (
+          <label className="mb-3 flex w-fit cursor-pointer items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              checked={selectedIds.length === data.length}
+              onChange={toggleSelectAll}
+              className="h-4 w-4 rounded border-gray-300"
+            />
+            {t('common.select_all', 'Select all')}
+          </label>
+        )}
+        {loading ? (
+          <div className="flex h-24 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
+        ) : data.length === 0 ? (
+          <div className="flex h-24 items-center justify-center rounded-md border text-muted-foreground">{t('common.no_result')}</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {data.map((item) => (
+              <article key={item.id} className="flex min-w-0 flex-col rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md">
+                <div className="flex items-start gap-3 border-b p-4">
+                  <input
+                    type="checkbox"
+                    checked={selectedIds.includes(item.id)}
+                    onChange={() => toggleSelect(item.id)}
+                    className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300"
+                    aria-label={t('common.select', 'Select')}
+                  />
+                  <div className="min-w-0 flex-1">
+                    <h2 className="truncate font-semibold" title={String(item.{{ model.search_field }} ?? item.id)}>
+                      {String(item.{{ model.search_field }} ?? item.id)}
+                    </h2>
+                    <p className="mt-1 text-xs text-muted-foreground">ID: {String(item.id)}</p>
+                  </div>
+                </div>
+                <dl className="flex-1 space-y-3 p-4">
+                  {% for field in model.fields %}
+                  {% if 'r' in field.permissions and field.name != model.search_field %}
+                  {hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+                    <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
+                      <dt className="truncate text-muted-foreground" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</dt>
+                      <dd className="min-w-0 break-words text-right">{renderGridValue('{{ field.name }}', item)}</dd>
+                    </div>
+                  )}
+                  {% endif %}
+                  {% endfor %}
+                  {% for field in model.extra_fields | default([]) | selectattr('show_in_list') | list %}
+                  <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
+                    <dt className="truncate text-muted-foreground">{{ field.label if field.label is string else field.name }}</dt>
+                    <dd className="min-w-0 break-words text-right">{item.{{ field.name }} == null ? '-' : String(item.{{ field.name }})}</dd>
+                  </div>
+                  {% endfor %}
+                </dl>
+                <div className="flex flex-wrap items-center justify-end gap-1 border-t p-3">
+                  {% if model.actions %}
+                  {% for action_name, action_config in model.actions.items() %}
+                  {(() => {
+                    const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
+                    if (!actionPerms.includes(userRole[0])) return false;
+                    {% if action_config.get("dynamic_availability") %}
+                    return Boolean(actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.visible);
+                    {% else %}
+                    const condition = {{ action_config.get("condition", None) | tojson }} as any;
+                    if (!condition) return true;
+                    const actual = (item as any)[condition.field];
+                    if (condition.op === 'eq') return actual === condition.value;
+                    if (condition.op === 'ne') return actual !== condition.value;
+                    if (condition.op === 'in') return Array.isArray(condition.value) && condition.value.includes(actual);
+                    if (condition.op === 'not_in') return !Array.isArray(condition.value) || !condition.value.includes(actual);
+                    if (condition.op === 'gt') return actual > condition.value;
+                    if (condition.op === 'gte') return actual >= condition.value;
+                    if (condition.op === 'lt') return actual < condition.value;
+                    if (condition.op === 'lte') return actual <= condition.value;
+                    if (condition.op === 'contains') return actual?.includes(condition.value);
+                    if (condition.op === 'startswith') return String(actual).startsWith(String(condition.value));
+                    if (condition.op === 'endswith') return String(actual).endsWith(String(condition.value));
+                    if (condition.op === 'is_null') return actual == null;
+                    if (condition.op === 'is_not_null') return actual != null;
+                    return true;
+                    {% endif %}
+                  })() && (
+                    <Button
+                      variant={% if action_config.get("toggle") %}{(item as any)[{{ action_config.get("toggle") | tojson }}] ? 'destructive' : 'default'}{% else %}"outline"{% endif %}
+                      size="sm"
+                      {% if action_config.get("dynamic_availability") %}
+                      disabled={!actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.enabled}
+                      title={actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.reason}
+                      {% endif %}
+                      onClick={async () => {
+                        try {
+                          await perform{{ model.name }}{{ action_name.capitalize() }}(item.id);
+                          toast.success(t('common.success', 'Success'));
+                          fetchData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
+                        } catch {
+                          toast.error(t('common.error', 'Error'));
+                        }
+                      }}
+                    >
+                      {% if action_config.get("toggle") %}
+                      {(item as any)[{{ action_config.get("toggle") | tojson }}] ? t('common.disable', 'Disable') : t('common.enable', 'Enable')}
+                      {% elif action_config.get("dynamic_availability") %}
+                      {actionStates[String(item.id)]?.[{{ action_name | tojson }}]?.label || {{ (action_config.get("label") or action_name) | tojson }}}
+                      {% else %}
+                      { {{ (action_config.get("label") or action_name) | tojson }} }
+                      {% endif %}
+                    </Button>
+                  )}
+                  {% endfor %}
+                  {% endif %}
+                  {!embedded && hasPermission('r') && <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}><Eye className="h-4 w-4" /></Button>}
+                  {hasPermission('u') && <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}><Pencil className="h-4 w-4" /></Button>}
+                  {hasPermission('d') && <Button variant="ghost" size="icon" className="text-destructive" onClick={() => requestDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>}
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+      </div>
+      {% else %}
       <div className="flex-1 min-h-0 overflow-hidden border rounded-md border-t-2 border-t-accent/30 [&>[data-ui=table-container]]:h-full">
         <Table>
           <TableHeader className="sticky top-0 z-20 bg-card shadow-sm">
@@ -1357,6 +1518,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </TableBody>
         </Table>
       </div>
+      {% endif %}
 
       {/* Pagination Controls */}
       <div className={`shrink-0 flex flex-wrap items-center justify-between gap-4 ${embedded ? '' : 'bg-background'}`}>

@@ -408,6 +408,7 @@ def _build_model_dict(
         owner_field=result.owner_field,
         page_edit=result.page_edit,
         edit_mode=result.edit_mode,
+        list_mode=result.list_mode,
         standalone=bool(result.model_site_props.get("standalone", True)),
         is_timescaledb=result.is_timescaledb,
         is_latest_table=result.model_site_props.get("is_latest_table", False),

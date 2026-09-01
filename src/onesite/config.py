@@ -30,6 +30,13 @@ class Theme(str, Enum):
     NEURON = "neuron"
 
 
+class ListMode(str, Enum):
+    """Layout used by generated model collection pages."""
+
+    LIST = "list"
+    GRID = "grid"
+
+
 class DesktopConfig(_ConfigModel):
     identifier: str | None = None
     version: str | None = None
@@ -408,6 +415,7 @@ class OneSiteConfig(_ConfigModel):
     standalone: bool = True
     page_edit: bool = False
     edit_mode: Literal["modal", "page", "drawer"] | None = None
+    list_mode: ListMode = ListMode.LIST
     refresh_interval: int = 0
     reverse_fk_display: bool = True
     actions: dict[str, ModelAction] = Field(default_factory=dict)

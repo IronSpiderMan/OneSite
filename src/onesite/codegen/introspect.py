@@ -1020,6 +1020,14 @@ def get_model_fields(
             "Expected 'modal', 'page', or 'drawer'."
         )
     page_edit = edit_mode == "page"
+    raw_list_mode = model_site_props.get("list_mode", "list")
+    if isinstance(raw_list_mode, str) and raw_list_mode in {"list", "grid"}:
+        list_mode = raw_list_mode
+    else:
+        raise ValueError(
+            f"Invalid list_mode for {model_cls.__name__}: {raw_list_mode!r}. "
+            "Expected 'list' or 'grid'."
+        )
     owner_field = model_site_props.get("owner_field", None)  # FK field name for user-owner filtering
 
     # ── TimescaleDB / time-series config ──────────────────────────────────
@@ -1607,6 +1615,7 @@ def get_model_fields(
         owner_field=owner_field,
         page_edit=page_edit,
         edit_mode=edit_mode,
+        list_mode=list_mode,
         is_timescaledb=is_timescaledb,
         timescaledb_entity_field=timescaledb_entity_field,
         timescaledb_metric_field=timescaledb_metric_field,

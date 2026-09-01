@@ -721,13 +721,14 @@ For editor autocomplete and validation, `__onesite__` also accepts the typed
 Pydantic configuration. The dictionary form remains fully supported:
 
 ```python
-from onesite.config import ImportExportConfig, OneSiteConfig
+from onesite.config import ImportExportConfig, ListMode, OneSiteConfig
 
 class Product(SQLModel, table=True):
     __onesite__ = OneSiteConfig(
         icon="Package",
         permissions={"user": "r", "admin": "crud", "developer": "crud"},
         edit_mode="drawer",
+        list_mode=ListMode.GRID,
         import_key="sku",
         importable=ImportExportConfig(fields=["sku", "name"]),
     )
@@ -746,6 +747,7 @@ class Product(SQLModel, table=True):
 | `frontend_only` | Excludes a model from backend persistence. |
 | `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode: "page"`. |
 | `edit_mode` | Create/edit container: `"modal"` (default), `"page"`, or right-side `"drawer"`. |
+| `list_mode` | Collection layout: `"list"` (default table) or responsive card `"grid"`. |
 | `actions` | Adds permission-controlled custom action buttons. |
 | `ui.detail.layout` | Shared layout for detail views and create/edit fields. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
@@ -755,6 +757,12 @@ For a right-side sliding create/edit form:
 
 ```python
 __onesite__ = {"edit_mode": "drawer"}
+```
+
+For a responsive card grid instead of the default table:
+
+```python
+__onesite__ = {"list_mode": "grid"}
 ```
 
 ### Detail page layout
