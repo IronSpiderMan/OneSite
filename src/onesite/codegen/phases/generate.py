@@ -402,6 +402,12 @@ def _generate_regular_model(
         )
 
     if not standalone:
+        # A model may have been standalone in an earlier generation. Remove
+        # those obsolete pages so TypeScript does not compile stale ID-based
+        # code after the model becomes embedded-only.
+        page_dir = frontend_path / "src" / "pages" / model["module_name"]
+        for filename in ("index.tsx", "detail.tsx", "create.tsx"):
+            (page_dir / filename).unlink(missing_ok=True)
         return
 
     generate_theme_file(

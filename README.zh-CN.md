@@ -144,6 +144,11 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
 生成的界面会显示关联对象标签并提供选择器。多对多中间表增加 `__onesite__ = {"is_link_table": True}`；只有关联键时会生成多选控件，包含额外字段时还会保留独立 CRUD。
 
+需要在创建父记录时同时创建子记录，可在子模型外键的 `site_props.reverse`
+中使用 `{"editor": "inline", "layout": "table"}`。`table` 布局与
+`dict[str, SubModel]` 的结构化表格 UI 一致，但子项仍保存为独立数据库记录；
+`on_remove` 可设为 `delete`（默认）或在可空外键上使用 `nullify`。
+
 ## 配置与权限
 
 推荐在 `site_config.py` 中使用带类型的 `SiteConfig`；旧项目的 `site_config.json` 仍然兼容。两种格式都支持 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation` 等配置。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports`、`external-resources` 和 `task-center`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的模型仍可通过路由和 API 访问，但不会出现在侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `"extra": {"TIMEZONE": "Asia/Shanghai"}` 设置系统时区。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。

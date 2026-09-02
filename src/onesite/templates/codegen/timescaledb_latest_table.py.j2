@@ -5,7 +5,7 @@ from sqlmodel import SQLModel, Field, Column, DateTime, JSON, PrimaryKeyConstrai
 
 
 class {{ latest_cls }}(SQLModel, table=True):
-    __tablename__ = "{{ ts_file }}_latest"
+    __tablename__ = "{{ latest_table | default(ts_file ~ '_latest', true) }}"
     __onesite__ = {
         "is_latest_table": True,
         "permissions": {"user": "", "admin": "", "developer": ""},

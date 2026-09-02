@@ -1,0 +1,21 @@
+"""Device model provided by the device_timeseries plugin."""
+from typing import Optional
+
+from sqlmodel import Field, SQLModel
+
+
+class DeviceModel(SQLModel, table=True):
+    __tablename__ = "device_model"
+    __onesite__ = {
+        "icon": "Boxes",
+        "translations": {
+            "zh": {"name": "设备模型", "fields": {
+                "name": "名称", "description": "说明",
+            }},
+            "en": {"name": "Device Models"},
+        },
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+    description: Optional[str] = None

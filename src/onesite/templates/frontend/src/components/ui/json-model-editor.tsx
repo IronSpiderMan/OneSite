@@ -682,7 +682,8 @@ const JsonTableCellEditor: React.FC<{
   field: JsonFieldSchema
   value: any
   onChange: (value: any) => void
-}> = ({ field, value, onChange }) => {
+  foreignKeyLoader?: JsonForeignKeyLoaders[string]
+}> = ({ field, value, onChange, foreignKeyLoader }) => {
   if (field.kind === "bool") {
     return <Switch checked={Boolean(value)} onCheckedChange={onChange} />
   }
@@ -696,6 +697,20 @@ const JsonTableCellEditor: React.FC<{
           ))}
         </SelectContent>
       </Select>
+    )
+  }
+  if (field.kind === "foreign_key" && foreignKeyLoader) {
+    return (
+      <div className="min-w-[12rem]">
+        <SearchableSelect
+          value={value}
+          onValueChange={onChange}
+          defaultLabel={value === undefined || value === null || value === "" ? undefined : String(value)}
+          placeholder="Select"
+          searchPlaceholder="Search..."
+          loadOptions={foreignKeyLoader}
+        />
+      </div>
     )
   }
   if (field.kind === "model" || field.kind === "array" || field.kind === "object" || (value !== null && typeof value === "object")) {
@@ -744,8 +759,9 @@ export const JsonModelTableEditor: React.FC<{
   canRemove?: boolean
   fixedKeys?: string[]
   lockKeys?: boolean
+  foreignKeyLoaders?: JsonForeignKeyLoaders
   rootValue?: Record<string, any>
-}> = ({ collectionKind, itemSchema, value, onChange, canAdd = true, canRemove = true, fixedKeys, lockKeys = false, rootValue }) => {
+}> = ({ collectionKind, itemSchema, value, onChange, canAdd = true, canRemove = true, fixedKeys, lockKeys = false, foreignKeyLoaders, rootValue }) => {
   const { t } = useTranslation()
   const arrayValue = Array.isArray(value) ? value : []
   const dictValue = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, any> : {}
@@ -838,6 +854,7 @@ export const JsonModelTableEditor: React.FC<{
                         field={field}
                         value={field.name ? row.item?.[field.name] : undefined}
                         onChange={(next) => updateItem(rowIndex, field.name ? { ...row.item, [field.name]: next } : row.item)}
+                        foreignKeyLoader={field.name ? foreignKeyLoaders?.[field.name] : undefined}
                       />
                     ) : <span className="text-muted-foreground">—</span>}
                   </TableCell>

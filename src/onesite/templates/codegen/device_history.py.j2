@@ -1,0 +1,49 @@
+"""TimescaleDB history table provided by the device_timeseries plugin."""
+from datetime import datetime, timezone
+from typing import Any
+
+from sqlalchemy import Column, DateTime, ForeignKeyConstraint, JSON, PrimaryKeyConstraint
+from sqlmodel import Field, SQLModel
+
+
+class DeviceHistory(SQLModel, table=True):
+    __tablename__ = "device_history"
+    __onesite__ = {
+        "time_series_table": {
+            "entity_field": "device_id",
+            "metric_field": "metric",
+            "metric_target_table": "device_field",
+            "metric_target_field": "name",
+            "metric_label_field": "name",
+            "metric_data_type_field": "dtype",
+            "metric_unit_field": "unit",
+            "time_field": "reported_at",
+            "latest_table": "device_latest",
+            "lifecycle": {
+                "chunk_interval": "1 day",
+                "compress_after": "7 days",
+                "retention_after": "90 days",
+            },
+        },
+        "permissions": {"user": "", "admin": "r", "developer": "r"},
+        "visible": [],
+    }
+    __table_args__ = (
+        PrimaryKeyConstraint(
+            "device_id", "metric", "reported_at", name="pk_device_history"
+        ),
+        ForeignKeyConstraint(
+            ["device_id", "metric"],
+            ["device_field.device_id", "device_field.name"],
+            ondelete="CASCADE",
+            name="fk_device_history_field",
+        ),
+    )
+
+    device_id: str = Field(foreign_key="device.id")
+    metric: str
+    value: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    reported_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )

@@ -62,6 +62,8 @@ def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[
             kind = "enum"
         elif field.get("fk_info"):
             kind = "foreign_key"
+        elif field.get("ui_type") == "json":
+            kind = field.get("json_kind") or "object"
         elif field.get("ui_type") in {
             "int",
             "float",
@@ -71,12 +73,25 @@ def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[
         }:
             kind = field["ui_type"]
         else:
-            kind = "any" if field.get("ui_type") == "json" else "str"
+            kind = "str"
         ui_field = {
             "name": field["name"],
             "kind": kind,
             "labelKey": field.get("label_key", field["name"]),
+            "required": bool(field.get("required")),
         }
+        if field.get("default") is not None:
+            ui_field["default"] = field["default"]
+        if field.get("minimum") is not None:
+            ui_field["minimum"] = field["minimum"]
+        if field.get("maximum") is not None:
+            ui_field["maximum"] = field["maximum"]
+        if field.get("visible_when") is not None:
+            ui_field["visibleWhen"] = field["visible_when"]
+        if field.get("required_when") is not None:
+            ui_field["requiredWhen"] = field["required_when"]
+        if field.get("clear_when_hidden"):
+            ui_field["clearWhenHidden"] = True
         if field.get("is_enum"):
             ui_field["enumValues"] = field.get("enum_values", [])
         if field.get("fk_info"):
@@ -215,6 +230,7 @@ def _resolve_fk_labels_and_reverse(
             fk["target_service"] = target_model["module_name"]
             fk["target_source_module"] = target_model["source_module"]
             fk["target_endpoint"] = f"{target_model['module_name']}s"
+            fk["target_id_type"] = target_model["id_type"]
 
             fk["label_field"] = (
                 target_model.get("unique_search_field") or target_model["search_field"]
@@ -243,6 +259,13 @@ def _resolve_fk_labels_and_reverse(
 
             reverse_cfg = fk.get("reverse", {}) or {}
             editor = _normalise_editor(reverse_cfg)
+            inline_layout = str(reverse_cfg.get("layout", "cards")).lower()
+            if inline_layout not in {"cards", "table"}:
+                console.print(
+                    f"[yellow]Warning: {model['name']}.{fk['name']} reverse.layout "
+                    f"must be cards or table; using cards.[/yellow]"
+                )
+                inline_layout = "cards"
             allow_existing = bool(reverse_cfg.get("allow_existing", editor == "embedded"))
             on_remove = str(reverse_cfg.get("on_remove", "delete")).lower()
             if on_remove not in {"delete", "nullify"}:
@@ -276,6 +299,7 @@ def _resolve_fk_labels_and_reverse(
                 "label_field": model.get("unique_search_field") or model["search_field"],
                 "display": editor != "hidden" and fk.get("reverse_display", True),
                 "editor": editor,
+                "inline_layout": inline_layout,
                 "allow_existing": allow_existing,
                 "on_remove": on_remove,
                 "inline_fields": inline_fields,
@@ -873,11 +897,61 @@ def _resolve_timescaledb_metadata(models: list[ModelDefinition]) -> None:
                     if time_column is None:
                         time_column = f["name"]
         model["timescaledb_time_column"] = time_column or "created_at"
-        model["timescaledb_latest_table_name"] = f"{model['table_name']}_latest"
+        raw_timeseries = model.get("site_props", {}).get("time_series_table") or {}
+        latest_table = raw_timeseries.get("latest_table") or f"{model['table_name']}_latest"
+        if not isinstance(latest_table, str) or not re.fullmatch(
+            r"[A-Za-z_][A-Za-z0-9_]*", latest_table
+        ):
+            raise ValueError(
+                f"{model['name']} time_series_table.latest_table must be a valid "
+                "SQL identifier"
+            )
+        model["timescaledb_latest_table_name"] = latest_table
 
-        raw_policy = (model.get("site_props", {}).get("time_series_table") or {}).get(
-            "lifecycle", {}
+        for metadata_name in (
+            "metric_label_field",
+            "metric_data_type_field",
+            "metric_unit_field",
+        ):
+            value = raw_timeseries.get(metadata_name)
+            if value is not None and (
+                not isinstance(value, str)
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value)
+            ):
+                raise ValueError(
+                    f"{model['name']} time_series_table.{metadata_name} "
+                    "must be a valid field name"
+                )
+            model[f"timescaledb_{metadata_name}"] = value
+
+        metric_field = model.get("timescaledb_metric_field")
+        metric_target_table = raw_timeseries.get("metric_target_table")
+        metric_target_field = raw_timeseries.get("metric_target_field", "id")
+        for key, value in (
+            ("metric_target_table", metric_target_table),
+            ("metric_target_field", metric_target_field),
+        ):
+            if value is not None and (
+                not isinstance(value, str)
+                or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", value)
+            ):
+                raise ValueError(
+                    f"{model['name']} time_series_table.{key} must be a valid SQL identifier"
+                )
+        metric_fk = next(
+            (
+                fk
+                for fk in model.get("foreign_keys", [])
+                if fk["name"] == metric_field
+            ),
+            None,
         )
+        model["timescaledb_metric_target_table"] = metric_target_table or (
+            metric_fk.get("target_service") if metric_fk else None
+        )
+        model["timescaledb_metric_target_field"] = metric_target_field
+
+        raw_policy = raw_timeseries.get("lifecycle", {})
         if raw_policy and not isinstance(raw_policy, dict):
             raise ValueError(
                 f"{model['name']} time_series_table.lifecycle must be an object"
@@ -1167,6 +1241,9 @@ def _resolve_timeseries_relations(models: list[ModelDefinition]) -> None:
                     "entity_field": entity_field,
                     "entity_model": target_model_name,
                     "metric_field": ts_model.get("timescaledb_metric_field"),
+                    "metric_label_field": ts_model.get("timescaledb_metric_label_field"),
+                    "metric_data_type_field": ts_model.get("timescaledb_metric_data_type_field"),
+                    "metric_unit_field": ts_model.get("timescaledb_metric_unit_field"),
                     "time_field": ts_model.get("timescaledb_time_column", "created_at"),
                     "api_base": f"{ts_model['module_name']}s",
                     "source_module": ts_model["source_module"],

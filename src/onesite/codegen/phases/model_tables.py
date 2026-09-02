@@ -81,6 +81,7 @@ def _scan_timeseries(models_dir: Path) -> list[dict[str, str | None]]:
             "entity_field": entity_field,
             "entity_stem": entity_field.removesuffix("_id"),
             "metric_field": _string_option(block, "metric_field"),
+            "latest_table": _string_option(block, "latest_table"),
             "time_column": _detect_time_column(
                 content, _string_option(block, "time_field")
             ),
@@ -101,6 +102,7 @@ def phase_generate_timeseries_artifacts(cwd: Path, backend_path: Path) -> None:
         entity_field = entry["entity_field"]
         entity_stem = entry["entity_stem"]
         metric_field = entry["metric_field"]
+        latest_table = entry["latest_table"] or f"{ts_file}_latest"
         if not all((ts_cls, ts_file, entity_field, entity_stem)):
             continue
 
@@ -118,6 +120,7 @@ def phase_generate_timeseries_artifacts(cwd: Path, backend_path: Path) -> None:
                 "entity_table": entity_stem,
                 "has_metric": bool(metric_field),
                 "metric_field": metric_field or "",
+                "latest_table": latest_table,
                 "time_column": entry["time_column"],
             },
             latest_path,

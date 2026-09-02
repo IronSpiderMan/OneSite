@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -395,13 +395,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   useEffect(() => {
     let interval: ReturnType<typeof setInterval>;
-    if (autoRefresh) {
+    if (autoRefresh{% if model.edit_mode == 'inplace_edit' %} && editingId === null{% endif %}) {
       interval = setInterval(() => {
         refreshData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
       }, refreshInterval);
     }
     return () => clearInterval(interval);
-  }, [autoRefresh, refreshInterval, refreshData]);
+  }, [autoRefresh, refreshInterval, refreshData{% if model.edit_mode == 'inplace_edit' %}, editingId{% endif %}]);
   {% endif %}
 
   useEffect(() => {
@@ -699,9 +699,22 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     }
     {% endif %}
     {% endfor %}
+    {% if model.edit_mode == 'inplace_edit' %}
+    // The shared form state backs the controls rendered inside this table row.
+    // Keeping the editor in the list preserves the current page and filters.
+    setIsModalOpen(false);
+    {% else %}
     setIsModalOpen(true);
     {% endif %}
+    {% endif %}
   };
+
+  {% if model.edit_mode == 'inplace_edit' %}
+  const handleCancelInplaceEdit = () => {
+    setEditingId(null);
+    reset();
+  };
+  {% endif %}
 
   {% if not model.page_edit %}
   // Relation tables can deep-link into the same edit modal used by this list page.
@@ -837,9 +850,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         }
       }
       {% else %}
-      if (editingId) {
+      if (editingId !== null) {
         await updateItem(editingId, payload);
         toast.success(t('toast.update_success', 'Updated'));
+        {% if model.edit_mode == 'inplace_edit' %}
+        setEditingId(null);
+        reset();
+        {% endif %}
       } else {
         await createItem(payload);
         toast.success(t('toast.create_success', 'Created'));
@@ -1356,8 +1373,15 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                   {% endfor %}
                   {% for field in model.extra_fields | default([]) | selectattr('show_in_list') | list %}
                   <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
-                    <dt className="truncate text-muted-foreground">{{ field.label if field.label is string else field.name }}</dt>
-                    <dd className="min-w-0 break-words text-right">{item.{{ field.name }} == null ? '-' : String(item.{{ field.name }})}</dd>
+                    <dt className="truncate text-muted-foreground">{% if field.component | default('') == 'online_status' %}{t('common.online_status')}{% else %}{{ field.label if field.label is string else field.name }}{% endif %}</dt>
+                    <dd className="min-w-0 break-words text-right">
+                      {% if field.component | default('') == 'online_status' %}
+                      <Badge variant="outline" className={item.{{ field.name }} ? 'border-emerald-500/40 text-emerald-600' : 'text-muted-foreground'}>
+                        <span className={`mr-1.5 h-2 w-2 rounded-full ${item.{{ field.name }} ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
+                        {t(item.{{ field.name }} ? 'common.online' : 'common.offline')}
+                      </Badge>
+                      {% else %}{item.{{ field.name }} == null ? '-' : String(item.{{ field.name }})}{% endif %}
+                    </dd>
                   </div>
                   {% endfor %}
                 </dl>
@@ -1446,7 +1470,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
               )}{% endif %}
               {% endfor %}
               {% for field in list_extra_fields %}
-              <TableHead>{{ field.label if field.label is string else field.name }}</TableHead>
+              <TableHead>{% if field.component | default('') == 'online_status' %}{t('common.online_status')}{% else %}{{ field.label if field.label is string else field.name }}{% endif %}</TableHead>
               {% endfor %}
               <TableHead className="w-[100px] sticky right-0 bg-card z-10 shadow-[-4px_0_8px_-4px_rgba(0,0,0,0.08)]">{t('common.actions')}</TableHead>
             </TableRow>
@@ -1478,6 +1502,110 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     {% for field in model.fields %}
                     {% if 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
                     <TableCell>
+                        {% if model.edit_mode == 'inplace_edit' and 'u' in field.permissions %}
+                        {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} ? (
+                        <div className="min-w-[10rem]" data-inplace-field="{{ field.name }}">
+                        {% if field.ui_type == 'bool' %}
+                        <Controller
+                            control={control}
+                            name="{{ field.name }}"
+                            render={({ field: { onChange, value } }) => (
+                                <Switch checked={Boolean(value)} onCheckedChange={onChange} aria-label={t('{{ field.label_key }}')} />
+                            )}
+                        />
+                        {% elif field.ui_type == 'image' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <ImageUpload value={value} onChange={onChange} />
+                        )} />
+                        {% elif field.ui_type == 'images' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <ImagesUpload id="inplace-{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
+                        )} />
+                        {% elif field.ui_type == 'file' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <FileUpload value={value} onChange={onChange} allowDownload={ {{ "true" if field.allow_download else "false" }} } />
+                        )} />
+                        {% elif field.ui_type == 'video_stream' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
+                        )} />
+                        {% elif field.dict_key_reference %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <SearchableSelect
+                                value={value}
+                                onValueChange={onChange}
+                                disabled={!rootValue?.{{ field.dict_key_reference.owner_fk }}}
+                                optionsKey={rootValue?.{{ field.dict_key_reference.owner_fk }}}
+                                loadOptions={async (query) => {
+                                    const ownerId = rootValue?.{{ field.dict_key_reference.owner_fk }};
+                                    if (ownerId === undefined || ownerId === null || ownerId === '') return [];
+                                    const options = await get{{ model.name }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}KeyOptions(ownerId);
+                                    const normalizedQuery = query.trim().toLocaleLowerCase();
+                                    return options.filter((option) => !normalizedQuery || option.label.toLocaleLowerCase().includes(normalizedQuery) || option.value.toLocaleLowerCase().includes(normalizedQuery));
+                                }}
+                            />
+                        )} />
+                        {% elif field.is_enum and field.is_multi_select %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <SearchableSelect
+                                value={value || []}
+                                onValueChange={onChange}
+                                multiple={true}
+                                loadOptions={async () => {{ field.enum_values | tojson }}.map((v: string) => ({ label: t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v), value: v }))}
+                            />
+                        )} />
+                        {% elif field.is_enum %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <Select value={value == null ? undefined : String(value)} onValueChange={onChange}>
+                                <SelectTrigger className="min-w-[10rem]"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                    {({% if model.module_name == "user" and model.name == "User" and field.name == "role" %}userRole === 'developer' ? {{ field.enum_values | tojson }} : ({{ field.enum_values | tojson }} as string[]).filter(v => v !== 'developer'){% else %}{{ field.enum_values | tojson }}{% endif %}).map((enumVal: string) => (
+                                        <SelectItem key={enumVal} value={enumVal}>{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${enumVal}`, enumVal)}</SelectItem>
+                                    ))}
+                                </SelectContent>
+                            </Select>
+                        )} />
+                        {% elif field.fk_info %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <SearchableSelect
+                                value={value}
+                                onValueChange={onChange}
+                                valueLabels={ {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                                loadOptions={async (query) => {
+                                    const response = await get{{ field.fk_info.target_model }}s(1, 20, query ? { {{ field.fk_info.label_field }}: query } : undefined);
+                                    return response.items.map((option: any) => ({ label: option.{{ field.fk_info.label_field }} || option.id, value: option.id }));
+                                }}
+                            />
+                        )} />
+                        {% elif field.ui_type == 'time' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <TimePicker value={value} onChange={onChange} />
+                        )} />
+                        {% elif field.ui_type == 'location' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <LocationInput value={value} onChange={onChange} />
+                        )} />
+                        {% elif field.ui_type == 'json' %}
+                        <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+                            <JsonInput value={value} onChange={onChange} jsonKind="{{ field.json_kind or 'object' }}" />
+                        )} />
+                        {% else %}
+                        <Input
+                            aria-label={t('{{ field.label_key }}')}
+                            {% if field.ui_type == 'int' or field.ui_type == 'float' %}type="number"{% elif field.ui_type == 'datetime' %}type="datetime-local"{% elif field.ui_type == 'date' %}type="date"{% else %}type="text"{% endif %}
+                            {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
+                            {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
+                            {...register('{{ field.name }}', {
+                                required: {{ 'true' if field.required and not field.update_optional else 'false' }},
+                                {% if field.minimum is not none %}min: {{ field.minimum }},{% endif %}
+                                {% if field.maximum is not none %}max: {{ field.maximum }},{% endif %}
+                            })}
+                        />
+                        {% endif %}
+                        </div>
+                        ) : (
+                        <>
+                        {% endif %}
                         {% if field.fk_info %}
                         <span className="block max-w-[250px] truncate" title={item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}>
                         {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
@@ -1567,18 +1695,56 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         {String(item.{{ field.name }})}
                         </span>
                         {% endif %}
+                        {% if model.edit_mode == 'inplace_edit' and 'u' in field.permissions %}
+                        </>
+                        )}
+                        {% endif %}
                     </TableCell>
                     )}{% endif %}
                     {% endfor %}
                     {% for field in list_extra_fields %}
                     <TableCell>
+                        {% if field.component | default('') == 'online_status' %}
+                        <Badge variant="outline" className={item.{{ field.name }} ? 'border-emerald-500/40 text-emerald-600' : 'text-muted-foreground'}>
+                            <span className={`mr-1.5 h-2 w-2 rounded-full ${item.{{ field.name }} ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
+                            {t(item.{{ field.name }} ? 'common.online' : 'common.offline')}
+                        </Badge>
+                        {% else %}
                         <span className="block max-w-[250px] truncate" title={String(item.{{ field.name }} ?? '')}>
                             {item.{{ field.name }} == null ? '-' : String(item.{{ field.name }})}
                         </span>
+                        {% endif %}
                     </TableCell>
                     {% endfor %}
                     <TableCell className="sticky right-0 bg-card z-10">
                         <div className="flex items-center gap-2">
+                        {% if model.edit_mode == 'inplace_edit' %}
+                        {editingId === item.id ? (
+                        <>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={isSaving}
+                            title={t('common.save')}
+                            onClick={() => void handleSubmit(onSubmit)()}
+                        >
+                            {isSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                        </Button>
+                        <Button
+                            type="button"
+                            variant="ghost"
+                            size="icon"
+                            disabled={isSaving}
+                            title={t('common.cancel')}
+                            onClick={handleCancelInplaceEdit}
+                        >
+                            <X className="h-4 w-4" />
+                        </Button>
+                        </>
+                        ) : (
+                        <>
+                        {% endif %}
                         <>
                         {% if model.actions %}
                         {% for action_name, action_config in model.actions.items() %}
@@ -1661,6 +1827,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             <Trash2 className="h-4 w-4" />
                         </Button>
                         )}
+                        {% if model.edit_mode == 'inplace_edit' %}
+                        </>
+                        )}
+                        {% endif %}
                         </div>
                     </TableCell>
                 </TableRow>
@@ -2453,7 +2623,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 name="{{ rfk.write_name }}"
                 defaultValue={[]}
                 render={({ field: { onChange, value } }) => (
-                    <JsonModelArrayEditor
+                    <JsonModel{{ 'Table' if rfk.inline_layout == 'table' else 'Array' }}Editor
+                        {% if rfk.inline_layout == 'table' %}collectionKind="array"{% endif %}
                         itemSchema={ {{ rfk.inline_schema | tojson }} }
                         value={value}
                         onChange={onChange}

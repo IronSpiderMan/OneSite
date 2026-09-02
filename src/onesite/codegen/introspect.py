@@ -1166,16 +1166,19 @@ def get_model_fields(
     exportable = isinstance(raw_exportable, dict) or bool(raw_exportable)
     raw_visible = model_site_props.get("visible", None)
     # ``page_edit`` is the legacy boolean spelling.  ``edit_mode`` is the
-    # extensible form and supports modal (default), page, and right-side drawer.
+    # extensible form and supports modal (default), page, right-side drawer,
+    # and editing the selected row directly in the paginated table.
     raw_edit_mode = model_site_props.get("edit_mode")
     if raw_edit_mode is None:
         edit_mode = "page" if model_site_props.get("page_edit", False) else "modal"
-    elif isinstance(raw_edit_mode, str) and raw_edit_mode in {"modal", "page", "drawer"}:
+    elif isinstance(raw_edit_mode, str) and raw_edit_mode in {
+        "modal", "page", "drawer", "inplace_edit"
+    }:
         edit_mode = raw_edit_mode
     else:
         raise ValueError(
             f"Invalid edit_mode for {model_cls.__name__}: {raw_edit_mode!r}. "
-            "Expected 'modal', 'page', or 'drawer'."
+            "Expected 'modal', 'page', 'drawer', or 'inplace_edit'."
         )
     page_edit = edit_mode == "page"
     raw_list_mode = model_site_props.get("list_mode", "list")
@@ -1307,6 +1310,23 @@ def get_model_fields(
         stream_config = site_props.get("stream", {}) or {}
         if not isinstance(stream_config, dict):
             raise ValueError(f"{model_cls.__name__}.{name} site_props.stream must be an object")
+        visible_when = _normalize_json_condition(
+            site_props.get("visible_when"),
+            model_name=model_cls.__name__,
+            field_name=name,
+            rule_name="visible_when",
+        )
+        required_when = _normalize_json_condition(
+            site_props.get("required_when"),
+            model_name=model_cls.__name__,
+            field_name=name,
+            rule_name="required_when",
+        )
+        clear_when_hidden = site_props.get("clear_when_hidden", False)
+        if not isinstance(clear_when_hidden, bool):
+            raise ValueError(
+                f"{model_cls.__name__}.{name} site_props.clear_when_hidden must be a boolean"
+            )
 
         # ── Layer 2: Field-level CRU permissions ──────────────────────────
         # Config formats:
@@ -1636,6 +1656,9 @@ def get_model_fields(
                 json_item_kind=json_item_kind,
                 json_fixed_keys=json_fixed_keys,
                 json_lock_keys=json_lock_keys,
+                visible_when=visible_when,
+                required_when=required_when,
+                clear_when_hidden=clear_when_hidden,
                 py_imports=sorted(set(json_py_imports)),
                 permissions=permissions,
                 role_permissions=field_role_permissions,

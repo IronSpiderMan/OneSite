@@ -15,7 +15,7 @@ from pydantic_core import PydanticUndefined
 import sqlmodel.main
 from sqlmodel import SQLModel
 
-from onesite.config import normalize_onesite_config
+from onesite.config import NetworkDeviceConfig, normalize_onesite_config
 from onesite_runtime import (
     ACTION_METADATA_ATTRIBUTE,
     EXTRA_FIELD_METADATA_ATTRIBUTE,
@@ -373,6 +373,14 @@ def _build_model_dict(
             f"Model {name!r} cannot combine tree_view with multi_display yet"
         )
 
+    if result.edit_mode == "inplace_edit" and (
+        result.list_mode != "list" or is_tree
+    ):
+        raise ValueError(
+            f"Model {name!r} can use edit_mode='inplace_edit' only with the "
+            "paginated table list (list_mode='list' and tree_view disabled)"
+        )
+
     return ModelDefinition(
         name=name,
         module_name=module_name,
@@ -501,6 +509,7 @@ def _validate_service_hooks(model_cls: type) -> None:
 _ACTION_ARGUMENTS = {"self", "context", "session", "current_user"}
 _EXTRA_FIELD_ARGUMENTS = {"self", "context", "session", "current_user", "values"}
 _OVERRIDE_FIELD_ARGUMENTS = {*_EXTRA_FIELD_ARGUMENTS, "value"}
+_NETWORK_CHECKER_ARGUMENTS = {*_EXTRA_FIELD_ARGUMENTS, "url"}
 
 
 def _read_annotation(annotation: Any) -> tuple[str, list[str]]:
@@ -614,6 +623,93 @@ def _extract_read_resolvers(
             overrides.append({"field": target, "handler": method_name})
             targets.add(target)
     return extra_fields, overrides
+
+
+def _normalize_network_device(
+    model_cls: type,
+    fields: list[FieldDefinition],
+    raw_config: Any,
+    extra_fields: list[dict[str, Any]],
+) -> dict[str, Any] | None:
+    """Validate network-device configuration and inject its Read-only field."""
+
+    if raw_config is None:
+        return None
+    config_value = {"url_field": raw_config} if isinstance(raw_config, str) else raw_config
+    if not isinstance(config_value, (dict, NetworkDeviceConfig)):
+        raise ValueError(
+            f"{model_cls.__name__}.network_device must be a field name or an object"
+        )
+    config = NetworkDeviceConfig.model_validate(config_value).model_dump(mode="python")
+    url_field = config.get("url_field")
+    status_field = config.get("status_field", "online")
+    checker = config.get("checker")
+    timeout = config.get("timeout", 1.0)
+    udp_payload = config.get("udp_payload", "")
+    for key, value in (("url_field", url_field), ("status_field", status_field)):
+        if not isinstance(value, str) or not value:
+            raise ValueError(
+                f"{model_cls.__name__}.network_device.{key} must be a non-empty string"
+            )
+    fields_by_name = {field.name: field for field in fields}
+    source_field = fields_by_name.get(url_field)
+    if source_field is None or "r" not in source_field.permissions:
+        raise ValueError(
+            f"{model_cls.__name__}.network_device.url_field {url_field!r} "
+            "must name a readable model field"
+        )
+    if "str" not in source_field.type.lower():
+        raise ValueError(
+            f"{model_cls.__name__}.network_device.url_field {url_field!r} must be a string field"
+        )
+    existing_names = set(fields_by_name) | {field["name"] for field in extra_fields}
+    if status_field in existing_names:
+        raise ValueError(
+            f"{model_cls.__name__}.network_device.status_field {status_field!r} "
+            "conflicts with an existing field"
+        )
+    if checker is not None:
+        if not isinstance(checker, str) or not checker:
+            raise ValueError(
+                f"{model_cls.__name__}.network_device.checker must be a method name"
+            )
+        method = inspect.getattr_static(model_cls, checker, None)
+        if isinstance(method, (classmethod, staticmethod)) or not inspect.isfunction(method):
+            raise ValueError(
+                f"{model_cls.__name__}.{checker} must be an instance method"
+            )
+        parameters = list(inspect.signature(method).parameters.values())
+        if not parameters or parameters[0].name != "self":
+            raise ValueError(
+                f"{model_cls.__name__}.{checker} must be an instance method whose first parameter is 'self'"
+            )
+        _validate_named_hook_signature(
+            model_cls, checker, method, _NETWORK_CHECKER_ARGUMENTS
+        )
+        annotation = inspect.signature(method).return_annotation
+        if annotation not in (bool, "bool"):
+            raise ValueError(
+                f"{model_cls.__name__}.{checker} network checker must declare a bool return type"
+            )
+
+    network = {
+        "url_field": url_field,
+        "status_field": status_field,
+        "checker": checker,
+        "timeout": float(timeout),
+        "udp_payload": udp_payload,
+    }
+    extra_fields.append({
+        "name": status_field,
+        "type": "bool",
+        "handler": None,
+        "label": config.get("label", {"en": "Online status", "zh": "在线状态"}),
+        "show_in_list": config.get("show_in_list", True),
+        "show_in_detail": config.get("show_in_detail", True),
+        "py_imports": [],
+        "component": "online_status",
+    })
+    return network
 
 
 def _validate_action_method_signature(
@@ -742,8 +838,21 @@ def _process_introspected_class(
         owner_field=result.owner_field,
         union_key=result.union_key,
     )
+    network_device = _normalize_network_device(
+        obj,
+        result.fields,
+        result.model_site_props.get("network_device"),
+        extra_fields,
+    )
     mdl["extra_fields"] = extra_fields
     mdl["override_fields"] = override_fields
+    mdl["network_device"] = network_device
+    mdl["network_probe_can_batch"] = bool(
+        network_device
+        and network_device["checker"] is None
+        and len(extra_fields) == 1
+        and not override_fields
+    )
     mdl["has_read_resolvers"] = bool(extra_fields or override_fields)
     mdl["schema_imports"] = sorted(
         set(mdl["schema_imports"])
@@ -756,6 +865,14 @@ def _process_introspected_class(
         if table is not None
         else []
     )
+    mdl["has_id_field"] = any(field["name"] == "id" for field in mdl["fields"])
+    mdl["uses_composite_identity"] = (
+        not mdl["has_id_field"] and len(mdl["primary_key_columns"]) > 1
+    )
+    if mdl["uses_composite_identity"]:
+        # Composite database keys use an opaque URL-safe token only at the
+        # generic REST/UI boundary; no surrogate column is persisted.
+        mdl["id_type"] = "str"
 
     mdl["has_function_actions"] = any(
         action_config.get("function", False)

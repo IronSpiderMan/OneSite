@@ -277,6 +277,17 @@ def _sync_project_utils(cwd: Path, backend_path: Path) -> None:
     _mirror_source_tree(source_utils, target_utils, "utils")
 
 
+def _sync_project_integrations(cwd: Path, backend_path: Path) -> None:
+    """Sync developer-owned integration adapters into the generated backend."""
+    paths = get_project_paths(cwd)
+    source_integrations = paths.integrations
+    target_integrations = backend_path / "app" / "integrations"
+
+    if source_integrations.exists():
+        _ensure_init_py(source_integrations)
+    _mirror_source_tree(source_integrations, target_integrations, "integrations")
+
+
 def _sync_project_resources(cwd: Path, backend_path: Path) -> None:
     """Scaffold and sync developer-owned application resource hooks."""
     paths = get_project_paths(cwd)
@@ -716,6 +727,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         error_handlers, backend_path / "app" / "core" / "error_handlers.py"
     )
     _sync_project_utils(cwd, backend_path)
+    _sync_project_integrations(cwd, backend_path)
     _sync_project_resources(cwd, backend_path)
     _sync_external_resource_providers(cwd, backend_path, site_config)
     if site_config.get("tools"):

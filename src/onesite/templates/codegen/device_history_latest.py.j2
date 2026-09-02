@@ -1,0 +1,29 @@
+"""Latest confirmed value per device field."""
+from datetime import datetime
+from typing import Any
+
+from sqlalchemy import Column, DateTime, ForeignKeyConstraint, JSON, PrimaryKeyConstraint
+from sqlmodel import Field, SQLModel
+
+
+class DeviceLatest(SQLModel, table=True):
+    __tablename__ = "device_latest"
+    __onesite__ = {
+        "is_latest_table": True,
+        "permissions": {"user": "", "admin": "", "developer": ""},
+        "visible": [],
+    }
+    __table_args__ = (
+        PrimaryKeyConstraint("device_id", "metric", name="pk_device_latest"),
+        ForeignKeyConstraint(
+            ["device_id", "metric"],
+            ["device_field.device_id", "device_field.name"],
+            ondelete="CASCADE",
+            name="fk_device_latest_field",
+        ),
+    )
+
+    device_id: str = Field(foreign_key="device.id")
+    metric: str
+    value: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
+    reported_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

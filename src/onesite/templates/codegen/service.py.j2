@@ -1,5 +1,7 @@
 import logging
 import os
+{% if model.network_probe_can_batch %}import asyncio
+{% endif %}
 from typing import Optional, List, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel import select, col
@@ -10,7 +12,7 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not 
 from app.schemas.pagination import PaginatedResponse
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
-from app.core.action_runtime import ReadContext, resolve_read_data
+from app.core.action_runtime import ReadContext, resolve_read_data{% if model.network_device %}, NetworkDeviceMetadata{% endif %}
 from app.core.datetime import SYSTEM_TIMEZONE, to_utc
 from app.core.config import settings
 {% if model.reports %}
@@ -125,10 +127,22 @@ class {{ model.name }}Service:
     ) -> {{ model.name }}Read:
         """Build a validated Read response without mutating the ORM object."""
         data = dict(base_data) if base_data is not None else obj.model_dump()
+        {% if model.uses_composite_identity %}
+        data["id"] = crud.get_identity(obj)
+        {% endif %}
         data = await resolve_read_data(
             obj,
             data,
             ReadContext(session=session, current_user=current_user, source=source),
+            {% if model.network_device %}
+            network_device=NetworkDeviceMetadata(
+                url_field={{ model.network_device.url_field | tojson }},
+                status_field={{ model.network_device.status_field | tojson }},
+                checker={% if model.network_device.checker %}{{ model.network_device.checker | tojson }}{% else %}None{% endif %},
+                timeout={{ model.network_device.timeout }},
+                udp_payload={{ model.network_device.udp_payload | tojson }},
+            ),
+            {% endif %}
         )
         return {{ model.name }}Read.model_validate(data)
 
@@ -188,7 +202,7 @@ class {{ model.name }}Service:
         {% elif field.is_enum %}
         {{ field.name }}: Optional[str] = None,
         {% elif field.fk_info %}
-        {{ field.name }}: Optional[int] = None,
+        {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
         {% elif field.ui_type == 'str' %}
         {{ field.name }}: Optional[str] = None,
         {% endif %}
@@ -197,7 +211,7 @@ class {{ model.name }}Service:
         {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
         {% for fk in model.foreign_keys %}
         {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-        {{ fk.name }}: Optional[int] = None,
+        {{ fk.name }}: Optional[{{ fk.target_id_type }}] = None,
         {% endif %}
         {% endfor %}
         {% if model.owner_field %}
@@ -274,6 +288,17 @@ class {{ model.name }}Service:
         )
 
         # Build response
+        {% if model.network_probe_can_batch %}
+        # Built-in probes do not use the database session, so a page of
+        # unreachable devices costs one timeout window rather than N windows.
+        items_read = await asyncio.gather(*(
+            self.to_read(
+                {{ model.name }}.model_validate(item), session,
+                current_user=current_user, source="list", base_data=item,
+            )
+            for item in items
+        ))
+        {% else %}
         items_read = [
             await self.to_read(
                 {{ model.name }}.model_validate(item), session,
@@ -281,6 +306,7 @@ class {{ model.name }}Service:
             )
             for item in items
         ]
+        {% endif %}
         if size == -1:
             return PaginatedResponse.create(data=items_read, total=total, page=1, size=total)
         return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
@@ -519,7 +545,7 @@ class {{ model.name }}Service:
         )
         try:
             for obj, old in zip(objects, olds):
-                await crud.delete(session, obj.id, auto_commit=False)
+                await crud.delete(session, {% if model.uses_composite_identity %}crud.get_identity(obj){% else %}obj.id{% endif %}, auto_commit=False)
             await invoke_model_hook(
                 {{ model.name }},
                 "on_after_bulk_delete",

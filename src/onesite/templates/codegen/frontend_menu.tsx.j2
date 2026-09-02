@@ -76,12 +76,19 @@ export function filterMenuByRole(
   });
 }
 
+function matchesMenuItemPath(menuPath: string, pathname: string): boolean {
+  const normalizedMenuPath = menuPath.replace(/\/+$/, '') || '/';
+  const normalizedPathname = pathname.replace(/\/+$/, '') || '/';
+  return normalizedPathname === normalizedMenuPath
+    || (normalizedMenuPath !== '/' && normalizedPathname.startsWith(`${normalizedMenuPath}/`));
+}
+
 export function findMenuItem(
   menu: GeneratedMenuNode[],
   pathname: string,
 ): GeneratedMenuItem | undefined {
   for (const node of menu) {
-    if (node.type === 'item' && node.key === pathname) return node;
+    if (node.type === 'item' && matchesMenuItemPath(node.key, pathname)) return node;
     if (node.type === 'group') {
       const item = findMenuItem(node.children, pathname);
       if (item) return item;
@@ -95,7 +102,7 @@ export function findMenuPath(
   pathname: string,
 ): GeneratedMenuNode[] {
   for (const node of menu) {
-    if (node.type === 'item' && node.key === pathname) return [node];
+    if (node.type === 'item' && matchesMenuItemPath(node.key, pathname)) return [node];
     if (node.type === 'group') {
       const childPath = findMenuPath(node.children, pathname);
       if (childPath.length) return [node, ...childPath];

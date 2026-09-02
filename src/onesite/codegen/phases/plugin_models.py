@@ -12,7 +12,15 @@ from ..render import generate_file
 
 
 _PLUGIN_MODEL_TEMPLATES = {
-    "site_logger": ("app_log.py.j2", "app_log.py"),
+    "site_logger": (("app_log.py.j2", "app_log.py"),),
+    "device_timeseries": (
+        ("device_model.py.j2", "device_model.py"),
+        ("device_model_field.py.j2", "device_model_field.py"),
+        ("device.py.j2", "device.py"),
+        ("device_field.py.j2", "device_field.py"),
+        ("device_history.py.j2", "device_history.py"),
+        ("device_history_latest.py.j2", "device_history_latest.py"),
+    ),
 }
 
 
@@ -26,7 +34,10 @@ def phase_generate_plugin_models(
     source_models = get_project_paths(cwd).models
     generated_models = backend_path / "app" / "models"
 
-    for plugin_name, (template_name, filename) in _PLUGIN_MODEL_TEMPLATES.items():
-        if plugin_name not in enabled_plugins or (source_models / filename).exists():
+    for plugin_name, model_templates in _PLUGIN_MODEL_TEMPLATES.items():
+        if plugin_name not in enabled_plugins:
             continue
-        generate_file(template_name, {}, generated_models / filename)
+        for template_name, filename in model_templates:
+            if (source_models / filename).exists():
+                continue
+            generate_file(template_name, {}, generated_models / filename)

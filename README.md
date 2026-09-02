@@ -730,13 +730,13 @@ For editor autocomplete and validation, `__onesite__` also accepts the typed
 Pydantic configuration. The dictionary form remains fully supported:
 
 ```python
-from onesite.config import ImportExportConfig, ListMode, OneSiteConfig
+from onesite.config import EditMode, ImportExportConfig, ListMode, OneSiteConfig
 
 class Product(SQLModel, table=True):
     __onesite__ = OneSiteConfig(
         icon="Package",
         permissions={"user": "r", "admin": "crud", "developer": "crud"},
-        edit_mode="drawer",
+        edit_mode=EditMode.DRAWER_EDIT,
         list_mode=ListMode.GRID,
         import_key="sku",
         importable=ImportExportConfig(fields=["sku", "name"]),
@@ -754,10 +754,11 @@ class Product(SQLModel, table=True):
 | `tree_view` | Enables a self-referencing tree; an object may configure a related `leaf` model. |
 | `is_singleton` | Creates a single configuration-like record UI/API. |
 | `frontend_only` | Excludes a model from backend persistence. |
-| `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode: "page"`. |
-| `edit_mode` | Create/edit container: `"modal"` (default), `"page"`, or right-side `"drawer"`. |
+| `page_edit` | Legacy boolean for full-page create/edit; equivalent to `edit_mode=EditMode.PAGE_EDIT`. |
+| `edit_mode` | `EditMode.FORM_EDIT` (default modal), `PAGE_EDIT`, `INPLACE_EDIT`, or `DRAWER_EDIT`. |
 | `list_mode` | Collection layout: `"list"` (default table) or responsive card `"grid"`. |
 | `multi_display` | Adds a selectable multi-item media view alongside the normal collection layout. |
+| `network_device` | Probes a URL field during Read responses and adds an online-status field. |
 | `actions` | Adds permission-controlled custom action buttons. |
 | `ui.detail.layout` | Shared layout for detail views and create/edit fields. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
@@ -766,8 +767,17 @@ class Product(SQLModel, table=True):
 For a right-side sliding create/edit form:
 
 ```python
-__onesite__ = {"edit_mode": "drawer"}
+__onesite__ = OneSiteConfig(edit_mode=EditMode.DRAWER_EDIT)
 ```
+
+To edit a selected row directly in the paginated table (creation still uses a modal):
+
+```python
+__onesite__ = OneSiteConfig(edit_mode=EditMode.INPLACE_EDIT)
+```
+
+This mode is available for the default table list; it cannot be combined with
+`list_mode: "grid"` or a tree view.
 
 For a responsive card grid instead of the default table:
 
@@ -813,6 +823,60 @@ Display selection is separate from the list's bulk-action selection. Selected
 items remain visible while paging through the selector, and configured field
 read permissions are still enforced at runtime. Tree views do not currently
 support `multi_display`.
+
+### Network device reachability
+
+Set `network_device` to a URL field name to add an `online: bool` value to
+generated Read responses and an online/offline badge to list and detail pages:
+
+```python
+class Camera(SQLModel, table=True):
+    __onesite__ = {"network_device": "endpoint"}
+
+    id: int | None = Field(default=None, primary_key=True)
+    endpoint: str
+```
+
+The object form can rename the response field and control probe behavior:
+
+```python
+__onesite__ = {
+    "network_device": {
+        "url_field": "endpoint",
+        "status_field": "is_online",
+        "timeout": 1.5,
+        "show_in_list": True,
+        "show_in_detail": True,
+        "udp_payload": "ping",
+    }
+}
+```
+
+Schemes are inferred from the URL. Built-in TCP reachability covers `tcp`,
+HTTP(S), WebSocket, MQTT(S), `opc.tcp`, Modbus TCP, RTSP, SSH, FTP, mail
+protocols, AMQP(S), and Redis. `udp://host:port` sends the configured payload
+and requires a reply, because UDP has no connection handshake. Probe errors
+and timeouts produce `false` without failing the Read request.
+
+For a vendor-specific protocol, name an instance method that returns `bool`.
+It may be synchronous or asynchronous and may accept `url`, `context`,
+`session`, `current_user`, or `values`:
+
+```python
+class VendorDevice(SQLModel, table=True):
+    __onesite__ = {
+        "network_device": {
+            "url_field": "endpoint",
+            "checker": "check_vendor_connection",
+        }
+    }
+
+    id: int | None = Field(default=None, primary_key=True)
+    endpoint: str
+
+    async def check_vendor_connection(self, url: str) -> bool:
+        return await vendor_client.is_reachable(url)
+```
 
 ### Detail page layout
 

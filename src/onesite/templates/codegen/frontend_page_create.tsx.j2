@@ -515,7 +515,8 @@ const Create{{ model.name }}Page: React.FC = () => {
                 name="{{ rfk.write_name }}"
                 defaultValue={[]}
                 render={({ field: { onChange, value } }) => (
-                  <JsonModelArrayEditor
+                  <JsonModel{{ 'Table' if rfk.inline_layout == 'table' else 'Array' }}Editor
+                    {% if rfk.inline_layout == 'table' %}collectionKind="array"{% endif %}
                     itemSchema={ {{ rfk.inline_schema | tojson }} }
                     value={value}
                     onChange={onChange}

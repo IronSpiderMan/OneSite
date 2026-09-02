@@ -43,6 +43,20 @@ class ListMode(str, Enum):
     GRID = "grid"
 
 
+class EditMode(str, Enum):
+    """Editor presentation used by generated model collection pages.
+
+    The serialized values intentionally retain the established generator
+    spellings so typed configuration and legacy dictionary configuration can
+    coexist without migration.
+    """
+
+    FORM_EDIT = "modal"
+    PAGE_EDIT = "page"
+    INPLACE_EDIT = "inplace_edit"
+    DRAWER_EDIT = "drawer"
+
+
 class DesktopConfig(_ConfigModel):
     identifier: str | None = None
     version: str | None = None
@@ -397,7 +411,11 @@ class TimeSeriesTableConfig(_ConfigModel):
 
     entity_field: str
     metric_field: str | None = None
+    metric_label_field: str | None = None
+    metric_data_type_field: str | None = None
+    metric_unit_field: str | None = None
     time_field: str | None = None
+    latest_table: str | None = None
     lifecycle: TimeSeriesLifecycleConfig | None = None
 
 
@@ -438,6 +456,21 @@ class DictKeyReferenceConfig(_ConfigModel):
 class ExternalResourceConfig(_ConfigModel):
     provider: str
     resource: str
+
+
+class NetworkDeviceConfig(_StrictConfigModel):
+    """Reachability status derived from a URL stored on a model row."""
+
+    url_field: str
+    status_field: str = "online"
+    checker: str | None = None
+    timeout: float = Field(default=1.0, ge=0.05, le=30.0)
+    show_in_list: bool = True
+    show_in_detail: bool = True
+    label: str | dict[str, str] = Field(
+        default_factory=lambda: {"en": "Online status", "zh": "在线状态"}
+    )
+    udp_payload: str = ""
 
 
 class TreeLeafConfig(_ConfigModel):
@@ -532,7 +565,7 @@ class OneSiteConfig(_ConfigModel):
     is_latest_table: bool = False
     standalone: bool = True
     page_edit: bool = False
-    edit_mode: Literal["modal", "page", "drawer"] | None = None
+    edit_mode: EditMode | None = None
     list_mode: ListMode = ListMode.LIST
     multi_display: MultiDisplayConfig | None = None
     refresh_interval: int = 0
@@ -549,6 +582,7 @@ class OneSiteConfig(_ConfigModel):
         default_factory=dict
     )
     external_resource: ExternalResourceConfig | None = None
+    network_device: str | NetworkDeviceConfig | None = None
     tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)
     special_me_permissions: ModelPermissions | None = None

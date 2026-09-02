@@ -1,0 +1,146 @@
+"""Per-device field configuration provided by the device_timeseries plugin."""
+import inspect
+from decimal import Decimal
+from enum import Enum
+from typing import Any, Optional
+
+from sqlalchemy import CheckConstraint, Column, JSON, PrimaryKeyConstraint, UniqueConstraint
+from sqlmodel import Field, SQLModel
+
+
+class DeviceFieldAttribute(str, Enum):
+    READ = "read"
+    SUBSCRIBE = "subscribe"
+    READ_SUBSCRIBE = "read_subscribe"
+    WRITE = "write"
+
+
+class DeviceReportMode(str, Enum):
+    PERIODIC = "periodic"
+    CHANGE = "change"
+    CHANGE_HEARTBEAT = "change_heartbeat"
+
+
+def _validate_write_value(dtype: str, value: Any) -> None:
+    """Reject values that cannot be represented by the configured field type."""
+    if dtype == "str" and not isinstance(value, str):
+        raise ValueError("str 字段只能写入字符串")
+    if dtype == "bool" and not isinstance(value, bool):
+        raise ValueError("bool 字段只能写入布尔值")
+    if dtype.startswith("float") and (
+        isinstance(value, bool) or not isinstance(value, (int, float))
+    ):
+        raise ValueError("float 字段只能写入数值")
+    integer_ranges = {
+        "int8": (-128, 127), "uint8": (0, 255),
+        "int32": (-(2**31), 2**31 - 1),
+        "int64": (-(2**63), 2**63 - 1),
+    }
+    if dtype in integer_ranges:
+        if isinstance(value, bool) or not isinstance(value, int):
+            raise ValueError(f"{dtype} 字段只能写入整数")
+        lower, upper = integer_ranges[dtype]
+        if not lower <= value <= upper:
+            raise ValueError(f"写入值超出 {dtype} 范围")
+
+
+class DeviceField(SQLModel, table=True):
+    __tablename__ = "device_field"
+    __onesite__ = {
+        "icon": "SlidersHorizontal",
+        "permissions": {"user": "r", "admin": "ru", "developer": "ru"},
+        "visible": [],
+        "standalone": False,
+        "translations": {
+            "zh": {"name": "设备字段", "fields": {
+                "device_id": "设备", "device_model_field_id": "模型字段",
+                "name": "名称", "dtype": "数据类型", "unit": "单位",
+                "address": "地址", "attribute": "属性", "value": "当前值",
+                "report_mode": "上报模式", "deadband": "死区",
+                "heartbeat_interval_seconds": "心跳间隔(秒)",
+            }},
+            "en": {"name": "Device Fields"},
+        },
+    }
+    __table_args__ = (
+        PrimaryKeyConstraint("device_id", "name", name="pk_device_field"),
+        UniqueConstraint(
+            "device_id", "device_model_field_id", name="uq_device_field_definition"
+        ),
+        CheckConstraint(
+            "heartbeat_interval_seconds IS NULL OR heartbeat_interval_seconds > 0",
+            name="ck_device_field_heartbeat_interval",
+        ),
+        CheckConstraint("deadband IS NULL OR deadband >= 0", name="ck_device_field_deadband"),
+    )
+
+    device_id: str = Field(
+        foreign_key="device.id",
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {
+            "permissions": "r",
+            "reverse": {
+                "editor": "embedded", "allow_existing": False,
+                "on_remove": "delete",
+            },
+        }}},
+    )
+    device_model_field_id: int = Field(
+        foreign_key="device_model_field.id", index=True,
+        sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}},
+    )
+    name: str = Field(sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
+    dtype: str = Field(sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
+    unit: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
+    address: Optional[str] = None
+    attribute: DeviceFieldAttribute = DeviceFieldAttribute.READ
+    value: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    report_mode: DeviceReportMode = DeviceReportMode.CHANGE_HEARTBEAT
+    deadband: Optional[Decimal] = Field(default=None, ge=0)
+    heartbeat_interval_seconds: Optional[int] = Field(default=60, gt=0)
+
+    async def on_before_create(self) -> None:
+        raise ValueError("设备字段由设备模型自动生成，不能手工创建")
+
+    async def on_after_update(self, session, old, changes, context) -> None:
+        """Dispatch an edited write-mode value through the project adapter."""
+        if "value" not in changes or old.get("value") == self.value:
+            return
+        if self.attribute != DeviceFieldAttribute.WRITE:
+            raise ValueError("只有 write 属性的设备字段允许反写")
+        if not isinstance(self.value, dict) or "value" not in self.value:
+            raise ValueError('反写值必须使用 {"value": ...} 格式')
+        raw_value = self.value["value"]
+        _validate_write_value(self.dtype, raw_value)
+
+        from app.models.device_model_field import DeviceModelField, DeviceDataType
+
+        definition = await session.get(DeviceModelField, self.device_model_field_id)
+        if definition is None:
+            raise ValueError("设备字段对应的模型字段不存在")
+        if definition.dtype == DeviceDataType.ENUM and raw_value not in (
+            definition.enum_values or []
+        ):
+            raise ValueError("写入值不在 enum_values 中")
+        if isinstance(raw_value, (int, float)) and not isinstance(raw_value, bool):
+            numeric_value = Decimal(str(raw_value))
+            if definition.min_value is not None and numeric_value < definition.min_value:
+                raise ValueError("写入值小于字段最小值")
+            if definition.max_value is not None and numeric_value > definition.max_value:
+                raise ValueError("写入值大于字段最大值")
+
+        try:
+            from app.integrations.device_timeseries import write_device_field
+        except ImportError as exc:
+            raise RuntimeError(
+                "device_timeseries 反写需要项目实现 "
+                "app.integrations.device_timeseries.write_device_field"
+            ) from exc
+        result = write_device_field(
+            session=session,
+            field=self,
+            value=raw_value,
+            current_user=getattr(context, "current_user", None),
+        )
+        if inspect.isawaitable(result):
+            await result

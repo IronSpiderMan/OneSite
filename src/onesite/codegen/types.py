@@ -68,6 +68,9 @@ class FieldDefinition:
     json_item_kind: str | None = None
     json_fixed_keys: list[str] | None = None
     json_lock_keys: bool = False
+    visible_when: dict[str, list[Any]] | None = None
+    required_when: dict[str, list[Any]] | None = None
+    clear_when_hidden: bool = False
     py_imports: list[str] = field(default_factory=list)
     permissions: str = "cru"
     role_permissions: dict[str, str] | None = None

@@ -1,0 +1,32 @@
+"""Device instances provided by the device_timeseries plugin."""
+from enum import Enum
+from sqlmodel import Field, SQLModel
+
+
+class DeviceProtocol(str, Enum):
+    OPCUA = "opcua"
+    MQTT = "mqtt"
+    MODBUS = "modbus"
+
+
+class Device(SQLModel, table=True):
+    __tablename__ = "device"
+    __onesite__ = {
+        "icon": "Cpu",
+        "translations": {
+            "zh": {"name": "设备", "fields": {
+                "name": "名称", "device_model_id": "设备模型", "protocol": "协议",
+                "collection_interval_seconds": "采集周期(秒)",
+            }},
+            "en": {"name": "Devices"},
+        },
+    }
+
+    id: str = Field(
+        primary_key=True,
+        sa_column_kwargs={"info": {"site_props": {"permissions": "cru"}}},
+    )
+    name: str = Field(index=True)
+    device_model_id: int = Field(foreign_key="device_model.id", index=True)
+    protocol: DeviceProtocol
+    collection_interval_seconds: int = Field(default=60, gt=0)

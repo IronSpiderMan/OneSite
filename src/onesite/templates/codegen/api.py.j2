@@ -405,7 +405,7 @@ async def read_{{ model.lower_name }}s(
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.fk_info %}
-    {{ field.name }}: Optional[int] = Query(None, description="Filter by {{ field.name }}"),
+    {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = Query(None, description="Filter by {{ field.name }}"),
     {% endif %}
@@ -414,7 +414,7 @@ async def read_{{ model.lower_name }}s(
     {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
     {% for fk in model.foreign_keys %}
     {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-    {{ fk.name }}: Optional[int] = Query(None, description="Filter by {{ fk.name }}"),
+    {{ fk.name }}: Optional[{{ fk.target_id_type }}] = Query(None, description="Filter by {{ fk.name }}"),
     {% endif %}
     {% endfor %}
     session: AsyncSession = Depends(db.get_session),

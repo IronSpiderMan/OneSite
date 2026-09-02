@@ -808,6 +808,23 @@ const {{ model.name }}DetailPage: React.FC = () => {
             const result = await get{{ ts.model_name }}Realtime(itemId);
             {% endif %}
             set{{ ts.model_name }}Realtime(result.data || []);
+            {% if ts.metric_label_field %}
+            set{{ ts.model_name }}Properties(Object.fromEntries(
+                (result.data || []).map((row: any) => {
+                    const rawType = String(row.metric_data_type || '').toLowerCase();
+                    const dataType = rawType.startsWith('float')
+                        ? 'float'
+                        : rawType.startsWith('int') || rawType.startsWith('uint')
+                            ? 'int'
+                            : rawType;
+                    return [String(row.{{ ts.metric_field }}), {
+                        display_name: row.metric_label || String(row.{{ ts.metric_field }}),
+                        data_type: dataType,
+                        unit: row.metric_unit || '',
+                    }];
+                })
+            ));
+            {% endif %}
             {% if model.definition_binding_meta %}
             set{{ ts.model_name }}Properties(definitions || {});
             {% endif %}
@@ -928,7 +945,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const {{ ts.model_name }}Metrics = React.useMemo(() => {
         const set = new Set<string>();
         {{ ts.model_name }}History.forEach((row: any) => {
-            if (row.{{ ts.metric_field }}) set.add(row.{{ ts.metric_field }});
+            if (row.{{ ts.metric_field }} !== undefined && row.{{ ts.metric_field }} !== null) {
+                set.add(String(row.{{ ts.metric_field }}));
+            }
         });
         return Array.from(set);
     }, [{{ ts.model_name }}History]);
@@ -978,7 +997,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         const numGroups: Record<string, { time: number; value: number }[]> = {};
         const nonNumGroups: Record<string, { time: number; value: any }[]> = {};
         filtered.forEach((row: any) => {
-            const metric = row.{{ ts.metric_field }};
+            const metric = String(row.{{ ts.metric_field }} ?? '');
             const rawVal = row.value?.value;
             if (rawVal === undefined || rawVal === null) return;
             const numVal = Number(rawVal);
@@ -1103,9 +1122,21 @@ const {{ model.name }}DetailPage: React.FC = () => {
         return null;
     };
 
+    {% if model.has_embedded_reverse %}
+    const isEmbeddedTab = [
+        {% for rfk in model.reverse_foreign_keys %}
+        {% if rfk.editor == 'embedded' %}'reverse-fk-{{ rfk.name }}',{% endif %}
+        {% endfor %}
+    ].includes(activeTab);
+    {% endif %}
+
     return (
         <div
-            className="{{ page_shell_class | default('space-y-6') }}{% if model.has_embedded_reverse %} !flex !h-full !min-h-0 !flex-col !gap-4 !space-y-0{% endif %}"
+            {% if model.has_embedded_reverse %}
+            className={`{{ page_shell_class | default('space-y-6') }} ${isEmbeddedTab ? '!flex !h-full !min-h-0 !flex-col !gap-4 !space-y-0' : ''}`}
+            {% else %}
+            className="{{ page_shell_class | default('space-y-6') }}"
+            {% endif %}
             data-codegen-theme="{{ codegen_theme | default('normal') }}"
             data-page-kind="detail"
         >
@@ -1308,7 +1339,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
             </div>
             {% endif %}
 
-            <div className="{{ detail_grid_class | default('grid grid-cols-1 gap-6') }}{% if model.has_embedded_reverse %} !flex-1 !min-h-0{% endif %}" data-page-region="detail-grid">
+            <div
+                {% if model.has_embedded_reverse %}
+                className={`{{ detail_grid_class | default('grid grid-cols-1 gap-6') }} ${isEmbeddedTab ? '!flex-1 !min-h-0' : ''}`}
+                {% else %}
+                className="{{ detail_grid_class | default('grid grid-cols-1 gap-6') }}"
+                {% endif %}
+                data-page-region="detail-grid"
+            >
                 {activeTab === 'detail' && !hasDetailLayout && (
                 <Card>
                     <CardHeader>
@@ -1718,9 +1756,16 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     <CardContent className="space-y-4">
                         {% for field in detail_extra_fields %}
                         <div className="space-y-1">
-                            <Label className="text-muted-foreground">{{ field.label if field.label is string else field.name }}</Label>
+                            <Label className="text-muted-foreground">{% if field.component | default('') == 'online_status' %}{t('common.online_status')}{% else %}{{ field.label if field.label is string else field.name }}{% endif %}</Label>
                             <div className="font-medium break-words">
+                                {% if field.component | default('') == 'online_status' %}
+                                <Badge variant="outline" className={currentItem.{{ field.name }} ? 'border-emerald-500/40 text-emerald-600' : 'text-muted-foreground'}>
+                                    <span className={`mr-1.5 h-2 w-2 rounded-full ${currentItem.{{ field.name }} ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
+                                    {t(currentItem.{{ field.name }} ? 'common.online' : 'common.offline')}
+                                </Badge>
+                                {% else %}
                                 {currentItem.{{ field.name }} == null ? '-' : (typeof currentItem.{{ field.name }} === 'object' ? JSON.stringify(currentItem.{{ field.name }}) : String(currentItem.{{ field.name }}))}
+                                {% endif %}
                             </div>
                         </div>
                         {% endfor %}
@@ -2215,11 +2260,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             control={editControl}
                             name="{{ rfk.write_name }}"
                             render={({ field: { onChange, value } }) => (
-                                <JsonModelArrayEditor
+                                <JsonModel{{ 'Table' if rfk.inline_layout == 'table' else 'Array' }}Editor
+                                    {% if rfk.inline_layout == 'table' %}collectionKind="array"{% endif %}
                                     itemSchema={ {{ rfk.inline_schema | tojson }} }
                                     value={value}
                                     onChange={onChange}
-                                    showJsonMode={false}
+                                    {% if rfk.inline_layout != 'table' %}showJsonMode={false}{% endif %}
                                     foreignKeyLoaders={{ '{{' }}
                                         {% for field in rfk.inline_schema.fields %}
                                         {% if field.foreignKey %}
@@ -2543,8 +2589,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         </div>
                     </CardHeader>
                     <CardContent>
-                        {% if model.definition_binding_meta %}
-                        {# Card-style display enriched by the entity's definition binding. #}
+                        {% if ts.metric_field %}
+                        {# Metric timeseries always use the dense Hub-style cards.  A
+                           definition binding enriches labels and units when present, but
+                           must not control the visual treatment of normalized schemas. #}
                         {% if ts.metric_field %}
                         <div className="mb-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
                             <div className="relative w-full sm:max-w-xs">
@@ -2580,7 +2628,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             { {{ ts.model_name }}FilteredRealtime.length > 0 ? (
                                 {{ ts.model_name }}FilteredRealtime.map((row, idx) => {
                                     const meta = {{ ts.model_name }}Properties[row.{{ ts.metric_field }}] || {};
-                                    const metric = row.{{ ts.metric_field }};
+                                    const metric = String(row.{{ ts.metric_field }} ?? '');
                                     const rawValue = row.value?.value;
                                     const trendData = {{ ts.model_name }}ChartData.numeric[metric] || [];
                                     const stateData = {{ ts.model_name }}ChartData.nonNumeric[metric] || [];
@@ -2720,7 +2768,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     </CardContent>
                 </Card>
 
-                {% if not (model.definition_binding_meta and ts.metric_field) %}
+                {% if not ts.metric_field %}
                 {/* Timeseries History */}
                 <Card className="col-span-full">
                     <CardHeader className="pb-3">

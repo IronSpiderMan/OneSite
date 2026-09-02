@@ -5,7 +5,7 @@ from app.cruds import {{ model.module_name }} as crud
 from app.schemas.{{ model.module_name }} import {{ model.name }}Update
 from app.models.{{ model.source_module }} import {{ model.name }}
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
-from app.core.action_runtime import ReadContext, resolve_read_data
+from app.core.action_runtime import ReadContext, resolve_read_data{% if model.network_device %}, NetworkDeviceMetadata{% endif %}
 from app.schemas.{{ model.module_name }} import {{ model.name }}Read
 
 logger = logging.getLogger(__name__)
@@ -15,6 +15,15 @@ class {{ model.name }}Service:
         data = await resolve_read_data(
             obj, obj.model_dump(),
             ReadContext(session=session, current_user=current_user, source=source),
+            {% if model.network_device %}
+            network_device=NetworkDeviceMetadata(
+                url_field={{ model.network_device.url_field | tojson }},
+                status_field={{ model.network_device.status_field | tojson }},
+                checker={% if model.network_device.checker %}{{ model.network_device.checker | tojson }}{% else %}None{% endif %},
+                timeout={{ model.network_device.timeout }},
+                udp_payload={{ model.network_device.udp_payload | tojson }},
+            ),
+            {% endif %}
         )
         return {{ model.name }}Read.model_validate(data)
 

@@ -1,5 +1,8 @@
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+{% if model.uses_composite_identity %}import base64
+import json
+{% endif %}
 from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core.datetime import to_utc
@@ -24,6 +27,30 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Create{% if not 
 from app.models.{{ m2m.link_module }} import {{ m2m.link_model }}
 from app.models.{{ m2m.target_source_module }} import {{ m2m.target_model }}
 {% endfor %}
+{% endif %}
+
+{% if model.uses_composite_identity %}
+def get_identity(obj: {{ model.name }}) -> str:
+    """Encode the composite database key for generic REST/UI routes."""
+    payload = json.dumps(
+        [getattr(obj, field) for field in {{ model.primary_key_columns | tojson }}],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return base64.urlsafe_b64encode(payload).decode("ascii").rstrip("=")
+
+
+def _decode_identity(value: str) -> tuple:
+    try:
+        padding = "=" * (-len(value) % 4)
+        decoded = json.loads(base64.urlsafe_b64decode(value + padding))
+    except Exception as exc:
+        raise ValueError("Invalid {{ model.name }} identity") from exc
+    if not isinstance(decoded, list) or len(decoded) != {{ model.primary_key_columns | length }}:
+        raise ValueError("Invalid {{ model.name }} identity")
+    return tuple(decoded)
+
+
 {% endif %}
 {% if model.reverse_m2m %}
 {% for rel in model.reverse_m2m %}
@@ -345,10 +372,20 @@ async def get_realtime_by_entity(
     entity_id = int(entity_id)  # entity_id comes as str from query param; convert for DB
     {% endif %}
     query = text("""
-        SELECT *
-        FROM {{ model.timescaledb_latest_table_name }}
-        WHERE {{ model.timescaledb_entity_field }} = :entity
-        ORDER BY {{ model.timescaledb_time_column }} DESC
+        SELECT latest_metric.*
+        {% if model.timescaledb_metric_label_field %}, metric_meta.{{ model.timescaledb_metric_label_field }} AS metric_label{% endif %}
+        {% if model.timescaledb_metric_data_type_field %}, metric_meta.{{ model.timescaledb_metric_data_type_field }} AS metric_data_type{% endif %}
+        {% if model.timescaledb_metric_unit_field %}, metric_meta.{{ model.timescaledb_metric_unit_field }} AS metric_unit{% endif %}
+        FROM {{ model.timescaledb_latest_table_name }} AS latest_metric
+        {% if model.timescaledb_metric_label_field %}
+        LEFT JOIN {{ model.timescaledb_metric_target_table }} AS metric_meta
+          ON metric_meta.{{ model.timescaledb_metric_target_field }} = latest_metric.{{ model.timescaledb_metric_field }}
+          {% if model.timescaledb_metric_target_field != 'id' %}
+         AND metric_meta.{{ model.timescaledb_entity_field }} = latest_metric.{{ model.timescaledb_entity_field }}
+          {% endif %}
+        {% endif %}
+        WHERE latest_metric.{{ model.timescaledb_entity_field }} = :entity
+        ORDER BY latest_metric.{{ model.timescaledb_time_column }} DESC
     """)
     result = await session.execute(query, {"entity": entity_id})
     rows = result.fetchall()
@@ -434,7 +471,7 @@ async def get_history_by_entity(
 {% else %}
 
 async def get(session: AsyncSession, id: {{ model.id_type }}) -> Optional[{{ model.name }}]:
-    return await session.get({{ model.name }}, id)
+    return await session.get({{ model.name }}, {% if model.uses_composite_identity %}_decode_identity(id){% else %}id{% endif %})
 
 
 {% if model.fields | selectattr('is_unique') | list %}
@@ -486,7 +523,7 @@ def _apply_filters(
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.fk_info %}
-    {{ field.name }}: Optional[int] = None,
+    {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -495,7 +532,7 @@ def _apply_filters(
     {% set search_field_names = model.fields | selectattr('is_search_field') | map(attribute='name') | list %}
     {% for fk in model.foreign_keys %}
     {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-    {{ fk.name }}: Optional[int] = None,
+    {{ fk.name }}: Optional[{{ fk.target_id_type }}] = None,
     {% endif %}
     {% endfor %}
     {% if model.owner_field %}
@@ -584,7 +621,7 @@ async def get_multi(
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.fk_info %}
-    {{ field.name }}: Optional[int] = None,
+    {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -592,7 +629,7 @@ async def get_multi(
     {% endfor %}
     {% for fk in model.foreign_keys %}
     {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-    {{ fk.name }}: Optional[int] = None,
+    {{ fk.name }}: Optional[{{ fk.target_id_type }}] = None,
     {% endif %}
     {% endfor %}
     {% if model.owner_field %}
@@ -674,6 +711,9 @@ async def _enrich_with_fk_labels(
     enriched = []
     for item in items:
         item_dict = item.model_dump()
+        {% if model.uses_composite_identity %}
+        item_dict["id"] = get_identity(item)
+        {% endif %}
         {% for fk in model.foreign_keys %}
         fk_id = getattr(item, "{{ fk.name }}", None)
         item_dict["{{ fk.name }}_label"] = {{ fk.name }}_map.get(fk_id) if fk_id is not None else None
@@ -681,7 +721,13 @@ async def _enrich_with_fk_labels(
         enriched.append(item_dict)
     return enriched
     {% else %}
-    return [item.model_dump() for item in items]
+    return [
+        {
+            **item.model_dump(),
+            {% if model.uses_composite_identity %}"id": get_identity(item),{% endif %}
+        }
+        for item in items
+    ]
     {% endif %}
 
 
@@ -715,7 +761,7 @@ async def get_multi_with_fk_labels(
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.fk_info %}
-    {{ field.name }}: Optional[int] = None,
+    {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -723,7 +769,7 @@ async def get_multi_with_fk_labels(
     {% endfor %}
     {% for fk in model.foreign_keys %}
     {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-    {{ fk.name }}: Optional[int] = None,
+    {{ fk.name }}: Optional[{{ fk.target_id_type }}] = None,
     {% endif %}
     {% endfor %}
     {% if model.owner_field %}
@@ -784,7 +830,7 @@ async def count(
     {% elif field.is_enum %}
     {{ field.name }}: Optional[str] = None,
     {% elif field.fk_info %}
-    {{ field.name }}: Optional[int] = None,
+    {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
     {{ field.name }}: Optional[str] = None,
     {% endif %}
@@ -792,7 +838,7 @@ async def count(
     {% endfor %}
     {% for fk in model.foreign_keys %}
     {% if fk.name != model.owner_field and fk.name not in search_field_names %}
-    {{ fk.name }}: Optional[int] = None,
+    {{ fk.name }}: Optional[{{ fk.target_id_type }}] = None,
     {% endif %}
     {% endfor %}
     {% if model.owner_field %}
@@ -1124,7 +1170,7 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
 
 @transactional_write
 async def delete(session: AsyncSession, id: {{ model.id_type }}, *, auto_commit: bool = True) -> {{ model.id_type }}:
-    db_obj = await session.get({{ model.name }}, id)
+    db_obj = await session.get({{ model.name }}, {% if model.uses_composite_identity %}_decode_identity(id){% else %}id{% endif %})
     old = snapshot_model(db_obj)
     hook_context = ModelHookContext(
         operation="delete",
@@ -1138,7 +1184,7 @@ async def delete(session: AsyncSession, id: {{ model.id_type }}, *, auto_commit:
         old=old,
         context=hook_context,
     )
-    deleted_id = db_obj.id
+    deleted_id = {% if model.uses_composite_identity %}get_identity(db_obj){% else %}db_obj.id{% endif %}
     await session.delete(db_obj)
     await session.flush()
     await invoke_model_hook(

@@ -1,4 +1,6 @@
 import logging
+{% if model.network_probe_can_batch %}import asyncio
+{% endif %}
 from typing import Any, List, Optional, Union
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -7,7 +9,7 @@ from app.schemas.user import UserCreate, UserRead, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
-from app.core.action_runtime import ReadContext, resolve_read_data
+from app.core.action_runtime import ReadContext, resolve_read_data{% if model.network_device %}, NetworkDeviceMetadata{% endif %}
 {% if model.reports %}
 from app.core.reports import get_model_report_catalog, query_model_report
 {% endif %}
@@ -28,6 +30,15 @@ class UserService:
         data = await resolve_read_data(
             obj, data,
             ReadContext(session=session, current_user=current_user, source=source),
+            {% if model.network_device %}
+            network_device=NetworkDeviceMetadata(
+                url_field={{ model.network_device.url_field | tojson }},
+                status_field={{ model.network_device.status_field | tojson }},
+                checker={% if model.network_device.checker %}{{ model.network_device.checker | tojson }}{% else %}None{% endif %},
+                timeout={{ model.network_device.timeout }},
+                udp_payload={{ model.network_device.udp_payload | tojson }},
+            ),
+            {% endif %}
         )
         return UserRead.model_validate(data)
 
@@ -143,11 +154,19 @@ class UserService:
         )
         
         # Build response
+        {% if model.network_probe_can_batch %}
+        items_read = await asyncio.gather(*(
+            self.to_read(User.model_validate(item), session,
+                current_user=current_user, source="list", base_data=item)
+            for item in items
+        ))
+        {% else %}
         items_read = [
             await self.to_read(User.model_validate(item), session,
                 current_user=current_user, source="list", base_data=item)
             for item in items
         ]
+        {% endif %}
         if size == -1:
             return PaginatedResponse.create(data=items_read, total=total, page=1, size=total)
         return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)

@@ -8,8 +8,11 @@ same action decorators while being introspected and while serving requests.
 from __future__ import annotations
 
 import inspect
+import asyncio
+import ssl
 from dataclasses import dataclass
 from typing import Any, Callable, Literal, Mapping, TypeVar, overload
+from urllib.parse import urlsplit
 
 
 ACTION_METADATA_ATTRIBUTE = "__onesite_action__"
@@ -87,6 +90,17 @@ class ExtraFieldMetadata:
     label: str | dict[str, str] | None = None
     show_in_list: bool = True
     show_in_detail: bool = True
+
+
+@dataclass(frozen=True)
+class NetworkDeviceMetadata:
+    """Configuration for a response-only network reachability field."""
+
+    url_field: str
+    status_field: str = "online"
+    checker: str | None = None
+    timeout: float = 1.0
+    udp_payload: str = ""
 
 
 @dataclass(frozen=True)
@@ -313,10 +327,143 @@ async def invoke_read_callable(
     return result
 
 
+_NETWORK_DEFAULT_PORTS = {
+    "http": 80, "https": 443, "ws": 80, "wss": 443,
+    "mqtt": 1883, "mqtts": 8883, "opc.tcp": 4840, "opcua": 4840,
+    "modbus": 502, "modbus.tcp": 502, "rtsp": 554,
+    "ftp": 21, "ssh": 22, "telnet": 23,
+    "smtp": 25, "smtps": 465, "imap": 143, "imaps": 993,
+    "pop3": 110, "pop3s": 995, "amqp": 5672, "amqps": 5671,
+    "redis": 6379,
+}
+_TLS_SCHEMES = {"https", "wss", "mqtts", "smtps", "imaps", "pop3s", "amqps"}
+
+
+async def _probe_tcp(host: str, port: int, timeout: float, *, use_tls: bool) -> bool:
+    ssl_context = None
+    if use_tls:
+        # Reachability is independent from certificate trust.  Industrial and
+        # embedded devices commonly use private or self-signed certificates.
+        ssl_context = ssl.create_default_context()
+        ssl_context.check_hostname = False
+        ssl_context.verify_mode = ssl.CERT_NONE
+    _, writer = await asyncio.wait_for(
+        asyncio.open_connection(host, port, ssl=ssl_context), timeout=timeout
+    )
+    writer.close()
+    try:
+        await writer.wait_closed()
+    except OSError:
+        # A peer that resets while we close was still reachable.
+        pass
+    return True
+
+
+class _UDPProbe(asyncio.DatagramProtocol):
+    def __init__(self, future: asyncio.Future[bool]) -> None:
+        self.future = future
+
+    def datagram_received(self, data: bytes, addr: Any) -> None:
+        if not self.future.done():
+            self.future.set_result(True)
+
+    def error_received(self, exc: Exception) -> None:
+        if not self.future.done():
+            self.future.set_result(False)
+
+
+async def _probe_udp(host: str, port: int, timeout: float, payload: str) -> bool:
+    loop = asyncio.get_running_loop()
+    future: asyncio.Future[bool] = loop.create_future()
+    transport, _ = await loop.create_datagram_endpoint(
+        lambda: _UDPProbe(future), remote_addr=(host, port)
+    )
+    try:
+        transport.sendto(payload.encode())
+        return await asyncio.wait_for(future, timeout=timeout)
+    finally:
+        transport.close()
+
+
+async def probe_network_url(url: Any, *, timeout: float = 1.0, udp_payload: str = "") -> bool:
+    """Return whether a URL endpoint is reachable without raising probe errors.
+
+    HTTP-family endpoints are considered online when a TCP/TLS connection can
+    be established.  This intentionally treats authentication and non-2xx
+    responses as online: the feature measures reachability, not application
+    health.  UDP requires a reply to the configured payload.
+    """
+
+    if not isinstance(url, str) or not url.strip():
+        return False
+    try:
+        parsed = urlsplit(url.strip())
+        scheme = parsed.scheme.lower()
+        host = parsed.hostname
+        if not scheme or not host:
+            return False
+        port = parsed.port or _NETWORK_DEFAULT_PORTS.get(scheme)
+        if port is None:
+            return False
+        if scheme == "udp":
+            return await _probe_udp(host, port, timeout, udp_payload)
+        if scheme == "tcp" or scheme in _NETWORK_DEFAULT_PORTS:
+            return await _probe_tcp(host, port, timeout, use_tls=scheme in _TLS_SCHEMES)
+        return False
+    except (OSError, ValueError, asyncio.TimeoutError, ssl.SSLError):
+        return False
+
+
+async def resolve_network_device_status(
+    obj: Any,
+    context: ReadContext,
+    metadata: NetworkDeviceMetadata,
+) -> bool:
+    """Resolve configured reachability through a custom checker or URL scheme."""
+
+    url = getattr(obj, metadata.url_field, None)
+    if metadata.checker:
+        try:
+            checker = getattr(obj, metadata.checker)
+            checker_context = ReadContext(
+                session=context.session,
+                current_user=context.current_user,
+                source=context.source,
+                values=context.values,
+            )
+            signature = inspect.signature(checker)
+            parameters = signature.parameters
+            has_kwargs = any(
+                parameter.kind is inspect.Parameter.VAR_KEYWORD
+                for parameter in parameters.values()
+            )
+            available = {
+                "url": url,
+                "context": checker_context,
+                "session": checker_context.session,
+                "current_user": checker_context.current_user,
+                "values": checker_context.values,
+            }
+            kwargs = {
+                name: value for name, value in available.items()
+                if has_kwargs or name in parameters
+            }
+            result = checker(**kwargs)
+            if inspect.isawaitable(result):
+                result = await result
+            return result if isinstance(result, bool) else False
+        except Exception:
+            return False
+    return await probe_network_url(
+        url, timeout=metadata.timeout, udp_payload=metadata.udp_payload
+    )
+
+
 async def resolve_read_data(
     obj: Any,
     data: Mapping[str, Any],
     context: ReadContext,
+    network_device: NetworkDeviceMetadata | None = None,
 ) -> dict[str, Any]:
     """Apply all decorators declared on ``obj`` without mutating the ORM row."""
 
@@ -347,6 +494,10 @@ async def resolve_read_data(
         resolver = getattr(obj, method_name)
         result[metadata.name or method_name] = await invoke_read_callable(
             resolver, resolver_context
+        )
+    if network_device is not None:
+        result[network_device.status_field] = await resolve_network_device_status(
+            obj, resolver_context, network_device
         )
     return result
 
@@ -395,6 +546,7 @@ __all__ = [
     "ActionMetadata",
     "ActionState",
     "ExtraFieldMetadata",
+    "NetworkDeviceMetadata",
     "OverrideFieldMetadata",
     "ReadContext",
     "action",
@@ -407,5 +559,7 @@ __all__ = [
     "invoke_read_callable",
     "normalize_action_state",
     "override_field",
+    "probe_network_url",
     "resolve_read_data",
+    "resolve_network_device_status",
 ]
