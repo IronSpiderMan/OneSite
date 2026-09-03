@@ -115,25 +115,58 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
     return <span>{String(parsedValue)}</span>;
   }
 
-  const summary = Array.isArray(parsedValue)
-    ? `[ ] ${parsedValue.length}`
-    : `{ } ${Object.keys(parsedValue as Record<string, unknown>).length}`;
+  // Format key-value pairs for objects
+  const formatKeyValuePairs = (obj: Record<string, unknown>, maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
+    const entries = Object.entries(obj);
+    const lines = entries.map(([key, value]) => {
+      const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
+      return `${key}: ${valueStr}`;
+    });
+    
+    const preview = lines.slice(0, maxLines).join('\n');
+    const full = lines.join('\n');
+    const hasMore = lines.length > maxLines;
+    
+    return { preview, full, hasMore };
+  };
+
+  // Format array items for arrays
+  const formatArrayItems = (arr: unknown[], maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
+    const lines = arr.map((item, index) => {
+      const itemStr = typeof item === 'object' ? JSON.stringify(item) : String(item);
+      return `[${index}]: ${itemStr}`;
+    });
+    
+    const preview = lines.slice(0, maxLines).join('\n');
+    const full = lines.join('\n');
+    const hasMore = lines.length > maxLines;
+    
+    return { preview, full, hasMore };
+  };
+
+  const isArray = Array.isArray(parsedValue);
+  const { preview, full, hasMore } = isArray
+    ? formatArrayItems(parsedValue as unknown[])
+    : formatKeyValuePairs(parsedValue as Record<string, unknown>);
 
   return (
     <Popover>
       <PopoverTrigger asChild>
         <button
           type="button"
-          className="inline-flex max-w-[180px] items-center gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          className="inline-flex max-w-[250px] items-start gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           title="View JSON"
         >
-          <Braces className="h-3.5 w-3.5 text-muted-foreground" aria-hidden="true" />
-          <span className="truncate">{summary}</span>
+          <Braces className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
+          <span className="whitespace-pre-line break-all text-left">
+            {preview}
+            {hasMore && <span className="text-muted-foreground">...</span>}
+          </span>
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-0">
         <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
-          {JSON.stringify(parsedValue, null, 2)}
+          {full}
         </pre>
       </PopoverContent>
     </Popover>
