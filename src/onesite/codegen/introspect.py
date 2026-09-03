@@ -826,20 +826,7 @@ def _parse_model_permissions(raw: Any, model_name: str) -> dict[str, str]:
         return {role: raw.get(role, "") for role in ROLE_ORDER}
 
     if isinstance(raw, str):
-        # Legacy string: "admin-crud", "crud/rcud", or bare "admin"/"user"
-        if raw == "admin":
-            console.print(
-                f"[yellow]Warning: Model '{model_name}' uses legacy 'admin', "
-                f"please use 'admin-crud'[/yellow]"
-            )
-            raw = "admin-crud"
-        elif raw == "user":
-            console.print(
-                f"[yellow]Warning: Model '{model_name}' uses legacy 'user', "
-                f"please use 'crud'[/yellow]"
-            )
-            raw = "crud"
-
+        # String format: "admin-crud", "crud", "rcud"
         parts = raw.split("-", 1)
         if len(parts) == 2:
             prefix_role, perm_chars = parts

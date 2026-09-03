@@ -5,6 +5,7 @@ import { BarChart3, Download, Loader2, Play, RotateCcw, SlidersHorizontal } from
 import { ModelReportChart } from '../components/visualization-chart';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { SearchableSelect } from '../components/ui/searchable-select';
 {% for model in report_models %}
 import { get{{ model.name }}ModelReportCatalog, query{{ model.name }}ModelReport } from '../services/{{ model.module_name }}';
@@ -242,17 +243,17 @@ const ReportsPage: React.FC = () => {
       <aside className="flex max-h-[calc(100vh-2rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70 p-4 shadow-sm xl:h-full xl:max-h-full">
         <div className="mb-5 flex shrink-0 items-center gap-2"><div className="rounded-lg bg-primary/10 p-2 text-primary"><SlidersHorizontal className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{t('reports.builder_settings', 'Report settings')}</h2><p className="text-xs text-muted-foreground">{t('reports.builder_settings_hint', 'Available choices are controlled by the model')}</p></div></div>
         <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
-        <Field label={String(t('reports.model', 'Model'))}><Select value={modelKey} onChange={setModelKey} options={models.map((item) => ({ value: item.key, label: modelLabel(item.key) }))} /></Field>
-        <Field label={String(t('reports.category', 'Chart category'))}><Select value={category} onChange={setCategory} options={(catalog?.categories || []).map((item) => ({ value: item, label: String(t(`reports.categories.${item}`, categoryLabels[item] || item)) }))} /></Field>
-        <Field label={String(t('reports.chart', 'Chart style'))}><Select value={chart} onChange={setChart} options={charts.map((item) => ({ value: item.key, label: chartLabel(item.key, item.label) }))} /></Field>
+        <Field label={String(t('reports.model', 'Model'))}><Select value={modelKey} onValueChange={setModelKey}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{models.map((item) => <SelectItem key={item.key} value={item.key}>{modelLabel(item.key)}</SelectItem>)}</SelectContent></Select></Field>
+        <Field label={String(t('reports.category', 'Chart category'))}><Select value={category} onValueChange={setCategory}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(catalog?.categories || []).map((item) => <SelectItem key={item} value={item}>{String(t(`reports.categories.${item}`, categoryLabels[item] || item))}</SelectItem>)}</SelectContent></Select></Field>
+        <Field label={String(t('reports.chart', 'Chart style'))}><Select value={chart} onValueChange={setChart}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{charts.map((item) => <SelectItem key={item.key} value={item.key}>{chartLabel(item.key, item.label)}</SelectItem>)}</SelectContent></Select></Field>
 
         {category !== 'composition' && <>
-          <Field label={String(t('reports.x_axis', 'X axis'))}><Select value={xField} onChange={(value) => { setXField(value); const option = catalog?.inputs.x.find((item) => item.field === value); setBin(option?.bins?.[0] || 'none'); }} options={fieldOptions(catalog?.inputs.x || [])} /></Field>
-          {!!xOption?.bins?.length && <Field label={String(t('reports.bin', 'Bin'))}><Select value={bin} onChange={(value) => { setBin(value); if (value !== 'none') setAggregations((current) => Object.fromEntries(Object.entries(current).map(([field, aggregation]) => { const allowed = catalog?.inputs.y.find((item) => item.field === field)?.aggregations || []; return [field, aggregation === 'raw' ? (allowed.find((item) => item !== 'raw') || aggregation) : aggregation]; }))); }} options={xOption.bins.map((item) => ({ value: item, label: String(t(`reports.bins.${item}`, binLabels[item] || item)) }))} /></Field>}
-          {Array.from({ length: yCount }).map((_, index) => <div key={index} className="grid grid-cols-[1fr_120px] gap-2"><Field label={`${t('reports.y_axis', 'Y axis')}${yCount > 1 ? ` ${index + 1}` : ''}`}><Select value={yFields[index] || ''} onChange={(value) => selectY(index, value)} options={fieldOptions(catalog?.inputs.y || [])} /></Field>{category !== 'scatter' && <Field label={String(t('reports.aggregation', 'Aggregation'))}><Select value={aggregations[yFields[index]] || 'raw'} onChange={(value) => setAggregations((current) => ({ ...current, [yFields[index]]: value }))} options={(catalog?.inputs.y.find((item) => item.field === yFields[index])?.aggregations || []).map((item) => ({ value: item, label: String(t(`reports.aggregations.${item}`, aggregationLabels[item] || item)) }))} /></Field>}</div>)}
+          <Field label={String(t('reports.x_axis', 'X axis'))}><Select value={xField} onValueChange={(value) => { setXField(value); const option = catalog?.inputs.x.find((item) => item.field === value); setBin(option?.bins?.[0] || 'none'); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldOptions(catalog?.inputs.x || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></Field>
+          {!!xOption?.bins?.length && <Field label={String(t('reports.bin', 'Bin'))}><Select value={bin} onValueChange={(value) => { setBin(value); if (value !== 'none') setAggregations((current) => Object.fromEntries(Object.entries(current).map(([field, aggregation]) => { const allowed = catalog?.inputs.y.find((item) => item.field === field)?.aggregations || []; return [field, aggregation === 'raw' ? (allowed.find((item) => item !== 'raw') || aggregation) : aggregation]; }))); }}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{xOption.bins.map((item) => <SelectItem key={item} value={item}>{String(t(`reports.bins.${item}`, binLabels[item] || item))}</SelectItem>)}</SelectContent></Select></Field>}
+          {Array.from({ length: yCount }).map((_, index) => <div key={index} className="grid grid-cols-[1fr_120px] gap-2"><Field label={`${t('reports.y_axis', 'Y axis')}${yCount > 1 ? ` ${index + 1}` : ''}`}><Select value={yFields[index] || ''} onValueChange={(value) => selectY(index, value)}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldOptions(catalog?.inputs.y || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></Field>{category !== 'scatter' && <Field label={String(t('reports.aggregation', 'Aggregation'))}><Select value={aggregations[yFields[index]] || 'raw'} onValueChange={(value) => setAggregations((current) => ({ ...current, [yFields[index]]: value }))}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(catalog?.inputs.y.find((item) => item.field === yFields[index])?.aggregations || []).map((item) => <SelectItem key={item} value={item}>{String(t(`reports.aggregations.${item}`, aggregationLabels[item] || item))}</SelectItem>)}</SelectContent></Select></Field>}</div>)}
         </>}
-        {showCls && <Field label={String(t('reports.classification', 'Classification'))}><Select value={clsField} onChange={setClsField} options={fieldOptions(catalog?.inputs.cls || [])} /></Field>}
-        {category === 'composition' && <Field label={String(t('reports.count', 'Count'))}><Select value={countField} onChange={setCountField} options={fieldOptions(catalog?.inputs.count || [])} /></Field>}
+        {showCls && <Field label={String(t('reports.classification', 'Classification'))}><Select value={clsField} onValueChange={setClsField}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldOptions(catalog?.inputs.cls || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></Field>}
+        {category === 'composition' && <Field label={String(t('reports.count', 'Count'))}><Select value={countField} onValueChange={setCountField}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldOptions(catalog?.inputs.count || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></Field>}
 
         {!!catalog?.filters.length && <div className="space-y-3 border-t pt-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('reports.filters', 'Filters')}</div>{catalog.filters.map((item) => <Field key={item.field} label={String(t(item.label_key || item.field, item.field))}>
           {item.is_foreign_key ? <SearchableSelect
@@ -263,9 +264,15 @@ const ReportsPage: React.FC = () => {
             loadOptions={(query) => loadForeignKeyOptions(modelKey, item.field, query)}
           /> : item.data_type === 'bool' ? <Select
             value={filterValues[item.field] ?? ''}
-            onChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
-            options={[{ value: '', label: String(t('common.all', 'All')) }, { value: 'true', label: String(t('common.yes', 'Yes')) }, { value: 'false', label: String(t('common.no', 'No')) }]}
-          /> : item.is_enum && item.is_multi_select ? <SearchableSelect
+            onValueChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
+          >
+            <SelectTrigger><SelectValue placeholder={String(t('common.all', 'All'))} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">{String(t('common.all', 'All'))}</SelectItem>
+              <SelectItem value="true">{String(t('common.yes', 'Yes'))}</SelectItem>
+              <SelectItem value="false">{String(t('common.no', 'No'))}</SelectItem>
+            </SelectContent>
+          </Select> : item.is_enum && item.is_multi_select ? <SearchableSelect
             multiple
             value={filterValues[item.field] || []}
             onValueChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
@@ -274,9 +281,14 @@ const ReportsPage: React.FC = () => {
             loadOptions={async (query) => (item.enum_values || []).map((value) => ({ label: String(t(`models.${modelKey}.enums.${item.field}.${value}`, String(value))), value })).filter((option) => option.label.toLowerCase().includes(query.toLowerCase()))}
           /> : item.is_enum ? <Select
             value={filterValues[item.field] ?? ''}
-            onChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
-            options={[{ value: '', label: String(t('common.all', 'All')) }, ...(item.enum_values || []).map((value) => ({ value: String(value), label: String(t(`models.${modelKey}.enums.${item.field}.${value}`, String(value))) }))]}
-          /> : item.data_type === 'date' || item.data_type === 'datetime' ? <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+            onValueChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
+          >
+            <SelectTrigger><SelectValue placeholder={String(t('common.all', 'All'))} /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="__all__">{String(t('common.all', 'All'))}</SelectItem>
+              {(item.enum_values || []).map((value) => <SelectItem key={String(value)} value={String(value)}>{String(t(`models.${modelKey}.enums.${item.field}.${value}`, String(value)))}</SelectItem>)}
+            </SelectContent>
+          </Select> : item.data_type === 'date' || item.data_type === 'datetime' ? <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
             <input type="date" value={filterValues[`${item.field}_from`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_from`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
             <span className="text-sm text-muted-foreground">-</span>
             <input type="date" value={filterValues[`${item.field}_to`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_to`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
@@ -289,8 +301,10 @@ const ReportsPage: React.FC = () => {
             className="h-10 w-full rounded-md border bg-background/50 px-3 text-sm"
           />}
         </Field>)}</div>}
-        <Button className="h-11 w-full" onClick={run} disabled={loading || !chart}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{t('reports.run_report', 'Run report')}</Button>
-        <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={reset}><RotateCcw className="mr-2 h-3.5 w-3.5" />{t('reports.reset_report', 'Reset')}</Button>
+        </div>
+        <div className="shrink-0 space-y-2 border-t pt-4">
+          <Button className="h-11 w-full" onClick={run} disabled={loading || !chart}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{t('reports.run_report', 'Run report')}</Button>
+          <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={reset}><RotateCcw className="mr-2 h-3.5 w-3.5" />{t('reports.reset_report', 'Reset')}</Button>
         </div>
       </aside>
 
@@ -306,5 +320,4 @@ const ReportsPage: React.FC = () => {
 };
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => <label className="block space-y-2"><span className="text-xs font-medium text-muted-foreground">{label}</span>{children}</label>;
-const Select: React.FC<{ value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }> = ({ value, onChange, options }) => <select className="h-10 w-full rounded-md border bg-background/50 px-3 text-sm" value={value} onChange={(event) => onChange(event.target.value)}>{options.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}</select>;
 export default ReportsPage;

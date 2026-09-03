@@ -387,7 +387,6 @@ def _sync_mqtt_callbacks(
     source_mqtt = source_integrations / "mqtt"
     target_integrations = backend_path / "app" / "integrations"
     target_mqtt = target_integrations / "mqtt"
-    legacy_mqtt = backend_path / "app" / "consumers" / "mqtt"
 
     _ensure_init_py(source_integrations)
     _ensure_init_py(source_mqtt)
@@ -397,18 +396,11 @@ def _sync_mqtt_callbacks(
         source_file = source_mqtt / f"{handler_name}.py"
 
         if not source_file.exists():
-            legacy_file = legacy_mqtt / f"{handler_name}.py"
-            if _async_function_exists(legacy_file, handler_name):
-                copy_file_with_status(legacy_file, source_file)
-                console.print(
-                    f"[yellow]Migrated legacy MQTT handler to {source_file}[/yellow]"
-                )
-            else:
-                generate_file(
-                    "mqtt_callback.py.j2",
-                    {"callback": callback},
-                    source_file,
-                )
+            generate_file(
+                "mqtt_callback.py.j2",
+                {"callback": callback},
+                source_file,
+            )
 
         if not _async_function_exists(source_file, handler_name):
             raise SiteConfigError(

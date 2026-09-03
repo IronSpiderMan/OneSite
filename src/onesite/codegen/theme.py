@@ -179,13 +179,6 @@ def resolve_theme(site_config: Dict[str, Any]) -> Tuple[Dict[str, Any], float]:
     # so ``SiteConfig(theme=\"neuron\")`` is not silently shadowed by that
     # default field during model_dump().
     theme_name = site_config.get("theme") or site_config.get("style") or "normal"
-    legacy_style_alias = {
-        "slate": "normal",
-        "blue": "normal",
-        "red": "industrial",
-        "green": "normal",
-    }
-    theme_name = legacy_style_alias.get(theme_name, theme_name)
     if theme_name not in THEMES:
         console.print(f"[yellow]Warning: Theme/Style '{theme_name}' not found. Falling back to 'normal'.[/yellow]")
         theme_name = "normal"

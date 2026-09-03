@@ -69,28 +69,10 @@ def generate_code() -> None:
     # resolved FK and reverse-FK paths.  Keep charts in the transient
     # generation context; KPI metadata is attached to its source model.
     site_config["_visualizations"] = load_and_compile_visualizations(cwd, models)
-    legacy_dashboard_metrics = [
-        model["name"] for model in models if model.get("dashboard_metrics")
-    ]
     apply_dashboard_metrics(
         models,
         load_and_compile_dashboard_metrics(cwd, models),
     )
-    legacy_visualizations = [model["name"] for model in models if model.get("visualize")]
-    if legacy_visualizations:
-        console.print(
-            "[yellow]Model-level __onesite__.visualize is deprecated. "
-            "Move these charts to visualizations.py: "
-            + ", ".join(legacy_visualizations)
-            + "[/yellow]"
-        )
-    if legacy_dashboard_metrics:
-        console.print(
-            "[yellow]Model-level __onesite__.dashboard_metrics is deprecated. "
-            "Move these KPIs to visualizations.py: "
-            + ", ".join(legacy_dashboard_metrics)
-            + "[/yellow]"
-        )
 
     # Phase 5 — Theme & assets (before codegen so generated files aren't overwritten)
     phase_theme_assets.phase_theme_and_assets(site_config, cwd, backend_path)
