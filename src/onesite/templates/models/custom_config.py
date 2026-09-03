@@ -13,6 +13,7 @@ class ThemeStyleEnum(str, Enum):
     NORMAL = "normal"
     INDUSTRIAL = "industrial"
     NEURON = "neuron"
+    ARCO = "arco"
 
 class ThemeModeEnum(str, Enum):
     SYSTEM = "system"

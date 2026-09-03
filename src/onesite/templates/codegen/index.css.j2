@@ -212,6 +212,186 @@
   border-bottom-style: dashed !important;
 }
 
+{# ── Arco theme-specific rules ── #}
+{# A compact enterprise console, inspired by the supplied Arco Design Pro reference. #}
+[data-theme="arco"] { color-scheme: light; }
+[data-theme="arco"].dark { color-scheme: dark; }
+[data-theme="arco"] body {
+  font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", sans-serif;
+  background: hsl(var(--background));
+}
+[data-theme="arco"] h1, [data-theme="arco"] h2, [data-theme="arco"] h3,
+[data-theme="arco"] h4, [data-theme="arco"] h5, [data-theme="arco"] h6 { letter-spacing: -0.015em; }
+[data-theme="arco"] main [class*="rounded"], [data-theme="arco"] button,
+[data-theme="arco"] input, [data-theme="arco"] textarea, [data-theme="arco"] select { border-radius: 6px; }
+[data-theme="arco"] main .bg-card, [data-theme="arco"] [role="dialog"],
+[data-theme="arco"] [role="listbox"] { box-shadow: 0 4px 16px rgb(31 56 88 / 0.06); }
+[data-theme="arco"] thead th { background: hsl(var(--muted) / 0.75); color: hsl(var(--muted-foreground)); font-size: 0.75rem; font-weight: 600; }
+[data-theme="arco"] tbody tr { border-bottom-color: hsl(var(--border) / 0.75); }
+[data-theme="arco"] tbody tr:hover { background: hsl(var(--accent) / 0.55); }
+[data-theme="arco"] .arco-sider { background: #fff !important; color: hsl(var(--foreground)); border-right: 1px solid hsl(var(--border)); }
+[data-theme="arco"].dark .arco-sider { background: hsl(var(--card)) !important; }
+[data-theme="arco"] .arco-brand { color: hsl(var(--foreground)); background: #fff; }
+[data-theme="arco"].dark .arco-brand { background: hsl(var(--card)); }
+[data-theme="arco"] .arco-logo-mark { background: #1677ff !important; color: white !important; box-shadow: 0 4px 12px rgb(22 119 255 / 0.35); }
+[data-theme="arco"] .arco-nav { padding-top: 18px; }
+[data-theme="arco"] .arco-nav-item { border: 0; margin-bottom: 2px; }
+[data-theme="arco"] .arco-nav-item.text-primary { background: rgb(22 119 255 / 0.11); color: #1677ff; }
+[data-theme="arco"] .arco-nav-item svg { color: currentColor; }
+[data-theme="arco"] .arco-sider .text-muted-foreground { color: hsl(var(--muted-foreground)) !important; }
+[data-theme="arco"] .arco-sider .border-t { border-color: hsl(var(--border)); }
+[data-theme="arco"] .arco-header { background: hsl(var(--card) / 0.95) !important; backdrop-filter: blur(12px); }
+[data-theme="arco"] .arco-workspace { background: hsl(var(--background)); }
+[data-theme="arco"] button[class*="bg-primary"] { box-shadow: 0 2px 6px rgb(22 119 255 / 0.18); }
+[data-theme="arco"] button[class*="bg-primary"]:hover { box-shadow: 0 5px 13px rgb(22 119 255 / 0.28); transform: translateY(-1px); }
+[data-theme="arco"] [data-page-region="grid-list"] > .grid {
+  gap: 20px;
+}
+[data-theme="arco"] [data-grid-create-card] {
+  min-height: 250px;
+  border-color: hsl(var(--border) / 0.9);
+  background: hsl(var(--card));
+  color: hsl(var(--muted-foreground));
+  box-shadow: none;
+}
+[data-theme="arco"] [data-grid-create-card]:hover {
+  border-color: rgb(22 119 255 / 0.55);
+  background: rgb(22 119 255 / 0.025);
+  box-shadow: 0 8px 24px rgb(31 56 88 / 0.08);
+  transform: translateY(-1px);
+}
+[data-theme="arco"] [data-grid-create-card] svg {
+  height: 42px;
+  width: 42px;
+  stroke-width: 1.5;
+}
+[data-theme="arco"] [data-grid-create-card] span {
+  font-size: 0.875rem;
+}
+[data-theme="arco"] [data-grid-card] {
+  min-height: 250px;
+  overflow: hidden;
+  border-color: hsl(var(--border) / 0.9);
+  box-shadow: none;
+}
+[data-theme="arco"] [data-grid-card]:hover {
+  border-color: rgb(22 119 255 / 0.45);
+  box-shadow: 0 8px 24px rgb(31 56 88 / 0.1);
+}
+[data-theme="arco"] [data-grid-card] > div:first-child {
+  border-bottom: 0;
+  padding: 28px 32px 0;
+}
+[data-theme="arco"] [data-grid-card] h2 {
+  color: hsl(var(--foreground));
+  font-size: 1.25rem;
+  font-weight: 650;
+  line-height: 1.5;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-id {
+  display: none;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-select {
+  position: absolute;
+  right: 20px;
+  top: 20px;
+  margin: 0;
+  opacity: 0;
+  transition: opacity 150ms ease;
+}
+[data-theme="arco"] [data-grid-card]:hover .grid-card-select,
+[data-theme="arco"] [data-grid-card] .grid-card-select:focus-visible,
+[data-theme="arco"] [data-grid-card] .grid-card-select:checked {
+  opacity: 1;
+}
+[data-theme="arco"] [data-grid-card] dl {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  column-gap: 24px;
+  row-gap: 20px;
+  padding: 18px 32px 28px;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-field {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+  font-size: 1rem;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-field dt {
+  flex: 0 0 auto;
+  color: hsl(var(--muted-foreground));
+  font-weight: 600;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-field dd {
+  min-width: 0;
+  text-align: left;
+  color: hsl(var(--foreground));
+  font-weight: 500;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-field[data-grid-field-type="datetime"],
+[data-theme="arco"] [data-grid-card] .grid-card-field[data-grid-field-type="date"] {
+  grid-column: 1 / -1;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-field[data-grid-field="created_at"] dt {
+  display: none;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-field[data-grid-field="created_at"] dd {
+  color: hsl(var(--muted-foreground));
+  font-size: 1rem;
+  font-weight: 400;
+}
+[data-theme="arco"] [data-grid-card] > div:last-child {
+  margin-top: auto;
+  justify-content: flex-end;
+  gap: 16px;
+  border-top: 0;
+  padding: 0 32px 28px;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action {
+  height: 42px;
+  min-width: 88px;
+  padding: 0 20px;
+  font-size: 1rem;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action svg {
+  display: none;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action .sr-only {
+  position: static;
+  width: auto;
+  height: auto;
+  margin: 0;
+  padding: 0;
+  overflow: visible;
+  clip: auto;
+  clip-path: none;
+  white-space: normal;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action-edit {
+  background: #1677ff;
+  color: #fff;
+  box-shadow: 0 2px 6px rgb(22 119 255 / 0.18);
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action-edit:hover {
+  background: #0f6ae6;
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action-delete {
+  background: hsl(var(--muted) / 0.65);
+  color: hsl(var(--foreground));
+}
+[data-theme="arco"] [data-grid-card] .grid-card-action-delete:hover {
+  background: hsl(var(--destructive) / 0.12);
+  color: hsl(var(--destructive));
+}
+@media (max-width: 640px) {
+  [data-theme="arco"] [data-grid-card] dl { grid-template-columns: 1fr; }
+  [data-theme="arco"] [data-grid-card] .grid-card-field[data-grid-field-type="datetime"],
+  [data-theme="arco"] [data-grid-card] .grid-card-field[data-grid-field-type="date"] { grid-column: auto; }
+}
+[data-theme="arco"] ::-webkit-scrollbar { width: 7px; height: 7px; }
+[data-theme="arco"] ::-webkit-scrollbar-thumb { background: hsl(var(--border)); border-radius: 999px; }
+
 {# ── Neuron theme-specific rules ── #}
 {# A telemetry-console treatment with light and dark color modes. #}
 [data-theme="neuron"] {

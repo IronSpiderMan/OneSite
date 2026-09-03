@@ -34,6 +34,7 @@ class Theme(str, Enum):
     NORMAL = "normal"
     INDUSTRIAL = "industrial"
     NEURON = "neuron"
+    ARCO = "arco"
 
 
 class ListMode(str, Enum):

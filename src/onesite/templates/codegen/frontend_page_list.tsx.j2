@@ -1144,11 +1144,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
               <Trash className="mr-2 h-4 w-4" /> {t('common.bulk_delete', 'Delete')} ({selectedIds.length})
             </Button>
           )}
+          {% if model.list_mode != 'grid' %}
           {hasPermission('c') && (
             <Button onClick={handleCreate}>
               <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
             </Button>
           )}
+          {% endif %}
           {% if model.has_embedded_page %}
           {embedded && allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
             <Button
@@ -1339,32 +1341,61 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         )}
         {loading ? (
           <div className="flex h-24 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin" /></div>
-        ) : data.length === 0 ? (
+        ) : data.length === 0 && !hasPermission('c') ? (
           <div className="flex h-24 items-center justify-center rounded-md border text-muted-foreground">{t('common.no_result')}</div>
         ) : (
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+            {hasPermission('c') && (
+              <button
+                type="button"
+                data-grid-create-card
+                onClick={handleCreate}
+                className="flex min-h-[180px] flex-col items-center justify-center gap-3 rounded-lg border bg-card text-muted-foreground transition-all hover:border-primary/50 hover:bg-primary/[0.03] hover:text-primary"
+                aria-label={`${t('common.click_to_create')} ${t('models.{{ model.module_name }}.name')}`}
+              >
+                <Plus className="h-9 w-9" strokeWidth={1.8} />
+                <span className="text-sm">{t('common.click_to_create')} {t('models.{{ model.module_name }}.name')}</span>
+              </button>
+            )}
             {data.map((item) => (
-              <article key={item.id} className="flex min-w-0 flex-col rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md">
+              <article
+                key={item.id}
+                data-grid-card
+                className={`group relative flex min-w-0 flex-col rounded-lg border bg-card shadow-sm transition-shadow hover:shadow-md ${!embedded && hasPermission('r') ? 'cursor-pointer' : ''}`}
+                role={!embedded && hasPermission('r') ? 'button' : undefined}
+                tabIndex={!embedded && hasPermission('r') ? 0 : undefined}
+                onClick={(event) => {
+                  if (!embedded && hasPermission('r') && !(event.target as HTMLElement).closest('button, input, a')) {
+                    navigate(`/{{ model.module_name }}s/${item.id}`);
+                  }
+                }}
+                onKeyDown={(event) => {
+                  if (!embedded && hasPermission('r') && (event.key === 'Enter' || event.key === ' ')) {
+                    event.preventDefault();
+                    navigate(`/{{ model.module_name }}s/${item.id}`);
+                  }
+                }}
+              >
                 <div className="flex items-start gap-3 border-b p-4">
                   <input
                     type="checkbox"
                     checked={selectedIds.includes(item.id)}
                     onChange={() => toggleSelect(item.id)}
-                    className="mt-1 h-4 w-4 shrink-0 rounded border-gray-300"
+                    className="grid-card-select mt-1 h-4 w-4 shrink-0 rounded border-gray-300"
                     aria-label={t('common.select', 'Select')}
                   />
                   <div className="min-w-0 flex-1">
                     <h2 className="truncate font-semibold" title={String(item.{{ model.search_field }} ?? item.id)}>
                       {String(item.{{ model.search_field }} ?? item.id)}
                     </h2>
-                    <p className="mt-1 text-xs text-muted-foreground">ID: {String(item.id)}</p>
+                    <p className="grid-card-id mt-1 text-xs text-muted-foreground">ID: {String(item.id)}</p>
                   </div>
                 </div>
                 <dl className="flex-1 space-y-3 p-4">
                   {% for field in model.fields %}
                   {% if 'r' in field.permissions and field.name != model.search_field %}
                   {hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
-                    <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
+                    <div data-grid-field="{{ field.name }}" data-grid-field-type="{{ field.ui_type }}" className="grid-card-field grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
                       <dt className="truncate text-muted-foreground" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</dt>
                       <dd className="min-w-0 break-words text-right">{renderGridValue('{{ field.name }}', item)}</dd>
                     </div>
@@ -1372,7 +1403,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                   {% endif %}
                   {% endfor %}
                   {% for field in model.extra_fields | default([]) | selectattr('show_in_list') | list %}
-                  <div className="grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
+                  <div data-grid-field="{{ field.name }}" data-grid-field-type="{{ field.component | default('text') }}" className="grid-card-field grid min-w-0 grid-cols-[minmax(0,0.42fr)_minmax(0,0.58fr)] gap-3 text-sm">
                     <dt className="truncate text-muted-foreground">{% if field.component | default('') == 'online_status' %}{t('common.online_status')}{% else %}{{ field.label if field.label is string else field.name }}{% endif %}</dt>
                     <dd className="min-w-0 break-words text-right">
                       {% if field.component | default('') == 'online_status' %}
@@ -1441,9 +1472,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                   )}
                   {% endfor %}
                   {% endif %}
-                  {!embedded && hasPermission('r') && <Button variant="ghost" size="icon" onClick={() => navigate(`/{{ model.module_name }}s/${item.id}`)}><Eye className="h-4 w-4" /></Button>}
-                  {hasPermission('u') && <Button variant="ghost" size="icon" onClick={() => handleEdit(item)}><Pencil className="h-4 w-4" /></Button>}
-                  {hasPermission('d') && <Button variant="ghost" size="icon" className="text-destructive" onClick={() => requestDelete(item.id)}><Trash2 className="h-4 w-4" /></Button>}
+                  {hasPermission('u') && <Button variant="ghost" size="icon" className="grid-card-action grid-card-action-edit" onClick={() => handleEdit(item)}><Pencil className="h-4 w-4" /><span className="sr-only">{t('common.edit')}</span></Button>}
+                  {hasPermission('d') && <Button variant="ghost" size="icon" className="grid-card-action grid-card-action-delete text-destructive" onClick={() => requestDelete(item.id)}><Trash2 className="h-4 w-4" /><span className="sr-only">{t('common.delete')}</span></Button>}
                 </div>
               </article>
             ))}

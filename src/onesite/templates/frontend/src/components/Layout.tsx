@@ -8,7 +8,7 @@ import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
 import { NotificationBell } from './notification-bell';
 
-type ThemeStyle = 'normal' | 'industrial' | 'neuron';
+type ThemeStyle = 'normal' | 'industrial' | 'neuron' | 'arco';
 
 function useThemeStyle(): ThemeStyle {
   const [style, setStyle] = useState<ThemeStyle>(
@@ -35,6 +35,7 @@ const SIDEBAR_EXTRA: Record<ThemeStyle, string> = {
   normal: '',
   industrial: 'rounded-none',
   neuron: 'rounded-none',
+  arco: 'rounded-none',
 };
 
 // Theme-specific active nav item
@@ -42,16 +43,19 @@ const NAV_ACTIVE: Record<ThemeStyle, string> = {
   normal: 'bg-primary/10 text-primary font-medium border-r-[3px] border-primary pr-[calc(1rem-3px)]',
   industrial: 'bg-primary text-primary-foreground border-l-[3px] border-accent pl-[calc(1rem-3px)]',
   neuron: 'bg-primary/10 text-primary font-semibold border-l-2 border-primary pl-[calc(1rem-2px)]',
+  arco: 'bg-primary/15 text-primary font-semibold',
 };
 const NAV_INACTIVE: Record<ThemeStyle, string> = {
   normal: 'text-foreground/75 hover:bg-muted hover:text-primary border-r-[3px] border-transparent',
   industrial: 'hover:bg-accent hover:text-accent-foreground border-l-[3px] border-transparent',
   neuron: 'hover:bg-muted hover:text-foreground border-l-2 border-transparent',
+  arco: 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
 };
 const NAV_ITEM_BASE: Record<ThemeStyle, string> = {
   normal: 'rounded-none',
   industrial: 'rounded-none',
   neuron: 'rounded-none',
+  arco: 'rounded-md',
 };
 
 // Theme-specific header classes
@@ -59,6 +63,7 @@ const HEADER_EXTRA: Record<ThemeStyle, string> = {
   normal: 'border-b border-b-border shadow-[0_1px_4px_rgb(0_21_41_/_0.08)]',
   industrial: 'border-b-2 border-b-accent/30',
   neuron: 'border-b border-b-border',
+  arco: 'border-b border-b-border shadow-none',
 };
 
 // Theme-specific logo area
@@ -66,6 +71,7 @@ const LOGO_AREA_EXTRA: Record<ThemeStyle, string> = {
   normal: 'border-b border-b-border',
   industrial: 'border-b-2 border-b-accent/40',
   neuron: 'border-b border-b-border',
+  arco: 'border-b border-white/10',
 };
 
 const AppLayout: React.FC = () => {
@@ -157,6 +163,7 @@ const AppLayout: React.FC = () => {
   const isCollapsed = collapsed;
   const isNormal = theme === 'normal';
   const isNeuron = theme === 'neuron';
+  const isArco = theme === 'arco';
 
   const sidebarWidth = isCollapsed ? SIDEBAR_WIDTH_COLLAPSED : isNormal ? 'md:w-56' : SIDEBAR_WIDTH;
   const mainMargin = isCollapsed ? MAIN_MARGIN_COLLAPSED : isNormal ? 'md:ml-56' : MAIN_MARGIN;
@@ -179,7 +186,7 @@ const AppLayout: React.FC = () => {
       : t('common.dashboard', 'Dashboard');
 
   return (
-    <div className={cn("h-screen overflow-hidden flex", isNormal && "ant-admin-shell")}>
+    <div className={cn("h-screen overflow-hidden flex", isNormal && "ant-admin-shell", isArco && "arco-shell")}>
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
@@ -195,11 +202,12 @@ const AppLayout: React.FC = () => {
           sidebarWidth,
           SIDEBAR_EXTRA[theme],
           isNormal && "ant-admin-sider",
+          isArco && "arco-sider",
           sidebarOpen ? "translate-x-0" : "-translate-x-full"
         )}
       >
         {/* Logo area */}
-        <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isNormal && "ant-admin-brand", isNeuron && "neuron-brand-area h-[72px] px-5", isCollapsed ? "justify-center" : "justify-between")}>
+        <div className={cn("h-16 flex items-center px-4 border-b", LOGO_AREA_EXTRA[theme], isNormal && "ant-admin-brand", isNeuron && "neuron-brand-area h-[72px] px-5", isArco && "arco-brand", isCollapsed ? "justify-center" : "justify-between")}>
           {isNeuron ? (
             <Link to={logoLink} className="neuron-brand min-w-0 no-underline">
               {logoUrl ? (
@@ -223,7 +231,7 @@ const AppLayout: React.FC = () => {
                   {logoUrl ? (
                     <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain" />
                   ) : (
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm">
+                    <div className={cn("h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm", isArco && "arco-logo-mark")}>
                       {projectName.charAt(0).toUpperCase()}
                     </div>
                   )}
@@ -233,7 +241,7 @@ const AppLayout: React.FC = () => {
                   {logoUrl ? (
                     <img src={logoUrl} alt="Logo" className="h-8 w-8 rounded-lg object-contain flex-shrink-0" />
                   ) : (
-                    <div className="h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0">
+                    <div className={cn("h-8 w-8 rounded-lg bg-primary/10 flex items-center justify-center text-primary font-bold text-sm flex-shrink-0", isArco && "arco-logo-mark")}>
                       {projectName.charAt(0).toUpperCase()}
                     </div>
                   )}
@@ -250,7 +258,7 @@ const AppLayout: React.FC = () => {
         </div>
 
         {/* Navigation */}
-        <nav className={cn("flex-1 overflow-y-auto py-4", isNormal && "ant-admin-menu", isNeuron && "neuron-nav", isCollapsed ? "px-2" : isNormal ? "px-0" : "px-4")}>
+        <nav className={cn("flex-1 overflow-y-auto py-4", isNormal && "ant-admin-menu", isNeuron && "neuron-nav", isArco && "arco-nav", isCollapsed ? "px-2" : isNormal ? "px-0" : "px-4")}>
           {!isCollapsed && (
             <div className={cn("px-4 py-2 text-[0.65rem] font-semibold uppercase tracking-[0.12em] text-muted-foreground", isNeuron && "neuron-nav-heading")}>
               {isNeuron ? <><span>01</span> OPERATIONS</> : t('common.navigation', 'Navigation')}
@@ -286,12 +294,15 @@ const AppLayout: React.FC = () => {
                       className={cn(
                         "w-full flex items-center transition-all duration-150",
                         isNeuron && "neuron-nav-item",
+                        isArco && "arco-nav-item",
                         NAV_ITEM_BASE[theme],
                         isCollapsed
                           ? "justify-center py-2.5 px-0"
                           : "space-x-2 px-4 py-2",
                         !isCollapsed && "menu-nav-group-trigger",
-                        containsActiveItem ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
+                        // A group's active descendant keeps the group expanded,
+                        // but only the matching child represents the current page.
+                        NAV_INACTIVE[theme]
                       )}
                     >
                       {item.icon}
@@ -315,6 +326,7 @@ const AppLayout: React.FC = () => {
                               className={cn(
                                 "menu-nav-group-child flex items-center gap-2 py-2 pl-5 pr-4 text-sm transition-all duration-150",
                                 isNeuron && "neuron-nav-item",
+                                isArco && "arco-nav-item",
                                 isChildActive ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
                               )}
                             >
@@ -336,6 +348,7 @@ const AppLayout: React.FC = () => {
                   className={cn(
                     "flex items-center transition-all duration-150",
                     isNeuron && "neuron-nav-item",
+                    isArco && "arco-nav-item",
                     NAV_ITEM_BASE[theme],
                     isCollapsed
                       ? "justify-center py-2.5 px-0"
@@ -365,6 +378,7 @@ const AppLayout: React.FC = () => {
               className={cn(
                 "flex items-center transition-all duration-150",
                 isNeuron && "neuron-nav-item",
+                isArco && "arco-nav-item",
                 NAV_ITEM_BASE[theme],
                 isCollapsed
                   ? "justify-center py-2.5 px-0"
@@ -396,7 +410,7 @@ const AppLayout: React.FC = () => {
 
       {/* Main Content */}
       <div className={cn("flex-1 flex flex-col min-w-0 min-h-0", mainMargin)}>
-        <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme], isNormal && "ant-admin-header", isNeuron && "neuron-header h-[72px] px-5 md:px-7")}>
+        <header className={cn("h-16 bg-card flex items-center px-4 justify-between sticky top-0 z-40", HEADER_EXTRA[theme], isNormal && "ant-admin-header", isNeuron && "neuron-header h-[72px] px-5 md:px-7", isArco && "arco-header px-5 md:px-7")}>
             <div className="flex items-center gap-2">
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
                   <MenuIcon className="h-5 w-5" />
@@ -434,7 +448,7 @@ const AppLayout: React.FC = () => {
                 </Button>
             </div>
         </header>
-        <main className={cn("flex-1 min-h-0 p-6 overflow-auto", isNormal && "ant-admin-content", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7")}>
+        <main className={cn("flex-1 min-h-0 p-6 overflow-auto", isNormal && "ant-admin-content", isNeuron && "neuron-workspace px-5 py-6 md:px-8 md:py-7", isArco && "arco-workspace px-5 py-5 md:px-7 md:py-6")}>
             <Outlet />
         </main>
       </div>

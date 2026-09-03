@@ -161,6 +161,31 @@ async def get_multi(
     return list(result.all())
 
 
+async def get_with_fk_labels(
+    session: AsyncSession,
+    id: int,
+) -> Optional[Dict[str, Any]]:
+    """Get one user with the same FK label enrichment as list responses."""
+    item = await get(session, id)
+    if item is None:
+        return None
+
+    item_dict = item.model_dump()
+    {% for fk in model.foreign_keys %}
+    fk_id = getattr(item, "{{ fk.name }}", None)
+    if fk_id is not None:
+        from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
+        fk_obj = await session.get({{ fk.target_model }}, fk_id)
+        item_dict["{{ fk.name }}_label"] = (
+            getattr(fk_obj, "{{ fk.label_field }}", None) or str(fk_obj.id)
+            if fk_obj is not None else None
+        )
+    else:
+        item_dict["{{ fk.name }}_label"] = None
+    {% endfor %}
+    return item_dict
+
+
 async def get_multi_with_fk_labels(
     session: AsyncSession,
     *,
