@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye, Braces{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
+import { Plus, Pencil, Trash2, Loader2, Eye{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -157,7 +157,6 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
           className="inline-flex max-w-[250px] items-start gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
           title="View JSON"
         >
-          <Braces className="mt-0.5 h-3.5 w-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
           <span className="whitespace-pre-line break-all text-left">
             {preview}
             {hasMore && <span className="text-muted-foreground">...</span>}
