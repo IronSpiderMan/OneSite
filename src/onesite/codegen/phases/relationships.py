@@ -327,6 +327,113 @@ def _resolve_fk_labels_and_reverse(
             relation["inline_fields"] = inline_fields
             relation["inline_schema"] = inline_schema
 
+    # A model often stores both a parent and one of its children, e.g.
+    # ``C.a_id -> A`` and ``C.b_id -> B`` where ``B.a_id -> A``.  Make that
+    # relationship a cascading selector: choose A first, then only load B rows
+    # that belong to it.  ``site_props.cascade`` can make an ambiguous relation
+    # explicit: {"parent_field": "a_id", "filter_field": "a_id"}.
+    for model in models:
+        fks_by_name = {fk["name"]: fk for fk in model["foreign_keys"]}
+        for fk in model["foreign_keys"]:
+            target_model = model_map.get(fk["target_model"])
+            if target_model is None:
+                continue
+
+            cascade = fk.get("cascade", {}) or {}
+            if not isinstance(cascade, dict):
+                raise ValueError(
+                    f"{model['name']}.{fk['name']} site_props.cascade must be an object"
+                )
+            parent_name = cascade.get("parent_field") or cascade.get("depends_on")
+            filter_name = cascade.get("filter_field") or cascade.get("target_field")
+
+            if parent_name:
+                parent_fk = fks_by_name.get(str(parent_name))
+                if parent_fk is None:
+                    raise ValueError(
+                        f"{model['name']}.{fk['name']} cascade.parent_field "
+                        f"{parent_name!r} must be a foreign key on {model['name']}"
+                    )
+                if not filter_name:
+                    candidates = [
+                        target_fk for target_fk in target_model["foreign_keys"]
+                        if target_fk["target_model"] == parent_fk["target_model"]
+                    ]
+                    if len(candidates) == 1:
+                        filter_name = candidates[0]["name"]
+                target_filter_fk = next(
+                    (target_fk for target_fk in target_model["foreign_keys"]
+                     if target_fk["name"] == filter_name),
+                    None,
+                )
+                if target_filter_fk is None or target_filter_fk["target_model"] != parent_fk["target_model"]:
+                    raise ValueError(
+                        f"{model['name']}.{fk['name']} cascade.filter_field "
+                        f"{filter_name!r} must be a foreign key on {target_model['name']} "
+                        f"that targets {parent_fk['target_model']}"
+                    )
+                fk["cascade_parent_field"] = parent_fk["name"]
+                fk["cascade_filter_field"] = target_filter_fk["name"]
+
+                continue
+
+            candidates: list[tuple[dict, dict]] = []
+            for parent_fk in model["foreign_keys"]:
+                if parent_fk["name"] == fk["name"]:
+                    continue
+                for target_fk in target_model["foreign_keys"]:
+                    if target_fk["target_model"] == parent_fk["target_model"]:
+                        candidates.append((parent_fk, target_fk))
+            # Only infer unambiguous paths; otherwise users can opt in with
+            # site_props.cascade to avoid silently filtering on the wrong key.
+            if len(candidates) == 1:
+                parent_fk, target_filter_fk = candidates[0]
+                fk["cascade_parent_field"] = parent_fk["name"]
+                fk["cascade_filter_field"] = target_filter_fk["name"]
+
+    # Resolve selectors inferred from two-column composite foreign keys.  The
+    # dependent field stores the constrained remote value (often ``name``),
+    # rather than the target model's synthetic/opaque identity.
+    table_model_map = {model["table_name"]: model for model in models}
+    for model in models:
+        fields_by_name = {field["name"]: field for field in model["fields"]}
+        for field in model["fields"]:
+            selector = field.get("composite_selector")
+            if not selector:
+                continue
+            target_model = table_model_map.get(selector["target_table"])
+            parent_field = fields_by_name.get(selector["parent_field"])
+            if target_model is None or parent_field is None:
+                field["composite_selector"] = None
+                continue
+            target_fields = {item["name"]: item for item in target_model["fields"]}
+            value_field = target_fields.get(selector["value_field"])
+            filter_field = target_fields.get(selector["filter_field"])
+            parent_fk = parent_field.get("fk_info")
+            filter_fk = filter_field.get("fk_info") if filter_field else None
+            target_primary_key = set(target_model.get("primary_key_columns", []))
+            expected_primary_key = {selector["filter_field"], selector["value_field"]}
+            if (
+                value_field is None
+                or filter_field is None
+                or "r" not in value_field["permissions"]
+                or parent_fk is None
+                or filter_fk is None
+                or parent_fk["target_model"] != filter_fk["target_model"]
+                or (target_primary_key and target_primary_key != expected_primary_key)
+            ):
+                field["composite_selector"] = None
+                continue
+            # SearchableSelect sends its text query using the displayed value
+            # column.  Make that column an accepted list endpoint filter even
+            # when the model explicitly chose another primary search field.
+            value_field["is_search_field"] = True
+            selector.update({
+                "target_model": target_model["name"],
+                "target_service": target_model["module_name"],
+                "label_field": selector["value_field"],
+            })
+
     # Report filters use the same resolved relationship metadata as list-page
     # filters.  Introspection happens before relationship resolution, so refresh
     # the initially inferred target service and label field here.

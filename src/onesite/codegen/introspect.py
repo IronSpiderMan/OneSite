@@ -1033,6 +1033,8 @@ def _normalize_multi_display(
                 "zoom": zoom,
                 "label_key": field.label_key,
                 "ui_type": field.ui_type,
+                "json_model_schema": field.json_model_schema,
+                "json_item_schema": field.json_item_schema,
                 "is_enum": field.is_enum,
                 "is_multi_select": field.is_multi_select,
                 "is_foreign_key": field.fk_info is not None,
@@ -1577,6 +1579,7 @@ def get_model_fields(
                 label_field="name",
                 reverse_display=reverse_display,
                 reverse=reverse,
+                cascade=site_props.get("cascade", {}) or {},
                 is_self_referencing=is_self_referencing,
             )
 
@@ -1687,6 +1690,51 @@ def get_model_fields(
         )
 
     model_field_names = {field.name for field in fields}
+
+    # Detect the dependent value in a two-column composite FK.  We keep this
+    # as raw table/column metadata here; the target model/service is resolved
+    # after every model has been introspected.
+    table = getattr(model_cls, "__table__", None)
+    if table is not None:
+        fields_by_name = {field.name: field for field in fields}
+        for constraint in table.foreign_key_constraints:
+            elements = list(constraint.elements)
+            if len(elements) != 2:
+                continue
+            pairs = []
+            for element in elements:
+                target_fullname = str(element.target_fullname)
+                if "." not in target_fullname:
+                    break
+                target_table, target_field = target_fullname.rsplit(".", 1)
+                pairs.append({
+                    "local_field": str(element.parent.name),
+                    "target_table": target_table,
+                    "target_field": target_field,
+                })
+            if len(pairs) != 2 or len({pair["target_table"] for pair in pairs}) != 1:
+                continue
+
+            parent_pairs = [
+                pair for pair in pairs
+                if pair["local_field"].endswith("_id")
+                and pair["target_field"].endswith("_id")
+            ]
+            if len(parent_pairs) != 1:
+                continue
+            parent_pair = parent_pairs[0]
+            value_pair = next(pair for pair in pairs if pair is not parent_pair)
+            parent_field = fields_by_name.get(parent_pair["local_field"])
+            value_field = fields_by_name.get(value_pair["local_field"])
+            if parent_field is None or value_field is None or value_field.fk_info is not None:
+                continue
+            value_field.composite_selector = {
+                "target_table": value_pair["target_table"],
+                "parent_field": parent_pair["local_field"],
+                "filter_field": parent_pair["target_field"],
+                "value_field": value_pair["target_field"],
+            }
+
     for field in fields:
         root_controllers = _json_schema_root_controllers(
             field.json_model_schema or field.json_item_schema

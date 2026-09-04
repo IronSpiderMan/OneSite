@@ -11,7 +11,8 @@ export interface {{ model.name }} {
     id: {{ 'string' if 'str' in model.id_type else 'number' }};
 {% for field in model.fields %}
     {% if field.name != 'id' and 'r' in field.permissions %}
-    {{ field.name }}: {{ 'Record<string, any>' if 'Dict[' in field.type else 'string[]' if field.is_multi_select else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
+    {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
+    {{ field.name }}: {{ 'string' if override and override.read_type == 'str' else 'number' if override and override.read_type in ('int', 'float') else 'boolean' if override and override.read_type == 'bool' else 'any' if override else 'Record<string, any>' if 'Dict[' in field.type else 'string[]' if field.is_multi_select else 'any[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
     {% if field.fk_info %}
     {{ field.name }}_label?: string;
     {% endif %}

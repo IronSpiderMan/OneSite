@@ -1,8 +1,7 @@
-import React, { useMemo, useState } from 'react';
-import { LayoutGrid, Search } from 'lucide-react';
+import React, { useMemo } from 'react';
+import { LayoutGrid } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 
-import { Input } from './input';
 import { cn } from '../../lib/utils';
 
 type ItemId = string | number;
@@ -36,18 +35,10 @@ export function MultiDisplayView<T extends { id: ItemId }>({
   renderItem,
 }: MultiDisplayViewProps<T>) {
   const { t } = useTranslation();
-  const [query, setQuery] = useState('');
   const selectedIds = useMemo(
     () => new Set(selectedItems.map((item) => String(item.id))),
     [selectedItems],
   );
-  const visibleItems = useMemo(() => {
-    const normalizedQuery = query.trim().toLocaleLowerCase();
-    if (!normalizedQuery) return items;
-    return items.filter((item) =>
-      getLabel(item).toLocaleLowerCase().includes(normalizedQuery),
-    );
-  }, [getLabel, items, query]);
   const selectionFull = selectedItems.length >= maxSelected;
 
   return (
@@ -57,15 +48,6 @@ export function MultiDisplayView<T extends { id: ItemId }>({
     >
       <aside className="flex max-h-64 shrink-0 flex-col border-b bg-muted/10 lg:max-h-none lg:w-72 lg:border-b-0 lg:border-r">
         <div className="space-y-2 border-b p-3">
-          <div className="relative">
-            <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={t('multi_display.search_items', 'Search items')}
-              className="pl-9"
-            />
-          </div>
           <p className="text-xs text-muted-foreground">
             {t('multi_display.selection_count', 'Selected {{count}} / {{max}}', {
               count: selectedItems.length,
@@ -78,12 +60,12 @@ export function MultiDisplayView<T extends { id: ItemId }>({
             <div className="p-4 text-center text-sm text-muted-foreground">
               {t('common.loading', 'Loading...')}
             </div>
-          ) : visibleItems.length === 0 ? (
+          ) : items.length === 0 ? (
             <div className="p-4 text-center text-sm text-muted-foreground">
               {t('common.no_result', 'No results')}
             </div>
           ) : (
-            visibleItems.map((item) => {
+            items.map((item) => {
               const checked = selectedIds.has(String(item.id));
               return (
                 <label

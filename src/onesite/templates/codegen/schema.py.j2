@@ -150,9 +150,10 @@ class {{ model.name }}Base(SQLModel):
 {% set ns_json_fields = namespace(fields=[]) %}
 {% for field in model.fields %}
     {% if 'r' in field.permissions and field.name != 'id' %}
-    {{ field.name }}: {{ field.type }}
+    {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
+    {{ field.name }}: {{ override.read_type if override and override.read_type is defined else field.type }}
     {% set ns.has_field = true %}
-    {% if (field.ui_type in ['json', 'location'] and field.type not in ('Dict[str, Any]', 'Any', 'dict')) or field.ui_type == 'multi_select' %}
+    {% if not override and ((field.ui_type in ['json', 'location'] and field.type not in ('Dict[str, Any]', 'Any', 'dict')) or field.ui_type == 'multi_select') %}
     {% set ns_json_fields.fields = ns_json_fields.fields + [field.name] %}
     {% endif %}
     {% endif %}

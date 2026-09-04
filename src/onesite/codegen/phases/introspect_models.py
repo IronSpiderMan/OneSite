@@ -623,8 +623,16 @@ def _extract_read_resolvers(
             if override_metadata.direction == "read":
                 if target in read_targets:
                     raise ValueError(f"{model_cls.__name__} defines more than one read override_field for {target!r}")
+                annotation = inspect.signature(raw_method).return_annotation
+                if annotation is inspect.Signature.empty:
+                    raise ValueError(
+                        f"{model_cls.__name__}.{method_name} override_field must declare a return type"
+                    )
+                type_name, py_imports = _read_annotation(annotation)
                 entry = overrides_by_target.setdefault(target, {"field": target})
                 entry["handler"] = method_name
+                entry["read_type"] = type_name
+                entry["py_imports"] = py_imports
                 read_targets.add(target)
             else:
                 if "u" not in field.permissions and "c" not in field.permissions:
@@ -877,6 +885,7 @@ def _process_introspected_class(
     mdl["schema_imports"] = sorted(
         set(mdl["schema_imports"])
         | {item for field in extra_fields for item in field["py_imports"]}
+        | {item for field in override_fields for item in field.get("py_imports", [])}
     )
 
     table = getattr(obj, "__table__", None)

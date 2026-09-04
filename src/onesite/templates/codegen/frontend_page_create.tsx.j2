@@ -32,6 +32,11 @@ import {
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
 {% endfor %}
+{% for field in model.fields %}
+{% if field.composite_selector %}
+import * as {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService from '../../services/{{ field.composite_selector.target_service }}';
+{% endif %}
+{% endfor %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service }}';
@@ -214,6 +219,31 @@ const Create{{ model.name }}Page: React.FC = () => {
                   />
                 )}
               />
+              {% elif field.composite_selector %}
+              <Controller
+                control={control}
+                name="{{ field.name }}"
+                render={({ field: { onChange, value } }) => (
+                  <SearchableSelect
+                    value={value}
+                    onValueChange={onChange}
+                    disabled={!watch('{{ field.composite_selector.parent_field }}')}
+                    optionsKey={watch('{{ field.composite_selector.parent_field }}')}
+                    placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                    searchPlaceholder={`${t('common.search')}...`}
+                    loadOptions={async (query) => {
+                      const parentValue = watch('{{ field.composite_selector.parent_field }}');
+                      if (parentValue === undefined || parentValue === null || parentValue === '') return [];
+                      const filters = { '{{ field.composite_selector.filter_field }}': parentValue, ...(query ? { '{{ field.composite_selector.label_field }}': query } : {}) };
+                      const response = await {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService.get{{ field.composite_selector.target_model }}s(1, 20, filters);
+                      return response.items.map((item: any) => ({
+                        label: item.{{ field.composite_selector.label_field }} ?? item.{{ field.composite_selector.value_field }},
+                        value: item.{{ field.composite_selector.value_field }},
+                      }));
+                    }}
+                  />
+                )}
+              />
               {% elif field.is_enum and field.is_multi_select %}
               <Controller
                 control={control}
@@ -267,6 +297,16 @@ const Create{{ model.name }}Page: React.FC = () => {
                     value={value}
                     onValueChange={(nextValue) => {
                       onChange(nextValue);
+                      {% for cascade_fk in model.foreign_keys %}
+                      {% if cascade_fk.cascade_parent_field == field.name %}
+                      setValue('{{ cascade_fk.name }}', '');
+                      {% endif %}
+                      {% endfor %}
+                      {% for dependent_field in model.fields %}
+                      {% if dependent_field.composite_selector and dependent_field.composite_selector.parent_field == field.name %}
+                      setValue('{{ dependent_field.name }}', '');
+                      {% endif %}
+                      {% endfor %}
                       {% for reference in model.dict_key_reference_meta %}
                       {% if reference.owner_fk == field.name %}
                       setValue('{{ reference.field }}', '');
@@ -276,8 +316,18 @@ const Create{{ model.name }}Page: React.FC = () => {
                     placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
                     searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
                     valueLabels={ {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                    {% if field.fk_info.cascade_parent_field %}
+                    disabled={!watch('{{ field.fk_info.cascade_parent_field }}')}
+                    optionsKey={watch('{{ field.fk_info.cascade_parent_field }}')}
+                    {% endif %}
                     loadOptions={async (query) => {
+                      {% if field.fk_info.cascade_parent_field %}
+                      const parentId = watch('{{ field.fk_info.cascade_parent_field }}');
+                      if (parentId === undefined || parentId === null || parentId === '') return [];
+                      const filters = { '{{ field.fk_info.cascade_filter_field }}': parentId, ...(query ? { {{ field.fk_info.label_field }}: query } : {}) };
+                      {% else %}
                       const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                      {% endif %}
                       const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
                       return response.items.map((item: any) => ({
                         label: item.{{ field.fk_info.label_field }} || item.id,

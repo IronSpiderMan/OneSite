@@ -73,6 +73,11 @@ import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime'
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s, get{{ fk.target_model }} } from '../../services/{{ fk.target_service }}';
 {% endfor %}
+{% for field in model.fields %}
+{% if field.composite_selector %}
+import * as {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService from '../../services/{{ field.composite_selector.target_service }}';
+{% endif %}
+{% endfor %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 import { get{{ m2m.target_model }}s } from '../../services/{{ m2m.target_service }}';
@@ -96,7 +101,18 @@ import * as {{ rfk.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name
 {% endif %}
 {% endfor %}
 
-const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
+type JsonPreviewSchema = {
+  fields?: Array<{
+    name?: string;
+    labelKey?: string;
+    translations?: Record<string, string>;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+};
+
+const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null }> = ({ value, schema }) => {
+  const { t } = useTranslation();
   if (value === undefined || value === null) {
     return <span className="text-muted-foreground">-</span>;
   }
@@ -106,7 +122,7 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
     try {
       parsedValue = JSON.parse(value);
     } catch {
-      return <span className="block max-w-[250px] truncate" title={value}>{value}</span>;
+      return <span className="block max-w-[250px] whitespace-pre-line break-words" title={value}>{value}</span>;
     }
   }
 
@@ -118,12 +134,27 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
     return <span>{String(parsedValue)}</span>;
   }
 
-  // Format key-value pairs for objects
+  const previewValue = (item: unknown, maxLength: number = 80): string => {
+    if (item === null) return 'null';
+    if (item === undefined) return '-';
+
+    const text = typeof item === 'object' ? JSON.stringify(item) : String(item);
+    return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+  };
+
+  // Structured JSON fields carry their own i18n keys.  Use them in the
+  // compact list preview too, while preserving raw keys for untyped JSON.
+  const labelFor = (key: string): string => {
+    const field = schema?.fields?.find((candidate) => candidate.name === key);
+    if (!field?.labelKey) return key;
+    return String(t(field.labelKey, { defaultValue: field.translations?.en || key }));
+  };
+
+  // Format key-value pairs for objects.
   const formatKeyValuePairs = (obj: Record<string, unknown>, maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
     const entries = Object.entries(obj);
     const lines = entries.map(([key, value]) => {
-      const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-      return `${key}: ${valueStr}`;
+      return `${labelFor(key)}: ${previewValue(value)}`;
     });
     
     const preview = lines.slice(0, maxLines).join('\n');
@@ -133,11 +164,22 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
     return { preview, full, hasMore };
   };
 
-  // Format array items for arrays
+  // Array objects are common for JSON-backed list fields (for example, [{}]).
+  // Show their first fields directly instead of an opaque one-line JSON blob.
+  const formatObjectItem = (item: Record<string, unknown>): string => {
+    const entries = Object.entries(item);
+    if (!entries.length) return '{}';
+    const fields = entries.slice(0, 3).map(([key, value]) => `${labelFor(key)}: ${previewValue(value, 40)}`);
+    return `${fields.join(' · ')}${entries.length > fields.length ? ' …' : ''}`;
+  };
+
+  // Format array items for arrays.
   const formatArrayItems = (arr: unknown[], maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
     const lines = arr.map((item, index) => {
-      const itemStr = typeof item === 'object' ? JSON.stringify(item) : String(item);
-      return `[${index}]: ${itemStr}`;
+      const itemStr = item !== null && typeof item === 'object' && !Array.isArray(item)
+        ? formatObjectItem(item as Record<string, unknown>)
+        : previewValue(item);
+      return `${index + 1}. ${itemStr}`;
     });
     
     const preview = lines.slice(0, maxLines).join('\n');
@@ -148,9 +190,13 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
   };
 
   const isArray = Array.isArray(parsedValue);
-  const { preview, full, hasMore } = isArray
+  const { preview, hasMore } = isArray
     ? formatArrayItems(parsedValue as unknown[])
     : formatKeyValuePairs(parsedValue as Record<string, unknown>);
+
+  if (Array.isArray(parsedValue) && parsedValue.length === 0) {
+    return <span className="text-muted-foreground">-</span>;
+  }
 
   return (
     <Popover>
@@ -168,7 +214,7 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-0">
         <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
-          {full}
+          {JSON.stringify(parsedValue, null, 2)}
         </pre>
       </PopoverContent>
     </Popover>
@@ -994,7 +1040,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         {% elif field.ui_type == 'location' %}
         return item.{{ field.name }}?.latitude != null && item.{{ field.name }}?.longitude != null ? `${item.{{ field.name }}.latitude}, ${item.{{ field.name }}.longitude}` : '-';
         {% elif field.ui_type == 'json' %}
-        return <JsonPreview value={item.{{ field.name }}} />;
+        return <JsonPreview value={item.{{ field.name }}} schema={ {{ (field.json_model_schema or field.json_item_schema) | tojson }} } />;
         {% else %}
         return item.{{ field.name }} == null || item.{{ field.name }} === '' ? '-' : String(item.{{ field.name }});
         {% endif %}
@@ -1056,7 +1102,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% elif display.ui_type == 'time' %}
           <span className="break-words text-sm">{formatTime(item.{{ display.field }})}</span>
           {% elif display.ui_type == 'json' %}
-          <JsonPreview value={item.{{ display.field }}} />
+          <JsonPreview value={item.{{ display.field }}} schema={ {{ (display.json_model_schema or display.json_item_schema) | tojson }} } />
           {% else %}
           <span className="block break-words text-sm">{item.{{ display.field }} == null || item.{{ display.field }} === '' ? '-' : String(item.{{ display.field }})}</span>
           {% endif %}
@@ -1815,7 +1861,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                           : '-'}
                         </span>
                         {% elif field.ui_type == 'json' %}
-                        <JsonPreview value={item.{{ field.name }}} />
+                        <JsonPreview value={item.{{ field.name }}} schema={ {{ (field.json_model_schema or field.json_item_schema) | tojson }} } />
                         {% else %}
                         <span className="block max-w-[250px] truncate" title={String(item.{{ field.name }})}>
                         {String(item.{{ field.name }})}
@@ -2464,6 +2510,31 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                                 />
                             )}
                         />
+                        {% elif field.composite_selector %}
+                        <Controller
+                            control={control}
+                            name="{{ field.name }}"
+                            render={({ field: { onChange, value } }) => (
+                                <SearchableSelect
+                                    value={value}
+                                    onValueChange={onChange}
+                                    disabled={!watch('{{ field.composite_selector.parent_field }}')}
+                                    optionsKey={watch('{{ field.composite_selector.parent_field }}')}
+                                    placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                                    searchPlaceholder={`${t('common.search')}...`}
+                                    loadOptions={async (query) => {
+                                        const parentValue = watch('{{ field.composite_selector.parent_field }}');
+                                        if (parentValue === undefined || parentValue === null || parentValue === '') return [];
+                                        const filters = { '{{ field.composite_selector.filter_field }}': parentValue, ...(query ? { '{{ field.composite_selector.label_field }}': query } : {}) };
+                                        const response = await {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService.get{{ field.composite_selector.target_model }}s(1, 20, filters);
+                                        return response.items.map((item: any) => ({
+                                            label: item.{{ field.composite_selector.label_field }} ?? item.{{ field.composite_selector.value_field }},
+                                            value: item.{{ field.composite_selector.value_field }},
+                                        }));
+                                    }}
+                                />
+                            )}
+                        />
                         {% elif field.is_enum and field.is_multi_select %}
             <Controller
                 control={control}
@@ -2518,6 +2589,16 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         value={value}
                         onValueChange={(nextValue) => {
                             onChange(nextValue);
+                            {% for cascade_fk in model.foreign_keys %}
+                            {% if cascade_fk.cascade_parent_field == field.name %}
+                            setValue('{{ cascade_fk.name }}', '');
+                            {% endif %}
+                            {% endfor %}
+                            {% for dependent_field in model.fields %}
+                            {% if dependent_field.composite_selector and dependent_field.composite_selector.parent_field == field.name %}
+                            setValue('{{ dependent_field.name }}', '');
+                            {% endif %}
+                            {% endfor %}
                             {% for reference in model.dict_key_reference_meta %}
                             {% if reference.owner_fk == field.name %}
                             setValue('{{ reference.field }}', '');
@@ -2527,8 +2608,18 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
                         searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
                         valueLabels={ {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                        {% if field.fk_info.cascade_parent_field %}
+                        disabled={!watch('{{ field.fk_info.cascade_parent_field }}')}
+                        optionsKey={watch('{{ field.fk_info.cascade_parent_field }}')}
+                        {% endif %}
                         loadOptions={async (query) => {
+                            {% if field.fk_info.cascade_parent_field %}
+                            const parentId = watch('{{ field.fk_info.cascade_parent_field }}');
+                            if (parentId === undefined || parentId === null || parentId === '') return [];
+                            const filters = { '{{ field.fk_info.cascade_filter_field }}': parentId, ...(query ? { {{ field.fk_info.label_field }}: query } : {}) };
+                            {% else %}
                             const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                            {% endif %}
                             const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
                             return response.items.map((item: any) => ({
                                 label: item.{{ field.fk_info.label_field }} || item.id,

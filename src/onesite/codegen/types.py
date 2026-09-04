@@ -25,6 +25,11 @@ class ForeignKeyInfo:
     label_field: str
     reverse_display: bool = True
     reverse: dict[str, Any] = field(default_factory=dict)
+    # Optional UI cascade declaration.  Resolved to the local parent field and
+    # target filter field during relationship resolution.
+    cascade: dict[str, Any] = field(default_factory=dict)
+    cascade_parent_field: str | None = None
+    cascade_filter_field: str | None = None
     is_self_referencing: bool = False
 
     # ── Set during relationship resolution (Phase 4) ────────────────────────
@@ -87,6 +92,9 @@ class FieldDefinition:
     enum_translations: dict = field(default_factory=dict)
     is_search_field: bool = False
     fk_info: ForeignKeyInfo | None = None
+    # Resolved UI selector for the non-id component of a two-column composite
+    # FK, e.g. (a_id, b_name) -> (b.a_id, b.name).
+    composite_selector: dict[str, Any] | None = None
     allow_download: bool = True
     stream_protocol: str = "auto"
     stream_autoplay: bool = False

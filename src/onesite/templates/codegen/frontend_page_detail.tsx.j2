@@ -51,6 +51,10 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         <span className="text-muted-foreground">
             {currentItem.{{ field.name }}?.latitude != null && currentItem.{{ field.name }}?.longitude != null ? `${currentItem.{{ field.name }}.latitude}, ${currentItem.{{ field.name }}.longitude}` : '-'}
         </span>
+        {% elif field.name in override_field_names %}
+        <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+            {String(currentItem.{{ field.name }} ?? '-')}
+        </pre>
         {% elif field.ui_type == 'json' and field.json_model_schema %}
         <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} }
             value={currentItem.{{ field.name }}}
@@ -97,6 +101,27 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
             }}
         />
     )} />
+    {% elif field.composite_selector %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <SearchableSelect
+            value={value}
+            onValueChange={onChange}
+            disabled={!editRootValue?.{{ field.composite_selector.parent_field }}}
+            optionsKey={editRootValue?.{{ field.composite_selector.parent_field }}}
+            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+            searchPlaceholder={`${t('common.search')}...`}
+            loadOptions={async (query) => {
+                const parentValue = editRootValue?.{{ field.composite_selector.parent_field }};
+                if (parentValue === undefined || parentValue === null || parentValue === '') return [];
+                const filters = { '{{ field.composite_selector.filter_field }}': parentValue, ...(query ? { '{{ field.composite_selector.label_field }}': query } : {}) };
+                const response = await {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService.get{{ field.composite_selector.target_model }}s(1, 20, filters);
+                return response.items.map((item: any) => ({
+                    label: item.{{ field.composite_selector.label_field }} ?? item.{{ field.composite_selector.value_field }},
+                    value: item.{{ field.composite_selector.value_field }},
+                }));
+            }}
+        />
+    )} />
     {% elif field.fk_info %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
         <SearchableSelect
@@ -106,6 +131,11 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
                 {% for reference in model.dict_key_reference_meta %}
                 {% if reference.owner_fk == field.name %}
                 setEditValue('{{ reference.field }}', '');
+                {% endif %}
+                {% endfor %}
+                {% for dependent_field in model.fields %}
+                {% if dependent_field.composite_selector and dependent_field.composite_selector.parent_field == field.name %}
+                setEditValue('{{ dependent_field.name }}', '');
                 {% endif %}
                 {% endfor %}
             }}
@@ -245,6 +275,11 @@ import { VideoStreamInput } from '../../components/ui/video-stream-input';
 import { LinkTableOrderedSelect } from '../../components/ui/link-table-ordered-select';
 {% for fk in model.foreign_keys %}
 import { get{{ fk.target_model }}s } from '../../services/{{ fk.target_service }}';
+{% endfor %}
+{% for field in model.fields %}
+{% if field.composite_selector %}
+import * as {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService from '../../services/{{ field.composite_selector.target_service }}';
+{% endif %}
 {% endfor %}
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
@@ -1400,7 +1435,32 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
                             <div className="space-y-2">
                                 <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
-                                {% if field.ui_type == 'bool' %}
+                                {% if field.composite_selector %}
+                                <Controller
+                                    control={editControl}
+                                    name="{{ field.name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        <SearchableSelect
+                                            value={value}
+                                            onValueChange={onChange}
+                                            disabled={!watchEdit('{{ field.composite_selector.parent_field }}')}
+                                            optionsKey={watchEdit('{{ field.composite_selector.parent_field }}')}
+                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+                                            searchPlaceholder={`${t('common.search')}...`}
+                                            loadOptions={async (query) => {
+                                                const parentValue = watchEdit('{{ field.composite_selector.parent_field }}');
+                                                if (parentValue === undefined || parentValue === null || parentValue === '') return [];
+                                                const filters = { '{{ field.composite_selector.filter_field }}': parentValue, ...(query ? { '{{ field.composite_selector.label_field }}': query } : {}) };
+                                                const response = await {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService.get{{ field.composite_selector.target_model }}s(1, 20, filters);
+                                                return response.items.map((item: any) => ({
+                                                    label: item.{{ field.composite_selector.label_field }} ?? item.{{ field.composite_selector.value_field }},
+                                                    value: item.{{ field.composite_selector.value_field }},
+                                                }));
+                                            }}
+                                        />
+                                    )}
+                                />
+                                {% elif field.ui_type == 'bool' %}
                                 <div className="flex h-10 items-center justify-end rounded-md border px-3">
                                     <Controller
                                         control={editControl}
@@ -1512,6 +1572,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <LocationInput value={value} onChange={onChange} />
                                     )}
                                 />
+                                {% elif field.name in override_field_names %}
+                                <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
+                                    {String(currentItem.{{ field.name }} ?? '-')}
+                                </pre>
                                 {% elif field.ui_type == 'json' %}
                                 <Controller
                                     control={editControl}
@@ -1599,12 +1663,34 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     render={({ field: { onChange, value } }) => (
                                         <SearchableSelect
                                             value={value}
-                                            onValueChange={onChange}
+                                            onValueChange={(nextValue) => {
+                                                onChange(nextValue);
+                                                {% for cascade_fk in model.foreign_keys %}
+                                                {% if cascade_fk.cascade_parent_field == field.name %}
+                                                setEditValue('{{ cascade_fk.name }}', '');
+                                                {% endif %}
+                                                {% endfor %}
+                                                {% for dependent_field in model.fields %}
+                                                {% if dependent_field.composite_selector and dependent_field.composite_selector.parent_field == field.name %}
+                                                setEditValue('{{ dependent_field.name }}', '');
+                                                {% endif %}
+                                                {% endfor %}
+                                            }}
                                             placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
                                             searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
                                             valueLabels={ edit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                                            {% if field.fk_info.cascade_parent_field %}
+                                            disabled={!watchEdit('{{ field.fk_info.cascade_parent_field }}')}
+                                            optionsKey={watchEdit('{{ field.fk_info.cascade_parent_field }}')}
+                                            {% endif %}
                                             loadOptions={async (query) => {
+                                                {% if field.fk_info.cascade_parent_field %}
+                                                const parentId = watchEdit('{{ field.fk_info.cascade_parent_field }}');
+                                                if (parentId === undefined || parentId === null || parentId === '') return [];
+                                                const filters = { '{{ field.fk_info.cascade_filter_field }}': parentId, ...(query ? { {{ field.fk_info.label_field }}: query } : {}) };
+                                                {% else %}
                                                 const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                                                {% endif %}
                                                 const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
                                                 return response.items.map((item: any) => ({
                                                     label: item.{{ field.fk_info.label_field }} || item.id,
@@ -1881,6 +1967,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         <CardTitle>{t('{{ field.label_key }}')}</CardTitle>
                     </CardHeader>
                     <CardContent>
+                        {% if field.name in override_field_names %}
+                        <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-sm">
+                            {String(currentItem.{{ field.name }} ?? '-')}
+                        </pre>
+                        {% else %}
                         {% if model.page_edit and 'u' in field.permissions %}{isEditing && hasFieldPerm('{{ field.name }}', 'u') ? (
                         <Controller
                             control={editControl}
@@ -1971,6 +2062,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                             {% endif %}
                         </div>
                         {% if model.page_edit and 'u' in field.permissions %})}{% endif %}
+                        {% endif %}
                     </CardContent>
                 </Card>
                 )}
@@ -2278,12 +2370,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% if rfk.display %}
                 {activeTab === 'reverse-fk-{{ rfk.name }}' && (
                 <Card className="col-span-full{% if rfk.editor == 'embedded' %} flex h-full min-h-0 flex-col overflow-hidden{% endif %}">
-                    {% if rfk.editor != 'embedded' %}
-                    <CardHeader>
-                        <CardTitle>{t('models.{{ rfk.source_service }}.plural')}</CardTitle>
-                    </CardHeader>
-                    {% endif %}
-                    <CardContent{% if rfk.editor == 'embedded' %} className="flex-1 min-h-0 overflow-hidden p-0"{% endif %}>
+                    <CardContent{% if rfk.editor == 'embedded' %} className="flex-1 min-h-0 overflow-hidden p-0"{% else %} className="pt-6"{% endif %}>
                         {% if rfk.editor == 'embedded' %}
                         <{{ rfk.source_model }}EmbeddedPage
                             embedded={true}
@@ -2323,15 +2410,21 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         />
                         ) : (<>{% endif %}
                         {% if rfk.source_search_fields %}
-                        <div className="mb-4 min-w-0 overflow-hidden rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40">
+                        <div className="{% if rfk.source_search_fields | length > 1 %}mb-4 min-w-0 overflow-hidden rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40{% else %}mb-4 w-full max-w-sm{% endif %}">
+                            {% if rfk.source_search_fields | length > 1 %}
                             <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
                                 <Button variant="outline" size="sm" type="button" onClick={() => set{{ rfk.source_model }}SearchValues({})}>{t('common.reset', 'Reset')}</Button>
                             </div>
+                            {% endif %}
+                            {% if rfk.source_search_fields | length > 1 %}
                             <div className="mt-4 grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+                            {% endif %}
                             {% for field in rfk.source_search_fields %}
                                 <div className="min-w-0 space-y-2">
+                                    {% if rfk.source_search_fields | length > 1 %}
                                     <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
+                                    {% endif %}
                                     {% if field.ui_type == 'bool' %}
                                     <Select
                                         value={ {{ rfk.name }}SearchValues['{{ field.name }}'] || '__all__' }
@@ -2409,7 +2502,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                     {% endif %}
                                 </div>
                             {% endfor %}
+                            {% if rfk.source_search_fields | length > 1 %}
                             </div>
+                            {% endif %}
                         </div>
                         {% endif %}
                         <div className="rounded-md border overflow-x-auto">
