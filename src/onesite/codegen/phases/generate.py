@@ -343,6 +343,7 @@ def _backend_path(tpl: str, model: ModelDefinition, backend_path: Path) -> Path:
         "service.py.j2": backend_path / "app" / "services" / f"{model['module_name']}.py",
         "user_service.py.j2": backend_path / "app" / "services" / f"{model['module_name']}.py",
         "api.py.j2": backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py",
+        "read_only_api.py.j2": backend_path / "app" / "api" / "endpoints" / f"{model['module_name']}.py",
         "backend_test.py.j2": backend_path / "tests" / f"test_{model['module_name']}_api.py",
     }
     return mapping[tpl]
@@ -371,7 +372,8 @@ def _generate_regular_model(
     generate_file(tpl_schema, context, _backend_path(tpl_schema, model, backend_path))
     generate_file(tpl_crud, context, _backend_path(tpl_crud, model, backend_path))
     generate_file(tpl_service, context, _backend_path(tpl_service, model, backend_path))
-    generate_file("api.py.j2", context, _backend_path("api.py.j2", model, backend_path))
+    api_template = "read_only_api.py.j2" if model.get("read_only") else "api.py.j2"
+    generate_file(api_template, context, _backend_path(api_template, model, backend_path))
 
     generate_file(
         "frontend_service.ts.j2", context,
@@ -428,7 +430,7 @@ def _generate_regular_model(
             theme_name,
         )
 
-    if not model.get("frontend_only"):
+    if not model.get("frontend_only") and not model.get("read_only"):
         generate_file(
             "backend_test.py.j2", context,
             _backend_path("backend_test.py.j2", model, backend_path),
@@ -893,6 +895,11 @@ def phase_generate_aggregated(
         if model.get("importable") or model.get("exportable")
     ]
     import_export_enabled = bool(import_export_models)
+    tracking_enabled = any(
+        model.get("tracked_operations")
+        for model in models
+        if model.get("module_name") != "operation_log"
+    )
     scheduled_tasks = site_config.get("scheduled_tasks", [])
     tools = site_config.get("tools", [])
     hidden_tasks = {
@@ -1009,6 +1016,7 @@ def phase_generate_aggregated(
     generate_file(
         "db.py.j2",
         {
+            "tracking_enabled": tracking_enabled,
             "background_execution_enabled": bool(
                 site_config.get("tools")
                 or site_config.get("scheduled_tasks")
@@ -1123,6 +1131,7 @@ def phase_generate_aggregated(
                 "external_resources_enabled": external_resources_enabled,
                 "import_export_enabled": import_export_enabled,
                 "background_tasks_enabled": background_tasks_enabled,
+                "tracking_enabled": tracking_enabled,
             }
         },
         backend_path / "app" / "main.py",
@@ -1155,9 +1164,46 @@ def phase_generate_aggregated(
     if import_export_enabled:
         generate_file(
             "import_export_runtime.py.j2",
-            {},
+            {
+                "tracked_io_operations": {
+                    model["module_name"]: [
+                        operation
+                        for operation in model.get("tracked_operations", [])
+                        if operation in {"import", "export"}
+                    ]
+                    for model in import_export_models
+                    if any(
+                        operation in {"import", "export"}
+                        for operation in model.get("tracked_operations", [])
+                    )
+                }
+            },
             backend_path / "app" / "core" / "import_export_runtime.py",
         )
+    if tracking_enabled:
+        generate_file(
+            "operation_tracking.py.j2",
+            {},
+            backend_path / "app" / "core" / "operation_tracking.py",
+        )
+    else:
+        (backend_path / "app" / "core" / "operation_tracking.py").unlink(
+            missing_ok=True
+        )
+        if not any(model.get("module_name") == "operation_log" for model in models):
+            stale_tracking_paths = [
+                backend_path / "app" / area / "operation_log.py"
+                for area in ("schemas", "cruds", "services", "api/endpoints")
+            ] + [
+                frontend_path / "src" / "services" / "operation_log.ts",
+                frontend_path / "src" / "stores" / "useOperationLogStore.ts",
+                frontend_path / "src" / "pages" / "operation_log" / "index.tsx",
+                frontend_path / "src" / "pages" / "operation_log" / "detail.tsx",
+                frontend_path / "src" / "pages" / "operation_log" / "create.tsx",
+                frontend_path / "src" / "pages" / "operation_log" / "embedded.tsx",
+            ]
+            for stale_path in stale_tracking_paths:
+                stale_path.unlink(missing_ok=True)
     if background_tasks_enabled:
         generate_file(
             "background_execution_cleanup.py.j2",

@@ -27,6 +27,7 @@ from onesite_runtime import (
 
 from ..introspect import get_model_fields
 from ..model_imports import ModelIntrospectionError, isolated_project_imports
+from ..render import generate_file
 from ..types import (
     FieldDefinition,
     ModelDefinition,
@@ -408,6 +409,8 @@ def _build_model_dict(
         refresh_interval=result.refresh_interval,
         reverse_fk_display=result.reverse_fk_display,
         site_props=result.model_site_props,
+        tracked_operations=result.model_site_props.get("tracked_operations", []),
+        read_only=bool(result.model_site_props.get("read_only", False)),
         actions=result.actions,
         is_notification_table=result.is_notification_table,
         union_key=result.union_key,
@@ -418,6 +421,7 @@ def _build_model_dict(
         dashboard_metrics=result.model_site_props.get("dashboard_metrics", []),
         reports=result.model_site_props.get("reports"),
         has_created_at=any(f.name == "created_at" for f in result.fields),
+        default_order_field=result.model_site_props.get("default_order_field"),
         owner_field=result.owner_field,
         page_edit=result.page_edit,
         edit_mode=result.edit_mode,
@@ -1004,6 +1008,27 @@ def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
             if module_models is None:
                 raise ModelIntrospectionError(
                     f"Model validation failed while introspecting {full_module_name}"
+                )
+            found_models.extend(module_models)
+
+        tracking_enabled = any(
+            model.get("tracked_operations") for model in found_models
+        )
+        if tracking_enabled:
+            if any(model["module_name"] == "operation_log" for model in found_models):
+                raise ModelIntrospectionError(
+                    "operation_log is reserved for OneSite operation tracking"
+                )
+            generate_file(
+                "operation_log.py.j2",
+                {},
+                backend_path / "app" / "models" / "operation_log.py",
+            )
+            module = importlib.import_module("app.models.operation_log")
+            module_models = _introspect_module(module, "operation_log")
+            if module_models is None:
+                raise ModelIntrospectionError(
+                    "Could not introspect generated operation log model"
                 )
             found_models.extend(module_models)
 

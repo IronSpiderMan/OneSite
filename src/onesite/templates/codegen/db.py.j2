@@ -84,6 +84,39 @@ async def init_db():
         {% for index in obsolete_indexes %}
         await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}
+        {% if tracking_enabled %}
+        if settings.DATABASE_URI.startswith("postgresql"):
+            # create_all cannot add the user FK to an operation_log table that
+            # was created by an older generator version.  Keep that upgrade
+            # idempotent while allowing PostgreSQL to name/track it explicitly.
+            await conn.execute(text("""
+                DO $$
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1
+                        FROM pg_constraint constraint_def
+                        JOIN pg_class source_table
+                          ON source_table.oid = constraint_def.conrelid
+                        JOIN pg_namespace source_schema
+                          ON source_schema.oid = source_table.relnamespace
+                        JOIN pg_class target_table
+                          ON target_table.oid = constraint_def.confrelid
+                        JOIN pg_attribute source_column
+                          ON source_column.attrelid = source_table.oid
+                         AND source_column.attnum = ANY(constraint_def.conkey)
+                        WHERE constraint_def.contype = 'f'
+                          AND source_schema.nspname = current_schema()
+                          AND source_table.relname = 'operation_log'
+                          AND source_column.attname = 'user_id'
+                          AND target_table.relname = 'user'
+                    ) THEN
+                        ALTER TABLE "operation_log"
+                        ADD CONSTRAINT "fk_operation_log_user_id_user"
+                        FOREIGN KEY ("user_id") REFERENCES "user" ("id");
+                    END IF;
+                END $$;
+            """))
+        {% endif %}
     {% if external_resources_enabled %}
     # Provider synchronization owns its aggregate state schema.
     from app.core.external_resources import init_external_resource_db

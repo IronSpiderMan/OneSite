@@ -670,7 +670,9 @@ async def get_multi(
         {% endif %}
     )
 
-    {% if model.has_created_at %}
+    {% if model.default_order_field %}
+    statement = statement.order_by(col({{ model.name }}.{{ model.default_order_field }}).desc())
+    {% elif model.has_created_at %}
     statement = statement.order_by(col({{ model.name }}.created_at).desc())
     {% endif %}
 

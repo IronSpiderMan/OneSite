@@ -15,6 +15,9 @@ from app.core.db import init_db
 from app.core.error_handlers import register_error_handlers
 from app.initial_data import init_data
 from app.resources import destroy_resources, init_resources
+{% if config.tracking_enabled %}
+from app.core.operation_tracking import OperationTrackingMiddleware
+{% endif %}
 
 logger = get_logger(__name__)
 
@@ -198,6 +201,10 @@ app = FastAPI(
 )
 
 register_error_handlers(app)
+
+{% if config.tracking_enabled %}
+app.add_middleware(OperationTrackingMiddleware)
+{% endif %}
 
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:

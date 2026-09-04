@@ -1,0 +1,79 @@
+from datetime import datetime, timezone
+from typing import Optional
+
+from sqlalchemy import Column, DateTime, Index
+from sqlmodel import Field, SQLModel
+
+
+class OperationLog(SQLModel, table=True):
+    __tablename__ = "operation_log"
+    __table_args__ = (
+        Index("ix_operation_log_user_time", "user_id", "operated_at"),
+        Index("ix_operation_log_resource_time", "resource", "operated_at"),
+        Index("ix_operation_log_operation_time", "operation", "operated_at"),
+    )
+
+    __onesite__ = {
+        "permissions": {"user": "r", "admin": "r", "developer": "r"},
+        "visible": ["user", "admin", "developer"],
+        "owner_field": "user_id",
+        "read_only": True,
+        "default_order_field": "operated_at",
+        "icon": "History",
+        "translations": {
+            "zh": {
+                "name": "操作日志",
+                "plural": "操作日志",
+                "my_name": "我的操作日志",
+                "fields": {
+                    "user_id": "用户",
+                    "resource": "资源",
+                    "operation": "操作",
+                    "status": "状态",
+                    "operated_at": "操作时间",
+                },
+            },
+            "en": {
+                "name": "Operation Log",
+                "plural": "Operation Logs",
+                "my_name": "My Operation Logs",
+                "fields": {
+                    "user_id": "User",
+                    "resource": "Resource",
+                    "operation": "Operation",
+                    "status": "Status",
+                    "operated_at": "Operated At",
+                },
+            },
+        },
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int = Field(
+        foreign_key="user.id",
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {"reverse_display": False}}},
+    )
+    resource: str = Field(
+        max_length=128,
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}},
+    )
+    operation: str = Field(
+        max_length=32,
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}},
+    )
+    status: str = Field(
+        max_length=16,
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {"is_search_field": True}}},
+    )
+    operated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            info={"site_props": {"is_search_field": True}},
+        ),
+    )

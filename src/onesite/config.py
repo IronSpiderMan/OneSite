@@ -620,6 +620,12 @@ class OneSiteConfig(_ConfigModel):
     visualize: dict[str, Any] | list[dict[str, Any]] | None = None
     dashboard_metrics: list[Any] = Field(default_factory=list)
     reports: ReportsConfig | bool = False
+    # Compact CRUD strings (for example ``"rud"``) keep the common case
+    # terse. Extended operations use the list form alongside the ``crud``
+    # shorthand.
+    track: str | list[
+        Literal["crud", "c", "r", "u", "d", "bulk_delete", "import", "export"]
+    ] | None = None
 
 
 # A discoverable alias for users who search for "model config" in an editor.

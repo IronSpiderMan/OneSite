@@ -961,13 +961,31 @@ def generate_locale_files(
         model_name_en = pick_model_name(en_pack, model_name_en)
         model_name_zh = pick_model_name(zh_pack, model_name_zh)
 
-        en_model = {"name": model_name_en, "plural": f"{model_name_en}s", "fields": {}}
-        zh_model = {"name": model_name_zh, "plural": model_name_zh, "fields": {}}
+        en_plural = (
+            en_pack.get("plural")
+            if isinstance(en_pack, dict) and isinstance(en_pack.get("plural"), str)
+            else f"{model_name_en}s"
+        )
+        zh_plural = (
+            zh_pack.get("plural")
+            if isinstance(zh_pack, dict) and isinstance(zh_pack.get("plural"), str)
+            else model_name_zh
+        )
+        en_model = {"name": model_name_en, "plural": en_plural, "fields": {}}
+        zh_model = {"name": model_name_zh, "plural": zh_plural, "fields": {}}
 
         # Add "my_name" translation for owner-scoped models (e.g., "My Items")
         if model.get("owner_field"):
-            en_model["my_name"] = f"My {model_name_en}s"
-            zh_model["my_name"] = f"我的{model_name_zh}"
+            en_model["my_name"] = (
+                en_pack.get("my_name")
+                if isinstance(en_pack, dict) and isinstance(en_pack.get("my_name"), str)
+                else f"My {en_plural}"
+            )
+            zh_model["my_name"] = (
+                zh_pack.get("my_name")
+                if isinstance(zh_pack, dict) and isinstance(zh_pack.get("my_name"), str)
+                else f"我的{model_name_zh}"
+            )
 
         # Generate translations for model groups (e.g., settings.groups.general)
         site_props = model.get("site_props", {})

@@ -17,6 +17,9 @@ from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
+{% if model.tracked_operations %}
+from app.core.operation_tracking import tracked_operation{% if "import" in model.tracked_operations or "export" in model.tracked_operations %}, record_operation{% endif %}
+{% endif %}
 {% if (model.module_name == "user" and model.name == "User") or model.importable %}
 from app.core.config import settings
 {% endif %}
@@ -151,6 +154,9 @@ def _check_inline_relation_permissions(payload: Any, current_user: User, *, upda
 
 # ── TimescaleDB: create a new record ──
 @router.post("/", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))])
+{% if "create" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="create")
+{% endif %}
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -167,6 +173,9 @@ async def create_{{ model.lower_name }}(
 
 # ── TimescaleDB: get realtime (latest) data for an entity ──
 @router.get("/realtime")
+{% if "read" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="read")
+{% endif %}
 async def read_{{ model.lower_name }}_realtime(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -184,6 +193,9 @@ async def read_{{ model.lower_name }}_realtime(
 
 # ── TimescaleDB: get historical data for an entity ──
 @router.get("/history")
+{% if "read" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="read")
+{% endif %}
 async def read_{{ model.lower_name }}_history(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -418,6 +430,9 @@ async def get_{{ model.lower_name }}_stats_filters(
 
 {% if not model.is_timescaledb %}
 @router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+{% if "read" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="read")
+{% endif %}
 async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
@@ -508,6 +523,9 @@ async def read_{{ model.lower_name }}s(
     )
 
 @router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))]{% endif %})
+{% if "create" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="create")
+{% endif %}
 async def create_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -547,6 +565,9 @@ async def create_{{ model.lower_name }}(
 
 {% if model.module_name == "user" and model.name == "User" %}
 @router.get("/me", response_model=UserRead)
+{% if "read" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="read")
+{% endif %}
 async def read_me(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -559,6 +580,9 @@ async def read_me(
     {% endif %}
 
 @router.put("/me", response_model=UserRead)
+{% if "update" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="update")
+{% endif %}
 async def update_me(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -644,6 +668,9 @@ async def read_{{ reference.field }}_key_options(
 
 {% endfor %}
 @router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+{% if "read" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="read")
+{% endif %}
 async def read_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -678,6 +705,9 @@ async def read_{{ model.lower_name }}(
     return {{ model.lower_name }}
 
 @router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))]{% endif %})
+{% if "update" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="update")
+{% endif %}
 async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -760,6 +790,9 @@ async def update_{{ model.lower_name }}(
         )
 
 @router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+{% if "delete" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="delete")
+{% endif %}
 async def delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -807,6 +840,9 @@ async def delete_{{ model.lower_name }}(
     return {"deleted": deleted}
 
 @router.post("/bulk_delete", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))])
+{% if "bulk_delete" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="bulk_delete")
+{% endif %}
 async def bulk_delete_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -1187,6 +1223,9 @@ async def read_{{ model.lower_name }}_{{ rel.name }}(
 
 {% if model.exportable %}
 @router.post("/export")
+{% if "export" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="export", failures_only=True)
+{% endif %}
 async def export_{{ model.lower_name }}s(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -1254,6 +1293,9 @@ async def export_{{ model.lower_name }}s(
 
 {% if model.importable %}
 @router.post("/import")
+{% if "import" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="import", failures_only=True, ignore_dry_run=True)
+{% endif %}
 async def import_{{ model.lower_name }}s(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -1273,15 +1315,28 @@ async def import_{{ model.lower_name }}s(
 
     {% if not model.custom_importable %}
     if not background:
-        return await service.import_from_csv(
-            session,
-            task_id=str(uuid.uuid4()),
-            user_id=current_user.id,
-            file=file,
-            dry_run=dry_run,
-            current_role=current_role,
-            scoped_owner_id=scoped_owner_id,
-        )
+        try:
+            result = await service.import_from_csv(
+                session,
+                task_id=str(uuid.uuid4()),
+                user_id=current_user.id,
+                file=file,
+                dry_run=dry_run,
+                current_role=current_role,
+                scoped_owner_id=scoped_owner_id,
+            )
+        except Exception:
+            raise
+        {% if "import" in model.tracked_operations %}
+        if not dry_run:
+            await record_operation(
+                user_id=current_user.id,
+                resource="{{ model.module_name }}",
+                operation="import",
+                status="failed" if int(result.get("failed", 0)) else "success",
+            )
+        {% endif %}
+        return result
     {% endif %}
 
     task_id = str(uuid.uuid4())

@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException
+from fastapi import Depends, HTTPException, Request
 from fastapi.security import OAuth2PasswordBearer
 from jose import jwt, JWTError
 from pydantic import ValidationError
@@ -20,6 +20,7 @@ ROLE_HIERARCHY = {
 }
 
 async def get_current_user(
+    request: Request,
     session: AsyncSession = Depends(db.get_session),
     token: str = Depends(reusable_oauth2)
 ) -> User:
@@ -44,6 +45,9 @@ async def get_current_user(
         raise HTTPException(status_code=404, detail="User not found")
     if not user.is_active:
         raise HTTPException(status_code=400, detail="Inactive user")
+    # Operation tracking reads this after routing has completed. Keeping the
+    # authenticated identity on request state avoids decoding the token twice.
+    request.state.current_user_id = user.id
     return user
 
 def require_role(min_role: UserRole):

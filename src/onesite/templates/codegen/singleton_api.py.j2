@@ -2,6 +2,9 @@ from typing import Any
 from fastapi import APIRouter, Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import db, deps
+{% if model.tracked_operations %}
+from app.core.operation_tracking import tracked_operation
+{% endif %}
 {% if model.has_read_resolvers %}
 from app.models.user import User
 {% endif %}
@@ -13,6 +16,9 @@ router = APIRouter(
 )
 
 @router.get("/", response_model={{ model.name }}Read)
+{% if "read" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="read")
+{% endif %}
 async def get_{{ model.lower_name }}(
     session: AsyncSession = Depends(db.get_session),
     {% if model.has_read_resolvers %}
@@ -22,6 +28,9 @@ async def get_{{ model.lower_name }}(
     return await service.get(session{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
 
 @router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))])
+{% if "update" in model.tracked_operations %}
+@tracked_operation(resource="{{ model.module_name }}", operation="update")
+{% endif %}
 async def update_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),

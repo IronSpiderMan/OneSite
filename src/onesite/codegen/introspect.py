@@ -412,6 +412,52 @@ REPORT_UNSUPPORTED_TYPES = {
     "json", "location", "image", "images", "file", "video_stream", "textarea",
 }
 
+TRACK_CRUD_OPERATIONS = {
+    "c": "create",
+    "r": "read",
+    "u": "update",
+    "d": "delete",
+}
+TRACK_EXTENDED_OPERATIONS = {"bulk_delete", "import", "export"}
+
+
+def _normalize_tracked_operations(raw: Any, *, model_name: str) -> list[str]:
+    """Validate ``site_props.track`` and return stable operation names."""
+    if raw in (None, False, ""):
+        return []
+
+    tokens: list[str]
+    if isinstance(raw, str):
+        if any(char not in TRACK_CRUD_OPERATIONS for char in raw):
+            raise ValueError(
+                f"Model '{model_name}': track string must contain only c, r, u, d"
+            )
+        tokens = list(raw)
+    elif isinstance(raw, list):
+        tokens = raw
+    else:
+        raise ValueError(
+            f"Model '{model_name}': track must be a CRUD string or a list"
+        )
+
+    operations: set[str] = set()
+    for token in tokens:
+        if token == "crud":
+            operations.update(TRACK_CRUD_OPERATIONS.values())
+        elif token in TRACK_CRUD_OPERATIONS:
+            operations.add(TRACK_CRUD_OPERATIONS[token])
+        elif token in TRACK_EXTENDED_OPERATIONS:
+            operations.add(token)
+        else:
+            supported = "crud, c, r, u, d, bulk_delete, import, export"
+            raise ValueError(
+                f"Model '{model_name}': unsupported track operation {token!r}; "
+                f"use one of: {supported}"
+            )
+
+    order = ("create", "read", "update", "delete", "bulk_delete", "import", "export")
+    return [operation for operation in order if operation in operations]
+
 
 def _normalize_reports(
     raw: Any,
@@ -1153,6 +1199,29 @@ def get_model_fields(
     import_key = model_site_props.get("import_key", None)
     raw_exportable = model_site_props.get("exportable", False)
     exportable = isinstance(raw_exportable, dict) or bool(raw_exportable)
+    tracked_operations = _normalize_tracked_operations(
+        model_site_props.get("track"), model_name=model_cls.__name__
+    )
+    if tracked_operations and frontend_only:
+        raise ValueError(
+            f"Model '{model_cls.__name__}': frontend-only models cannot enable track"
+        )
+    if "import" in tracked_operations and not importable:
+        raise ValueError(
+            f"Model '{model_cls.__name__}': track includes import but importable is disabled"
+        )
+    if "export" in tracked_operations and not exportable:
+        raise ValueError(
+            f"Model '{model_cls.__name__}': track includes export but exportable is disabled"
+        )
+    unsupported_singleton_operations = {
+        "create", "delete", "bulk_delete", "import", "export"
+    }.intersection(tracked_operations)
+    if unsupported_singleton_operations and is_singleton:
+        raise ValueError(
+            f"Model '{model_cls.__name__}': singleton models only support read/update tracking"
+        )
+    model_site_props["tracked_operations"] = tracked_operations
     raw_visible = model_site_props.get("visible", None)
     # ``page_edit`` is the legacy boolean spelling.  ``edit_mode`` is the
     # extensible form and supports modal (default), page, right-side drawer,
