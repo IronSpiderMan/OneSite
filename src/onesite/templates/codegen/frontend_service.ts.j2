@@ -21,6 +21,11 @@ export interface {{ model.name }} {
 {% for field in model.extra_fields | default([]) %}
     {{ field.name }}: {{ 'string[]' if 'List[' in field.type else 'string' if 'str' in field.type else 'number' if 'int' in field.type or 'float' in field.type else 'boolean' if 'bool' in field.type else 'any' }};
 {% endfor %}
+{% for override in model.override_fields | default([]) %}
+{% if override.raw_field is defined %}
+    {{ override.raw_field }}?: {{ 'Record<string, any>' if 'Dict[' in (model.fields | selectattr('name', 'equalto', override.field) | list | first).type else 'string[]' if (model.fields | selectattr('name', 'equalto', override.field) | list | first).is_multi_select else 'any[]' if 'List[' in (model.fields | selectattr('name', 'equalto', override.field) | list | first).type else 'string' if 'str' in (model.fields | selectattr('name', 'equalto', override.field) | list | first).type else 'number' if 'int' in (model.fields | selectattr('name', 'equalto', override.field) | list | first).type or 'float' in (model.fields | selectattr('name', 'equalto', override.field) | list | first).type else 'boolean' if 'bool' in (model.fields | selectattr('name', 'equalto', override.field) | list | first).type else 'any' }};
+{% endif %}
+{% endfor %}
 }
 
 export interface PaginatedResponse<T> {

@@ -532,10 +532,18 @@ async def resolve_read_data(
         values=snapshot,
     )
     methods = vars(type(obj)).items()
+    write_targets = {
+        metadata.field
+        for _, raw_method in methods
+        if (metadata := get_override_field_metadata(raw_method)) is not None
+        and metadata.direction == "write"
+    }
     for _, raw_method in methods:
         metadata = get_override_field_metadata(raw_method)
         if metadata is None or metadata.direction != "read":
             continue
+        if metadata.field not in write_targets:
+            result[f"{metadata.field}__raw"] = result.get(metadata.field)
         resolver = getattr(obj, raw_method.__name__)
         result[metadata.field] = await invoke_read_callable(
             resolver,

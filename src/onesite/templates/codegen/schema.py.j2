@@ -211,6 +211,8 @@ class {{ model.name }}Create(SQLModel):
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if 'c' in field.permissions %}
+    {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | selectattr('write_handler', 'defined') | list | first) %}
+    {% set input_type = override.read_type if override else field.type %}
     {% if field.required and not field.create_optional %}
     {% if field.default_factory == 'date' %}
     # Omit the value to let the SQLModel date default factory run.
@@ -219,10 +221,12 @@ class {{ model.name }}Create(SQLModel):
     # user_id is optional in create - None means broadcast to all users
     user_id: Optional[int] = None
     {% else %}
-    {{ field.name }}: {{ field.type }}
+    {{ field.name }}: {{ input_type }}
     {% endif %}
     {% else %}
-    {% if field.default_factory == 'list' %}
+    {% if override %}
+    {{ field.name }}: Optional[{{ input_type }}] = None
+    {% elif field.default_factory == 'list' %}
     {{ field.name }}: {{ field.type }} = Field(default_factory=list)
     {% elif field.default_factory == 'dict' %}
     {{ field.name }}: {{ field.type }} = Field(default_factory=dict)
@@ -287,10 +291,12 @@ class {{ model.name }}Update(SQLModel):
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if 'u' in field.permissions and field.name != 'id' %}
-    {% if field.type.startswith('Optional[') %}
-    {{ field.name }}: {{ field.type }} = None
+    {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | selectattr('write_handler', 'defined') | list | first) %}
+    {% set input_type = override.read_type if override else field.type %}
+    {% if input_type.startswith('Optional[') %}
+    {{ field.name }}: {{ input_type }} = None
     {% else %}
-    {{ field.name }}: Optional[{{ field.type }}] = None
+    {{ field.name }}: Optional[{{ input_type }}] = None
     {% endif %}
     {% set ns.has_field = true %}
     {% endif %}
@@ -343,6 +349,11 @@ class {{ model.name }}Update(SQLModel):
 
 class {{ model.name }}Read({{ model.name }}Base):
     {% if not model.is_timescaledb %}id: {{ model.id_type }}{% endif %}
+{% for override in model.override_fields | default([]) %}
+{% if override.raw_field is defined %}
+    {{ override.raw_field }}: Optional[{{ (model.fields | selectattr('name', 'equalto', override.field) | list | first).type }}] = None
+{% endif %}
+{% endfor %}
 {% for fk in model.foreign_keys %}
     {{ fk.name }}_label: Optional[str] = None
 {% endfor %}

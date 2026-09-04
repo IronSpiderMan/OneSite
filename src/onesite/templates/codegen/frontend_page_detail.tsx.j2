@@ -78,10 +78,25 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 )
 {%- endmacro %}
 {% macro detail_edit_field(field) -%}
-{% if field.name not in override_field_names or field.name in writable_override_field_names %}hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+{% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
+hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
 <div className="space-y-2">
     <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
-    {% if field.dict_key_reference %}
+    {% if field.name in writable_override_field_names %}
+    {% if override.read_type == 'bool' %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <Switch checked={Boolean(value)} onCheckedChange={onChange} id="edit-{{ field.name }}" />
+    )} />
+    {% elif override.read_type in ['int', 'float'] %}
+    <Input id="edit-{{ field.name }}" type="number" {...register('{{ field.name }}', { valueAsNumber: true })} />
+    {% elif override.read_type.startswith('List[') or override.read_type.startswith('Dict[') or override.read_type in ['list', 'dict', 'Any'] %}
+    <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
+        <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
+    )} />
+    {% else %}
+    <Input id="edit-{{ field.name }}" type="text" {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })} />
+    {% endif %}
+    {% elif field.dict_key_reference %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
         <SearchableSelect
             value={value}
@@ -224,7 +239,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
     <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% if field.minimum is not none %} min={ {{ field.minimum }} }{% endif %}{% if field.maximum is not none %} max={ {{ field.maximum }} }{% endif %}{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }},{% if field.minimum is not none %} min: {{ field.minimum }},{% endif %}{% if field.maximum is not none %} max: {{ field.maximum }},{% endif %} })} />
     {% endif %}
 </div>
-){% endif %}
+)
 {%- endmacro %}
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -583,12 +598,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (isSaving) return;
       setIsSaving(true);
       try {
-        // @override_field values are presentation-only.  A read response may
-        // contain a formatted value that cannot be written back to the model.
         const updatePayload = { ...values };
-        {% for field_name in override_field_names if field_name not in writable_override_field_names %}
-        delete updatePayload['{{ field_name }}'];
-        {% endfor %}
         await updateItem(currentItem!.id, updatePayload);
         toast.success(t('toast.update_success', 'Updated'));
         setIsEditing(false);
@@ -610,8 +620,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (!currentItem) return;
       const item = currentItem;
       {% for field in model.fields %}
-      {% if 'r' in field.permissions and (field.name not in override_field_names or field.name in writable_override_field_names) %}
-      setEditValue('{{ field.name }}', item.{{ field.name }});
+      {% if 'r' in field.permissions %}
+      {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
+      setEditValue('{{ field.name }}', item.{{ override.raw_field if override and override.raw_field is defined else field.name }});
       {% endif %}
       {% endfor %}
       {% for field in model.fields %}
@@ -1572,7 +1583,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <LocationInput value={value} onChange={onChange} />
                                     )}
                                 />
-                                {% elif field.name in override_field_names %}
+                                {% elif field.name in writable_override_field_names %}
                                 <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
                                     {String(currentItem.{{ field.name }} ?? '-')}
                                 </pre>
@@ -1968,9 +1979,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     </CardHeader>
                     <CardContent>
                         {% if field.name in override_field_names %}
+                        {% if model.page_edit and 'u' in field.permissions %}
+                        {isEditing ? (
+                            {{ detail_edit_field(field) }}
+                        ) : (
+                        {% endif %}
                         <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-sm">
                             {String(currentItem.{{ field.name }} ?? '-')}
                         </pre>
+                        {% if model.page_edit and 'u' in field.permissions %}
+                        )}
+                        {% endif %}
                         {% else %}
                         {% if model.page_edit and 'u' in field.permissions %}{isEditing && hasFieldPerm('{{ field.name }}', 'u') ? (
                         <Controller

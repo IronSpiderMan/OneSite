@@ -650,6 +650,14 @@ def _extract_read_resolvers(
                 f"{model_cls.__name__}.{entry['write_handler']} write override_field "
                 f"must be paired with a read override_field for {target!r}"
             )
+        if "handler" in entry and "write_handler" not in entry:
+            raw_field = f"{target}__raw"
+            if raw_field in fields_by_name or raw_field in names:
+                raise ValueError(
+                    f"{model_cls.__name__} cannot expose raw override value as "
+                    f"{raw_field!r} because that name is already in use"
+                )
+            entry["raw_field"] = raw_field
     return extra_fields, overrides
 
 
