@@ -564,7 +564,9 @@ def _extract_read_resolvers(
     extra_fields: list[dict[str, Any]] = []
     overrides: list[dict[str, Any]] = []
     names: set[str] = set()
-    targets: set[str] = set()
+    read_targets: set[str] = set()
+    write_targets: set[str] = set()
+    overrides_by_target: dict[str, dict[str, Any]] = {}
 
     for method_name, raw_method in vars(model_cls).items():
         if isinstance(raw_method, (classmethod, staticmethod)):
@@ -618,10 +620,28 @@ def _extract_read_resolvers(
             field = fields_by_name.get(target)
             if field is None or "r" not in field.permissions:
                 raise ValueError(f"{model_cls.__name__}.{method_name} overrides unknown or unreadable field {target!r}")
-            if target in targets:
-                raise ValueError(f"{model_cls.__name__} defines more than one override_field for {target!r}")
-            overrides.append({"field": target, "handler": method_name})
-            targets.add(target)
+            if override_metadata.direction == "read":
+                if target in read_targets:
+                    raise ValueError(f"{model_cls.__name__} defines more than one read override_field for {target!r}")
+                entry = overrides_by_target.setdefault(target, {"field": target})
+                entry["handler"] = method_name
+                read_targets.add(target)
+            else:
+                if "u" not in field.permissions and "c" not in field.permissions:
+                    raise ValueError(f"{model_cls.__name__}.{method_name} write override_field targets a non-writable field {target!r}")
+                if target in write_targets:
+                    raise ValueError(f"{model_cls.__name__} defines more than one write override_field for {target!r}")
+                entry = overrides_by_target.setdefault(target, {"field": target})
+                entry["write_handler"] = method_name
+                write_targets.add(target)
+            if entry not in overrides:
+                overrides.append(entry)
+    for target, entry in overrides_by_target.items():
+        if "write_handler" in entry and "handler" not in entry:
+            raise ValueError(
+                f"{model_cls.__name__}.{entry['write_handler']} write override_field "
+                f"must be paired with a read override_field for {target!r}"
+            )
     return extra_fields, overrides
 
 

@@ -16,6 +16,7 @@ from ..config import (
     validate_tools_config,
     validate_video_stream_config,
     validate_custom_features_config,
+    validate_public_dashboard_config,
 )
 from ..envsync import sync_env_files
 from ...project_paths import get_project_paths
@@ -60,6 +61,7 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
     )
     validate_desktop_config(site_config)
     validate_custom_features_config(site_config)
+    validate_public_dashboard_config(site_config)
     validate_external_resource_providers_config(site_config)
     allowed_origins = site_config["allowed_origins"]
     if not isinstance(allowed_origins, list) or any(

@@ -1194,6 +1194,43 @@ Preset constants are grouped by chart type for editor completion, such as
 `line.smooth`, `line.stacked_area_gradient`, and `pie.rounded_donut`. Existing
 string presets remain supported.
 
+### Public dashboard sharing
+
+An opt-in public dashboard can expose selected project-level visualizations at
+a route that does not require a user session. Add this to `site_config.json`
+and run `site sync`:
+
+```json
+{
+  "public_dashboard": {
+    "enabled": true,
+    "path": "/share/dashboard",
+    "title": "Live service status",
+    "visualizations": ["daily_sales", "orders_by_status"]
+  }
+}
+```
+
+With typed Python configuration, use `PublicDashboardConfig`:
+
+```python
+from onesite.config import PublicDashboardConfig, SiteConfig
+
+config = SiteConfig(
+    project_name="MyApp",
+    public_dashboard=PublicDashboardConfig(
+        enabled=True,
+        path="/share/dashboard",
+        title="Live service status",
+        visualizations=["daily_sales", "orders_by_status"],
+    ),
+)
+```
+
+Only the listed visualization keys receive unauthenticated query endpoints;
+the normal dashboard and every model API remain protected. Owner-scoped charts
+cannot be shared publicly, because their results depend on the signed-in user.
+
 OneSite validates each preset's semantic inputs and generates a shared query API
 plus an ECharts dashboard runtime. Related fields can use paths such as
 `category.name`. See `docs/visualization-redesign.md` for the contracts and

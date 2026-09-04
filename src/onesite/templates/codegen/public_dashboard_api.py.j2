@@ -1,0 +1,21 @@
+from typing import Any
+
+from fastapi import APIRouter, Body, Depends
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db
+from app.core.visualizations import list_public_visualizations, query_visualization
+
+router = APIRouter()
+
+@router.get("")
+async def list_public_dashboard() -> Any:
+    return {"visualizations": list_public_visualizations()}
+
+@router.post("/{key}/query")
+async def query_public_dashboard(
+    key: str,
+    payload: dict[str, Any] = Body(default_factory=dict),
+    session: AsyncSession = Depends(db.get_session),
+) -> Any:
+    return await query_visualization(session, key=key, user=None, payload=payload, public=True)

@@ -13,6 +13,7 @@ def update_api_router(
     visualizations_enabled: bool = False,
     import_export_enabled: bool = False,
     custom_api_modules: List[str] | None = None,
+    public_dashboard_enabled: bool = False,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -60,6 +61,11 @@ def update_api_router(
         imports.append("from app.api.endpoints import visualizations")
         routers.append(
             'api_router.include_router(visualizations.router, prefix="/visualizations", tags=["visualizations"])'
+        )
+    if public_dashboard_enabled:
+        imports.append("from app.api.endpoints import public_dashboard")
+        routers.append(
+            'api_router.include_router(public_dashboard.router, prefix="/public/dashboard", tags=["public-dashboard"])'
         )
 
     for model in models:

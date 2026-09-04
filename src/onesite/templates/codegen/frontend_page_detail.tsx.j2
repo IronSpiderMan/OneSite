@@ -1,3 +1,5 @@
+{% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
+{% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
 {% macro detail_read_field(field) -%}
 hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
 <div className="space-y-1">
@@ -72,7 +74,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 )
 {%- endmacro %}
 {% macro detail_edit_field(field) -%}
-hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+{% if field.name not in override_field_names or field.name in writable_override_field_names %}hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
 <div className="space-y-2">
     <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
     {% if field.dict_key_reference %}
@@ -192,7 +194,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
     <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% if field.minimum is not none %} min={ {{ field.minimum }} }{% endif %}{% if field.maximum is not none %} max={ {{ field.maximum }} }{% endif %}{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }},{% if field.minimum is not none %} min: {{ field.minimum }},{% endif %}{% if field.maximum is not none %} max: {{ field.maximum }},{% endif %} })} />
     {% endif %}
 </div>
-)
+){% endif %}
 {%- endmacro %}
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
@@ -545,7 +547,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (isSaving) return;
       setIsSaving(true);
       try {
-        await updateItem(currentItem!.id, values);
+        // @override_field values are presentation-only.  A read response may
+        // contain a formatted value that cannot be written back to the model.
+        const updatePayload = { ...values };
+        {% for field_name in override_field_names if field_name not in writable_override_field_names %}
+        delete updatePayload['{{ field_name }}'];
+        {% endfor %}
+        await updateItem(currentItem!.id, updatePayload);
         toast.success(t('toast.update_success', 'Updated'));
         setIsEditing(false);
         await fetchItem(currentItem!.id);
@@ -566,7 +574,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (!currentItem) return;
       const item = currentItem;
       {% for field in model.fields %}
-      {% if 'r' in field.permissions %}
+      {% if 'r' in field.permissions and (field.name not in override_field_names or field.name in writable_override_field_names) %}
       setEditValue('{{ field.name }}', item.{{ field.name }});
       {% endif %}
       {% endfor %}

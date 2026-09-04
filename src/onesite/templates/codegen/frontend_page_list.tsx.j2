@@ -1,3 +1,5 @@
+{% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
+{% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
 import React, { useState, useEffect, useRef } from 'react';
 import { Plus, Pencil, Trash2, Loader2, Eye{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
@@ -675,7 +677,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     const item = full || record;
     // Set form values
     {% for field in model.fields %}
-    {% if 'r' in field.permissions %}
+    {% if 'r' in field.permissions and (field.name not in override_field_names or field.name in writable_override_field_names) %}
     setValue('{{ field.name }}', item.{{ field.name }});
     {% endif %}
     {% endfor %}
@@ -863,6 +865,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     if (isSaving) return;
     setIsSaving(true);
     const payload = { ...values, ...fixedFields };
+    // @override_field values are response-only display values; never persist
+    // the formatted response value during a generated edit.
+    {% for field_name in override_field_names if field_name not in writable_override_field_names %}
+    delete payload['{{ field_name }}'];
+    {% endfor %}
     try {
       {% if model.is_tree %}
       if (editingId) {
@@ -1063,7 +1070,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   return (
     <div
-      className="{{ page_shell_class | default('flex h-full min-h-0 flex-col gap-6') }}"
+      className={embedded ? 'flex h-full min-h-0 flex-col gap-4 overflow-auto p-4' : '{{ page_shell_class | default("flex h-full min-h-0 flex-col gap-6") }}'}
       data-codegen-theme="{{ codegen_theme | default('normal') }}"
       data-page-kind="list"
     >
@@ -1121,6 +1128,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         </AlertDialogContent>
       </AlertDialog>
 
+      {!embedded && (
       <div className="flex items-center justify-between">
         <h1 className="text-3xl font-bold tracking-tight">{% if model.owner_field %}{userRole === 'user' ? t('models.{{ model.module_name }}.my_name') : t('models.{{ model.module_name }}.plural')}{% else %}{t('models.{{ model.module_name }}.plural')}{% endif %}</h1>
         <div className="flex items-center gap-4">
@@ -1184,7 +1192,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           )}
           {% endif %}
           {% if model.has_embedded_page %}
-          {embedded && allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+          {allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
             <Button
               variant="outline"
               onClick={() => {
@@ -1198,6 +1206,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% endif %}
         </div>
       </div>
+      )}
 
       {% if model.multi_display %}
       <div className="flex w-fit items-center rounded-md border bg-muted/30 p-1" role="tablist" aria-label={t('multi_display.view_mode', 'View mode')}>
@@ -1224,6 +1233,25 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
           <div className="flex items-center gap-2">
             <Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button>
+            {embedded && hasPermission('c') && (
+              <Button size="sm" onClick={handleCreate}>
+                <Plus className="mr-1 h-3 w-3" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+              </Button>
+            )}
+            {% if model.has_embedded_page %}
+            {embedded && allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setAttachExistingIds([]);
+                  setAttachExistingOpen(true);
+                }}
+              >
+                <Plus className="mr-1 h-3 w-3" /> {t('common.add_existing', 'Add existing')}
+              </Button>
+            )}
+            {% endif %}
           </div>
         </div>
         <div className="mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2">
@@ -1339,6 +1367,29 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% endfor %}
           </div>
         </div>
+      </div>
+      {% elif embedded %}
+      {/* Embedded mode: action buttons when no search fields */}
+      <div className="flex items-center gap-2">
+        {hasPermission('c') && (
+          <Button size="sm" onClick={handleCreate}>
+            <Plus className="mr-1 h-3 w-3" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+          </Button>
+        )}
+        {% if model.has_embedded_page %}
+        {allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setAttachExistingIds([]);
+              setAttachExistingOpen(true);
+            }}
+          >
+            <Plus className="mr-1 h-3 w-3" /> {t('common.add_existing', 'Add existing')}
+          </Button>
+        )}
+        {% endif %}
       </div>
       {% endif %}
 
@@ -1564,7 +1615,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     {% for field in model.fields %}
                     {% if 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
                     <TableCell>
-                        {% if model.edit_mode == 'inplace_edit' and 'u' in field.permissions %}
+                        {% if model.edit_mode == 'inplace_edit' and 'u' in field.permissions and (field.name not in override_field_names or field.name in writable_override_field_names) %}
                         {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} ? (
                         <div className="min-w-[10rem]" data-inplace-field="{{ field.name }}">
                         {% if field.ui_type == 'bool' %}
@@ -2320,7 +2371,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
             <div className="max-h-[80vh] overflow-y-auto pr-2">
                 <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
           {% macro modal_form_field(field, as_expression=false) -%}
-          {% if not as_expression %}{{ '{' }}{% endif %}(!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+          {% if not as_expression %}{{ '{' }}{% endif %}{% if field.name not in override_field_names or field.name in writable_override_field_names %}(!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && ({% else %}false && ({% endif %}
           <div className="space-y-2">
             <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{((!editingId && {{ 'true' if field.required and not field.create_optional else 'false' }}) || (Boolean(editingId) && {{ 'true' if field.required and not field.update_optional else 'false' }})) && <span className="text-destructive"> *</span>}</Label>
             {% if field.ui_type == 'bool' %}

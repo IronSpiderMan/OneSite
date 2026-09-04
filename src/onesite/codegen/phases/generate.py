@@ -885,6 +885,7 @@ def phase_generate_aggregated(
     )
     theme_name = resolve_theme(site_config)[0]["id"]
     visualizations = site_config.get("_visualizations", [])
+    public_dashboard = site_config.get("_public_dashboard", {"enabled": False})
     model_reports_enabled = any(model.get("reports") for model in api_models)
     import_export_models = [
         model
@@ -1077,12 +1078,21 @@ def phase_generate_aggregated(
         visualization_context = {
             "visualizations": visualizations,
             "visualizations_json": json.dumps(visualizations, ensure_ascii=False),
+            "public_visualization_keys_json": json.dumps([
+                item["key"] for item in public_dashboard.get("visualizations", [])
+            ]),
         }
         generate_file(
             "visualization_runtime.py.j2",
             visualization_context,
             backend_path / "app" / "core" / "visualizations.py",
         )
+        if public_dashboard.get("enabled"):
+            generate_file(
+                "public_dashboard_api.py.j2",
+                {},
+                backend_path / "app" / "api" / "endpoints" / "public_dashboard.py",
+            )
         generate_file(
             "visualizations_api.py.j2",
             visualization_context,
@@ -1127,14 +1137,13 @@ def phase_generate_aggregated(
 
     # ── API router ──
     update_api_router(
-        api_models,
-        backend_path / "app" / "api" / "api.py",
-        scheduled_tasks,
-        tools,
-        external_resources_enabled,
-        bool(visualizations),
-        background_tasks_enabled,
-        custom_api_modules,
+        api_models, backend_path / "app" / "api" / "api.py",
+        scheduled_tasks=scheduled_tasks, tools=tools,
+        external_resources_enabled=external_resources_enabled,
+        visualizations_enabled=bool(visualizations),
+        public_dashboard_enabled=bool(public_dashboard.get("enabled")),
+        import_export_enabled=background_tasks_enabled,
+        custom_api_modules=custom_api_modules,
     )
 
     if tools or scheduled_tasks or import_export_enabled:
@@ -1441,6 +1450,7 @@ def phase_generate_aggregated(
             "external_resources_enabled": external_resources_enabled,
             "reports_enabled": bool(report_models),
             "import_export_enabled": background_tasks_enabled,
+            "public_dashboard": public_dashboard,
         },
         frontend_path / "src" / "Routes.tsx",
     )
@@ -1488,11 +1498,18 @@ def phase_generate_aggregated(
             "tools": tools,
             "dashboard_metric_icons": dashboard_metric_icons,
             "visualizations": visualizations,
+            "public_dashboard": public_dashboard,
             "dashboard_widgets": dashboard_widgets,
         },
         frontend_path / "src" / "pages" / "Dashboard.tsx",
         theme_name,
     )
+    if public_dashboard.get("enabled") and not public_dashboard.get("component"):
+        generate_file(
+            "public_dashboard_page.tsx.j2",
+            {"public_dashboard": public_dashboard},
+            frontend_path / "src" / "pages" / "PublicDashboard.tsx",
+        )
     if report_models:
         generate_file(
             "report_runtime.py.j2",

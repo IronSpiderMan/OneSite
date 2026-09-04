@@ -83,6 +83,16 @@ class ReadContext:
 
 
 @dataclass(frozen=True)
+class WriteContext:
+    """Request-scoped values available while normalizing a field for storage."""
+
+    session: Any
+    current_user: Any | None = None
+    operation: Literal["create", "update"] = "update"
+    values: Mapping[str, Any] | None = None
+
+
+@dataclass(frozen=True)
 class ExtraFieldMetadata:
     """Metadata attached to an instance method by :func:`extra_field`."""
 
@@ -108,6 +118,7 @@ class OverrideFieldMetadata:
     """Metadata attached to an instance method by :func:`override_field`."""
 
     field: str
+    direction: Literal["read", "write"] = "read"
 
 
 ActionFunction = TypeVar("ActionFunction", bound=Callable[..., Any])
@@ -168,14 +179,30 @@ def extra_field(
     return decorate
 
 
-def override_field(field: str) -> Callable[[ActionFunction], ActionFunction]:
-    """Declare a response-only override for one persisted readable field."""
+def override_field(
+    field: str, *, direction: Literal["read", "write"] = "read"
+) -> Callable[[ActionFunction], ActionFunction]:
+    """Declare a field presentation override or its inverse write normalizer.
+
+    The default ``direction="read"`` transforms a persisted value for the
+    response.  Pair it with ``direction="write"`` on a second instance method
+    to turn submitted display values back into the persisted representation.
+    Write resolvers receive ``value``, ``context``, ``session``,
+    ``current_user``, and ``values``; ``context.operation`` is ``"create"`` or
+    ``"update"``.
+    """
 
     if not isinstance(field, str) or not field:
         raise ValueError("override_field field must be a non-empty string")
+    if direction not in {"read", "write"}:
+        raise ValueError("override_field direction must be 'read' or 'write'")
 
     def decorate(handler: ActionFunction) -> ActionFunction:
-        setattr(handler, OVERRIDE_FIELD_METADATA_ATTRIBUTE, OverrideFieldMetadata(field=field))
+        setattr(
+            handler,
+            OVERRIDE_FIELD_METADATA_ATTRIBUTE,
+            OverrideFieldMetadata(field=field, direction=direction),
+        )
         return handler
 
     return decorate
@@ -316,6 +343,35 @@ async def invoke_read_callable(
     }
     if include_value:
         values["value"] = value
+    kwargs = {
+        name: resolved
+        for name, resolved in values.items()
+        if has_kwargs or name in parameters
+    }
+    result = function(**kwargs)
+    if inspect.isawaitable(result):
+        return await result
+    return result
+
+
+async def invoke_write_callable(
+    function: Callable[..., Any], context: WriteContext, *, value: Any
+) -> Any:
+    """Invoke a write-side override resolver with its declared dependencies."""
+
+    signature = inspect.signature(function)
+    parameters = signature.parameters
+    has_kwargs = any(
+        parameter.kind is inspect.Parameter.VAR_KEYWORD
+        for parameter in parameters.values()
+    )
+    values = {
+        "context": context,
+        "session": context.session,
+        "current_user": context.current_user,
+        "values": context.values,
+        "value": value,
+    }
     kwargs = {
         name: resolved
         for name, resolved in values.items()
@@ -478,7 +534,7 @@ async def resolve_read_data(
     methods = vars(type(obj)).items()
     for _, raw_method in methods:
         metadata = get_override_field_metadata(raw_method)
-        if metadata is None:
+        if metadata is None or metadata.direction != "read":
             continue
         resolver = getattr(obj, raw_method.__name__)
         result[metadata.field] = await invoke_read_callable(
@@ -498,6 +554,32 @@ async def resolve_read_data(
     if network_device is not None:
         result[network_device.status_field] = await resolve_network_device_status(
             obj, resolver_context, network_device
+        )
+    return result
+
+
+async def resolve_write_data(
+    obj: Any, data: Mapping[str, Any], context: WriteContext
+) -> dict[str, Any]:
+    """Normalize submitted values through declared write-side overrides."""
+
+    result = dict(data)
+    snapshot = dict(data)
+    resolver_context = WriteContext(
+        session=context.session,
+        current_user=context.current_user,
+        operation=context.operation,
+        values=snapshot,
+    )
+    for _, raw_method in vars(type(obj)).items():
+        metadata = get_override_field_metadata(raw_method)
+        if metadata is None or metadata.direction != "write":
+            continue
+        if metadata.field not in result:
+            continue
+        resolver = getattr(obj, raw_method.__name__)
+        result[metadata.field] = await invoke_write_callable(
+            resolver, resolver_context, value=result[metadata.field]
         )
     return result
 
@@ -549,6 +631,7 @@ __all__ = [
     "NetworkDeviceMetadata",
     "OverrideFieldMetadata",
     "ReadContext",
+    "WriteContext",
     "action",
     "extra_field",
     "evaluate_action_state",
@@ -557,9 +640,11 @@ __all__ = [
     "get_override_field_metadata",
     "invoke_action_callable",
     "invoke_read_callable",
+    "invoke_write_callable",
     "normalize_action_state",
     "override_field",
     "probe_network_url",
     "resolve_read_data",
+    "resolve_write_data",
     "resolve_network_device_status",
 ]

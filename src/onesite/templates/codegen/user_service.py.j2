@@ -9,7 +9,7 @@ from app.schemas.user import UserCreate, UserRead, UserUpdate, UserUpdateMe
 from app.schemas.pagination import PaginatedResponse
 from app.models.user import User
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
-from app.core.action_runtime import ReadContext, resolve_read_data{% if model.network_device %}, NetworkDeviceMetadata{% endif %}
+from app.core.action_runtime import ReadContext, WriteContext, resolve_read_data, resolve_write_data{% if model.network_device %}, NetworkDeviceMetadata{% endif %}
 {% if model.reports %}
 from app.core.reports import get_model_report_catalog, query_model_report
 {% endif %}
@@ -172,6 +172,16 @@ class UserService:
         return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
 
     async def create(self, session: AsyncSession, obj_in: UserCreate, *, current_user: Any = None) -> UserRead:
+        {% set write_overrides = model.override_fields | default([]) | selectattr('write_handler', 'defined') | list %}
+        {% if write_overrides %}
+        write_values = await resolve_write_data(
+            User.model_construct(**obj_in.dict(exclude_unset=True)),
+            obj_in.dict(exclude_unset=True),
+            WriteContext(session=session, current_user=current_user, operation="create"),
+        )
+        for key, value in write_values.items():
+            setattr(obj_in, key, value)
+        {% endif %}
         {% if model.fields | selectattr('is_unique') | list %}
         # Check unique field constraints
         {% for field in model.fields %}
@@ -234,6 +244,16 @@ class UserService:
         db_obj = await crud.get(session, id)
         if not db_obj:
             raise ValueError("User not found")
+        {% set write_overrides = model.override_fields | default([]) | selectattr('write_handler', 'defined') | list %}
+        {% if write_overrides %}
+        write_values = await resolve_write_data(
+            db_obj,
+            obj_in.dict(exclude_unset=True),
+            WriteContext(session=session, current_user=current_user, operation="update"),
+        )
+        for key, value in write_values.items():
+            setattr(obj_in, key, value)
+        {% endif %}
         
         {% if model.fields | selectattr('is_unique') | list %}
         # Check unique field constraints (only for fields being updated)

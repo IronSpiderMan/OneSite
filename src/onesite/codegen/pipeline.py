@@ -69,6 +69,32 @@ def generate_code() -> None:
     # resolved FK and reverse-FK paths.  Keep charts in the transient
     # generation context; KPI metadata is attached to its source model.
     site_config["_visualizations"] = load_and_compile_visualizations(cwd, models)
+    public_dashboard = site_config["public_dashboard"]
+    public_keys = set(public_dashboard["visualizations"]) if public_dashboard["enabled"] else set()
+    compiled_by_key = {item["key"]: item for item in site_config["_visualizations"]}
+    unknown_public_keys = sorted(public_keys - set(compiled_by_key))
+    if unknown_public_keys:
+        available_keys = ", ".join(sorted(compiled_by_key)) or "(none declared in visualizations.py)"
+        raise ValueError(
+            "public_dashboard references unknown visualizations: "
+            + ", ".join(unknown_public_keys)
+            + ". Available visualization keys: "
+            + available_keys
+        )
+    owner_scoped_keys = sorted(
+        key for key in public_keys
+        if compiled_by_key[key]["model"].get("owner_field")
+        or (compiled_by_key[key].get("leaf") or {}).get("model", {}).get("owner_field")
+    )
+    if owner_scoped_keys:
+        raise ValueError(
+            "public_dashboard cannot expose owner-scoped visualizations: "
+            + ", ".join(owner_scoped_keys)
+        )
+    site_config["_public_dashboard"] = {
+        **public_dashboard,
+        "visualizations": [item for item in site_config["_visualizations"] if item["key"] in public_keys],
+    }
     apply_dashboard_metrics(
         models,
         load_and_compile_dashboard_metrics(cwd, models),

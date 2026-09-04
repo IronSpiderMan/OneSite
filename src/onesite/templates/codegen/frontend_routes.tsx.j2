@@ -7,6 +7,13 @@ import {
 } from './GeneratedFeatureRoutes';
 import SettingsPage from './pages/Settings';
 import DashboardPage from './pages/Dashboard';
+{% if public_dashboard is defined and public_dashboard.enabled %}
+{% if public_dashboard.component %}
+import PublicDashboardPage from './custom/features/{{ public_dashboard.component.rsplit('.', 1)[0] }}';
+{% else %}
+import PublicDashboardPage from './pages/PublicDashboard';
+{% endif %}
+{% endif %}
 {% if reports_enabled %}
 import ReportsPage from './pages/Reports';
 {% endif %}
@@ -92,6 +99,16 @@ const GeneratedBaseRoutes: GeneratedRouteDefinition[] = [
 export const GeneratedRoutes: GeneratedRouteDefinition[] = [
   ...applyGeneratedRouteOverrides(GeneratedBaseRoutes),
   ...GeneratedFeatureRoutes,
+];
+
+export const PublicDashboardRoutes: GeneratedRouteDefinition[] = [
+{% if public_dashboard is defined and public_dashboard.enabled %}
+  {
+    id: 'builtin.public-dashboard',
+    path: {{ public_dashboard.path | tojson }},
+    element: <PublicDashboardPage />,
+  },
+{% endif %}
 ];
 
 export { GeneratedPublicFeatureRoutes };

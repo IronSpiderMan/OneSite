@@ -52,3 +52,13 @@ export const getVisualizationOptions = async (key: string): Promise<Visualizatio
   const response = await request.get<VisualizationOptions>(`/visualizations/${encodeURIComponent(key)}/options`);
   return response.data;
 };
+
+export const getPublicVisualizations = async (): Promise<VisualizationSpec[]> => {
+  const response = await request.get<{ visualizations: VisualizationSpec[] }>('/public/dashboard');
+  return response.data.visualizations;
+};
+
+export const queryPublicVisualization = async (key: string): Promise<VisualizationData> => {
+  const response = await request.post<VisualizationData>(`/public/dashboard/${encodeURIComponent(key)}/query`);
+  return response.data;
+};

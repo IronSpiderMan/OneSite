@@ -58,6 +58,40 @@ _FRONTEND_ROUTE_ID_RE = re.compile(r"[a-z][a-z0-9_.-]*")
 _TASK_CENTER_KINDS = {"import", "export", "tool", "scheduled_task"}
 
 
+def validate_public_dashboard_config(config: Dict[str, Any]) -> None:
+    """Validate the opt-in, read-only dashboard sharing configuration."""
+    dashboard = config.setdefault("public_dashboard", {"enabled": False})
+    if not isinstance(dashboard, dict):
+        raise SiteConfigError("site_config.json field 'public_dashboard' must be an object.")
+    unknown = set(dashboard) - {"enabled", "path", "title", "visualizations", "component"}
+    if unknown:
+        raise SiteConfigError(
+            "site_config.json field 'public_dashboard' contains unsupported keys: "
+            + ", ".join(sorted(unknown)) + "."
+        )
+    enabled = dashboard.setdefault("enabled", False)
+    if not isinstance(enabled, bool):
+        raise SiteConfigError("site_config.json field 'public_dashboard.enabled' must be a boolean.")
+    path = dashboard.setdefault("path", "/share/dashboard")
+    if not isinstance(path, str) or not path.startswith("/") or path == "/" or "?" in path or "#" in path:
+        raise SiteConfigError("site_config.json field 'public_dashboard.path' must be a non-root absolute route path.")
+    title = dashboard.setdefault("title", "Dashboard")
+    if not isinstance(title, str) or not title.strip():
+        raise SiteConfigError("site_config.json field 'public_dashboard.title' must be a non-empty string.")
+    visualizations = dashboard.setdefault("visualizations", [])
+    if not isinstance(visualizations, list) or any(not isinstance(key, str) or not key for key in visualizations):
+        raise SiteConfigError("site_config.json field 'public_dashboard.visualizations' must be an array of visualization keys.")
+    if len(set(visualizations)) != len(visualizations):
+        raise SiteConfigError("site_config.json field 'public_dashboard.visualizations' must not contain duplicate keys.")
+    if enabled and not visualizations:
+        raise SiteConfigError("An enabled public_dashboard must list at least one visualization.")
+    component = dashboard.setdefault("component", None)
+    if component is not None and (
+        not isinstance(component, str) or component.startswith("/") or ".." in component
+    ):
+        raise SiteConfigError("site_config.json field 'public_dashboard.component' must be a relative frontend feature path.")
+
+
 def validate_custom_features_config(config: Dict[str, Any]) -> None:
     """Validate and normalize SiteConfig-owned custom feature declarations."""
     raw_features = config.setdefault("custom_features", [])

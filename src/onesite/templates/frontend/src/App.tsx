@@ -1,6 +1,6 @@
 import { BrowserRouter, HashRouter, Routes, Route, Navigate, useLocation } from 'react-router-dom';
 import AppLayout from './components/Layout';
-import { GeneratedPublicFeatureRoutes, GeneratedRoutes } from './Routes';
+import { GeneratedPublicFeatureRoutes, GeneratedRoutes, PublicDashboardRoutes } from './Routes';
 import LoginPage from './pages/Login';
 import RegisterPage from './pages/Register';
 import ErrorPage from './pages/ErrorPage';
@@ -38,6 +38,9 @@ function App() {
           element={<ErrorPage />}
         />
         {GeneratedPublicFeatureRoutes.map((route) => (
+          <Route key={route.id} path={route.path} element={route.element} />
+        ))}
+        {PublicDashboardRoutes.map((route) => (
           <Route key={route.id} path={route.path} element={route.element} />
         ))}
         

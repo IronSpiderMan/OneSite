@@ -66,6 +66,34 @@ class DesktopConfig(_ConfigModel):
     height: int | None = None
 
 
+class PublicDashboardConfig(_StrictConfigModel):
+    """Opt-in, anonymous read-only access to selected Dashboard charts."""
+
+    enabled: bool = False
+    path: str = "/share/dashboard"
+    title: str = "Dashboard"
+    visualizations: list[str] = Field(default_factory=list)
+    # Optional developer-owned component under app/frontend/features.  This
+    # lets a customized dashboard render the exact same content when shared.
+    component: str | None = None
+
+    @model_validator(mode="after")
+    def validate_sharing(self) -> "PublicDashboardConfig":
+        if not self.path.startswith("/") or self.path == "/" or "?" in self.path or "#" in self.path:
+            raise ValueError("path must be a non-root absolute route path")
+        if not self.title.strip():
+            raise ValueError("title must not be empty")
+        if any(not key for key in self.visualizations):
+            raise ValueError("visualizations must contain non-empty keys")
+        if len(set(self.visualizations)) != len(self.visualizations):
+            raise ValueError("visualizations must not contain duplicate keys")
+        if self.enabled and not self.visualizations:
+            raise ValueError("an enabled public dashboard must list at least one visualization")
+        if self.component is not None and (self.component.startswith("/") or ".." in self.component):
+            raise ValueError("component must be a relative path under frontend features")
+        return self
+
+
 class RedisConfig(_ConfigModel):
     url: str = "redis://localhost:6379/0"
     password: str | None = None
@@ -652,6 +680,7 @@ class SiteConfig(_ConfigModel):
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
     task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)
+    public_dashboard: PublicDashboardConfig = Field(default_factory=PublicDashboardConfig)
 
 
 _MISSING = object()
