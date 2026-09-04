@@ -4,6 +4,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { getErrorMessage } from '../../utils/request';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -99,7 +100,7 @@ const Create{{ model.name }}Page: React.FC = () => {
       toast.success(t('toast.create_success', 'Created'));
       navigate('/{{ model.module_name }}s');
     } catch (error) {
-      toast.error(t('toast.save_failed', 'Save failed'));
+      toast.error(getErrorMessage(error, t('toast.save_failed', 'Save failed')));
       console.error(error);
     } finally {
       setSubmitting(false);

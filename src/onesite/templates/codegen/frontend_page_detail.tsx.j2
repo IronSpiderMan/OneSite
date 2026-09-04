@@ -201,6 +201,7 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { ArrowLeft, Eye, Loader2{% if model.reverse_timeseries %}, Clock, Search{% endif %}{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { getErrorMessage } from '../../utils/request';
 import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store';
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
@@ -563,7 +564,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         {% endfor %}
         {% endif %}
       } catch (error) {
-        toast.error(t('toast.save_failed', 'Save failed'));
+        toast.error(getErrorMessage(error, t('toast.save_failed', 'Save failed')));
         console.error(error);
       } finally {
         setIsSaving(false);

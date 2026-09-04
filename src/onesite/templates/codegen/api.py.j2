@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.im
 {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.definition_binding_meta or model.reverse_definition_bindings or model.dict_key_reference_meta or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
 from app.models.user import User
 {% endif %}
-{% if model.is_notification_table or model.has_dynamic_action_states %}
+{% if model.is_notification_table or model.has_dynamic_action_states or model.reverse_foreign_keys %}
 from sqlmodel import select, func, col
 {% endif %}
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -34,6 +34,9 @@ from app.services.{{ model.module_name }} import service
 from app.cruds import {{ model.module_name }} as crud
 {% endif %}
 from app.models.{{ model.source_module }} import {{ model.name }}
+{% for rfk in model.reverse_foreign_keys %}
+from app.models.{{ rfk.source_module }} import {{ rfk.source_model }}
+{% endfor %}
 {% if model.definition_binding_meta %}from app.models.{{ model.definition_binding_meta.definition_module }} import {{ model.definition_binding_meta.definition_model }}
 {% endif -%}
 {% for reference in model.dict_key_reference_meta %}from app.models.{{ reference.owner_module }} import {{ reference.owner_model }}
@@ -68,6 +71,33 @@ router = APIRouter()
 router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
 {% endif %}
 
+{% if model.reverse_foreign_keys %}
+async def _delete_dependencies(session: AsyncSession, id: {{ model.id_type }}) -> list[str]:
+    """Return generated reverse-FK relationships that still reference this row."""
+    dependencies = []
+    {% for rfk in model.reverse_foreign_keys %}
+    result = await session.exec(
+        select({{ rfk.source_model }}.id)
+        .where({{ rfk.source_model }}.{{ rfk.source_fk_field }} == id)
+        .limit(1)
+    )
+    if result.first() is not None:
+        dependencies.append("{{ rfk.source_model }}")
+    {% endfor %}
+    return dependencies
+
+
+def _cannot_delete_detail(dependencies: list[str]) -> str:
+    if dependencies:
+        return (
+            "Cannot delete {{ model.name }}: related "
+            + ", ".join(dependencies)
+            + " record(s) still reference it. Remove or reassign them first."
+        )
+    return "Cannot delete {{ model.name }}: related records still reference it."
+
+
+{% endif %}
 {% if model.importable %}
 def _publish_{{ model.module_name }}_import(payload: dict) -> None:
     task_queue.publish(
@@ -506,6 +536,14 @@ async def create_{{ model.lower_name }}(
         return await service.create(session, {{ model.lower_name }}_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot create {{ model.name }}: a unique value is already in use "
+                "or a referenced record does not exist."
+            ),
+        )
 
 {% if model.module_name == "user" and model.name == "User" %}
 @router.get("/me", response_model=UserRead)
@@ -712,6 +750,14 @@ async def update_{{ model.lower_name }}(
         if "not found" in str(e):
             raise HTTPException(status_code=404, detail=str(e))
         raise HTTPException(status_code=400, detail=str(e))
+    except IntegrityError:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Cannot update {{ model.name }}: a unique value is already in use "
+                "or a referenced record does not exist."
+            ),
+        )
 
 @router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 async def delete_{{ model.lower_name }}(
@@ -752,7 +798,12 @@ async def delete_{{ model.lower_name }}(
         deleted = await service.delete(session, id)
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=400, detail="Cannot delete: related records still exist")
+        {% if model.reverse_foreign_keys %}
+        dependencies = await _delete_dependencies(session, id)
+        raise HTTPException(status_code=409, detail=_cannot_delete_detail(dependencies))
+        {% else %}
+        raise HTTPException(status_code=409, detail="Cannot delete {{ model.name }}: related records still reference it")
+        {% endif %}
     return {"deleted": deleted}
 
 @router.post("/bulk_delete", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))])
@@ -797,7 +848,13 @@ async def bulk_delete_{{ model.lower_name }}(
         deleted_count = await service.bulk_delete(session, delete_ids)
     except IntegrityError:
         await session.rollback()
-        raise HTTPException(status_code=400, detail="Cannot delete: some records have related data that prevents deletion")
+        {% if model.reverse_foreign_keys %}
+        for id in delete_ids:
+            dependencies = await _delete_dependencies(session, id)
+            if dependencies:
+                raise HTTPException(status_code=409, detail=_cannot_delete_detail(dependencies))
+        {% endif %}
+        raise HTTPException(status_code=409, detail="Cannot delete {{ model.name }}: related records still reference it")
     return {"deleted": deleted_count}
 
 {% if model.definition_binding_meta %}

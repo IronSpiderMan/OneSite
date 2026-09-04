@@ -16,6 +16,7 @@ import { JsonInput } from '../components/ui/json-input';
 import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonModelDetail, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../components/ui/json-model-editor';
 import { getMe, updateMe } from '../services/user';
 import { toast } from 'sonner';
+import { getErrorMessage } from '../utils/request';
 
 type Me = {
   id: number;
@@ -147,8 +148,7 @@ export default function ProfilePage() {
       toast.success(t('toast.update_success'));
     } catch (e: any) {
       console.error(e);
-      const detail = e?.response?.data?.detail;
-      toast.error(detail || t('toast.save_failed'));
+      toast.error(getErrorMessage(e, t('toast.save_failed')));
     } finally {
       setSaving(false);
     }

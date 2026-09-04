@@ -41,6 +41,37 @@ export const request = axios.create({
   timeout: 30000,
 });
 
+/**
+ * Turn the API's structured errors into a message suitable for a form toast.
+ * FastAPI returns validation errors as an array, whereas application errors
+ * use a string `detail`; callers should not need to know that distinction.
+ */
+export const getErrorMessage = (error: unknown, fallback: string): string => {
+  const responseData = (error as any)?.response?.data;
+  const detail = responseData?.detail;
+  if (typeof detail === 'string' && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item: any) => {
+        const location = Array.isArray(item?.loc)
+          ? item.loc.filter((part: unknown) => part !== 'body').join('.')
+          : '';
+        const message = typeof item?.msg === 'string' ? item.msg : '';
+        return location ? `${location}: ${message}` : message;
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join('; ');
+  }
+  if (typeof responseData?.message === 'string' && responseData.message.trim()) {
+    return responseData.message;
+  }
+  // Axios's "Request failed with status code …" adds no useful context.
+  // Keep the caller's action-specific fallback for malformed API responses.
+  if ((error as any)?.response) return fallback;
+  const message = (error as any)?.message;
+  return typeof message === 'string' && message.trim() ? message : fallback;
+};
+
 request.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');

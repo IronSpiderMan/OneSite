@@ -6,6 +6,7 @@ import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { getErrorMessage } from '../../utils/request';
 import { 
     {{ model.name }}{% if model.has_embedded_page %}, get{{ model.name }}s, update{{ model.name }}{% endif %}{% if model.m2m_fields %}{% for m2m in model.m2m_fields %}, get{{ model.name }}{{ m2m.target_model }}s{% if m2m.order_field %}, get{{ model.name }}{{ m2m.target_model }}sWithMeta{% endif %}{% endfor %}{% endif %}{% for reference in model.dict_key_reference_meta %}, get{{ model.name }}{{ reference.field|replace('_', ' ')|title|replace(' ', '') }}KeyOptions{% endfor %}
     {% if model.actions %}
@@ -791,8 +792,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       await refreshTree();
       {% endif %}
     } catch (error: any) {
-      const detail = error?.response?.data?.detail || t('toast.delete_failed', 'Delete failed');
-      toast.error(detail);
+      toast.error(getErrorMessage(error, t('toast.delete_failed', 'Delete failed')));
       console.error(error);
     } finally {
       setIsDeleting(false);
@@ -851,8 +851,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       await refreshTree();
       {% endif %}
     } catch (error: any) {
-      const detail = error?.response?.data?.detail || t('toast.delete_failed', 'Delete failed');
-      toast.error(detail);
+      toast.error(getErrorMessage(error, t('toast.delete_failed', 'Delete failed')));
       console.error(error);
     } finally {
       setIsBulkDeleting(false);
@@ -903,7 +902,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       setIsModalOpen(false);
       {% endif %}
     } catch (error) {
-      toast.error(t('toast.save_failed', 'Save failed'));
+      toast.error(getErrorMessage(error, t('toast.save_failed', 'Save failed')));
       console.error(error);
     } finally {
       setIsSaving(false);
@@ -1219,20 +1218,25 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       </div>
       {% endif %}
 
-      {% set ns = namespace(has_search_fields=false) %}
+      {% set ns = namespace(search_field_count=0) %}
       {% for field in model.fields %}
           {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
-      {% set ns.has_search_fields = true %}
+      {% set ns.search_field_count = ns.search_field_count + 1 %}
       {% elif field.fk_info and field.is_search_field %}
-      {% set ns.has_search_fields = true %}
+      {% set ns.search_field_count = ns.search_field_count + 1 %}
       {% endif %}
       {% endfor %}
-      {% if ns.has_search_fields %}
-      <div className="rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40">
+      {% if ns.search_field_count %}
+      <div className="{% if ns.search_field_count > 1 or embedded %}rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40{% else %}w-full max-w-sm{% endif %}">
+        {% if ns.search_field_count > 1 or embedded %}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          {% if ns.search_field_count > 1 %}
           <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
+          {% endif %}
           <div className="flex items-center gap-2">
+            {% if ns.search_field_count > 1 %}
             <Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button>
+            {% endif %}
             {embedded && hasPermission('c') && (
               <Button size="sm" onClick={handleCreate}>
                 <Plus className="mr-1 h-3 w-3" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
@@ -1254,12 +1258,17 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
             {% endif %}
           </div>
         </div>
+        {% endif %}
+        {% if ns.search_field_count > 1 %}
         <div className="mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2">
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
+        {% endif %}
           {% for field in model.fields %}
               {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
           <div className="min-w-0 space-y-2">
+            {% if ns.search_field_count > 1 %}
             <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
+            {% endif %}
             {% if field.ui_type == 'bool' %}
             <Select
               value={searchValues['{{ field.name }}'] || '__all__'}
@@ -1337,7 +1346,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </div>
           {% elif field.fk_info and field.is_search_field %}
           <div className="min-w-0 space-y-2">
+            {% if ns.search_field_count > 1 %}
             <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
+            {% endif %}
             <SearchableSelect
               value={searchValues['{{ field.name }}'] || ''}
               onValueChange={(v) => {
@@ -1365,8 +1376,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </div>
           {% endif %}
           {% endfor %}
+          {% if ns.search_field_count > 1 %}
           </div>
         </div>
+        {% endif %}
       </div>
       {% elif embedded %}
       {/* Embedded mode: action buttons when no search fields */}

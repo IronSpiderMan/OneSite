@@ -3,6 +3,7 @@ import { Loader2, Save, ChevronRight, ChevronDown } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
+import { getErrorMessage } from '../utils/request';
 import { Button } from '../components/ui/button';
 import { Input } from '../components/ui/input';
 import { JsonInput } from '../components/ui/json-input';
@@ -128,7 +129,7 @@ const SettingsPage: React.FC = () => {
       toast.success(t('toast.save_success', 'Saved'));
     } catch (e) {
       console.error(e);
-      toast.error(t('toast.save_failed', 'Save failed'));
+      toast.error(getErrorMessage(e, t('toast.save_failed', 'Save failed')));
     } finally {
       setIsSavingSystem(false);
     }
@@ -162,7 +163,7 @@ const SettingsPage: React.FC = () => {
       toast.success(t('toast.save_success', 'Saved'));
     } catch (e) {
       console.error(e);
-      toast.error(t('toast.save_failed', 'Save failed'));
+      toast.error(getErrorMessage(e, t('toast.save_failed', 'Save failed')));
     } finally {
       setIsSavingCustom(false);
     }
