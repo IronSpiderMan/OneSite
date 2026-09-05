@@ -9,6 +9,8 @@ interface {{ model.name }}State {
     loading: boolean;
     currentItem: {{ model.name }} | null;
     filters: Record<string, any>;
+    sorting: { sort_by?: string; sort_order?: 'asc' | 'desc' };
+    setSorting: (field?: string, direction?: 'asc' | 'desc') => Promise<void>;
     fetchData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
     refreshData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
     fetchItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => Promise<{{ model.name }} | null>;
@@ -26,11 +28,16 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
     loading: false,
     currentItem: null,
     filters: {},
+    sorting: {},
+    setSorting: async (field, direction) => {
+        set({ sorting: field ? { sort_by: field, sort_order: direction } : {} });
+        await get().fetchData(1, get().size);
+    },
     fetchData: async (page = 1, size = 20, filters?: Record<string, any>) => {
         set({ loading: true });
         try {
             const f = filters !== undefined ? filters : get().filters;
-            const result = await get{{ model.name }}s(page, size, f);
+            const result = await get{{ model.name }}s(page, size, { ...f, ...get().sorting });
             if (result && Array.isArray(result.items)) {
                 set({ 
                     data: result.items,
@@ -55,7 +62,7 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
             const currentPage = page ?? get().page;
             const currentSize = size ?? get().size;
             const f = filters !== undefined ? filters : get().filters;
-            const result = await get{{ model.name }}s(currentPage, currentSize, f);
+            const result = await get{{ model.name }}s(currentPage, currentSize, { ...f, ...get().sorting });
             if (result && Array.isArray(result.items)) {
                 set({
                     data: result.items,

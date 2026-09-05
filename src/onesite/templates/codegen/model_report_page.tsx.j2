@@ -2,10 +2,14 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { BarChart3, Loader2, Play, RotateCcw, SlidersHorizontal, GripVertical, ArrowUp, ArrowDown, Copy, Trash2, Plus, Undo2, FileText, Eye, Download, Check, X } from 'lucide-react';
 
+import * as ReportSettingsDialog from '@radix-ui/react-dialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { ModelReportChart } from '../components/visualization-chart';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { TimePicker } from '../components/ui/time-picker';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
@@ -26,11 +30,18 @@ import { get{{ item.foreign_key.target_model }}s } from '../services/{{ item.for
 {% for model in table_report_models %}
 import { get{{ model.name }}s as readTable{{ model.name }} } from '../services/{{ model.module_name }}';
 {% endfor %}
+{% for model in table_report_models %}{% for field in model.fields %}{% if field.fk_info and field.is_search_field %}
+{% set import_key = field.fk_info.target_model ~ ':' ~ field.fk_info.target_service %}
+{% if import_key not in fk_imports.keys %}
+import { get{{ field.fk_info.target_model }}s } from '../services/{{ field.fk_info.target_service }}';
+{% set _ = fk_imports.keys.append(import_key) %}
+{% endif %}{% endif %}{% endfor %}{% endfor %}
+{% include 'report_table_filters.tsx.j2' %}
 type TableField = { key: string; labelKey: string; hiddenForUser?: boolean; permissions: Record<string, string>; render: (item: Record<string, any>, t: ReturnType<typeof useTranslation>['t'], timeZone: string) => React.ReactNode };
-type TableSource = { key: string; visible: Record<string, boolean>; permissions: Record<string, string>; fields: TableField[]; load: (page: number, size: number) => Promise<{ items: any[]; total: number; total_pages: number }> };
+type TableSource = { key: string; visible: Record<string, boolean>; permissions: Record<string, string>; fields: TableField[]; Filters: React.FC<ReportTableFilterProps>; buildFilters: (values: Record<string, any>, role: string) => Record<string, any>; load: (page: number, size: number, filters?: Record<string, any>) => Promise<{ items: any[]; total: number; total_pages: number }> };
 const tableSources: TableSource[] = [
 {% for model in table_report_models %}
-  { key: '{{ model.module_name }}', visible: {{ model.role_visible | tojson }}, permissions: {{ model.role_permissions | tojson }}, load: readTable{{ model.name }}, fields: [
+  { key: '{{ model.module_name }}', visible: {{ model.role_visible | tojson }}, permissions: {{ model.role_permissions | tojson }}, load: readTable{{ model.name }}, Filters: {{ model.name }}TableFilters, buildFilters: build{{ model.name }}TableFilters, fields: [
 {% for field in model.fields %}
 {% if 'r' in field.permissions | default('r') %}
     { key: '{{ field.name }}', labelKey: '{{ field.label_key | default("models." ~ model.module_name ~ ".fields." ~ field.name) }}', hiddenForUser: {{ 'true' if field.name == model.owner_field else 'false' }}, permissions: {{ (field.role_permissions or {}) | tojson }}, render: (item, t, timeZone) => <>
@@ -126,6 +137,7 @@ const loadForeignKeyOptions = async (model: string, field: string, query: string
 
 const ReportsPage: React.FC = () => {
   const { t } = useTranslation();
+  const [chartSettingsTab, setChartSettingsTab] = useState<'data' | 'filters' | 'preview'>('data');
   const [modelKey, setModelKey] = useState(models[0]?.key || '');
   const [catalog, setCatalog] = useState<Catalog | null>(null);
   const [category, setCategory] = useState('');
@@ -227,7 +239,7 @@ const ReportsPage: React.FC = () => {
     try {
       const query = { model: modelKey, payload: { category, chart, bindings, filters }, relativeDays: { ...relativeDays }, dateTypes: Object.fromEntries(catalog.filters.map((item) => [item.field, item.data_type])) };
       setResult(await activeModel.query(resolveReportQuery(query)));
-      setLastQuery(query);
+      setLastQuery(query); setChartSettingsTab('preview');
     } catch (reason: any) {
       setError(reason?.response?.data?.detail || reason?.message || String(reason));
     } finally {
@@ -263,10 +275,14 @@ const ReportsPage: React.FC = () => {
     return column;
   };
 
-  const chartSettings = <div className="space-y-4">
-      <aside className="flex min-h-0 flex-col gap-4">
-        <div className="flex shrink-0 items-center gap-2"><div className="rounded-lg bg-primary/10 p-2 text-primary"><SlidersHorizontal className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{t('reports.builder_settings', 'Report settings')}</h2><p className="text-xs text-muted-foreground">{t('reports.builder_settings_hint', 'Available choices are controlled by the model')}</p></div></div>
-        <div className="space-y-5 pr-1">
+  const chartSettings = {
+    summary: `${modelLabel(modelKey)}${activeChart ? ` · ${chartLabel(activeChart.key, activeChart.label)}` : ''}`,
+    content: <div className="flex min-h-0 flex-1 flex-col">
+      <div className="mx-6 mt-4 grid shrink-0 grid-cols-3 gap-1 rounded-lg bg-muted p-1" aria-label={String(t('reports.editor.table_settings_sections', 'Settings sections'))}>
+        {(['data', 'filters', 'preview'] as const).map((tab) => <button key={tab} type="button" aria-pressed={chartSettingsTab === tab} onClick={() => setChartSettingsTab(tab)} className={`rounded-md px-2 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${chartSettingsTab === tab ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{String(t(`reports.editor.chart_tab_${tab}`, { data: 'Data & chart', filters: 'Filters', preview: 'Preview' }[tab]))}</button>)}
+      </div>
+      <div data-report-scroll="chart-settings" className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
+        <div hidden={chartSettingsTab !== 'data'} className="space-y-5">
         <Field label={String(t('reports.model', 'Model'))}><Select value={modelKey} disabled={loading} onValueChange={setModelKey}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{models.map((item) => <SelectItem key={item.key} value={item.key}>{modelLabel(item.key)}</SelectItem>)}</SelectContent></Select></Field>
         <Field label={String(t('reports.category', 'Chart category'))}><Select value={category} onValueChange={setCategory}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(catalog?.categories || []).map((item) => <SelectItem key={item} value={item}>{String(t(`reports.categories.${item}`, categoryLabels[item] || item))}</SelectItem>)}</SelectContent></Select></Field>
         <Field label={String(t('reports.chart', 'Chart style'))}><Select value={chart} onValueChange={setChart}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{charts.map((item) => <SelectItem key={item.key} value={item.key}>{chartLabel(item.key, item.label)}</SelectItem>)}</SelectContent></Select></Field>
@@ -279,7 +295,10 @@ const ReportsPage: React.FC = () => {
         {showCls && <Field label={String(t('reports.classification', 'Classification'))}><Select value={clsField} onValueChange={setClsField}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldOptions(catalog?.inputs.cls || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></Field>}
         {category === 'composition' && <Field label={String(t('reports.count', 'Count'))}><Select value={countField} onValueChange={setCountField}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{fieldOptions(catalog?.inputs.count || []).map((item) => <SelectItem key={item.value} value={item.value}>{item.label}</SelectItem>)}</SelectContent></Select></Field>}
 
-        {!!catalog?.filters.length && <div className="space-y-3 border-t pt-4"><div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('reports.filters', 'Filters')}</div>{catalog.filters.map((item) => <Field key={item.field} label={String(t(item.label_key || item.field, item.field))}>
+
+        </div>
+        <div hidden={chartSettingsTab !== 'filters'}>
+        {!!catalog?.filters.length && <div className="space-y-5"><div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('reports.filters', 'Filters')}</div>{catalog.filters.map((item) => <Field key={item.field} label={String(t(item.label_key || item.field, item.field))}>
           {item.is_foreign_key ? <SearchableSelect
             value={filterValues[item.field] || ''}
             onValueChange={(value) => setFilterValues((current) => ({ ...current, [item.field]: value }))}
@@ -325,17 +344,24 @@ const ReportsPage: React.FC = () => {
             className="h-10 w-full rounded-md border bg-background/50 px-3 text-sm"
           />}
         </Field>)}</div>}
+
+          {!catalog?.filters.length && <p className="py-10 text-center text-sm text-muted-foreground">{t('reports.editor.table_no_filters', 'No filters available for this model.')}</p>}
         </div>
-        <div className="shrink-0 space-y-2 border-t pt-4">
-          <Button className="h-11 w-full" onClick={run} disabled={loading || !chart}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{t('reports.run_report', 'Run report')}</Button>
-          <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={reset}><RotateCcw className="mr-2 h-3.5 w-3.5" />{t('reports.reset_report', 'Reset')}</Button>
-        </div>
-      </aside>        {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
-        {!result?.rows.length ? <section className="flex min-h-[160px] rounded-xl border border-dashed border-border/80 bg-card/30"><div className="m-auto max-w-md px-8 text-center"><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm"><BarChart3 className="h-7 w-7" /></div><h2 className="text-xl font-semibold">{t('reports.builder_empty_title', 'Build a report')}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t('reports.builder_empty_hint', 'Select a model and chart, bind its inputs, then run the query.')}</p></div></section> : <>
+        <div hidden={chartSettingsTab !== 'preview'} className="space-y-4">
+        {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+        {!result?.rows.length ? <section className="flex min-h-[220px] rounded-xl border border-dashed border-border/80 bg-card/30"><div className="m-auto max-w-md px-8 text-center"><div className="mx-auto mb-4 flex h-12 w-12 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm"><BarChart3 className="h-7 w-7" /></div><h2 className="text-base font-semibold">{t('reports.builder_empty_title', 'Build a report')}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t('reports.builder_empty_hint', 'Select a model and chart, bind its inputs, then run the query.')}</p></div></section> : <>
           <section className="rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="text-sm font-semibold">{activeChart ? chartLabel(activeChart.key, activeChart.label) : ''}</h2><p className="mt-1 text-xs text-muted-foreground">{t('reports.result_summary', { model: modelLabel(modelKey, catalog?.title || modelKey), count: result.rows.length })}</p></div>{result.meta.truncated && <Badge variant="outline">{t('reports.truncated_badge', 'Truncated')}</Badge>}</div><div className="h-[240px] p-4"><ModelReportChart chart={result.chart} rows={result.rows} /></div></section>
           <details className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm"><summary className="cursor-pointer px-4 py-3 text-sm font-semibold">{t('reports.details', 'Data details')}</summary><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{Object.keys(result.rows[0]).map((column) => <th key={column} className="px-4 py-3 text-left font-medium">{resultColumnLabel(column)}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index} className="border-t">{Object.keys(result.rows[0]).map((column) => <td key={column} className="px-4 py-3">{String(row[column] ?? '')}</td>)}</tr>)}</tbody></table></div></details>
         </>}
-  </div>;
+
+        </div>
+      </div>
+    </div>,
+    actions: <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" disabled={loading} onClick={reset} aria-label={String(t('reports.reset_report', 'Reset'))}><RotateCcw className="h-4 w-4" /></Button>
+      <Button variant="outline" size="sm" className="flex-1" onClick={run} disabled={loading || !chart}>{loading ? <Loader2 className="mr-1.5 h-4 w-4 animate-spin" /> : <Play className="mr-1.5 h-4 w-4" />}{t('reports.editor.chart_run_preview', 'Generate preview')}</Button>
+    </div>,
+  };
 
   return <div className="mx-auto w-full max-w-[1920px] space-y-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden" data-page-kind="reports">
     <header className="flex shrink-0 items-center gap-3">

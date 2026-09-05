@@ -1,0 +1,38 @@
+type ReportTableFilterProps = { searchValues: Record<string, any>; setSearchValues: React.Dispatch<React.SetStateAction<Record<string, any>>>; role: string };
+{% for model in table_report_models %}
+const build{{ model.name }}TableFilters = (values: Record<string, any>, role: string): Record<string, any> => {
+  const searchValues: Record<string, any> = {};
+{% for field in model.fields %}{% if field.is_search_field %}
+  if ({% if field.role_permissions %}({{ field.role_permissions | tojson }} as Record<string, string>)[role]?.includes('r'){% else %}true{% endif %}) {
+{% if field.name != model.owner_field %}
+    for (const key of ['{{ field.name }}', '{{ field.name }}_from', '{{ field.name }}_to']) searchValues[key] = values[key];
+{% else %}
+    if (role !== 'user') for (const key of ['{{ field.name }}', '{{ field.name }}_from', '{{ field.name }}_to']) searchValues[key] = values[key];
+{% endif %}
+  }
+{% endif %}{% endfor %}
+  const next: Record<string, any> = {};
+{% include 'frontend_list_filter_values.ts.j2' %}
+  return next;
+};
+const {{ model.name }}TableFilters: React.FC<ReportTableFilterProps> = ({ searchValues, setSearchValues, role }) => {
+  const { t } = useTranslation();
+{% for field in model.fields %}{% if field.fk_info and field.is_search_field %}
+  const [{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels] = useState<Record<string, string>>({});
+  const [search{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels, setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels] = useState<Record<string, string>>({});
+{% endif %}{% endfor %}
+  return <div className="space-y-5">
+{% set ns = namespace(search_field_count=2) %}
+{% for field in model.fields %}{% if field.is_search_field %}
+    {({% if field.role_permissions %}({{ field.role_permissions | tojson }} as Record<string, string>)[role]?.includes('r'){% else %}true{% endif %}){% if field.name == model.owner_field %} && role !== 'user'{% endif %} && <React.Fragment key="{{ field.name }}">
+{% include 'frontend_list_filter_control.tsx.j2' %}
+    </React.Fragment>}
+{% endif %}{% endfor %}
+{% if model.fields | selectattr('is_search_field') | list %}
+    <Button type="button" size="sm" variant="outline" onClick={() => setSearchValues({})}>{t('common.reset', 'Reset')}</Button>
+{% else %}
+    <p className="py-6 text-center text-sm text-muted-foreground">{t('reports.editor.table_no_filters', 'No filters available for this model.')}</p>
+{% endif %}
+  </div>;
+};
+{% endfor %}

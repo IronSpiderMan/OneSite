@@ -1,0 +1,24 @@
+    {% for field in model.fields %}
+    {% if field.is_search_field %}
+    {% if field.ui_type == 'bool' %}
+    if (searchValues['{{ field.name }}'] === 'true') next['{{ field.name }}'] = true;
+    if (searchValues['{{ field.name }}'] === 'false') next['{{ field.name }}'] = false;
+    {% elif field.ui_type == 'datetime' %}
+    if (searchValues['{{ field.name }}_from']) next['{{ field.name }}_from'] = `${searchValues['{{ field.name }}_from']}T00:00:00`;
+    if (searchValues['{{ field.name }}_to']) next['{{ field.name }}_to'] = `${searchValues['{{ field.name }}_to']}T23:59:59`;
+    {% elif field.ui_type == 'time' %}
+    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
+    {% elif field.is_enum and field.is_multi_select %}
+    if (Array.isArray(searchValues['{{ field.name }}']) && searchValues['{{ field.name }}'].length > 0) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
+    {% elif field.is_enum %}
+    if (searchValues['{{ field.name }}'] && searchValues['{{ field.name }}'] !== '__all__') next['{{ field.name }}'] = searchValues['{{ field.name }}'];
+    {% elif field.ui_type == 'str' %}
+    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+    {% for field in model.fields %}
+    {% if field.fk_info and field.is_search_field %}
+    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = Number(searchValues['{{ field.name }}']);
+    {% endif %}
+    {% endfor %}

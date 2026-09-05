@@ -1,4 +1,6 @@
 const validReportTableSize = (size: number): boolean => Number.isSafeInteger(size) && size > 0;
+const readableReportTableFields = (fields: TableField[], role: string): TableField[] => fields.filter((field) => !(field.hiddenForUser && role === 'user') && (!Object.keys(field.permissions).length || (field.permissions[role] || '').includes('r')));
+const visibleReportTableFields = (fields: TableField[], hiddenFields?: string[]): TableField[] => fields.filter((field) => !hiddenFields?.includes(field.key));
 const ReportDataTable: React.FC<{ config: NonNullable<ReportBlock['table']>; refreshKey: number; editing: boolean; disabled: boolean; onChange: (config: NonNullable<ReportBlock['table']>) => void }> = ({ config, refreshKey, editing, disabled, onChange }) => {
   const { t } = useTranslation();
   const label = (key: string, fallback: string) => String(t(`reports.editor.${key}`, fallback));
@@ -8,34 +10,82 @@ const ReportDataTable: React.FC<{ config: NonNullable<ReportBlock['table']>; ref
   const source = sources.find((item) => item.key === config.model);
   const page = Number.isInteger(config.page) && config.page > 0 ? config.page : 1;
   const size = validReportTableSize(config.size) ? config.size : 20;
+  const [settingsOpen, setSettingsOpen] = useState(!config.model);
+  const [settingsTab, setSettingsTab] = useState<'data' | 'filters' | 'columns'>('data');
+  const [fieldSearch, setFieldSearch] = useState('');
   const [sizeDraft, setSizeDraft] = useState(String(size));
   useEffect(() => { setSizeDraft(String(size)); }, [size, config.model]);
-  const requestKey = `${role}:${config.model}:${page}:${size}:${refreshKey}`;
+  const filters = source?.buildFilters(config.filters || {}, role) || {};
+  const requestKey = `${role}:${config.model}:${page}:${size}:${refreshKey}:${JSON.stringify(filters)}`;
   const [result, setResult] = useState<{ key: string; items: Record<string, any>[]; total: number; pages: number } | null>(null);
   const [error, setError] = useState('');
   useEffect(() => {
     let cancelled = false;
     setResult(null); setError('');
-    if (source) source.load(page, size).then((data) => {
+    const timer = window.setTimeout(() => {
+    if (source) source.load(page, size, filters).then((data) => {
       if (!cancelled) setResult({ key: requestKey, items: data.items, total: data.total, pages: data.total_pages });
     }).catch(() => { if (!cancelled) setError(label('table_error', 'Table could not be loaded. Check access and retry.')); });
-    return () => { cancelled = true; };
+    }, 300);
+    return () => { cancelled = true; window.clearTimeout(timer); };
   }, [source, requestKey]);
   const data = result?.key === requestKey && source ? result : null;
-  const columns = source?.fields.filter((field) => !(field.hiddenForUser && role === 'user') && (!Object.keys(field.permissions).length || (field.permissions[role] || '').includes('r')) && (!data?.items.length || data.items.some((item) => Object.prototype.hasOwnProperty.call(item, field.key)))) || [];
-  return <div className="report-rich-text" data-table-ready={!!data}>
-    {editing && <div data-editor-control className="space-y-2" onClick={(event) => event.stopPropagation()}>
-      <Select disabled={disabled} value={source?.key || ''} onValueChange={(model) => onChange({ model, page: 1, size })}><SelectTrigger aria-label={label('table_source', 'Table data source')}><SelectValue placeholder={label('table_source', 'Table data source')} /></SelectTrigger><SelectContent>{sources.map((item) => <SelectItem key={item.key} value={item.key}>{String(t(`models.${item.key}.name`, item.key))}</SelectItem>)}</SelectContent></Select>
-      {!sources.length && <p>{label('table_no_sources', 'No readable frontend data sources.')}</p>}
-      <form className="flex items-center gap-2" onSubmit={(event) => { event.preventDefault(); const nextSize = Number(sizeDraft); if (validReportTableSize(nextSize)) onChange({ ...config, size: nextSize, page: 1 }); }}>
-        <label className="flex items-center gap-2 text-sm">{label('table_size', 'Rows per page')}<input className="w-24 rounded border bg-background px-2 py-1" type="number" min="1" step="1" required disabled={disabled} value={sizeDraft} onChange={(event) => setSizeDraft(event.target.value)} /></label>
-        <Button type="submit" size="sm" variant="outline" disabled={disabled || !validReportTableSize(Number(sizeDraft))}>{label('apply_content', 'Save content')}</Button>
-      </form>
-      <div className="flex items-center gap-2"><Button size="sm" variant="outline" disabled={disabled || page <= 1} onClick={() => onChange({ ...config, page: page - 1 })}>←</Button><span>{page} / {data?.pages || 1}</span><Button size="sm" variant="outline" disabled={disabled || !data || page >= data.pages} onClick={() => onChange({ ...config, page: page + 1 })}>→</Button></div>
+  const availableFields = readableReportTableFields(source?.fields || [], role);
+  const hiddenFields = Array.isArray(config.hiddenFields) ? config.hiddenFields : [];
+  const columns = visibleReportTableFields(availableFields, hiddenFields).filter((field) => !data?.items.length || data.items.some((item) => Object.prototype.hasOwnProperty.call(item, field.key)));
+  const selectedCount = visibleReportTableFields(availableFields, hiddenFields).length;
+  const filterCount = Object.keys(filters).length;
+  const matchingFields = availableFields.filter((field) => String(t(field.labelKey, field.key)).toLocaleLowerCase().includes(fieldSearch.trim().toLocaleLowerCase()));
+  const sourceLabel = source ? String(t(`models.${source.key}.name`, source.key)) : label('table_source', 'Table data source');
+  return <div data-table-ready={!!data}>
+    {editing && <div data-editor-control className="report-table-toolbar" onClick={(event) => event.stopPropagation()}>
+      <div className="report-table-summary"><span className="report-table-source">{sourceLabel}</span><span>{selectedCount} {label('table_fields_unit', 'fields')}{filterCount > 0 && ` · ${filterCount} ${label('table_filters_unit', 'filters')}`}</span></div>
+      <ReportSettingsDialog.Root open={settingsOpen} onOpenChange={setSettingsOpen}>
+        <ReportSettingsDialog.Trigger asChild><Button type="button" variant="outline" size="sm" disabled={disabled}><SlidersHorizontal className="mr-1.5 h-3.5 w-3.5" />{label('table_settings', 'Table settings')}</Button></ReportSettingsDialog.Trigger>
+        <ReportSettingsDialog.Portal>
+          <ReportSettingsDialog.Overlay className="fixed inset-0 z-50 bg-black/30 backdrop-blur-[2px]" />
+          <ReportSettingsDialog.Content onClick={(event) => event.stopPropagation()} className="fixed inset-y-0 right-0 z-50 flex w-full max-w-[460px] flex-col border-l bg-background text-foreground shadow-2xl focus:outline-none">
+            <header className="shrink-0 border-b px-6 py-5">
+              <div className="flex items-center justify-between gap-3"><ReportSettingsDialog.Title className="flex items-center gap-2 text-lg font-semibold"><SlidersHorizontal className="h-5 w-5 text-primary" />{label('table_settings', 'Table settings')}</ReportSettingsDialog.Title><ReportSettingsDialog.Close asChild><Button type="button" variant="ghost" size="sm" aria-label={label('table_close_settings', 'Close settings')}><X className="h-4 w-4" /></Button></ReportSettingsDialog.Close></div>
+              <ReportSettingsDialog.Description className="mt-2 text-xs leading-relaxed text-muted-foreground">{label('table_settings_hint', 'Changes appear in the report immediately. Save the report template to keep them.')}</ReportSettingsDialog.Description>
+              <div className="mt-4 flex items-center gap-2 rounded-lg bg-muted/60 px-3 py-2 text-xs"><span className="min-w-0 flex-1 truncate font-medium">{sourceLabel}</span><span className="shrink-0 text-muted-foreground">{selectedCount} / {availableFields.length} {label('table_fields_unit', 'fields')}</span></div>
+            </header>
+            <div className="mx-6 mt-4 grid shrink-0 grid-cols-3 gap-1 rounded-lg bg-muted p-1" aria-label={label('table_settings_sections', 'Settings sections')}>
+              {(['data', 'filters', 'columns'] as const).map((tab) => <button key={tab} type="button" aria-pressed={settingsTab === tab} onClick={() => setSettingsTab(tab)} className={`rounded-md px-2 py-2 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${settingsTab === tab ? 'bg-background text-foreground shadow-sm' : 'text-muted-foreground hover:text-foreground'}`}>{label(`table_tab_${tab}`, { data: 'Data & paging', filters: 'Filters', columns: 'Fields' }[tab])}</button>)}
+            </div>
+            <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-6">
+              <div hidden={settingsTab !== 'data'} className="space-y-6">
+                <div className="space-y-2"><Label>{label('table_source', 'Table data source')}</Label><Select disabled={disabled} value={source?.key || ''} onValueChange={(model) => { setFieldSearch(''); onChange({ model, page: 1, size }); }}><SelectTrigger aria-label={label('table_source', 'Table data source')}><SelectValue placeholder={label('table_source', 'Table data source')} /></SelectTrigger><SelectContent>{sources.map((item) => <SelectItem key={item.key} value={item.key}>{String(t(`models.${item.key}.name`, item.key))}</SelectItem>)}</SelectContent></Select><p className="text-xs leading-relaxed text-muted-foreground">{label('table_source_hint', 'Choose the model that supplies this table.')}</p></div>
+                {!sources.length && <p className="rounded-lg border border-dashed p-4 text-sm text-muted-foreground">{label('table_no_sources', 'No readable frontend data sources.')}</p>}
+                <form className="space-y-2 border-t pt-5" onSubmit={(event) => { event.preventDefault(); const nextSize = Number(sizeDraft); if (validReportTableSize(nextSize)) onChange({ ...config, size: nextSize, page: 1 }); }}>
+                  <label className="block text-sm font-medium">{label('table_size', 'Rows per page')}<input className="mt-2 flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" type="number" min="1" step="1" required disabled={disabled || !source} value={sizeDraft} onChange={(event) => setSizeDraft(event.target.value)} /></label>
+                  <div className="flex items-center justify-between gap-3"><p className="text-xs text-muted-foreground">{label('table_size_hint', 'Changing the row count returns to page 1.')}</p><Button type="submit" size="sm" variant="outline" disabled={disabled || !source || !validReportTableSize(Number(sizeDraft)) || Number(sizeDraft) === size}>{label('table_apply', 'Apply')}</Button></div>
+                </form>
+              </div>
+              <div hidden={settingsTab !== 'filters'}>
+                {source ? <><div className="mb-5 flex items-center justify-between"><h3 className="text-sm font-semibold">{label('table_tab_filters', 'Filters')}</h3><span className="rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">{filterCount} {label('table_filters_unit', 'filters')}</span></div><fieldset disabled={disabled}><source.Filters searchValues={config.filters || {}} role={role} setSearchValues={(action) => onChange({ ...config, page: 1, filters: typeof action === 'function' ? action(config.filters || {}) : action })} /></fieldset></> : <p className="py-10 text-center text-sm text-muted-foreground">{label('table_select', 'Select an available table data source.')}</p>}
+              </div>
+              <div hidden={settingsTab !== 'columns'}>
+                <fieldset disabled={disabled || !source} className="space-y-4">
+                  <legend className="mb-3 text-sm font-semibold">{label('table_columns', 'Visible fields')}</legend>
+                  <Input value={fieldSearch} onChange={(event) => setFieldSearch(event.target.value)} aria-label={label('table_search_fields', 'Search fields')} placeholder={label('table_search_fields', 'Search fields')} />
+                  <div className="flex items-center justify-between gap-2"><span className="text-xs text-muted-foreground">{selectedCount} / {availableFields.length} {label('table_selected', 'selected')}</span><div className="flex gap-1"><Button type="button" size="sm" variant="ghost" onClick={() => onChange({ ...config, hiddenFields: [] })}>{label('table_show_all', 'Show all')}</Button><Button type="button" size="sm" variant="ghost" onClick={() => onChange({ ...config, hiddenFields: Array.from(new Set([...hiddenFields, ...availableFields.map((field) => field.key)])) })}>{label('table_hide_all', 'Hide all')}</Button></div></div>
+                  <div className="space-y-2">{matchingFields.map((field) => <label key={field.key} className={`flex cursor-pointer items-center gap-3 rounded-lg border px-3 py-3 text-sm transition-colors ${!hiddenFields.includes(field.key) ? 'border-primary/25 bg-primary/5' : 'border-border hover:bg-muted/50'}`}><input type="checkbox" className="h-4 w-4 shrink-0 accent-primary" checked={!hiddenFields.includes(field.key)} onChange={(event) => onChange({ ...config, hiddenFields: event.target.checked ? hiddenFields.filter((key) => key !== field.key) : [...hiddenFields, field.key] })} /><span className="min-w-0 break-words">{String(t(field.labelKey, field.key))}</span></label>)}</div>
+                  {!matchingFields.length && <p className="py-6 text-center text-sm text-muted-foreground">{label('table_no_matching_fields', 'No matching fields.')}</p>}
+                </fieldset>
+              </div>
+            </div>
+            <footer className="flex shrink-0 items-center justify-between gap-4 border-t bg-muted/30 px-6 py-4"><span className="text-xs text-muted-foreground">{label('table_live_hint', 'Preview updates automatically')}</span><ReportSettingsDialog.Close asChild><Button type="button" size="sm">{label('table_done', 'Done')}</Button></ReportSettingsDialog.Close></footer>
+          </ReportSettingsDialog.Content>
+        </ReportSettingsDialog.Portal>
+      </ReportSettingsDialog.Root>
     </div>}
+    <div className="report-rich-text">
     {!source ? <p className="report-note">{label('table_select', 'Select an available table data source.')}</p> : error ? <p role="alert" className="report-note">{error}</p> : !data ? <p>{label('loading', 'Loading…')}</p> : <>
-      <table><caption>{String(t(`models.${source.key}.name`, source.key))} · {label('table_page', 'Page')} {page} / {data.pages || 1} · {label('table_total', 'Total')} {data.total}</caption><thead><tr>{columns.map((field) => <th key={field.key}>{String(t(field.labelKey, field.key))}</th>)}</tr></thead><tbody>{data.items.map((item, index) => <tr key={index}>{columns.map((field) => <td key={field.key}>{field.render(item, t, timeZone)}</td>)}</tr>)}</tbody></table>
+      {!columns.length ? <p className="report-note">{label('table_no_columns', 'No fields selected for display.')}</p> : <table><caption>{String(t(`models.${source.key}.name`, source.key))} · {label('table_page', 'Page')} {page} / {data.pages || 1} · {label('table_total', 'Total')} {data.total}</caption><thead><tr>{columns.map((field) => <th key={field.key}>{String(t(field.labelKey, field.key))}</th>)}</tr></thead><tbody>{data.items.map((item, index) => <tr key={index}>{columns.map((field) => <td key={field.key}>{field.render(item, t, timeZone)}</td>)}</tr>)}</tbody></table>}
       {!data.items.length && <p className="report-note">{label('no_data', 'No data for these filters.')}</p>}
     </>}
+    </div>
+    {editing && source && <div data-editor-control className="report-table-pagination" onClick={(event) => event.stopPropagation()}><span>{label('table_total', 'Total')} {data?.total ?? '—'} · {size} {label('table_rows_unit', 'rows / page')}</span><div><Button type="button" size="sm" variant="ghost" aria-label={label('table_previous_page', 'Previous page')} disabled={disabled || page <= 1} onClick={() => onChange({ ...config, page: page - 1 })}>←</Button><span>{page} / {data?.pages || 1}</span><Button type="button" size="sm" variant="ghost" aria-label={label('table_next_page', 'Next page')} disabled={disabled || !data || page >= data.pages} onClick={() => onChange({ ...config, page: page + 1 })}>→</Button></div></div>}
   </div>;
 };

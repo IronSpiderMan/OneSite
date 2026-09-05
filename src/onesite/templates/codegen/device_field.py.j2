@@ -6,7 +6,7 @@ from typing import Any, Optional
 
 from onesite_runtime import override_field
 from sqlalchemy import CheckConstraint, Column, JSON, PrimaryKeyConstraint, UniqueConstraint
-from sqlmodel import Field, SQLModel
+from sqlmodel import Field, SQLModel, select
 
 
 class DeviceFieldAttribute(str, Enum):
@@ -112,8 +112,18 @@ class DeviceField(SQLModel, table=True):
     deadband: Optional[Decimal] = Field(default=None, ge=0)
 
     @override_field("value")
-    def present_value(self, value: Any) -> str:
-        """Expose the telemetry payload's scalar value in read responses."""
+    async def present_value(self, value: Any, session) -> str:
+        """Display confirmed telemetry, never the stored write command."""
+        from app.models.device_history_latest import DeviceLatest
+
+        # Select the payload directly so repeated reads see new telemetry even
+        # when the session has an older DeviceLatest ORM object in its identity map.
+        value = (await session.exec(
+            select(DeviceLatest.value).where(
+                DeviceLatest.device_id == self.device_id,
+                DeviceLatest.metric == self.name,
+            )
+        )).first()
         if not isinstance(value, dict) or "value" not in value:
             return "" if value is None else str(value)
 

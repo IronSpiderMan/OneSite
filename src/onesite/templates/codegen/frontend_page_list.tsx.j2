@@ -1,7 +1,7 @@
 {% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
 {% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
 import React, { useState, useEffect, useRef } from 'react';
-import { Plus, Pencil, Trash2, Loader2, Eye{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
+import { ArrowUpDown, ArrowUp, ArrowDown, Plus, Pencil, Trash2, Loader2, Eye{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
 import { useNavigate{% if not model.page_edit %}, useSearchParams{% endif %} } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -128,7 +128,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   {% if not model.page_edit %}
   const [searchParams, setSearchParams] = useSearchParams();
   {% endif %}
-  const { data, loading, fetchData, refreshData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
+  const { sorting, setSorting, data, loading, fetchData, refreshData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
   const timeZone = getUserTimeZone();
   {% if not model.page_edit %}
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -836,30 +836,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   const applySearch = () => {
     const next: Record<string, any> = { ...scopeFilters };
-    {% for field in model.fields %}
-    {% if field.is_search_field %}
-    {% if field.ui_type == 'bool' %}
-    if (searchValues['{{ field.name }}'] === 'true') next['{{ field.name }}'] = true;
-    if (searchValues['{{ field.name }}'] === 'false') next['{{ field.name }}'] = false;
-    {% elif field.ui_type == 'datetime' %}
-    if (searchValues['{{ field.name }}_from']) next['{{ field.name }}_from'] = `${searchValues['{{ field.name }}_from']}T00:00:00`;
-    if (searchValues['{{ field.name }}_to']) next['{{ field.name }}_to'] = `${searchValues['{{ field.name }}_to']}T23:59:59`;
-    {% elif field.ui_type == 'time' %}
-    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
-    {% elif field.is_enum and field.is_multi_select %}
-    if (Array.isArray(searchValues['{{ field.name }}']) && searchValues['{{ field.name }}'].length > 0) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
-    {% elif field.is_enum %}
-    if (searchValues['{{ field.name }}'] && searchValues['{{ field.name }}'] !== '__all__') next['{{ field.name }}'] = searchValues['{{ field.name }}'];
-    {% elif field.ui_type == 'str' %}
-    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
-    {% endif %}
-    {% endif %}
-    {% endfor %}
-    {% for field in model.fields %}
-    {% if field.fk_info and field.is_search_field %}
-    if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = Number(searchValues['{{ field.name }}']);
-    {% endif %}
-    {% endfor %}
+    {% include 'frontend_list_filter_values.ts.j2' %}
     {% if model.is_tree %}
     treeSearchFiltersRef.current = next;
     loadRoots(1);
@@ -1188,117 +1165,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {% endif %}
           {% for field in model.fields %}
-              {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
-          <div className="min-w-0 space-y-2">
-            {% if ns.search_field_count > 1 %}
-            <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
-            {% endif %}
-            {% if field.ui_type == 'bool' %}
-            <Select
-              value={searchValues['{{ field.name }}'] || '__all__'}
-              onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
-            >
-              <SelectTrigger className="h-9 min-w-0 w-full">
-                <SelectValue placeholder={t('common.all', 'All')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
-                <SelectItem value="true">{t('common.yes', 'Yes')}</SelectItem>
-                <SelectItem value="false">{t('common.no', 'No')}</SelectItem>
-              </SelectContent>
-            </Select>
-            {% elif field.ui_type == 'datetime' %}
-            <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
-              <Input
-                type="date"
-                className="h-9 min-w-0 w-full"
-                value={searchValues['{{ field.name }}_from'] || ''}
-                onChange={(e) => setSearchValues((s) => ({ ...s, ['{{ field.name }}_from']: e.target.value }))}
-              />
-              <span className="text-muted-foreground text-sm">-</span>
-              <Input
-                type="date"
-                className="h-9 min-w-0 w-full"
-                value={searchValues['{{ field.name }}_to'] || ''}
-                onChange={(e) => setSearchValues((s) => ({ ...s, ['{{ field.name }}_to']: e.target.value }))}
-              />
-            </div>
-            {% elif field.ui_type == 'time' %}
-            <TimePicker
-              value={searchValues['{{ field.name }}'] || ''}
-              onChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
-              placeholder={t('common.select_time', 'Select time')}
-            />
-            {% elif field.is_enum and field.is_multi_select %}
-            <SearchableSelect
-              value={searchValues['{{ field.name }}'] || []}
-              onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
-              multiple={true}
-              placeholder={t('common.all', 'All')}
-              searchPlaceholder={`${t('common.search')}...`}
-              loadOptions={async () => [
-                {% for enum_val in field.enum_values %}
-                { label: t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}'), value: '{{ enum_val }}' },
-                {% endfor %}
-              ]}
-            />
-            {% elif field.is_enum %}
-            <Select
-              value={searchValues['{{ field.name }}'] || '__all__'}
-              onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
-            >
-              <SelectTrigger className="h-9 min-w-0 w-full">
-                <SelectValue placeholder={t('common.all', 'All')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
-                {% for enum_val in field.enum_values %}
-                <SelectItem value="{{ enum_val }}">{
-                    t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}')
-                }</SelectItem>
-                {% endfor %}
-              </SelectContent>
-            </Select>
-            {% elif field.ui_type == 'str' %}
-            <Input
-              className="h-9 min-w-0 w-full"
-              value={searchValues['{{ field.name }}'] || ''}
-              onChange={(e) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: e.target.value }))}
-              placeholder={t('common.search')}
-            />
-            {% endif %}
-          </div>
-          {% elif field.fk_info and field.is_search_field %}
-          <div className="min-w-0 space-y-2">
-            {% if ns.search_field_count > 1 %}
-            <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
-            {% endif %}
-            <SearchableSelect
-              value={searchValues['{{ field.name }}'] || ''}
-              onValueChange={(v) => {
-                setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }));
-                if (v) {
-                  const key = String(v);
-                  const label = {{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels[key] || '';
-                  if (label) {
-                    setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels((s) => ({ ...s, [key]: label }));
-                  }
-                }
-              }}
-              placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
-              searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
-              valueLabels={search{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels}
-              loadOptions={async (query) => {
-                const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
-                const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
-                return response.items.map((item: any) => ({
-                  label: item.{{ field.fk_info.label_field }} || item.id,
-                  value: item.id
-                }));
-              }}
-            />
-          </div>
-          {% endif %}
+{% include 'frontend_list_filter_control.tsx.j2' %}
           {% endfor %}
           {% if ns.search_field_count > 1 %}
           </div>
@@ -1516,7 +1383,27 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
               </TableHead>
               {% for field in model.fields %}
               {% if 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+              {% if field.ui_type in ['datetime', 'date', 'time'] %}
+              <TableHead aria-sort={sorting.sort_by === '{{ field.name }}' ? (sorting.sort_order === 'asc' ? 'ascending' : 'descending') : 'none'}>
+                <button
+                  type="button"
+                  className="inline-flex items-center gap-1 whitespace-nowrap rounded-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                  disabled={loading}
+                  title={t(sorting.sort_by !== '{{ field.name }}' ? 'common.sort_ascending' : sorting.sort_order === 'asc' ? 'common.sort_descending' : 'common.sort_default')}
+                  aria-label={`${t('{{ field.label_key }}')}: ${t(sorting.sort_by !== '{{ field.name }}' ? 'common.sort_ascending' : sorting.sort_order === 'asc' ? 'common.sort_descending' : 'common.sort_default')}`}
+                  onClick={() => {
+                    if (sorting.sort_by !== '{{ field.name }}') void setSorting('{{ field.name }}', 'asc');
+                    else if (sorting.sort_order === 'asc') void setSorting('{{ field.name }}', 'desc');
+                    else void setSorting();
+                  }}
+                >
+                  {t('{{ field.label_key }}')}
+                  {sorting.sort_by !== '{{ field.name }}' ? <ArrowUpDown aria-hidden="true" className="h-3.5 w-3.5 text-muted-foreground" /> : sorting.sort_order === 'asc' ? <ArrowUp aria-hidden="true" className="h-3.5 w-3.5 text-primary" /> : <ArrowDown aria-hidden="true" className="h-3.5 w-3.5 text-primary" />}
+                </button>
+              </TableHead>
+              {% else %}
               <TableHead>{t('{{ field.label_key }}')}</TableHead>
+              {% endif %}
               )}{% endif %}
               {% endfor %}
               {% for field in list_extra_fields %}

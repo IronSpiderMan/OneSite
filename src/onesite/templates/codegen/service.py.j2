@@ -188,6 +188,8 @@ class {{ model.name }}Service:
         *,
         page: int = 1,
         size: int = 20,
+        sort_by: Optional[str] = None,
+        sort_order: str = "asc",
         {% for field in model.fields %}
         {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
@@ -259,6 +261,8 @@ class {{ model.name }}Service:
             session,
             page=page,
             size=size,
+            sort_by=sort_by,
+            sort_order=sort_order,
             {% for field in model.fields %}
             {% if field.is_search_field %}
             {% if field.ui_type == 'bool' %}

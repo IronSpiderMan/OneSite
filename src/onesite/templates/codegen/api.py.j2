@@ -1,4 +1,4 @@
-from typing import List, Any, Optional, Annotated
+from typing import List, Any, Optional, Annotated, Literal
 {% if model.importable or model.exportable %}
 import json
 import uuid
@@ -436,6 +436,8 @@ async def get_{{ model.lower_name }}_stats_filters(
 async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
+    sort_by: Optional[str] = None,
+    sort_order: Literal["asc", "desc"] = "asc",
     {% for field in model.fields %}
     {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
@@ -487,10 +489,15 @@ async def read_{{ model.lower_name }}s(
     """
     List {{ model.name }} records with optional search and filter support.
     """
+    sortable_fields = [{% for field in model.fields if field.ui_type in ['datetime', 'date', 'time'] and 'r' in field.permissions %}"{{ field.name }}", {% endfor %}]
+    if sort_by is not None and sort_by not in sortable_fields:
+        raise HTTPException(status_code=422, detail="Invalid time sort field")
     return await service.get_multi(
         session,
         page=page,
         size=size,
+        sort_by=sort_by,
+        sort_order=sort_order,
         {% for field in model.fields %}
         {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
