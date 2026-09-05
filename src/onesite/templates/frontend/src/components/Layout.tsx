@@ -7,6 +7,7 @@ import { cn } from '../lib/utils';
 import { Button } from './ui/button';
 import { AvatarFallback } from './ui/avatar-fallback';
 import { NotificationBell } from './notification-bell';
+import { Popover, PopoverContent, PopoverTrigger } from './ui/popover';
 
 type ThemeStyle = 'normal' | 'industrial' | 'neuron' | 'arco';
 
@@ -78,6 +79,7 @@ const AppLayout: React.FC = () => {
   const { t } = useTranslation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(() => localStorage.getItem('sidebar_collapsed') === 'true');
+  const [collapsedMenuGroup, setCollapsedMenuGroup] = useState<string | null>(null);
   const [openMenuGroups, setOpenMenuGroups] = useState<Record<string, boolean>>({});
   const location = useLocation();
   const navigate = useNavigate();
@@ -97,6 +99,7 @@ const AppLayout: React.FC = () => {
   );
 
   const toggleCollapsed = useCallback(() => {
+    setCollapsedMenuGroup(null);
     setCollapsed(prev => {
       const next = !prev;
       localStorage.setItem('sidebar_collapsed', String(next));
@@ -158,6 +161,7 @@ const AppLayout: React.FC = () => {
   // Close mobile sidebar on route change
   useEffect(() => {
     setSidebarOpen(false);
+    setCollapsedMenuGroup(null);
   }, [location.pathname]);
 
   const isCollapsed = collapsed;
@@ -173,12 +177,6 @@ const AppLayout: React.FC = () => {
   const menuItems = filterMenuByRole(GeneratedMenu, userRole);
   const activeMenuItem = findMenuItem(menuItems, location.pathname);
   const activeMenuPath = findMenuPath(menuItems, location.pathname);
-  const groupContainsActiveItem = (item: any): boolean =>
-    item.type === 'group' && item.children.some((child: any) =>
-      child.type === 'item'
-        ? child.key === location.pathname
-        : groupContainsActiveItem(child)
-    );
   const activePageName = activeMenuItem
     ? t(activeMenuItem.label)
     : location.pathname === '/settings'
@@ -268,27 +266,81 @@ const AppLayout: React.FC = () => {
           <div className={cn("space-y-1", isNormal && "space-y-0")}>
             {menuItems.map((item: any) => {
               if (item.type === 'group') {
-                const containsActiveItem = groupContainsActiveItem(item);
+                const containsActiveItem = activeMenuPath.some(node => node.key === item.key);
                 const isOpen = openMenuGroups[item.key] ?? (item.defaultOpen || containsActiveItem);
+                const children = (
+                  <>
+                    {item.children.map((child: any) => {
+                      const isChildActive = activeMenuItem?.key === child.key;
+                      return (
+                        <Link
+                          key={child.key}
+                          to={child.key}
+                          onClick={() => setCollapsedMenuGroup(null)}
+                          aria-current={isChildActive ? 'page' : undefined}
+                          className={cn(
+                            "menu-nav-group-child flex items-center gap-2 py-2 text-sm transition-all duration-150",
+                            isCollapsed ? "px-3" : "pl-5 pr-4",
+                            isNeuron && "neuron-nav-item",
+                            isArco && "arco-nav-item",
+                            isChildActive ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
+                          )}
+                        >
+                          {child.icon}
+                          <span className="font-medium">{t(child.label)}</span>
+                        </Link>
+                      );
+                    })}
+                  </>
+                );
+                if (isCollapsed) {
+                  return (
+                    <Popover
+                      key={item.key}
+                      open={collapsedMenuGroup === item.key}
+                      onOpenChange={open => setCollapsedMenuGroup(open ? item.key : null)}
+                    >
+                      <PopoverTrigger asChild>
+                        <button
+                          type="button"
+                          aria-label={t(item.label)}
+                          title={t(item.label)}
+                          className={cn(
+                            "relative w-full flex items-center justify-center py-2.5 transition-colors",
+                            NAV_ITEM_BASE[theme],
+                            containsActiveItem ? "bg-primary/10 text-primary" : NAV_INACTIVE[theme],
+                            "px-0"
+                          )}
+                        >
+                          {item.icon}
+                          <ChevronRight className="absolute right-0.5 h-2.5 w-2.5" aria-hidden="true" />
+                        </button>
+                      </PopoverTrigger>
+                      <PopoverContent
+                        side="right"
+                        align="start"
+                        sideOffset={12}
+                        aria-label={t(item.label)}
+                        className="w-56 max-w-[calc(100vw-2rem)] max-h-[var(--radix-popover-content-available-height)] overflow-y-auto p-1"
+                      >
+                        <div className="border-b px-3 py-2 text-sm font-semibold">{t(item.label)}</div>
+                        <div className="py-1">{children}</div>
+                      </PopoverContent>
+                    </Popover>
+                  );
+                }
                 return (
                   <div
                     key={item.key}
                     className={cn(
                       "menu-nav-group mb-1",
-                      !isCollapsed && isOpen && "menu-nav-group--open"
+                      isOpen && "menu-nav-group--open"
                     )}
                   >
                     <button
                       type="button"
-                      title={isCollapsed ? t(item.label) : undefined}
-                      aria-expanded={!isCollapsed && isOpen}
+                      aria-expanded={isOpen}
                       onClick={() => {
-                        if (isCollapsed) {
-                          localStorage.setItem('sidebar_collapsed', 'false');
-                          setCollapsed(false);
-                          setOpenMenuGroups(groups => ({ ...groups, [item.key]: true }));
-                          return;
-                        }
                         setOpenMenuGroups(groups => ({ ...groups, [item.key]: !isOpen }));
                       }}
                       className={cn(
@@ -296,45 +348,22 @@ const AppLayout: React.FC = () => {
                         isNeuron && "neuron-nav-item",
                         isArco && "arco-nav-item",
                         NAV_ITEM_BASE[theme],
-                        isCollapsed
-                          ? "justify-center py-2.5 px-0"
-                          : "space-x-2 px-4 py-2",
-                        !isCollapsed && "menu-nav-group-trigger",
+                        "space-x-2 px-4 py-2 menu-nav-group-trigger",
                         // A group's active descendant keeps the group expanded,
                         // but only the matching child represents the current page.
                         NAV_INACTIVE[theme]
                       )}
                     >
                       {item.icon}
-                      {!isCollapsed && <>
-                        <span className="flex-1 text-left text-sm font-medium">{t(item.label)}</span>
-                        <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
-                      </>}
+                      <span className="flex-1 text-left text-sm font-medium">{t(item.label)}</span>
+                      <ChevronDown className={cn("h-4 w-4 text-muted-foreground transition-transform", isOpen && "rotate-180")} />
                     </button>
-                    {!isCollapsed && isOpen && (
+                    {isOpen && (
                       <div className={cn(
                         "menu-nav-group-children ml-4 border-l py-0.5",
                         isNormal ? "border-border/60" : theme === 'industrial' ? "border-accent/40" : "border-primary/25"
                       )}>
-                        {item.children.map((child: any) => {
-                          const isChildActive = location.pathname === child.key;
-                          return (
-                            <Link
-                              key={child.key}
-                              to={child.key}
-                              aria-current={isChildActive ? 'page' : undefined}
-                              className={cn(
-                                "menu-nav-group-child flex items-center gap-2 py-2 pl-5 pr-4 text-sm transition-all duration-150",
-                                isNeuron && "neuron-nav-item",
-                                isArco && "arco-nav-item",
-                                isChildActive ? NAV_ACTIVE[theme] : NAV_INACTIVE[theme]
-                              )}
-                            >
-                              {child.icon}
-                              <span className="font-medium">{t(child.label)}</span>
-                            </Link>
-                          );
-                        })}
+                        {children}
                       </div>
                     )}
                   </div>

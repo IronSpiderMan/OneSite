@@ -8,7 +8,7 @@ import re
 from pathlib import Path
 
 from ..project_paths import get_project_paths
-from .assets import _mirror_source_tree
+from .file_utils import mirror_source_tree
 from .render import generate_file_if_missing
 
 
@@ -105,6 +105,6 @@ def sync_custom_backend(
         source = source_root / name
         if source.exists():
             _ensure_python_packages(source)
-        _mirror_source_tree(source, destination, f"custom backend {name}")
+        mirror_source_tree(source, destination, f"custom backend {name}")
 
     return configured_modules

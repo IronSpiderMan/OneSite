@@ -9,7 +9,12 @@ from rich.console import Console
 
 from ..project_paths import get_project_paths
 from .config import SiteConfigError
-from .file_utils import copy_file_with_status, write_file_with_status
+from .file_utils import (
+    copy_file_with_status,
+    mirror_python_tree as _mirror_python_tree,
+    mirror_source_tree as _mirror_source_tree,
+    write_file_with_status,
+)
 from .render import generate_file
 from .theme import resolve_theme
 
@@ -208,62 +213,6 @@ def _validate_async_function_signature(
             f"{file_path}:{func_name} parameters do not match configured inputs "
             f"({'; '.join(details)})."
         )
-
-
-def _mirror_python_tree(source: Path, destination: Path) -> None:
-    """Mirror Python source files without treating the generated copy as source."""
-    destination.mkdir(parents=True, exist_ok=True)
-    desired = {
-        path.relative_to(source): path
-        for path in source.rglob("*.py")
-        if path.is_file()
-    }
-
-    for existing in sorted(destination.rglob("*.py")):
-        relative = existing.relative_to(destination)
-        if relative not in desired:
-            existing.unlink()
-            console.print(
-                f"[yellow]Removed stale generated MQTT source {existing}[/yellow]"
-            )
-
-    for relative, source_file in sorted(desired.items()):
-        copy_file_with_status(source_file, destination / relative)
-
-
-def _mirror_source_tree(source: Path, destination: Path, label: str) -> None:
-    """Mirror a developer-owned source tree into generated backend output."""
-    desired = {}
-    if source.exists():
-        desired = {
-            path.relative_to(source): path
-            for path in source.rglob("*")
-            if path.is_file()
-            and "__pycache__" not in path.parts
-            and path.suffix != ".pyc"
-        }
-
-    if destination.exists():
-        for existing in sorted(
-            (path for path in destination.rglob("*") if path.is_file()),
-            reverse=True,
-        ):
-            relative = existing.relative_to(destination)
-            if relative not in desired:
-                existing.unlink()
-                console.print(
-                    f"[yellow]Removed stale generated {label} file {existing}[/yellow]"
-                )
-
-        for directory in sorted(
-            (path for path in destination.rglob("*") if path.is_dir()),
-            reverse=True,
-        ):
-            if not any(directory.iterdir()):
-                directory.rmdir()
-
-    for relative, source_file in sorted(desired.items()):
-        copy_file_with_status(source_file, destination / relative)
 
 
 def _sync_project_utils(cwd: Path, backend_path: Path) -> None:

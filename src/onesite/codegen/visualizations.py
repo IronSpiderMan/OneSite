@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Iterable
 
 from ..visualization import DashboardMetric, DataBinding, Visualization
+from .metadata.dashboard_metrics import _normalize_dashboard_metrics
 from .time_filters import RELATIVE_TIME_PERIODS
 from .types import FieldDefinition, ModelDefinition
 
@@ -630,10 +631,6 @@ def compile_dashboard_metrics(
     with the legacy ``__onesite__.dashboard_metrics`` configuration to keep
     both entry points behaviorally identical during the migration period.
     """
-
-    # Import lazily to keep the model introspection module independent from
-    # project-level declaration loading at import time.
-    from .introspect import _normalize_dashboard_metrics
 
     lookup = _model_lookup(models)
     grouped_raw: dict[str, list[dict[str, Any]]] = {}

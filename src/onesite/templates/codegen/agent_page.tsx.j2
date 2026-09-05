@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
-import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Copy, History, Loader2, MessageSquare, Plus, Search, Square, Terminal, X, AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Copy, History, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Square, Terminal, X, AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
 import request, { getBaseURL, getErrorMessage } from '../utils/request';
 
 type Agent = { key: string; title: string };
@@ -18,6 +18,46 @@ function pretty(value: unknown) {
   try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
 }
 
+async function copyText(text: string) {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Some browsers deny Clipboard API access; try copying a temporary selection.
+  }
+
+  const activeElement = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+  const selection = window.getSelection();
+  const ranges = selection ? Array.from({ length: selection.rangeCount }, (_, index) => selection.getRangeAt(index).cloneRange()) : [];
+  const fieldSelection = activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement
+    ? { start: activeElement.selectionStart, end: activeElement.selectionEnd, direction: activeElement.selectionDirection }
+    : null;
+  const textarea = document.createElement('textarea');
+  textarea.value = text;
+  textarea.readOnly = true;
+  textarea.tabIndex = -1;
+  textarea.style.cssText = 'position:fixed;left:-9999px;top:0;opacity:0;font-size:16px;';
+  document.body.appendChild(textarea);
+  try {
+    textarea.focus({ preventScroll: true });
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    if (!document.execCommand('copy')) throw new Error('Copy failed');
+  } finally {
+    textarea.remove();
+    activeElement?.focus({ preventScroll: true });
+    if (selection) {
+      selection.removeAllRanges();
+      ranges.forEach(range => selection.addRange(range));
+    }
+    if (fieldSelection?.start != null && fieldSelection.end != null && (activeElement instanceof HTMLInputElement || activeElement instanceof HTMLTextAreaElement)) {
+      activeElement.setSelectionRange(fieldSelection.start, fieldSelection.end, fieldSelection.direction || undefined);
+    }
+  }
+}
+
 function CodeBlock({ children }: { children?: React.ReactNode }) {
   const { t } = useTranslation();
   const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
@@ -28,7 +68,7 @@ function CodeBlock({ children }: { children?: React.ReactNode }) {
   const language = /(?:^|\s)language-([^\s]+)/.exec(code?.props.className || '')?.[1] || 'text';
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText((pre.current?.textContent || '').replace(/\n$/, ''));
+      await copyText((pre.current?.textContent || '').replace(/\n$/, ''));
       setCopyState('copied');
     } catch { setCopyState('error'); }
     clearTimeout(timer.current);
@@ -103,6 +143,7 @@ export default function AgentPage() {
   const [connectionError, setConnectionError] = useState(false);
   const [search, setSearch] = useState('');
   const [historyOpen, setHistoryOpen] = useState(false);
+  const [desktopHistoryOpen, setDesktopHistoryOpen] = useState(true);
   const [copied, setCopied] = useState('');
   const [atBottom, setAtBottom] = useState(true);
   const sidebar = useRef<HTMLElement>(null);
@@ -304,8 +345,9 @@ export default function AgentPage() {
 
   const copy = async (message: Message) => {
     try {
-      await navigator.clipboard.writeText(message.payload.content || '');
+      await copyText(message.payload.content || '');
       if (!alive.current) return;
+      setError(previous => previous === t('agent.copy_error') ? '' : previous);
       setCopied(message.id); clearTimeout(copyTimer.current);
       copyTimer.current = setTimeout(() => setCopied(''), 1800);
     } catch { setError(t('agent.copy_error')); }
@@ -343,7 +385,7 @@ export default function AgentPage() {
 
   return <div className="relative flex h-[calc(100dvh-7rem)] min-h-[360px] overflow-hidden sm:min-h-[480px] rounded-2xl border bg-background shadow-sm">
     {historyOpen && <button aria-label={t('agent.close_history')} onClick={() => setHistoryOpen(false)} className="absolute inset-0 z-20 bg-black/30 md:hidden" />}
-    <aside ref={sidebar} aria-label={t('agent.conversations')} className={`${historyOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-0 z-30 w-72 shrink-0 flex-col border-r bg-card md:static md:z-auto md:flex md:w-64 lg:w-72`}>
+    <aside id="agent-history" ref={sidebar} aria-label={t('agent.conversations')} className={`${historyOpen ? 'flex' : 'hidden'} ${desktopHistoryOpen ? 'md:flex' : 'md:hidden'} absolute inset-y-0 left-0 z-30 w-72 shrink-0 flex-col border-r bg-card md:static md:z-auto md:w-64 lg:w-72`}>
       <div className="space-y-4 p-5">
         <div className="flex items-center gap-2.5"><span className="rounded-xl bg-primary/10 p-2 text-primary"><Bot className="h-5 w-5" /></span><h1 className="flex-1 font-semibold tracking-tight">{t('agent.title')}</h1><button onClick={() => setHistoryOpen(false)} aria-label={t('agent.close_history')} className={`rounded-md p-1.5 md:hidden ${focusStyle}`}><X className="h-4 w-4" /></button></div>
         <button onClick={newConversation} disabled={sending || loading} className={`flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50 ${focusStyle}`}><Plus className="h-4 w-4" />{t('agent.new')}</button>
@@ -360,7 +402,10 @@ export default function AgentPage() {
 
     <section className="flex min-w-0 flex-1 flex-col">
       <header className="flex min-h-[72px] items-center gap-3 border-b px-4 sm:px-6">
-        <button ref={historyButton} onClick={() => setHistoryOpen(true)} aria-label={t('agent.conversations')} aria-expanded={historyOpen} className={`rounded-lg border p-2 md:hidden ${focusStyle}`}><History className="h-4 w-4" /></button>
+        <button ref={historyButton} onClick={() => setHistoryOpen(true)} aria-label={t('agent.conversations')} aria-controls="agent-history" aria-expanded={historyOpen} className={`rounded-lg border p-2 md:hidden ${focusStyle}`}><History className="h-4 w-4" /></button>
+        <button type="button" onClick={() => setDesktopHistoryOpen(open => !open)} aria-label={t(desktopHistoryOpen ? 'agent.collapse_history' : 'agent.expand_history')} title={t(desktopHistoryOpen ? 'agent.collapse_history' : 'agent.expand_history')} aria-controls="agent-history" aria-expanded={desktopHistoryOpen} className={`hidden shrink-0 rounded-lg border p-2 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground md:inline-flex ${focusStyle}`}>
+          {desktopHistoryOpen ? <PanelLeftClose className="h-4 w-4" /> : <PanelLeftOpen className="h-4 w-4" />}
+        </button>
         <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{active?.title || t('agent.new')}</h2><p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${running ? 'bg-primary' : 'bg-muted-foreground/40'}`} />{running ? t('agent.running') : t('agent.ready')}</p></div>
         <div className="relative max-w-[45%]"><select disabled={!!selected || sending || !agents.length} aria-label={t('agent.select')} value={active?.agent_key || agentKey} onChange={e => setAgentKey(e.target.value)} className={`max-w-full appearance-none truncate rounded-lg border bg-background py-2 pl-3 pr-8 text-xs font-medium disabled:opacity-70 ${focusStyle}`}>{agents.map(a => <option key={a.key} value={a.key}>{a.title}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" /></div>
       </header>
