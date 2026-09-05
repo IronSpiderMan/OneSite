@@ -1,3 +1,4 @@
+from app.core.access import ReadModel, WriteModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from sqlmodel import SQLModel, Field
@@ -14,7 +15,8 @@ class UserModelReportQuery(SQLModel):
 {% endif %}
 
 # Shared properties
-class UserBase(SQLModel):
+class UserBase(ReadModel):
+{% set access_kind = "read" %}{% include "field_access.py.j2" %}
 {% for field in model.fields %}
     {% if 'r' in field.permissions and field.name != 'id' and field.name != 'hashed_password' and field.name != 'password' %}
     {{ field.name }}: {{ field.type }}
@@ -22,7 +24,9 @@ class UserBase(SQLModel):
 {% endfor %}
 
 # Properties to receive via API on creation
-class UserCreate(SQLModel):
+class UserCreate(WriteModel):
+    __write_operation__ = "c"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
     email: str
     password: str
     full_name: Optional[str] = None
@@ -33,12 +37,14 @@ class UserCreate(SQLModel):
     # Allow other fields if any
 {% for field in model.fields %}
     {% if 'c' in field.permissions and field.name not in ['id', 'email', 'password', 'full_name', 'avatar', 'is_active', 'is_superuser', 'hashed_password', 'created_at', 'updated_at'] %}
-    {{ field.name }}: {{ field.type }}
+    {{ field.name }}: {{ field.type }}{% if not field.required or field.create_optional %} = None{% endif %}
     {% endif %}
 {% endfor %}
 
 # Public registration payload. Privileged fields are deliberately excluded.
-class UserRegister(SQLModel):
+class UserRegister(WriteModel):
+    __write_operation__ = "c"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
     email: str
     password: str
 {% for field in model.fields %}
@@ -48,7 +54,9 @@ class UserRegister(SQLModel):
 {% endfor %}
 
 # Properties to receive via API on update
-class UserUpdate(SQLModel):
+class UserUpdate(WriteModel):
+    __write_operation__ = "u"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
     email: Optional[str] = None
     password: Optional[str] = None
     full_name: Optional[str] = None
@@ -63,7 +71,9 @@ class UserUpdate(SQLModel):
     {% endif %}
 {% endfor %}
 
-class UserUpdateMe(SQLModel):
+class UserUpdateMe(WriteModel):
+    __write_operation__ = "u"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
     """Current user updates their own profile.
 
     Excludes admin-only fields (role, is_active, is_superuser).

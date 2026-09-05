@@ -179,19 +179,10 @@ def _init_link_table_flags(models: list[ModelDefinition]) -> None:
         if owner_field:
             fk_names = {fk["name"] for fk in model["foreign_keys"]}
             if owner_field not in fk_names:
-                console.print(
-                    f"[yellow]Warning: Model '{model['name']}' has owner_field='{owner_field}' "
-                    f"but no matching FK field found. Owner filtering disabled.[/yellow]"
-                )
-                model["owner_field"] = None
-            else:
-                fk = next((fk for fk in model["foreign_keys"] if fk["name"] == owner_field), None)
-                if fk and fk["target_model"] != "User":
-                    console.print(
-                        f"[yellow]Warning: Model '{model['name']}' owner_field='{owner_field}' "
-                        f"targets '{fk['target_model']}', not 'User'. Owner filtering disabled.[/yellow]"
-                    )
-                    model["owner_field"] = None
+                raise ValueError(f"{model['name']}.owner_field must name a foreign key to User")
+            fk = next(fk for fk in model["foreign_keys"] if fk["name"] == owner_field)
+            if fk["target_model"] != "User":
+                raise ValueError(f"{model['name']}.owner_field must reference User")
 
         if model.get("is_link_table") and model.get("is_association_table"):
             model["show_in_menu"] = bool(
@@ -235,6 +226,12 @@ def _resolve_fk_labels_and_reverse(
             fk["label_field"] = (
                 target_model.get("unique_search_field") or target_model["search_field"]
             )
+            label = next((field for field in target_model["fields"] if field.name == fk["label_field"]), None)
+            model.setdefault("read_label_permissions", {})[fk["name"] + "_label"] = {
+                role: "r" if "r" in target_model["role_permissions"].get(role, "")
+                and (label is None or label.name == "id" or "r" in (label.role_permissions or {}).get(role, "")) else ""
+                for role in ROLE_ORDER
+            }
             fk["target_readable_fields"] = [
                 f for f in target_model["fields"]
                 if "r" in f["permissions"]
@@ -929,6 +926,7 @@ def _apply_m2m_direction(
                 "target_fk_fields": [
                     {"name": fk["name"], "target_model": fk["target_model"],
                      "target_source_module": fk["target_source_module"],
+                     "target_service": fk["target_service"],
                      "label_field": fk["label_field"]}
                     for fk in to_model.get("foreign_keys", [])
                     if fk.get("target_source_module")
@@ -1389,6 +1387,7 @@ def phase_resolve_relationships(
                 "kind": "reverse_fk",
                 "write_name": rel["write_name"],
                 "target_model": rel["source_model"],
+                "target_service": rel["source_service"],
                 "role_permissions": rel["role_permissions"],
                 "remove_permission": "d" if rel["on_remove"] == "delete" else "u",
             }
@@ -1399,12 +1398,19 @@ def phase_resolve_relationships(
                 "kind": "m2m",
                 "write_name": rel["write_name"],
                 "target_model": rel["target_model"],
+                "target_service": rel["target_service"],
                 "role_permissions": rel["target_role_permissions"],
                 "remove_permission": None,
             }
             for rel in model.get("m2m_fields", [])
             if rel.get("editor") == "inline"
         ]
+
+        for relation in model["inline_relations"]:
+            relation["field_permissions"] = {
+                field["name"]: field.get("role_permissions") or {}
+                for field in model_map[relation["target_model"]]["fields"]
+            }
 
     # An embedded reverse-FK editor renders the child model's normal list and
     # modal CRUD UI inside its parent's detail tab.  The child has no route of

@@ -6,7 +6,7 @@ from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text
+from sqlalchemy import text, Index
 from app.core.config import settings
 
 P = ParamSpec("P")
@@ -62,7 +62,8 @@ elif database_url.startswith("postgresql://"):
 # Create Async Engine
 engine = create_async_engine(database_url, future=True)
 
-async def init_db():
+def register_models():
+    """Register application and runtime tables for startup and Alembic."""
     # Register every database model before create_all. Link/association tables
     # may not have API endpoints, so endpoint imports alone are insufficient.
     {% for module in model_imports %}
@@ -76,8 +77,29 @@ async def init_db():
     {% for module in latest_table_imports %}
     import {{ module }}  # noqa: F401
     {% endfor %}
+    {% if external_resources_enabled %}
+    import app.core.external_resources  # noqa: F401
+    {% endif %}
+
+    # Keep generated indexes in the same metadata Alembic compares.
+    {% for index in generated_indexes if index.name is defined %}
+    table = SQLModel.metadata.tables[{{ index.table | tojson }}]
+    if not any(index.name == {{ index.name | tojson }} for index in table.indexes):
+        columns = []
+        for spec in {{ index.columns | tojson }}:
+            parts = spec.rsplit(" ", 1)
+            column = table.c[parts[0]]
+            columns.append(column.desc() if len(parts) == 2 and parts[1] == "DESC" else column)
+        Index({{ index.name | tojson }}, *columns)
+    {% endfor %}
+
+async def init_db():
+    register_models()
+    from app.core.migrations import check_startup_revision
     async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.create_all)
+        versioned = await conn.run_sync(check_startup_revision)
+        if not versioned:
+            await conn.run_sync(SQLModel.metadata.create_all)
         {% for index in generated_indexes %}
         await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}

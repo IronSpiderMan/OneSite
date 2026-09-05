@@ -11,6 +11,8 @@ export interface SearchableSelectProps {
   loadOptions: (query: string) => Promise<{ label: string; value: string | number; description?: string }[]>
   defaultLabel?: string
   valueLabels?: Record<string, string>
+  disabled?: boolean
+  optionsKey?: string | number
   multiple?: boolean
 }
 
@@ -24,10 +26,17 @@ export function SearchableSelect({
   defaultLabel,
   valueLabels,
   multiple = false,
+  disabled = false,
+  optionsKey,
 }: SearchableSelectProps) {
   const [options, setOptions] = React.useState<{ label: string; value: string | number; description?: string }[]>([])
   const [loading, setLoading] = React.useState(false)
   const requestId = React.useRef(0)
+  React.useEffect(() => {
+    requestId.current += 1
+    setOptions([])
+    setLoading(false)
+  }, [optionsKey])
 
   const search = React.useCallback(async (query: string) => {
     const current = ++requestId.current
@@ -50,6 +59,7 @@ export function SearchableSelect({
 
   return (
     <Select
+      disabled={disabled}
       showSearch
       allowClear
       mode={multiple ? 'multiple' : undefined}

@@ -81,6 +81,7 @@ export default function ProfilePage() {
     if (!me) return;
 {% for field in model.fields %}
   {% if 'u' in field.permissions and field.name not in ['password', 'hashed_password'] %}
+    if (hasFieldPerm('{{ field.name }}', 'u')) {
     {% if field.required and not field.update_optional %}
     if (me.{{ field.name }} === undefined || me.{{ field.name }} === null || me.{{ field.name }} === '') {
       toast.error(`${t('{{ field.label_key }}')} ${t('common.required', 'is required')}`);
@@ -110,6 +111,7 @@ export default function ProfilePage() {
       if (validation !== true) { toast.error(validation); return; }
     }
     {% endif %}
+    }
   {% endif %}
 {% endfor %}
     try {
@@ -119,7 +121,7 @@ export default function ProfilePage() {
       const updateData: Record<string, any> = {};
 {% for field in model.fields %}
   {% if 'u' in field.permissions and field.name != 'password' and field.name != 'hashed_password' %}
-      updateData.{{ field.name }} = me.{{ field.name }};
+      if (hasFieldPerm('{{ field.name }}', 'u')) updateData.{{ field.name }} = me.{{ field.name }};
   {% endif %}
 {% endfor %}
 

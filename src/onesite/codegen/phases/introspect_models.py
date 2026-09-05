@@ -70,6 +70,7 @@ def _ensure_user_password_field(fields: list[FieldDefinition]) -> None:
             type="str",
             ui_type="str",
             permissions="cu",
+            role_permissions={role: "cu" for role in ("user", "admin", "developer")},
             create_optional=False,
             update_optional=True,
             required=True,
@@ -939,6 +940,8 @@ def _introspect_module(
         if not (inspect.isclass(obj) and issubclass(obj, SQLModel) and obj is not SQLModel):
             continue
 
+        if getattr(module, "__name__", "").startswith("app.models") and obj.__module__ != module.__name__:
+            continue
         table_args = getattr(obj, "__table_args__", None)
         singleton_marker = False
         if isinstance(table_args, dict):
@@ -965,6 +968,9 @@ def _introspect_module(
             return None  # fatal — caller should stop
         results.append(mdl)
 
+    # Resource identity follows the model class, independent of file grouping.
+    for model in results:
+        model["module_name"] = to_snake(model["name"])
     return results
 
 
@@ -989,8 +995,8 @@ def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
 
         models_dir = backend_path / "app" / "models"
         module_names = sorted(
-            model_file.stem
-            for model_file in models_dir.glob("*.py")
+            ".".join(model_file.relative_to(models_dir).with_suffix("").parts)
+            for model_file in models_dir.rglob("*.py")
             if model_file.stem != "__init__" and not model_file.stem.startswith("_")
         )
         found_models: list[ModelDefinition] = []
@@ -1010,6 +1016,23 @@ def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
                     f"Model validation failed while introspecting {full_module_name}"
                 )
             found_models.extend(module_models)
+
+        seen_keys = {}
+        for model in found_models:
+            key = model["module_name"]
+            if key in seen_keys:
+                raise ModelIntrospectionError(
+                    f"Generated model key {key!r} collides between "
+                    f"{seen_keys[key]} and {model['source_module']}.{model['name']}"
+                )
+            seen_keys[key] = f"{model['source_module']}.{model['name']}"
+            reserved_modules = {
+                "upload", "login", "ws", "video_streams", "tasks", "agents", "tools",
+                "task_center", "visualizations", "public_dashboard", "external_resources",
+            }
+            reserved_collections = {"task", "agent", "tool", "visualization"}
+            if key in reserved_modules or (not model.get("is_singleton") and key in reserved_collections):
+                raise ModelIntrospectionError(f"Model key {key!r} is reserved for a framework endpoint")
 
         tracking_enabled = any(
             model.get("tracked_operations") for model in found_models

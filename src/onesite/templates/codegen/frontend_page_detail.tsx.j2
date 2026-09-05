@@ -496,6 +496,8 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (!fp) return true;
       return (fp[userRole] || '').includes(perm);
     };
+{% include "frontend_write_payload.ts.j2" %}
+
     
     // State to store resolved foreign key data
     {% for fk in model.foreign_keys %}
@@ -598,7 +600,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (isSaving) return;
       setIsSaving(true);
       try {
-        const updatePayload = { ...values };
+        const updatePayload = writablePayload(values, 'u');
         await updateItem(currentItem!.id, updatePayload);
         toast.success(t('toast.update_success', 'Updated'));
         setIsEditing(false);

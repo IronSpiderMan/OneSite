@@ -44,7 +44,8 @@ const SettingsPage: React.FC = () => {
   {% endif %}
   {% endfor %}
   };
-  const canEditSystem = Object.values(systemFieldRolePerms).some(
+  const systemRolePerms: Record<string, string> = {{ system_model.role_permissions | tojson }};
+  const canEditSystem = (systemRolePerms[userRole] || '').includes('u') && Object.values(systemFieldRolePerms).some(
     (fp) => (fp[userRole] || '').includes('u')
   );
   {% endif %}
@@ -125,7 +126,7 @@ const SettingsPage: React.FC = () => {
   const onSaveSystem = async (formData: any) => {
     try {
       setIsSavingSystem(true);
-      await updateSystemData(formData);
+      await updateSystemData({% if system_model %}Object.fromEntries(Object.entries(formData).filter(([key]) => key in systemFieldRolePerms && hasFieldPerm(systemFieldRolePerms, key, 'u'))){% else %}formData{% endif %});
       toast.success(t('toast.save_success', 'Saved'));
     } catch (e) {
       console.error(e);
@@ -149,7 +150,7 @@ const SettingsPage: React.FC = () => {
         shouldReload = true;
       }
 
-      await updateCustomData(formData);
+      await updateCustomData({% if custom_model %}Object.fromEntries(Object.entries(formData).filter(([key]) => key in customFieldRolePerms && hasFieldPerm(customFieldRolePerms, key, 'u'))){% else %}formData{% endif %});
       // Do not reset a neuron/industrial project to normal when this form is
       // saved without a theme value (for example after changing language).
       const newStyle = formData.theme_style || getInitialStyle();

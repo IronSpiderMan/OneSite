@@ -604,6 +604,14 @@ def _build_navigation(
         for model in frontend_models
         if _is_menu_model(model)
     }
+    # Legacy navigation used the source module name. Keep it as an alias when
+    # it identifies one menu model, while generated routes use canonical keys.
+    models_by_source: dict[str, list[ModelDefinition]] = {}
+    for model in model_by_module.values():
+        source = model.get("source_module")
+        if source:
+            models_by_source.setdefault(source, []).append(model)
+    declared_models: set[str] = set()
     route_by_id = {route["id"]: route for route in custom_routes}
 
     def build_node(declaration: dict[str, Any], path: str) -> dict[str, Any] | None:
@@ -612,11 +620,28 @@ def _build_navigation(
             module_name = declaration["model"]
             model = model_by_module.get(module_name)
             if model is None:
+                candidates = models_by_source.get(module_name, [])
+                if len(candidates) > 1:
+                    keys = ", ".join(sorted(candidate["module_name"] for candidate in candidates))
+                    raise ValueError(
+                        f"site_config.navigation {path} references ambiguous source module "
+                        f"'{module_name}'. Use a model resource name: {keys}."
+                    )
+                if candidates:
+                    model = candidates[0]
+            if model is None:
                 available = ", ".join(sorted(model_by_module)) or "(none)"
                 raise ValueError(
                     f"site_config.navigation {path} references model '{module_name}', "
                     f"but its module name is not menu-eligible. Available models: {available}."
                 )
+            canonical_name = model["module_name"]
+            if canonical_name in declared_models:
+                raise ValueError(
+                    f"site_config.navigation {path} duplicates model '{canonical_name}' "
+                    "through its resource name or source module alias."
+                )
+            declared_models.add(canonical_name)
             return _model_menu_node(model)
         if node_type == "route":
             route_id = declaration["route"]
@@ -691,18 +716,6 @@ def _build_navigation(
         for index, declaration in enumerate(navigation)
         if (built := build_node(declaration, f"navigation[{index}]")) is not None
     ]
-    declared_models = {
-        declaration["model"]
-        for declaration in navigation
-        if declaration["type"] == "model"
-    }
-    declared_models.update(
-        child["model"]
-        for declaration in navigation
-        if declaration["type"] == "group"
-        for child in declaration["children"]
-        if child["type"] == "model"
-    )
     declared_nodes.extend(
         _model_menu_node(model)
         for module_name, model in model_by_module.items()
@@ -976,7 +989,7 @@ def phase_generate_aggregated(
         seen_indexes.add(key)
         raw_name = index_name(table, suffix)
         sql = _render_create_index_sql(raw_name, table, columns)
-        generated_indexes.append({"sql_literal": repr(sql)})
+        generated_indexes.append({"sql_literal": repr(sql), "name": raw_name, "table": table, "columns": columns})
 
     def remove_obsolete_index(table: str, suffix: str) -> None:
         sql = f"DROP INDEX IF EXISTS {_quote_ddl_identifier(index_name(table, suffix))}"
@@ -1146,6 +1159,8 @@ def phase_generate_aggregated(
 
     from ..agents import generate_agents
     generate_agents(site_config, api_models, cwd, backend_path)
+
+    generate_file("access_policies.py.j2", {"models": models}, backend_path / "app/core/access_policies.py")
 
     # ── API router ──
     update_api_router(

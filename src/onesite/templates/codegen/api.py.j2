@@ -66,13 +66,9 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 {% endfor %}
 {% endif %}
 
-{% if model.is_timescaledb %}
-router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
-{% elif model.is_notification_table %}
-router = APIRouter()
-{% else %}
-router = APIRouter(dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))])
-{% endif %}
+router = APIRouter(dependencies=[Depends(deps.model_access(
+    {{ model.role_permissions | tojson }}, self_profile={{ 'True' if model.module_name == 'user' else 'False' }}
+))])
 
 {% if model.reverse_foreign_keys %}
 async def _delete_dependencies(session: AsyncSession, id: {{ model.id_type }}) -> list[str]:
@@ -125,7 +121,8 @@ def _check_{{ model.module_name }}_import_permissions(current_user: User) -> str
 {% endif %}
 
 {% if model.inline_relations %}
-def _check_inline_relation_permissions(payload: Any, current_user: User, *, updating: bool) -> None:
+async def _check_inline_relation_permissions(payload: Any, current_user: User, *, updating: bool, session: AsyncSession) -> None:
+    from app.core.access import policy_for, require_owned_record
     raw_role = getattr(current_user, "role", "user")
     role = str(getattr(raw_role, "value", raw_role))
     {% for rel in model.inline_relations %}
@@ -139,6 +136,18 @@ def _check_inline_relation_permissions(payload: Any, current_user: User, *, upda
                     status_code=403,
                     detail=f"No {required} permission for {{ rel.target_model }}",
                 )
+            target_policy = policy_for("{{ rel.target_service }}")
+            for field in item.model_fields_set - {"id"}:
+                grants = target_policy["fields"].get(field, {})
+                if required not in grants.get(role, ""):
+                    raise HTTPException(status_code=403, detail=f"Field {field} is not writable")
+            if getattr(item, "id", None) is not None:
+                await require_owned_record(session, "{{ rel.target_service }}", item.id, current_user)
+            owner = target_policy.get("owner_field")
+            if owner and role not in {"admin", "developer"} and owner in type(item).model_fields:
+                if owner in item.model_fields_set and str(getattr(item, owner)) != str(current_user.id):
+                    raise HTTPException(status_code=403, detail="Cannot assign another owner")
+                setattr(item, owner, current_user.id)
         {% if rel.remove_permission %}
         if updating and "{{ rel.remove_permission }}" not in permissions:
             raise HTTPException(
@@ -153,7 +162,7 @@ def _check_inline_relation_permissions(payload: Any, current_user: User, *, upda
 {% if model.is_timescaledb %}
 
 # ── TimescaleDB: create a new record ──
-@router.post("/", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))])
+@router.post("/", dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))])
 {% if "create" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="create")
 {% endif %}
@@ -264,7 +273,7 @@ async def inbox(
     ]
     return PaginatedResponse.create(data=items_read, total=total, page=page, size=size)
 
-@router.put("/{id}/read", response_model={{ model.name }}Read)
+@router.put("/{id}/read", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))])
 async def mark_read(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -284,7 +293,7 @@ async def mark_read(
         n = await service.update(session, id, {{ model.name }}Update(is_read=True), current_user=current_user)
     return n
 
-@router.put("/mark_all_read")
+@router.put("/mark_all_read", dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))])
 async def mark_all_read(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -297,7 +306,7 @@ async def mark_all_read(
     updated_count = await service.mark_all_read(session, current_user.id)
     return {"updated": updated_count}
 
-@router.post("/send", dependencies=[Depends(deps.get_current_active_superuser)])
+@router.post("/send", dependencies=[Depends(deps.get_current_active_superuser), Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))])
 async def send_notification(
     *,
     session: AsyncSession = Depends(db.get_session),
@@ -529,7 +538,7 @@ async def read_{{ model.lower_name }}s(
         {% endif %}
     )
 
-@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_create }}))]{% endif %})
+@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))]{% endif %})
 {% if "create" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="create")
 {% endif %}
@@ -555,7 +564,7 @@ async def create_{{ model.lower_name }}(
         setattr({{ model.lower_name }}_in, "{{ model.owner_field }}", current_user.id)
     {% endif %}
     {% if model.inline_relations %}
-    _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=False)
+    await _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=False, session=session)
     {% endif %}
     try:
         return await service.create(session, {{ model.lower_name }}_in{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
@@ -616,7 +625,7 @@ async def update_me(
 async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
     *,
     session: AsyncSession = Depends(db.get_session),
-    {% if model.has_read_resolvers %}
+    {% if model.has_read_resolvers or model.owner_field %}
     current_user: User = Depends(deps.get_current_user),
     {% endif %}
     {% for key_field in model.union_key %}
@@ -638,6 +647,10 @@ async def read_{{ model.lower_name }}_by_{{ model.union_key | join('_') }}(
     )
     if not {{ model.lower_name }}:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")
+    {% if model.owner_field %}
+    from app.core.access import require_owned_record
+    await require_owned_record(session, "{{ model.module_name }}", {{ model.lower_name }}.id, current_user)
+    {% endif %}
     return {{ model.lower_name }}
 {% endif %}
 
@@ -711,7 +724,7 @@ async def read_{{ model.lower_name }}(
     {% endif %}
     return {{ model.lower_name }}
 
-@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))]{% endif %})
+@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))]{% endif %})
 {% if "update" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="update")
 {% endif %}
@@ -729,7 +742,7 @@ async def update_{{ model.lower_name }}(
     {{ model.lower_name }}_in: {{ model.name }}Update,
 ) -> Any:
     {% if model.inline_relations %}
-    _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=True)
+    await _check_inline_relation_permissions({{ model.lower_name }}_in, current_user, updating=True, session=session)
     {% endif %}
     {% if model.is_notification_table %}
     # Check permission for notification
@@ -744,6 +757,7 @@ async def update_{{ model.lower_name }}(
         raise HTTPException(status_code=403, detail="Forbidden")
     {% elif model.module_name == "user" and model.name == "User" %}
     # User update: admin/developer can update any, user can only update self
+    user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
     if id != current_user.id:
         user_level = deps.ROLE_HIERARCHY.get(current_user.role, 0)
         if user_level < deps.ROLE_HIERARCHY.get("admin", 1):
@@ -796,7 +810,7 @@ async def update_{{ model.lower_name }}(
             ),
         )
 
-@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "d"))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
 {% if "delete" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="delete")
 {% endif %}
@@ -846,7 +860,7 @@ async def delete_{{ model.lower_name }}(
         {% endif %}
     return {"deleted": deleted}
 
-@router.post("/bulk_delete", dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_delete }}))])
+@router.post("/bulk_delete", dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "d"))])
 {% if "bulk_delete" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="bulk_delete")
 {% endif %}
@@ -909,6 +923,8 @@ async def read_{{ model.lower_name }}_definitions(
     id: {{ model.id_type }},
 ) -> Any:
     """Return definitions selected by this entity."""
+    from app.core.access import require_owned_record
+    await require_owned_record(session, "{{ model.module_name }}", id, current_user)
     entity = await service.get(session, id)
     if not entity:
         raise HTTPException(status_code=404, detail="{{ model.name }} not found")

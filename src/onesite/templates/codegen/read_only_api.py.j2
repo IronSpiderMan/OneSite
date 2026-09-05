@@ -12,7 +12,7 @@ from app.services.{{ model.module_name }} import service
 
 
 router = APIRouter(
-    dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))]
+    dependencies=[Depends(deps.model_access({{ model.role_permissions | tojson }}))]
 )
 
 

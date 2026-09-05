@@ -104,6 +104,6 @@ def phase_finalize_standalone(backend_path: Path) -> None:
     """Make generated backend models independent of the OneSite package."""
 
     models_dir = backend_path / "app" / "models"
-    for model_path in sorted(models_dir.glob("*.py")):
+    for model_path in sorted(models_dir.rglob("*.py")):
         if model_path.name != "__init__.py":
             _strip_generator_metadata(model_path)

@@ -1,0 +1,4 @@
+from alembic import context
+from app.core.migrations import run_environment
+
+run_environment(context)

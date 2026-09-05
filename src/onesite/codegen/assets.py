@@ -714,6 +714,10 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     _ensure_init_py(backend_path / "app" / "consumers")
     _ensure_init_py(backend_path / "app" / "tasks")
 
+    copy_file_with_status(template_backend_root / "app/core/access.py", backend_path / "app/core/access.py")
+
+    copy_file_with_status(template_backend_root / "app/core/migrations.py", backend_path / "app/core/migrations.py")
+
     error_handlers = template_backend_root / "app" / "core" / "error_handlers.py"
     copy_file_with_status(
         error_handlers, backend_path / "app" / "core" / "error_handlers.py"

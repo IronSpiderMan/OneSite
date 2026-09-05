@@ -1,0 +1,18 @@
+    __{{ access_kind }}_permissions__ = {
+{% for field in model.fields %}
+{% if field.name != 'id' %}
+        {{ field.name | tojson }}: {{ (field.role_permissions or {}) | tojson }},
+{% endif %}
+{% endfor %}
+{% if access_kind == 'read' %}
+{% for name, grants in model.get('read_label_permissions', {}).items() %}
+        {{ name | tojson }}: {{ grants | tojson }},
+{% endfor %}
+{% for field in model.extra_fields | default([]) %}
+        {{ field.name | tojson }}: {{ model.role_permissions | tojson }},
+{% endfor %}
+{% endif %}
+    }
+{% if access_kind == 'write' %}
+    __owner_field__ = {{ (model.owner_field or '') | tojson }}
+{% endif %}

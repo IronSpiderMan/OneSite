@@ -1,3 +1,4 @@
+from app.core.access import ReadModel, WriteModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'date') | list or model.fields | selectattr('json_item_kind', 'equalto', 'date') | list %}, date{% endif %}{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list or model.fields | selectattr('json_item_kind', 'equalto', 'time') | list %}, time{% endif %}
 from pydantic import model_validator
@@ -5,7 +6,8 @@ from sqlmodel import SQLModel
 from app.models.{{ model.source_module }} import {{ model.name }}{% for imp in model.schema_imports %}, {{ imp }}{% endfor %}
 
 # Shared properties
-class {{ model.name }}Base(SQLModel):
+class {{ model.name }}Base(ReadModel):
+{% set access_kind = "read" %}{% include "field_access.py.j2" %}
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if not field.is_local_storage and 'r' in field.permissions and field.name != 'id' %}
@@ -19,7 +21,9 @@ class {{ model.name }}Base(SQLModel):
 
 
 # Properties to receive via API on update
-class {{ model.name }}Update(SQLModel):
+class {{ model.name }}Update(WriteModel):
+    __write_operation__ = "u"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if not field.is_local_storage and 'u' in field.permissions and field.name != 'id' %}

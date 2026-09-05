@@ -1,3 +1,4 @@
+from app.core.access import require_relation, scope_statement, scope_label_statement
 from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 {% if model.uses_composite_identity %}import base64
@@ -718,6 +719,7 @@ async def _enrich_with_fk_labels(
     if {{ fk.name }}_ids:
         from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
         stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
+        stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
@@ -1251,9 +1253,11 @@ async def get_{{ m2m.target_endpoint }}(
 ) -> List[Dict[str, Any]]:
     """Get list of {{ m2m.target_model }} objects related to {{ model.name }}, enriched with FK labels."""
     # Get target IDs first
+    await require_relation(session, "{{ model.module_name }}", "{{ m2m.target_service }}", {{ model.lower_name }}_id)
     statement = select({{ m2m.link_model }}.{{ m2m.target_fk_field }}).where(
         {{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id
-    )
+    ).join({{ m2m.target_model }}, {{ m2m.link_model }}.{{ m2m.target_fk_field }} == {{ m2m.target_model }}.id)
+    statement = scope_statement(statement, {{ m2m.target_model }}, "{{ m2m.target_service }}")
     result = await session.exec(statement)
     target_ids = list(result.all())
 
@@ -1288,6 +1292,7 @@ async def get_{{ m2m.target_endpoint }}(
     {{ fk_field.name }}_map = {}
     if {{ fk_field.name }}_ids:
         stmt = select({{ fk_field.target_model }}).where({{ fk_field.target_model }}.id.in_({{ fk_field.name }}_ids))
+        stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
@@ -1310,9 +1315,11 @@ async def get_{{ m2m.target_endpoint }}(
 
 async def count_{{ m2m.target_endpoint }}(session: AsyncSession, {{ model.lower_name }}_id: {{ model.id_type }}) -> int:
     """Count {{ m2m.target_model }}s related to {{ model.name }}."""
+    await require_relation(session, "{{ model.module_name }}", "{{ m2m.target_service }}", {{ model.lower_name }}_id)
     statement = select(func.count()).select_from({{ m2m.link_model }}).where(
         {{ m2m.link_model }}.{{ m2m.source_fk_field }} == {{ model.lower_name }}_id
-    )
+    ).join({{ m2m.target_model }}, {{ m2m.link_model }}.{{ m2m.target_fk_field }} == {{ m2m.target_model }}.id)
+    statement = scope_statement(statement, {{ m2m.target_model }}, "{{ m2m.target_service }}")
     result = await session.exec(statement)
     return result.one()
 
@@ -1342,6 +1349,7 @@ async def get_{{ m2m.target_endpoint }}_with_order(
         .offset(skip)
         .limit(size)
     )
+    statement = scope_statement(statement, {{ m2m.target_model }}, "{{ m2m.target_service }}")
     result = await session.exec(statement)
     rows = result.all()
     
@@ -1363,9 +1371,11 @@ async def get_{{ rel.name }}(
 ) -> List[Dict[str, Any]]:
     """Get list of {{ rel.source_model }} objects related to {{ model.name }} (reverse M2M), enriched with FK labels."""
     # Get source IDs first
+    await require_relation(session, "{{ model.module_name }}", "{{ rel.source_service }}", {{ model.lower_name }}_id)
     statement = select({{ rel.link_model }}.{{ rel.source_fk_field }}).where(
         {{ rel.link_model }}.{{ rel.target_fk_field }} == {{ model.lower_name }}_id
-    )
+    ).join({{ rel.source_model }}, {{ rel.link_model }}.{{ rel.source_fk_field }} == {{ rel.source_model }}.id)
+    statement = scope_statement(statement, {{ rel.source_model }}, "{{ rel.source_service }}")
     result = await session.exec(statement)
     source_ids = list(result.all())
 
@@ -1400,6 +1410,7 @@ async def get_{{ rel.name }}(
     {{ fk_field.name }}_map = {}
     if {{ fk_field.name }}_ids:
         stmt = select({{ fk_field.target_model }}).where({{ fk_field.target_model }}.id.in_({{ fk_field.name }}_ids))
+        stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
@@ -1422,9 +1433,11 @@ async def get_{{ rel.name }}(
 
 async def count_{{ rel.name }}(session: AsyncSession, {{ model.lower_name }}_id: {{ model.id_type }}) -> int:
     """Count {{ rel.source_model }}s related to {{ model.name }} (reverse M2M)."""
+    await require_relation(session, "{{ model.module_name }}", "{{ rel.source_service }}", {{ model.lower_name }}_id)
     statement = select(func.count()).select_from({{ rel.link_model }}).where(
         {{ rel.link_model }}.{{ rel.target_fk_field }} == {{ model.lower_name }}_id
-    )
+    ).join({{ rel.source_model }}, {{ rel.link_model }}.{{ rel.source_fk_field }} == {{ rel.source_model }}.id)
+    statement = scope_statement(statement, {{ rel.source_model }}, "{{ rel.source_service }}")
     result = await session.exec(statement)
     return result.one()
 {% endfor %}

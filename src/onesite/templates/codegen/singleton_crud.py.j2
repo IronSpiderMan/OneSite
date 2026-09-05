@@ -39,8 +39,8 @@ async def get(session: AsyncSession) -> {{ model.name }}:
             if not db_obj:
                 raise RuntimeError(
                     "Failed to create default singleton config. This is usually caused by a database schema mismatch "
-                    "(e.g. you changed fields in the config model). For SQLite, delete the database file and restart "
-                    "the backend to recreate tables."
+                    "(e.g. you changed fields in the config model). Review the Alembic migration and run "
+                    "site db upgrade before restarting the backend."
                 ) from e
         
     return db_obj

@@ -83,6 +83,8 @@ const Create{{ model.name }}Page: React.FC = () => {
     if (!fp) return true;
     return (fp[userRole] || '').includes(perm);
   };
+{% include "frontend_write_payload.ts.j2" %}
+
 
   {% for field in model.fields %}
   {% if field.fk_info %}
@@ -101,7 +103,7 @@ const Create{{ model.name }}Page: React.FC = () => {
   const onSubmit = async (values: any) => {
     setSubmitting(true);
     try {
-      await createItem(values);
+      await createItem(writablePayload(values, 'c'));
       toast.success(t('toast.create_success', 'Created'));
       navigate('/{{ model.module_name }}s');
     } catch (error) {

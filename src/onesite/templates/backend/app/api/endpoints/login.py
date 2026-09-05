@@ -15,7 +15,17 @@ from app.schemas.user import UserCreate, UserRead, UserRegister
 from app.services.system_config import service as system_config_service
 from app.services.user import service as user_service
 
-router = APIRouter()
+async def public_actor():
+    from types import SimpleNamespace
+    from app.core.access import current_actor
+    token = current_actor.set(SimpleNamespace(role="user", id=None))
+    try:
+        yield
+    finally:
+        current_actor.reset(token)
+
+
+router = APIRouter(dependencies=[Depends(public_actor)])
 
 
 @router.get("/public-config")
@@ -43,10 +53,14 @@ async def register_user(
 
     user_data = user_in.model_dump(exclude_none=True)
     user_data.update({"role": "user", "is_active": True, "is_superuser": False})
+    from app.core.access import current_actor
+    token = current_actor.set(None)
     try:
         return await user_service.create(session, UserCreate(**user_data))
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    finally:
+        current_actor.reset(token)
 
 @router.post("/login/access-token", response_model=Token)
 async def login_access_token(

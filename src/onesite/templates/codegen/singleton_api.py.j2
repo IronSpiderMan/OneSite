@@ -12,7 +12,7 @@ from app.schemas.{{ model.module_name }} import {{ model.name }}Read, {{ model.n
 from app.services.{{ model.module_name }} import service
 
 router = APIRouter(
-    dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_read }}))]
+    dependencies=[Depends(deps.model_access({{ model.role_permissions | tojson }}))]
 )
 
 @router.get("/", response_model={{ model.name }}Read)
@@ -27,7 +27,7 @@ async def get_{{ model.lower_name }}(
 ) -> Any:
     return await service.get(session{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
 
-@router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_role(deps.UserRole.{{ model.min_role_for_update }}))])
+@router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))])
 {% if "update" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="update")
 {% endif %}

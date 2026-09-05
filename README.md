@@ -23,6 +23,10 @@ uv run pytest
 uv run ruff check src/onesite src/onesite_runtime tests
 ```
 
+## Database migrations
+
+Use Alembic to evolve the schema: for an empty database, run `site db revision -m "initial"`, review the revision, then run `site db upgrade`. Adopt an existing database with matching models using `site db baseline` before changing the models. Keep migration history in `app/migrations/`; sync copies it into the deployment output. See the [migration and compatibility guide (Chinese)](docs/database-migrations.md).
+
 ## Quick start
 
 ```bash

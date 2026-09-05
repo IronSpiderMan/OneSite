@@ -1,3 +1,4 @@
+from app.core.access import ReadModel, WriteModel
 from typing import Optional, List, Dict, Any
 from datetime import datetime{% if model.fields | selectattr('ui_type', 'equalto', 'date') | list or model.fields | selectattr('json_item_kind', 'equalto', 'date') | list %}, date{% endif %}{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list or model.fields | selectattr('json_item_kind', 'equalto', 'time') | list %}, time{% endif %}
 import json
@@ -145,7 +146,8 @@ class {{ model.name }}ModelReportQuery(SQLModel):
 {%- endmacro %}
 
 # Shared properties
-class {{ model.name }}Base(SQLModel):
+class {{ model.name }}Base(ReadModel):
+{% set access_kind = "read" %}{% include "field_access.py.j2" %}
 {% set ns = namespace(has_field=false) %}
 {% set ns_json_fields = namespace(fields=[]) %}
 {% for field in model.fields %}
@@ -207,7 +209,9 @@ class {{ model.name }}Inline{{ m2m.target_model }}Item(SQLModel):
 {% endfor %}
 
 # Properties to receive via API on creation
-class {{ model.name }}Create(SQLModel):
+class {{ model.name }}Create(WriteModel):
+    __write_operation__ = "c"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if 'c' in field.permissions %}
@@ -287,7 +291,9 @@ class {{ model.name }}Create(SQLModel):
 
 {% if not model.is_timescaledb %}
 # Properties to receive via API on update
-class {{ model.name }}Update(SQLModel):
+class {{ model.name }}Update(WriteModel):
+    __write_operation__ = "u"
+{% set access_kind = "write" %}{% include "field_access.py.j2" %}
 {% set ns = namespace(has_field=false) %}
 {% for field in model.fields %}
     {% if 'u' in field.permissions and field.name != 'id' %}
@@ -378,8 +384,10 @@ class {{ model.name }}Send(SQLModel):
 {% if model.m2m_fields %}
 {% for m2m in model.m2m_fields %}
 {% if m2m.order_field %}
-class {{ model.name }}{{ m2m.target_model }}Meta(SQLModel):
-    id: int
+class {{ model.name }}{{ m2m.target_model }}Meta(ReadModel):
+{% set label = m2m.target_readable_fields | selectattr('name', 'equalto', m2m.label_field) | first %}
+    __read_permissions__ = {"label": {{ (label.role_permissions if label is defined else m2m.target_role_permissions) | tojson }}}
+    id: {{ m2m.target_id_type }}
     label: str
     order: int
 {% endif %}

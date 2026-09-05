@@ -29,6 +29,13 @@ console = Console()
 
 
 def generate_code() -> None:
+    from .transaction import staged_generation
+
+    with staged_generation(Path.cwd().resolve()):
+        _generate_staged_code()
+
+
+def _generate_staged_code() -> None:
     """Load configuration, introspect models, and generate the full project.
 
     This is the public entry point called by ``site sync``.
@@ -116,3 +123,6 @@ def generate_code() -> None:
     # Phase 8 — The generator metadata has served its purpose.  Remove it and
     # its imports so the generated application can run without OneSite.
     phase_finalize_standalone.phase_finalize_standalone(backend_path)
+
+    from .migrations import generate_migrations
+    generate_migrations(cwd, backend_path)

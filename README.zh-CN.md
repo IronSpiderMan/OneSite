@@ -32,6 +32,10 @@ uv run ruff check src/onesite src/onesite_runtime tests
 
 日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.py` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
 
+## 数据库迁移
+
+使用 Alembic 管理数据库结构：空库执行 `site db revision -m "initial"` 后检查迁移并运行 `site db upgrade`；旧库先用与现有结构匹配的模型执行 `site db baseline`。迁移源文件位于 `app/migrations/`，会随同步复制到部署目录。参见 [迁移、权限和同步说明](docs/database-migrations.md)。
+
 ## 内置 Agent
 
 在 `site_config.py` 中配置 `agents`（也支持同结构 JSON），执行 `site sync --install`，即可生成兼容 OpenAI 接口的异步 Agent、按用户隔离的会话/消息表，以及 `/agent` 对话页面。

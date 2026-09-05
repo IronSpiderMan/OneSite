@@ -92,3 +92,37 @@ async def get_current_active_developer(
             status_code=403, detail="The user doesn't have enough privileges"
         )
     return current_user
+
+
+def require_permission(permissions: dict[str, str], operation: str):
+    """Require an exact per-role grant for this endpoint operation."""
+    async def checker(current_user: User = Depends(get_current_user)) -> User:
+        from app.core.access import require_operation
+        require_operation(permissions, operation, current_user)
+        return current_user
+    return checker
+
+
+def model_access(permissions: dict[str, str], *, self_profile: bool = False):
+    """Keep one actor context through validation and response serialization."""
+    async def checker(request: Request, current_user: User = Depends(get_current_user)):
+        from app.core.access import current_actor, require_operation
+        if request.method in {"GET", "HEAD"} and not (
+            self_profile and request.url.path.rstrip("/").endswith("/me")
+        ):
+            require_operation(permissions, "r", current_user)
+        name = request.scope["route"].name
+        if not (self_profile and name == "update_me"):
+            operation = next((op for prefix, op in (
+                ("create_", "c"), ("update_", "u"), ("delete_", "d"), ("bulk_delete_", "d"),
+            ) if name.startswith(prefix)), None)
+            if operation:
+                require_operation(permissions, operation, current_user)
+        if name.startswith("perform_") or "action_states" in name:
+            require_operation(permissions, "r", current_user)
+        token = current_actor.set(current_user)
+        try:
+            yield current_user
+        finally:
+            current_actor.reset(token)
+    return checker

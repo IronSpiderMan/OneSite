@@ -204,6 +204,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     if (!fp) return true; // no restrictions = allowed
     return (fp[userRole] || '').includes(perm);
   };
+{% include "frontend_write_payload.ts.j2" %}
+
 
   {% if model.is_tree %}
   // ── Tree lazy-loading functions ──
@@ -792,7 +794,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const onSubmit = async (values: any) => {
     if (isSaving) return;
     setIsSaving(true);
-    const payload = { ...values, ...fixedFields };
+    const payload = writablePayload({ ...values, ...fixedFields }, editingId ? 'u' : 'c');
     try {
       {% if model.is_tree %}
       if (editingId) {

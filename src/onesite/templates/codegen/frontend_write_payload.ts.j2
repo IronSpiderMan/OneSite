@@ -1,0 +1,13 @@
+  // Submit only fields writable by this role, including embedded child rows.
+  const writablePayload = (values: Record<string, any>, operation: 'c' | 'u') => {
+    const payload = Object.fromEntries(Object.entries(values).filter(([key]) => hasFieldPerm(key, operation)));
+    {% for rel in model.inline_relations | default([]) %}
+    if (Array.isArray(payload.{{ rel.write_name }})) {
+      const grants: Record<string, Record<string, string>> = {{ rel.field_permissions | default({}) | tojson }};
+      payload.{{ rel.write_name }} = payload.{{ rel.write_name }}.map((item: Record<string, any>) =>
+        Object.fromEntries(Object.entries(item).filter(([key]) => key === 'id' || (grants[key]?.[userRole] || '').includes(item.id != null ? 'u' : 'c')))
+      );
+    }
+    {% endfor %}
+    return payload;
+  };

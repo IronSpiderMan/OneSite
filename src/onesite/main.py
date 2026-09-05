@@ -316,11 +316,11 @@ def sync(
     """
     # Ensure we are in a valid directory
     base_dir = get_cwd_safely()
-    _ensure_deploy_files(base_dir)
 
     console.print("[green]Syncing models...[/green]")
     from onesite.generator import generate_code
     generate_code()
+    _ensure_deploy_files(base_dir)
 
     if build_cmd:
         from onesite.cmd_build import CommandBuildError, build_command_projects
@@ -336,6 +336,75 @@ def sync(
         base_dir = get_cwd_safely()
         paths = get_project_paths(base_dir)
         _install_project_dependencies(paths.backend, paths.frontend)
+
+db_app = typer.Typer(help="Generate and apply Alembic database migrations")
+app.add_typer(db_app, name="db")
+
+
+def _database_command(action: str, revision: str | None = None, message: str = "model changes") -> None:
+    from .generator import generate_code
+
+    root = get_cwd_safely()
+    paths = get_project_paths(root)
+    if action in {"revision", "baseline"} or not (paths.backend / "alembic.ini").exists():
+        generate_code()
+    command = [sys.executable, "-m", "app.core.migrations", action,
+               "--script-location", str(paths.source / "migrations"), "--message", message]
+    if revision is not None:
+        command.append(revision)
+    try:
+        subprocess.run(command, cwd=paths.backend, check=True)
+    except subprocess.CalledProcessError as exc:
+        raise typer.Exit(code=exc.returncode) from exc
+    if action in {"revision", "baseline"}:
+        generate_code()
+
+
+@db_app.command("revision")
+def db_revision(message: str = typer.Option(..., "--message", "-m")):
+    """Generate a reviewable migration from the model/database difference."""
+    _database_command("revision", message=message)
+
+
+@db_app.command("upgrade")
+def db_upgrade(revision: str = typer.Argument("head")):
+    """Apply migrations up to a revision (default: head)."""
+    _database_command("upgrade", revision)
+
+
+@db_app.command("downgrade", context_settings={"ignore_unknown_options": True})
+def db_downgrade(revision: str = typer.Argument(...)):
+    """Revert migrations to an explicitly specified revision."""
+    _database_command("downgrade", revision)
+
+
+@db_app.command("baseline")
+def db_baseline(message: str = typer.Option("initial schema", "--message", "-m")):
+    """Adopt an existing database only when it matches the current models."""
+    _database_command("baseline", message=message)
+
+
+@db_app.command("current")
+def db_current():
+    _database_command("current")
+
+
+@db_app.command("history")
+def db_history():
+    _database_command("history")
+
+
+@db_app.command("check")
+def db_check():
+    """Fail if models contain unapplied schema differences."""
+    _database_command("check")
+
+
+@db_app.command("stamp")
+def db_stamp(revision: str = typer.Argument(...)):
+    """Explicitly set the revision without changing the database schema."""
+    _database_command("stamp", revision)
+
 
 @app.command()
 def run(

@@ -23,6 +23,15 @@ const {{ model.name }}Page: React.FC = () => {
   const [isSaving, setIsSaving] = useState(false);
   const { register, handleSubmit, reset, control, watch } = useForm();
   const rootValue = watch();
+  const userRole = localStorage.getItem('user_role') || 'user';
+  const rolePermissions: Record<string, string> = {{ model.role_permissions | tojson }};
+  const fieldRolePerms: Record<string, Record<string, string>> = {
+  {% for field in model.fields %}
+    "{{ field.name }}": {{ (field.role_permissions or {}) | tojson }},
+  {% endfor %}
+  };
+  const canEdit = (rolePermissions[userRole] || '').includes('u');
+  const canEditField = (key: string) => (fieldRolePerms[key]?.[userRole] || '').includes('u');
 
   useEffect(() => {
     fetchData();
@@ -40,7 +49,7 @@ const {{ model.name }}Page: React.FC = () => {
   const onSubmit = async (formData: any) => {
     try {
       setIsSaving(true);
-      await updateData(formData);
+      await updateData(Object.fromEntries(Object.entries(formData).filter(([key]) => canEditField(key))));
     } catch (error) {
       console.error('Failed to save:', error);
     } finally {
@@ -66,7 +75,7 @@ const {{ model.name }}Page: React.FC = () => {
         <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
           {t('menu.{{ model.module_name }}', '{{ model.name }}')}
         </h1>
-        <Button onClick={handleSubmit(onSubmit)} disabled={isSaving} className="flex items-center space-x-2">
+        <Button onClick={handleSubmit(onSubmit)} disabled={isSaving || !canEdit} className="flex items-center space-x-2">
           {isSaving ? <Loader2 className="w-4 h-4 animate-spin" /> : <Save className="w-4 h-4" />}
           <span>{t('common.save', 'Save')}</span>
         </Button>
@@ -76,7 +85,7 @@ const {{ model.name }}Page: React.FC = () => {
         <form className="space-y-6" onSubmit={(e) => e.preventDefault()}>
           {% for field in model.fields %}
           {% if 'u' in field.permissions and field.name != 'id' %}
-          <div className="space-y-2">
+          {canEditField('{{ field.name }}') && (<div className="space-y-2">
             <Label htmlFor="{{ field.name }}">
               {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
               {% if field.required and not field.update_optional %}<span className="text-destructive"> *</span>{% endif %}
@@ -218,7 +227,7 @@ const {{ model.name }}Page: React.FC = () => {
               })}
             />
             {% endif %}
-          </div>
+          </div>)}
           {% endif %}
           {% endfor %}
         </form>
