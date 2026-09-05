@@ -1,0 +1,202 @@
+"""Business API tools and explicit, developer-owned async tools."""
+import copy
+import importlib
+import inspect
+import json
+from urllib.parse import quote
+
+import httpx
+from jsonschema import Draft202012Validator
+from pydantic import BaseModel, ValidationError
+from fastapi.encoders import jsonable_encoder
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db
+from app.core.config import settings
+from app.core.agent import AgentBlocked
+from app.models.user import User
+
+AGENTS = json.loads({{ agents_json | tojson }})
+MODELS = json.loads({{ models_json | tojson }})
+OPERATIONS = {
+    "list": ("get", "/", "r"), "get": ("get", "/{id}", "r"),
+    "create": ("post", "/", "c"), "update": ("put", "/{id}", "u"),
+    "delete": ("delete", "/{id}", "d"), "bulk_delete": ("post", "/bulk_delete", "d"),
+}
+
+
+def agent_tool(*, args_model: type[BaseModel], roles=None):
+    def decorate(fn):
+        if not inspect.iscoroutinefunction(fn):
+            raise TypeError("Agent tools must be async functions")
+        fn.agent_args_model = args_model
+        fn.agent_roles = roles or ["user", "admin", "developer"]
+        return fn
+    return decorate
+
+
+def load_hooks(config):
+    return {point: getattr(importlib.import_module("app.agent_hooks"), handler.split(".")[1])
+            for point, handler in config["hooks"].items()}
+
+
+def dereference(value, document, seen=()):
+    if isinstance(value, list):
+        return [dereference(item, document, seen) for item in value]
+    if not isinstance(value, dict):
+        return value
+    if "$ref" in value:
+        ref = value["$ref"]
+        if ref in seen or not ref.startswith("#/"):
+            raise ValueError(f"Unsupported recursive/external tool schema: {ref}")
+        target = document
+        for part in ref[2:].split("/"):
+            target = target[part.replace("~1", "/").replace("~0", "~")]
+        return dereference({**target, **{k: v for k, v in value.items() if k != "$ref"}},
+                           document, (*seen, ref))
+    return {key: dereference(item, document, seen) for key, item in value.items()}
+
+
+class ToolRegistry:
+    def __init__(self, app, config, context, authorization):
+        self.app, self.config, self.context = app, config, context
+        self.authorization = authorization
+        self.tools = {}
+        document = app.openapi()
+        for model_name, operations in config["model_tools"].items():
+            model = MODELS[model_name]
+            for operation in operations:
+                method, suffix, permission = OPERATIONS[operation]
+                path = settings.API_V1_STR + model["path"] + suffix
+                endpoint = document["paths"].get(path, {}).get(method)
+                if endpoint is None:
+                    raise ValueError(f"Agent API unavailable: {method} {path}")
+                properties, required, locations = {}, [], {}
+                for raw in endpoint.get("parameters", []):
+                    param = dereference(raw, document)
+                    if param["in"] not in {"path", "query"}:
+                        continue
+                    name = param["name"]
+                    properties[name] = param["schema"]
+                    locations[name] = param["in"]
+                    if param.get("required"):
+                        required.append(name)
+                if "requestBody" in endpoint:
+                    body = dereference(endpoint["requestBody"], document)
+                    properties["body"] = body["content"]["application/json"]["schema"]
+                    if body.get("required"):
+                        required.append("body")
+                schema = {"type": "object", "properties": properties,
+                          "required": required, "additionalProperties": False}
+                self.tools[f"{model_name}_{operation}"] = {
+                    "schema": schema, "model": model, "method": method, "path": path,
+                    "operation": operation, "permission": permission, "locations": locations,
+                    "description": f"{operation} {model_name}. Uses the current user's API permissions.",
+                }
+        for name in config["custom_tools"]:
+            handler = getattr(importlib.import_module(f"app.agent_tools.{name}"), name)
+            args_model = getattr(handler, "agent_args_model", None)
+            if args_model is None or not inspect.iscoroutinefunction(handler):
+                raise ValueError(f"Custom tool {name} must use @agent_tool and be async")
+            schema = dereference(args_model.model_json_schema(), args_model.model_json_schema())
+            schema["additionalProperties"] = False
+            self.tools[name] = {"schema": schema, "handler": handler,
+                                "description": inspect.getdoc(handler) or name}
+
+    async def user(self):
+        async with AsyncSession(db.engine) as session:
+            user = await session.get(User, self.context.user.id)
+            if not user or not user.is_active:
+                raise AgentBlocked("User is inactive or unavailable")
+            role = getattr(user.role, "value", user.role)
+            if role not in self.config["roles"]:
+                raise AgentBlocked("Agent access denied")
+            return user, role
+
+    def permitted(self, tool, role):
+        if "handler" in tool:
+            return role in tool["handler"].agent_roles
+        return tool["permission"] in tool["model"]["roles"].get(role, "")
+
+    def schema(self, tool, role):
+        schema = copy.deepcopy(tool["schema"])
+        if "model" in tool and tool["operation"] == "list":
+            fields = tool["model"]["fields"]
+            for name in list(schema["properties"]):
+                field = name if name in fields else name.removesuffix("_from").removesuffix("_to")
+                if field in fields and "r" not in fields[field].get(role, ""):
+                    del schema["properties"][name]
+        if "model" in tool and tool["operation"] in {"create", "update"}:
+            body = schema["properties"].get("body", {})
+            allowed = {name for name, roles in tool["model"]["fields"].items()
+                       if tool["permission"] in roles.get(role, "")}
+            body["properties"] = {k: v for k, v in body.get("properties", {}).items() if k in allowed}
+            body["required"] = [k for k in body.get("required", []) if k in allowed]
+            body["additionalProperties"] = False
+        return schema
+
+    async def definitions(self):
+        _, role = await self.user()
+        return [{"type": "function", "function": {
+            "name": name, "description": tool["description"], "parameters": self.schema(tool, role),
+        }} for name, tool in self.tools.items() if self.permitted(tool, role)]
+
+    async def validate(self, name, arguments):
+        _, role = await self.user()
+        tool = self.tools.get(name)
+        if tool is None or not self.permitted(tool, role):
+            raise AgentBlocked("Tool is unavailable or permission denied")
+        errors = list(Draft202012Validator(self.schema(tool, role)).iter_errors(arguments))
+        if errors:
+            # Avoid dumping potentially sensitive input into model-visible error messages.
+            raise AgentBlocked("Invalid tool parameters: " + ", ".join(
+                ".".join(map(str, error.path)) or "arguments" for error in errors[:5]))
+        if tool.get("operation") == "list":
+            if not 1 <= arguments.get("size", 20) <= 100 or arguments.get("page", 1) < 1:
+                raise AgentBlocked("Use page >= 1 and size between 1 and 100")
+
+    async def call(self, model, operation, arguments):
+        """Custom tools use the same whitelist, validation and identity boundary."""
+        return await self.execute(f"{model}_{operation}", arguments)
+
+    async def execute(self, name, arguments):
+        await self.validate(name, arguments)
+        tool = self.tools[name]
+        if "handler" in tool:
+            try:
+                args = tool["handler"].agent_args_model.model_validate(arguments)
+            except ValidationError as exc:
+                raise AgentBlocked("Invalid custom tool parameters") from exc
+            return await tool["handler"](args, self.context)
+        path = tool["path"]
+        query = {}
+        for key, location in tool["locations"].items():
+            if key not in arguments:
+                continue
+            if location == "path":
+                value = str(arguments[key])
+                if value in {".", ".."} or "/" in value:
+                    raise AgentBlocked("Invalid record identifier")
+                path = path.replace("{" + key + "}", quote(value, safe=""))
+            else:
+                query[key] = arguments[key]
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app),
+                                     base_url="http://onesite.internal") as client:
+            response = await client.request(tool["method"], path, params=query,
+                **({"json": arguments["body"]} if "body" in arguments else {}),
+                headers={"Authorization": self.authorization})
+        if response.is_error:
+            raise AgentBlocked(f"Business API rejected the request (HTTP {response.status_code})")
+        result = response.json() if response.content else None
+        if tool["operation"] in {"list", "get", "create", "update"}:
+            _, role = await self.user()
+            allowed = {field for field, roles in tool["model"]["fields"].items()
+                       if "r" in roles.get(role, "")}
+            def clean(row):
+                return {k: v for k, v in row.items() if k in allowed} if isinstance(row, dict) else row
+            if tool["operation"] == "list" and isinstance(result, dict):
+                result = {k: v for k, v in result.items() if k in {"items", "total", "page", "size", "pages"}}
+                result["items"] = [clean(row) for row in result.get("items", [])]
+            else:
+                result = clean(result)
+        return jsonable_encoder(result)

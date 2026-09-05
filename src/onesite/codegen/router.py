@@ -14,6 +14,7 @@ def update_api_router(
     import_export_enabled: bool = False,
     custom_api_modules: List[str] | None = None,
     public_dashboard_enabled: bool = False,
+    agents_enabled: bool = False,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -37,6 +38,10 @@ def update_api_router(
     if scheduled_tasks:
         imports.append("from app.api.endpoints import tasks")
         routers.append('api_router.include_router(tasks.router, tags=["tasks"])')
+
+    if agents_enabled:
+        imports.append("from app.api.endpoints import agents")
+        routers.append('api_router.include_router(agents.router, prefix="/agents", tags=["agents"])')
 
     if tools:
         imports.append("from app.api.endpoints import tools")

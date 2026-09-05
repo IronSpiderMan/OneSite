@@ -1,0 +1,269 @@
+"""Owner-scoped conversations and bounded background agent turns."""
+import asyncio
+import logging
+import os
+from datetime import timedelta
+from uuid import uuid4
+from types import SimpleNamespace
+
+from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.encoders import jsonable_encoder
+from pydantic import BaseModel, Field
+from sqlalchemy import delete, update
+from sqlmodel import select, func
+from sqlmodel.ext.asyncio.session import AsyncSession
+from openai import AsyncOpenAI
+from dotenv import dotenv_values
+
+from app.core import db, deps
+from app.core.agent import AgentBlocked, AgentContext, run_agent
+from app.core.agent_models import AgentMessage, AgentSession, now
+from app.core.agent_tools import AGENTS, ToolRegistry, load_hooks
+from app.models.user import User
+
+router = APIRouter()
+logger = logging.getLogger(__name__)
+_running: dict[str, asyncio.Task] = {}
+
+
+class SessionInput(BaseModel):
+    agent_key: str
+
+
+class MessageInput(BaseModel):
+    content: str = Field(min_length=1, max_length=32000)
+
+
+def definition(key, user):
+    config = AGENTS.get(key)
+    role = getattr(user.role, "value", user.role)
+    if config is None or role not in config["roles"]:
+        raise HTTPException(403, "Agent unavailable")
+    return config
+
+
+async def owned(session, id, user):
+    item = await session.get(AgentSession, id)
+    if item is None or item.user_id != user.id:
+        raise HTTPException(404, "Conversation not found")
+    definition(item.agent_key, user)
+    return item
+
+
+async def rows(session, id):
+    return list((await session.exec(select(AgentMessage).where(
+        AgentMessage.session_id == id).order_by(AgentMessage.seq))).all())
+
+
+async def finish(id, run_id, error=None):
+    """Release only our own lease and close unanswered calls without replaying writes."""
+    async with AsyncSession(db.engine, expire_on_commit=False) as session:
+        result = await session.execute(update(AgentSession).where(
+            AgentSession.id == id, AgentSession.active_run_id == run_id,
+            AgentSession.status == "running",
+        ).values(status="failed" if error else "idle", error=error,
+                 active_run_id=None, expires_at=None, updated_at=now()))
+        if not result.rowcount:
+            await session.rollback()
+            return
+        history = await rows(session, id)
+        pending = {}
+        for message in history:
+            for call in message.payload.get("tool_calls", []):
+                pending[call["id"]] = call
+            if message.payload.get("role") == "tool":
+                pending.pop(message.payload.get("tool_call_id"), None)
+        seq = history[-1].seq if history else 0
+        for call in pending.values():
+            seq += 1
+            session.add(AgentMessage(session_id=id, seq=seq, payload={
+                "role": "tool", "tool_call_id": call["id"],
+                "content": '{"error":"Execution interrupted; result unknown. Do not automatically repeat this operation."}',
+            }, details={"interrupted": True, "run_id": run_id}))
+        await session.commit()
+
+
+async def recover(item):
+    if item.status == "running" and item.expires_at and item.expires_at < now():
+        await finish(item.id, item.active_run_id, "Execution expired or was interrupted")
+
+
+@router.get("")
+async def catalog(user: User = Depends(deps.get_current_user)):
+    role = getattr(user.role, "value", user.role)
+    return [{"key": key, "title": config["title"]} for key, config in AGENTS.items()
+            if role in config["roles"]]
+
+
+@router.get("/sessions")
+async def sessions(user: User = Depends(deps.get_current_user)):
+    async with AsyncSession(db.engine) as session:
+        items = (await session.exec(select(AgentSession).where(
+            AgentSession.user_id == user.id).order_by(AgentSession.updated_at.desc()).limit(100))).all()
+        role = getattr(user.role, "value", user.role)
+        return [jsonable_encoder(item) for item in items
+                if role in AGENTS.get(item.agent_key, {}).get("roles", [])]
+
+
+@router.post("/sessions", status_code=201)
+async def create_session(body: SessionInput, user: User = Depends(deps.get_current_user)):
+    definition(body.agent_key, user)
+    async with AsyncSession(db.engine, expire_on_commit=False) as session:
+        item = AgentSession(user_id=user.id, agent_key=body.agent_key)
+        session.add(item)
+        await session.commit()
+        return jsonable_encoder(item)
+
+
+@router.delete("/sessions/{id}", status_code=204)
+async def delete_session(id: str, user: User = Depends(deps.get_current_user)):
+    async with AsyncSession(db.engine) as session:
+        item = await owned(session, id, user)
+    await recover(item)
+    async with AsyncSession(db.engine) as session:
+        # Acquire the same row lock as message submission before removing history.
+        result = await session.execute(update(AgentSession).where(
+            AgentSession.id == id, AgentSession.user_id == user.id,
+            AgentSession.status != "running",
+        ).values(status="deleting"))
+        if not result.rowcount:
+            await owned(session, id, user)
+            raise HTTPException(409, "Stop the running conversation before deleting it")
+        await session.execute(delete(AgentMessage).where(AgentMessage.session_id == id))
+        await session.execute(delete(AgentSession).where(AgentSession.id == id))
+        await session.commit()
+
+
+@router.get("/sessions/{id}")
+async def get_session(id: str, user: User = Depends(deps.get_current_user)):
+    async with AsyncSession(db.engine) as session:
+        item = await owned(session, id, user)
+        # Finish read transaction before recovery's write transaction (SQLite).
+    await recover(item)
+    async with AsyncSession(db.engine) as session:
+        item = await owned(session, id, user)
+        encoded = jsonable_encoder(item)
+        encoded["messages"] = [jsonable_encoder(row) for row in await rows(session, id)]
+        return encoded
+
+
+async def execute_turn(app, authorization, user, item, run_id, config):
+    async def check():
+        async with AsyncSession(db.engine) as session:
+            current = await session.get(AgentSession, item.id)
+            if (not current or current.active_run_id != run_id or current.cancel_requested
+                    or current.status != "running" or current.expires_at < now()):
+                raise AgentBlocked("Execution stopped")
+
+    async def emit(payload, metadata):
+        async with AsyncSession(db.engine, expire_on_commit=False) as session:
+            # Lock the conversation via a conditional write before sequencing messages.
+            result = await session.execute(update(AgentSession).where(
+                AgentSession.id == item.id, AgentSession.active_run_id == run_id,
+                AgentSession.status == "running", AgentSession.cancel_requested.is_(False),
+                AgentSession.expires_at > now(),
+            ).values(updated_at=now()))
+            if not result.rowcount:
+                raise AgentBlocked("Execution stopped")
+            history = await rows(session, item.id)
+            if payload is None:
+                parent = history[-1]
+                parent.details = {**parent.details, "calls": {
+                    **parent.details.get("calls", {}), metadata["call_id"]: metadata,
+                }}
+                session.add(parent)
+            else:
+                session.add(AgentMessage(session_id=item.id, seq=history[-1].seq + 1,
+                    payload=payload, details={**metadata, "run_id": run_id}))
+            await session.commit()
+
+    context = AgentContext(user=user, session_id=item.id, run_id=run_id)
+    hooks = {}
+    run_started = False
+    try:
+        hooks = load_hooks(config)
+        async with AsyncSession(db.engine) as session:
+            history = [row.payload for row in await rows(session, item.id)]
+        registry = ToolRegistry(app, config, context, authorization)
+        context.api = registry
+        key = os.environ.get(config["api_key_env"]) or dotenv_values(".env").get(config["api_key_env"])
+        if not key:
+            raise AgentBlocked(f"Set the {config['api_key_env']} environment variable")
+        async with AsyncOpenAI(base_url=config["base_url"], api_key=key,
+                               max_retries=0, timeout=config["timeout_seconds"]) as client:
+            run_started = True
+            await asyncio.wait_for(run_agent(client=client, config=config, messages=history,
+                registry=registry, context=context, emit=emit, check=check,
+                hooks=hooks), timeout=config["timeout_seconds"])
+        await finish(item.id, run_id)
+    except asyncio.CancelledError:
+        await finish(item.id, run_id, "Execution stopped")
+        raise
+    except Exception as exc:
+        logger.exception("Agent turn failed")
+        if (not run_started or isinstance(exc, asyncio.TimeoutError)) and "on_error" in hooks:
+            try:
+                await hooks["on_error"](SimpleNamespace(
+                    stage="timeout" if run_started else "setup", error=exc), context)
+            except Exception:
+                logger.exception("Agent on_error hook failed")
+        error = str(exc) if isinstance(exc, AgentBlocked) else (
+            "Execution timed out; verify tool results before retrying" if isinstance(exc, asyncio.TimeoutError)
+            else "Execution failed; see server logs")
+        await finish(item.id, run_id, error)
+    finally:
+        _running.pop(run_id, None)
+
+
+@router.post("/sessions/{id}/messages", status_code=202)
+async def send_message(id: str, body: MessageInput, request: Request,
+                       user: User = Depends(deps.get_current_user)):
+    if not body.content.strip():
+        raise HTTPException(422, "Message must not be empty")
+    async with AsyncSession(db.engine) as session:
+        item = await owned(session, id, user)
+    await recover(item)
+    config = definition(item.agent_key, user)
+    run_id = str(uuid4())
+    async with AsyncSession(db.engine, expire_on_commit=False) as session:
+        result = await session.execute(update(AgentSession).where(
+            AgentSession.id == id, AgentSession.user_id == user.id,
+            AgentSession.status != "running",
+        ).values(status="running", active_run_id=run_id, cancel_requested=False, error=None,
+                 expires_at=now() + timedelta(seconds=config["timeout_seconds"] + 10), updated_at=now()))
+        if not result.rowcount:
+            raise HTTPException(409, "Conversation is already running")
+        seq = (await session.exec(select(func.max(AgentMessage.seq)).where(
+            AgentMessage.session_id == id))).one() or 0
+        session.add(AgentMessage(session_id=id, seq=seq + 1,
+            payload={"role": "user", "content": body.content}, details={"run_id": run_id}))
+        if seq == 0:
+            await session.execute(update(AgentSession).where(AgentSession.id == id).values(
+                title=body.content.strip()[:80]))
+        await session.commit()
+    _running[run_id] = asyncio.create_task(execute_turn(
+        request.app, request.headers.get("authorization", ""), user, item, run_id, config))
+    return {"run_id": run_id, "status": "running"}
+
+
+@router.post("/sessions/{id}/stop")
+async def stop(id: str, user: User = Depends(deps.get_current_user)):
+    async with AsyncSession(db.engine, expire_on_commit=False) as session:
+        item = await owned(session, id, user)
+        await session.execute(update(AgentSession).where(AgentSession.id == id).values(cancel_requested=True))
+        await session.commit()
+    task = _running.get(item.active_run_id)
+    if task:
+        task.cancel()
+        await asyncio.gather(task, return_exceptions=True)
+        # Covers cancellation before the coroutine's first instruction.
+        await finish(id, item.active_run_id, "Execution stopped")
+        _running.pop(item.active_run_id, None)
+    return {"status": "stopping"}
+
+
+async def shutdown_agent_runs():
+    tasks = list(_running.values())
+    for task in tasks:
+        task.cancel()
+    await asyncio.gather(*tasks, return_exceptions=True)

@@ -1084,5 +1084,99 @@ def generate_locale_files(
             "locales", {}
         ).get("zh", {})
 
+    en_translations["agent"] = {
+        "title": "Agent", "select": "Select agent", "new": "New conversation",
+        "conversations": "Conversations", "start": "Create or select a conversation",
+        "tool_result": "Tool result", "tool_calls": "Tool calls", "running": "Working…",
+        "stopping": "Stopping…", "message": "Message", "placeholder": "Ask about your data…",
+        "send": "Send", "stop": "Stop", "unavailable": "No agents are available for your account.",
+        "load_error": "Unable to load conversations", "create_error": "Unable to create conversation",
+        "send_error": "Unable to send message", "stop_error": "Unable to stop execution",
+    }
+    zh_translations["agent"] = {
+        "title": "智能助手", "select": "选择助手", "new": "新建对话", "conversations": "历史对话",
+        "start": "新建或选择一个对话", "tool_result": "工具结果", "tool_calls": "工具调用",
+        "running": "正在处理…", "stopping": "正在停止…", "message": "消息", "placeholder": "询问或操作你的数据…",
+        "send": "发送", "stop": "停止", "unavailable": "当前账号没有可用的助手。",
+        "load_error": "无法加载对话", "create_error": "无法创建对话", "send_error": "消息发送失败",
+        "stop_error": "无法停止执行",
+    }
+    en_translations["agent"].update({
+        "delete": "Delete conversation", "delete_named": "Delete {{title}}",
+        "delete_confirm": "Delete “{{title}}” and all its messages? This cannot be undone.",
+        "delete_error": "Unable to delete conversation",
+        "delete_running": "Stop the conversation before deleting it",
+    })
+    zh_translations["agent"].update({
+        "delete": "删除对话", "delete_named": "删除 {{title}}",
+        "delete_confirm": "删除“{{title}}”及其全部消息？此操作无法撤销。",
+        "delete_error": "删除对话失败", "delete_running": "请先停止执行，再删除对话",
+    })
+    en_translations["agent"].update(
+        {'tool_failed': 'Not completed',
+         'tool_done': 'Completed',
+         'tool_unknown': 'Interrupted',
+         'tool_arguments': 'Arguments',
+         'search': 'Search conversations',
+         'close_history': 'Close history',
+         'no_matches': 'No matching conversations',
+         'no_history': 'Your conversations will appear here.',
+         'history_hint': 'Conversations are saved automatically.',
+         'ready': 'Ready',
+         'loading': 'Loading conversation…',
+         'welcome': 'What would you like to do?',
+         'welcome_hint': 'Explore your data, work through a task, or ask what this assistant can '
+                         'help with.',
+         'suggest_query': 'Help me explore the available data',
+         'suggest_help': 'What can you help me do?',
+         'copy': 'Copy reply',
+         'copy_code': 'Copy code',
+         'code_block': 'Code block',
+         'table': 'Table',
+         'copied': 'Copied',
+         'copy_error': 'Unable to copy. Please select and copy the text.',
+         'sending': 'Sending…',
+         'latest': 'Latest messages',
+         'reconnecting': 'Connection interrupted. Reconnecting…',
+         'retry': 'Retry',
+         'dismiss': 'Dismiss',
+         'next_message': 'Write your next message…',
+         'keyboard_hint': 'Enter to send · Shift + Enter for a new line',
+         'composer_hint': 'Tool activity is shown in the conversation.',
+         'send_error': 'Unable to confirm delivery. Your draft is saved; check the conversation '
+                       'before sending again.'}
+    )
+    zh_translations["agent"].update(
+        {'tool_failed': '未完成',
+         'tool_done': '已完成',
+         'tool_unknown': '已中断',
+         'tool_arguments': '调用参数',
+         'search': '搜索历史对话',
+         'close_history': '关闭历史对话',
+         'no_matches': '没有找到相关对话',
+         'no_history': '开始聊天后，对话会保存在这里。',
+         'history_hint': '对话自动保存，随时继续。',
+         'ready': '就绪',
+         'loading': '正在加载对话…',
+         'welcome': '今天想做些什么？',
+         'welcome_hint': '查询业务数据、处理具体任务，或先了解助手可以为你做什么。',
+         'suggest_query': '帮我了解有哪些可用的数据',
+         'suggest_help': '你可以帮我完成哪些操作？',
+         'copy': '复制回复',
+         'copy_code': '复制代码',
+         'code_block': '代码块',
+         'table': '表格',
+         'copied': '已复制',
+         'copy_error': '复制失败，请选中文字后复制。',
+         'sending': '发送中…',
+         'latest': '回到最新消息',
+         'reconnecting': '连接暂时中断，正在重新连接…',
+         'retry': '重试',
+         'dismiss': '关闭提示',
+         'next_message': '可以先写好下一条消息…',
+         'keyboard_hint': 'Enter 发送 · Shift + Enter 换行',
+         'composer_hint': '工具执行过程会显示在对话中。',
+         'send_error': '暂时无法确认是否发送成功。草稿已保留，请检查对话后再发送。'}
+    )
     write_file_with_status(locale_dir / "en.json", json.dumps(en_translations, indent=2))
     write_file_with_status(locale_dir / "zh.json", json.dumps(zh_translations, indent=2, ensure_ascii=False))

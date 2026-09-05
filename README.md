@@ -44,6 +44,36 @@ edit app/models/, app/integrations/, app/utils/, app/resources.py or site_config
 
 Do not treat `generated/backend/app/models/` as the model source of truth: it is synced from `app/models/`. Everything under `generated/` is replaceable output. Keep durable business customizations in `app/`, not solely in generated files. Projects must use the `app/` and `generated/` layout; top-level `models/`, `backend/`, and `frontend/` directories are not supported.
 
+## Built-in Agent
+
+Configure `agents` in `site_config.py` (or the equivalent JSON), then run `site sync --install`. OneSite generates an OpenAI-compatible async Agent, owner-scoped session/message tables, and a conversation page at `/agent`.
+
+```python
+from onesite.config import AgentConfig, SiteConfig
+
+config = SiteConfig(agents={
+    "assistant": AgentConfig(
+        title="Data assistant",
+        base_url="http://localhost:18080/v1",
+        api_key_env="AGENT_API_KEY",
+        model="your-model-name",
+        roles=["admin", "developer"],
+        model_tools={"User": ["list", "get"]},
+        max_steps=20,
+        timeout_seconds=120,
+    )
+})
+```
+
+Set `AGENT_API_KEY` in the backend environment or its working-directory `.env`; a local server without key validation can use the literal value `None`. Replace the endpoint and model name with your server's settings, then run `site run` and open the Agent menu.
+
+- Expose selected model operations: `crud` expands to `list/get/create/update/delete`; `bulk_delete` is optional. Tools operate with the current user's API and field permissions.
+- Add async custom tools in `app/agent_tools/` and lifecycle hooks in `app/agent_hooks.py`. Available hooks: `before_run`, `before_model`, `before_tool`, `after_tool`, `after_run`, `on_error`.
+- Conversations save automatically. Search history, inspect tool calls, stop execution, or delete a conversation and its messages. Stop a running conversation before deleting it; deletion does not undo business data changes made by tools.
+- Execution has time and step limits. Interrupted writes are not automatically replayed. The page updates complete messages through polling.
+
+See [Agent configuration, tools, hooks and storage](docs/agents.md) for the full guide.
+
 ## CLI
 
 | Command | Purpose |

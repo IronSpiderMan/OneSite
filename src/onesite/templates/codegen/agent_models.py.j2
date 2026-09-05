@@ -1,0 +1,37 @@
+"""Internal session tables; deliberately excluded from generated public CRUD."""
+from datetime import datetime
+from uuid import uuid4
+from sqlalchemy import Column, JSON, UniqueConstraint, Index
+from sqlmodel import Field, SQLModel
+
+
+def now():
+    return datetime.utcnow()
+
+
+class AgentSession(SQLModel, table=True):
+    __tablename__ = "agent_session"
+    __table_args__ = (Index("ix_agent_session_owner_updated", "user_id", "updated_at"),)
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    user_id: int = Field(foreign_key="user.id")
+    agent_key: str
+    title: str = "New conversation"
+    status: str = "idle"
+    active_run_id: str | None = None
+    cancel_requested: bool = False
+    expires_at: datetime | None = None
+    error: str | None = None
+    created_at: datetime = Field(default_factory=now)
+    updated_at: datetime = Field(default_factory=now)
+
+
+class AgentMessage(SQLModel, table=True):
+    __tablename__ = "agent_message"
+    __table_args__ = (UniqueConstraint("session_id", "seq"),)
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    session_id: str = Field(foreign_key="agent_session.id", index=True)
+    seq: int
+    payload: dict = Field(sa_column=Column(JSON, nullable=False))
+    # SQLAlchemy reserves the attribute 'metadata'.
+    details: dict = Field(default_factory=dict, sa_column=Column("metadata", JSON, nullable=False))
+    created_at: datetime = Field(default_factory=now)

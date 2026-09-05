@@ -79,6 +79,8 @@ def phase_load_config(cwd: Path) -> tuple[dict, Path]:
     validate_mqtt_config(site_config)
     validate_kafka_config(site_config)
     validate_navigation_config(site_config)
+    from ..agents import validate_agents_config
+    validate_agents_config(site_config)
     validate_tools_config(site_config)
     validate_scheduled_tasks_config(site_config)
     validate_task_center_config(site_config)

@@ -32,7 +32,37 @@ uv run ruff check src/onesite src/onesite_runtime tests
 
 日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.py` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
 
-### 应用资源生命周期
+## 内置 Agent
+
+在 `site_config.py` 中配置 `agents`（也支持同结构 JSON），执行 `site sync --install`，即可生成兼容 OpenAI 接口的异步 Agent、按用户隔离的会话/消息表，以及 `/agent` 对话页面。
+
+```python
+from onesite.config import AgentConfig, SiteConfig
+
+config = SiteConfig(agents={
+    "assistant": AgentConfig(
+        title="数据助手",
+        base_url="http://localhost:18080/v1",
+        api_key_env="AGENT_API_KEY",
+        model="your-model-name",
+        roles=["admin", "developer"],
+        model_tools={"User": ["list", "get"]},
+        max_steps=20,
+        timeout_seconds=120,
+    )
+})
+```
+
+在后端运行环境或工作目录的 `.env` 中设置 `AGENT_API_KEY`；本地服务不校验密钥时可以使用字符串 `None`。把地址和模型名称替换为实际服务配置，再执行 `site run`，从菜单进入智能助手。
+
+- 按模型开放指定接口：`crud` 展开为 `list/get/create/update/delete`，可额外配置 `bulk_delete`。工具继续遵守当前用户的 API 和字段权限。
+- 在 `app/agent_tools/` 编写异步自定义工具，在 `app/agent_hooks.py` 编写 Hook。支持 `before_run`、`before_model`、`before_tool`、`after_tool`、`after_run`、`on_error` 六个执行点。
+- 对话自动保存，支持搜索历史、查看工具调用、停止执行，以及删除对话及其消息。运行中的对话需先停止再删除；删除对话不会撤销工具已经修改的业务数据。
+- 内置执行超时和步数限制；中断的写操作不会自动重放。页面通过轮询按完整消息更新。
+
+完整配置、自定义工具、Hook 示例和表结构见 [Agent 使用说明](docs/agents.md)。
+
+## 应用资源生命周期
 
 HTTP 客户端、连接池、设备 SDK 句柄等进程级资源可以放在 `app/resources.py`。新项目会自动创建该文件；已有项目首次执行 `site init` 或 `site sync` 时也会补齐。两个钩子都是异步函数，并接收 FastAPI 应用，因此可通过 `app.state` 保存资源：
 

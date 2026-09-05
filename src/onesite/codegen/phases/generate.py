@@ -1144,10 +1144,14 @@ def phase_generate_aggregated(
         cwd, backend_path, site_config.get("custom_features", [])
     )
 
+    from ..agents import generate_agents
+    generate_agents(site_config, api_models, cwd, backend_path)
+
     # ── API router ──
     update_api_router(
         api_models, backend_path / "app" / "api" / "api.py",
         scheduled_tasks=scheduled_tasks, tools=tools,
+        agents_enabled=bool(site_config.get("agents")),
         external_resources_enabled=external_resources_enabled,
         visualizations_enabled=bool(visualizations),
         public_dashboard_enabled=bool(public_dashboard.get("enabled")),
@@ -1366,6 +1370,8 @@ def phase_generate_aggregated(
         "builtin.dashboard": "/dashboard",
         "builtin.settings": "/settings",
     }
+    if site_config.get("agents"):
+        generated_route_paths["builtin.agent"] = "/agent"
     if report_models:
         generated_route_paths["builtin.reports"] = "/reports"
     if external_resources_enabled:
@@ -1453,6 +1459,15 @@ def phase_generate_aggregated(
         import_export_enabled=background_tasks_enabled,
         import_export_role_visible=import_export_role_visible,
     )
+    if site_config.get("agents"):
+        navigation.append({
+            "type": "item", "key": "/agent", "icon": "MessageSquare",
+            "label": "agent.title", "my_label": None,
+            "visible": {
+                role: any(role in agent["roles"] for agent in site_config["agents"].values())
+                for role in ("user", "admin", "developer")
+            },
+        })
     if background_tasks_enabled:
         generate_file(
             "frontend_task_center_service.ts.j2",
@@ -1497,6 +1512,7 @@ def phase_generate_aggregated(
             "reports_enabled": bool(report_models),
             "import_export_enabled": background_tasks_enabled,
             "public_dashboard": public_dashboard,
+            "agents_enabled": bool(site_config.get("agents")),
         },
         frontend_path / "src" / "Routes.tsx",
     )

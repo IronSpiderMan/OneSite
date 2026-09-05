@@ -1,0 +1,358 @@
+{% raw %}
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import rehypeHighlight from 'rehype-highlight';
+import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Copy, History, Loader2, MessageSquare, Plus, Search, Square, Terminal, X, AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
+import request, { getErrorMessage } from '../utils/request';
+
+type Agent = { key: string; title: string };
+type ToolCall = { id: string; function: { name: string; arguments: string } };
+type Message = { id: string; payload: { role: string; content?: string | null; tool_calls?: ToolCall[]; tool_call_id?: string }; details: { success?: boolean; interrupted?: boolean; blocked?: string; arguments?: unknown } };
+type Session = { id: string; title: string; agent_key: string; status: string; updated_at?: string; error?: string; cancel_requested: boolean; messages?: Message[] };
+
+function pretty(value: unknown) {
+  if (typeof value !== 'string') return JSON.stringify(value, null, 2);
+  try { return JSON.stringify(JSON.parse(value), null, 2); } catch { return value; }
+}
+
+function CodeBlock({ children }: { children?: React.ReactNode }) {
+  const { t } = useTranslation();
+  const [copyState, setCopyState] = useState<'idle' | 'copied' | 'error'>('idle');
+  const pre = useRef<HTMLPreElement>(null);
+  const timer = useRef<ReturnType<typeof setTimeout>>();
+  useEffect(() => () => clearTimeout(timer.current), []);
+  const code = React.Children.toArray(children).find(React.isValidElement) as React.ReactElement<{ className?: string }> | undefined;
+  const language = /(?:^|\s)language-([^\s]+)/.exec(code?.props.className || '')?.[1] || 'text';
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText((pre.current?.textContent || '').replace(/\n$/, ''));
+      setCopyState('copied');
+    } catch { setCopyState('error'); }
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => setCopyState('idle'), 2500);
+  };
+  return <div className="my-4 min-w-0 overflow-hidden rounded-xl border bg-muted/40">
+    <div className="flex items-center justify-between gap-3 border-b px-4 py-2 text-xs text-muted-foreground">
+      <span className="min-w-0 truncate font-mono">{language}</span>
+      <button type="button" onClick={copy} aria-label={t('agent.copy_code', 'Copy code')} className="flex shrink-0 items-center gap-1.5 rounded px-1.5 py-1 transition-colors hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+        {copyState === 'copied' ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
+        {copyState === 'copied' ? t('agent.copied') : t('agent.copy_code', 'Copy code')}
+      </button>
+    </div>
+    <pre ref={pre} tabIndex={0} aria-label={t('agent.code_block', 'Code block')} className="overflow-x-auto p-4 text-[13px] leading-6 [tab-size:2] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring [&>code]:block [&>code]:min-w-max [&>code]:whitespace-pre [&>code]:break-normal [&>code]:bg-transparent [&>code]:p-0">{children}</pre>
+    <span role="status" className={copyState === 'error' ? 'block px-4 pb-3 text-xs text-destructive' : 'sr-only'}>{copyState === 'error' ? t('agent.copy_error') : copyState === 'copied' ? t('agent.copied') : ''}</span>
+  </div>;
+}
+
+function MarkdownMessage({ content }: { content: string }) {
+  const { t } = useTranslation();
+  return <div className="min-w-0 max-w-full text-sm leading-7 [overflow-wrap:anywhere] [&>*:first-child]:mt-0 [&>*:last-child]:mb-0 [&_p]:my-3 [&_h1]:mb-3 [&_h1]:mt-6 [&_h1]:text-2xl [&_h1]:font-semibold [&_h1]:leading-snug [&_h2]:mb-3 [&_h2]:mt-5 [&_h2]:text-xl [&_h2]:font-semibold [&_h2]:leading-snug [&_h3]:mb-2 [&_h3]:mt-4 [&_h3]:text-lg [&_h3]:font-semibold [&_h4]:my-3 [&_h4]:font-semibold [&_h5]:my-3 [&_h5]:font-semibold [&_h6]:my-3 [&_h6]:font-semibold [&_ul]:my-3 [&_ul]:list-disc [&_ul]:pl-6 [&_ol]:my-3 [&_ol]:list-decimal [&_ol]:pl-6 [&_li]:my-1 [&_li>p]:my-1 [&_li>ul]:my-1 [&_li>ol]:my-1 [&_ul_ul]:list-[circle] [&_ul_ul_ul]:list-[square] [&_.contains-task-list]:list-none [&_.contains-task-list]:pl-1 [&_input[type=checkbox]]:mr-2 [&_input[type=checkbox]]:accent-primary [&_blockquote]:my-4 [&_blockquote]:border-l-4 [&_blockquote]:border-primary/30 [&_blockquote]:bg-muted/40 [&_blockquote]:px-4 [&_blockquote]:py-1 [&_blockquote]:text-muted-foreground [&_hr]:my-6 [&_hr]:border-border [&_a]:text-primary [&_a]:underline [&_a]:underline-offset-2 [&_strong]:font-semibold [&_del]:text-muted-foreground [&_img]:my-4 [&_img]:h-auto [&_img]:max-w-full [&_img]:rounded-lg [&_.hljs-comment]:text-muted-foreground [&_.hljs-quote]:text-muted-foreground [&_.hljs-keyword]:text-purple-700 dark:[&_.hljs-keyword]:text-purple-300 [&_.hljs-selector-tag]:text-purple-700 dark:[&_.hljs-selector-tag]:text-purple-300 [&_.hljs-string]:text-emerald-700 dark:[&_.hljs-string]:text-emerald-300 [&_.hljs-attr]:text-sky-700 dark:[&_.hljs-attr]:text-sky-300 [&_.hljs-title]:text-blue-700 dark:[&_.hljs-title]:text-blue-300 [&_.hljs-number]:text-amber-700 dark:[&_.hljs-number]:text-amber-300 [&_.hljs-literal]:text-amber-700 dark:[&_.hljs-literal]:text-amber-300 [&_.hljs-built_in]:text-cyan-700 dark:[&_.hljs-built_in]:text-cyan-300 [&_.hljs-meta]:text-muted-foreground">
+    <ReactMarkdown skipHtml remarkPlugins={[remarkGfm]} rehypePlugins={[[rehypeHighlight, { detect: false, ignoreMissing: true }]]} components={{
+      a: ({ children, href, title }) => !href || /^javascript:/i.test(href) ? <span>{children}</span> : <a href={href} title={title} target={href?.startsWith('#') ? undefined : '_blank'} rel="noopener noreferrer">{children}</a>,
+      pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
+      code: ({ inline, className, children }) => <code className={inline ? 'rounded border border-border/60 bg-muted/70 px-1.5 py-0.5 font-mono text-[0.875em]' : className}>{children}</code>,
+      table: ({ children }) => <div role="region" aria-label={t('agent.table', 'Table')} tabIndex={0} className="my-4 max-w-full overflow-x-auto rounded-lg border focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"><table className="w-full border-collapse text-left text-sm leading-6">{children}</table></div>,
+      thead: ({ children }) => <thead className="bg-muted/70">{children}</thead>,
+      th: ({ children, style }) => <th style={style} className="min-w-[7rem] border-b border-r px-4 py-2.5 font-semibold last:border-r-0">{children}</th>,
+      td: ({ children, style }) => <td style={style} className="min-w-[7rem] border-r px-4 py-2.5 align-top last:border-r-0">{children}</td>,
+      tr: ({ children }) => <tr className="border-b last:border-b-0 even:bg-muted/20">{children}</tr>,
+      img: ({ src, alt, title }) => <img src={src} alt={alt || ''} title={title} loading="lazy" />,
+    }}>{content}</ReactMarkdown>
+  </div>;
+}
+
+function ToolActivity({ call, result, running }: { call: ToolCall; result?: Message; running: boolean }) {
+  const { t } = useTranslation();
+  const failed = result?.details.success === false || result?.details.interrupted || !!result?.details.blocked;
+  const label = result ? (failed ? t('agent.tool_failed') : t('agent.tool_done')) : (running ? t('agent.running') : t('agent.tool_unknown'));
+  return <details className="group/tool overflow-hidden rounded-xl border bg-background text-sm">
+    <summary className="flex cursor-pointer list-none items-center gap-2.5 px-3.5 py-3 [&::-webkit-details-marker]:hidden">
+      <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
+      <span className="min-w-0 flex-1 truncate font-mono text-xs">{call.function.name}</span>
+      <span className={`flex shrink-0 items-center gap-1.5 text-xs ${failed ? 'text-destructive' : 'text-muted-foreground'}`}>
+        {!result && running ? <Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" /> : failed ? <AlertCircle className="h-3.5 w-3.5" /> : result ? <Check className="h-3.5 w-3.5" /> : null}{label}
+      </span>
+      <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform group-open/tool:rotate-90" />
+    </summary>
+    <div className="space-y-3 border-t bg-muted/30 p-3.5">
+      <div><p className="mb-1.5 text-xs font-medium text-muted-foreground">{t('agent.tool_arguments')}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3 text-xs leading-relaxed">{pretty(result?.details.arguments ?? call.function.arguments)}</pre></div>
+      {result && <div><p className="mb-1.5 text-xs font-medium text-muted-foreground">{t('agent.tool_result')}</p><pre className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3 text-xs leading-relaxed">{pretty(result.payload.content)}</pre></div>}
+    </div>
+  </details>;
+}
+
+export default function AgentPage() {
+  const { t, i18n } = useTranslation();
+  const [agents, setAgents] = useState<Agent[]>([]);
+  const [agentKey, setAgentKey] = useState('');
+  const [sessions, setSessions] = useState<Session[]>([]);
+  const [selected, setSelected] = useState('');
+  const [session, setSession] = useState<Session | null>(null);
+  const [drafts, setDrafts] = useState<Record<string, string>>({});
+  const [loading, setLoading] = useState(true);
+  const [loadingSession, setLoadingSession] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [stopping, setStopping] = useState(false);
+  const [deleting, setDeleting] = useState('');
+  const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
+  const [error, setError] = useState('');
+  const [connectionError, setConnectionError] = useState(false);
+  const [search, setSearch] = useState('');
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [copied, setCopied] = useState('');
+  const [atBottom, setAtBottom] = useState(true);
+  const sidebar = useRef<HTMLElement>(null);
+  const historyButton = useRef<HTMLButtonElement>(null);
+  const current = useRef('');
+  const version = useRef(0);
+  const submitting = useRef(false);
+  const restoreComposerFocus = useRef(false);
+  const alive = useRef(true);
+  const scroll = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+  const pinned = useRef(true);
+  const retryPoll = useRef<() => void>(() => {});
+  const copyTimer = useRef<ReturnType<typeof setTimeout>>();
+  current.current = selected;
+  const draftKey = selected || 'new';
+  const input = drafts[draftKey] || '';
+  // Never render a previous conversation while a different one is being fetched.
+  const active = session?.id === selected ? session : null;
+  const running = active?.status === 'running';
+  const activeAgent = agents.find(agent => agent.key === (active?.agent_key || agentKey));
+  const messages = active?.messages || [];
+  const visiblePending = pending?.id === selected ? pending : null;
+
+  useEffect(() => { alive.current = true; return () => { alive.current = false; clearTimeout(copyTimer.current); }; }, []);
+
+  useEffect(() => {
+    if (!historyOpen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (window.innerWidth >= 768) return;
+      if (event.key === 'Escape') { setHistoryOpen(false); historyButton.current?.focus(); }
+      if (event.key === 'Tab') {
+        const controls = Array.from(sidebar.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select') || []).filter(el => el.offsetParent !== null);
+        const first = controls[0], last = controls[controls.length - 1];
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
+      }
+    };
+    sidebar.current?.querySelector<HTMLButtonElement>('button')?.focus();
+    document.addEventListener('keydown', onKey);
+    return () => document.removeEventListener('keydown', onKey);
+  }, [historyOpen]);
+
+  useEffect(() => {
+    if (restoreComposerFocus.current && !sending && !loadingSession && !loading && agents.length) {
+      const frame = requestAnimationFrame(() => { inputRef.current?.focus(); restoreComposerFocus.current = false; });
+      return () => cancelAnimationFrame(frame);
+    }
+  }, [sending, loadingSession, loading, agents.length]);
+
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const [a, s] = await Promise.all([request.get<Agent[]>('/agents'), request.get<Session[]>('/agents/sessions')]);
+      if (!alive.current) return;
+      setAgents(a.data); setAgentKey(previous => a.data.some(a => a.key === previous) ? previous : (a.data[0]?.key || ''));
+      setSessions(s.data);
+    } catch (e) { if (alive.current) setError(getErrorMessage(e, t('agent.load_error'))); }
+    finally { if (alive.current) setLoading(false); }
+  }, [t]);
+  useEffect(() => { void load(); }, [load]);
+
+  useEffect(() => {
+    if (!selected) { setLoadingSession(false); return; }
+    setLoadingSession(true); setConnectionError(false);
+    let activeEffect = true;
+    let timer: ReturnType<typeof setTimeout>;
+    let inFlight = false;
+    const poll = async () => {
+      clearTimeout(timer);
+      if (inFlight || !activeEffect) return;
+      inFlight = true;
+      const snapshot = version.current;
+      try {
+        const { data } = await request.get<Session>(`/agents/sessions/${selected}`, { suppressErrorToast: true });
+        if (!activeEffect) return;
+        if (snapshot === version.current && !submitting.current) {
+          setSession(data); setLoadingSession(false); setConnectionError(false);
+          setSessions(items => items.map(item => item.id === data.id ? data : item));
+        }
+      } catch {
+        if (activeEffect) { setConnectionError(true); setLoadingSession(false); }
+      } finally {
+        inFlight = false;
+        if (activeEffect) timer = setTimeout(poll, document.hidden ? 5000 : 1200);
+      }
+    };
+    retryPoll.current = () => { void poll(); };
+    const onVisible = () => { if (!document.hidden) void poll(); };
+    document.addEventListener('visibilitychange', onVisible);
+    void poll();
+    return () => { activeEffect = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
+  }, [selected]);
+
+  const toBottom = useCallback((smooth = false) => {
+    const element = scroll.current;
+    if (!element) return;
+    element.scrollTo({ top: element.scrollHeight, behavior: smooth && !window.matchMedia('(prefers-reduced-motion: reduce)').matches ? 'smooth' : 'auto' });
+    pinned.current = true; setAtBottom(true);
+  }, []);
+  useEffect(() => {
+    if (!scroll.current) return;
+    const observer = new ResizeObserver(() => { if (pinned.current) toBottom(); });
+    observer.observe(scroll.current);
+    return () => observer.disconnect();
+  }, [toBottom]);
+  useEffect(() => { if (pinned.current) toBottom(); }, [selected, active?.id, messages.length, visiblePending?.content, running, toBottom]);
+  useEffect(() => { if (inputRef.current) { inputRef.current.style.height = 'auto'; inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`; } }, [input, selected]);
+
+  const select = (id: string) => {
+    version.current += 1;
+    current.current = id;
+    setSelected(id); setError(''); setHistoryOpen(false);
+    pinned.current = true; setAtBottom(true);
+  };
+  const newConversation = () => { if (!submitting.current) { select(''); setSession(null); setDrafts(d => ({ ...d, new: '' })); inputRef.current?.focus(); } };
+  const deleteConversation = async (item: Session) => {
+    if (deleting || submitting.current || item.status === 'running') return;
+    if (!window.confirm(t('agent.delete_confirm', { title: item.title }))) return;
+    setDeleting(item.id);
+    try {
+      await request.delete(`/agents/sessions/${item.id}`, { suppressErrorToast: true });
+      if (!alive.current) return;
+      setSessions(items => items.filter(s => s.id !== item.id));
+      setDrafts(d => { const next = { ...d }; delete next[item.id]; return next; });
+      if (current.current === item.id) { select(''); setSession(null); setPending(null); }
+    } catch (e) { if (alive.current) setError(getErrorMessage(e, t('agent.delete_error'))); }
+    finally { if (alive.current) setDeleting(''); }
+  };
+  const setInput = (value: string) => setDrafts(d => ({ ...d, [draftKey]: value }));
+
+  const send = async (event?: React.FormEvent) => {
+    event?.preventDefault();
+    if (!input.trim() || deleting || submitting.current || running || loading || loadingSession || !activeAgent) return;
+    const content = input.trim();
+    let id = selected;
+    const originalKey = draftKey;
+    submitting.current = true; version.current += 1;
+    setSending(true); setError(''); pinned.current = true;
+    try {
+      if (!id) {
+        const { data } = await request.post<Session>('/agents/sessions', { agent_key: agentKey });
+        if (!alive.current) return;
+        id = data.id;
+        setSessions(items => [data, ...items]);
+        select(id); setSession({ ...data, messages: [] }); setLoadingSession(false);
+        setDrafts(d => ({ ...d, [id]: content, new: '' }));
+      }
+      setPending({ id, content });
+      await request.post(`/agents/sessions/${id}/messages`, { content }, { suppressErrorToast: true });
+      if (!alive.current) return;
+      setDrafts(d => ({ ...d, [id]: '' }));
+      // A confirmed send stays visible even if the subsequent refresh loses connectivity.
+      setSession(previous => previous?.id === id ? { ...previous, status: 'running', error: undefined, cancel_requested: false,
+        messages: [...(previous.messages || []), { id: `pending-${Date.now()}`, payload: { role: 'user', content }, details: {} }] } : previous);
+    } catch (e) {
+      if (alive.current) {
+        if (current.current === id) setError(getErrorMessage(e, t('agent.send_error')));
+        setDrafts(d => ({ ...d, [id || originalKey]: content }));
+      }
+    } finally {
+      submitting.current = false; version.current += 1;
+      if (alive.current) { restoreComposerFocus.current = true; setSending(false); setPending(null); retryPoll.current(); }
+    }
+  };
+
+  const stop = async () => {
+    const id = selected;
+    if (stopping) return;
+    setStopping(true); version.current += 1;
+    try {
+      await request.post(`/agents/sessions/${id}/stop`, {}, { suppressErrorToast: true });
+      if (alive.current && current.current === id) setSession(previous => previous?.id === id ? { ...previous, cancel_requested: true } : previous);
+    } catch (e) { if (alive.current && current.current === id) setError(getErrorMessage(e, t('agent.stop_error'))); }
+    finally { if (alive.current) { setStopping(false); version.current += 1; retryPoll.current(); } }
+  };
+
+  const copy = async (message: Message) => {
+    try {
+      await navigator.clipboard.writeText(message.payload.content || '');
+      if (!alive.current) return;
+      setCopied(message.id); clearTimeout(copyTimer.current);
+      copyTimer.current = setTimeout(() => setCopied(''), 1800);
+    } catch { setError(t('agent.copy_error')); }
+  };
+
+  const filtered = [...sessions].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || '')).filter(s => s.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
+  const resultFor = (message: Message, call: ToolCall) => {
+    for (let index = messages.indexOf(message) + 1; index < messages.length; index++) {
+      const next = messages[index];
+      if (next.payload.role !== 'tool') break;
+      if (next.payload.tool_call_id === call.id) return next;
+    }
+    return undefined;
+  };
+  const focusStyle = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
+
+  return <div className="relative flex h-[calc(100dvh-7rem)] min-h-[360px] overflow-hidden sm:min-h-[480px] rounded-2xl border bg-background shadow-sm">
+    {historyOpen && <button aria-label={t('agent.close_history')} onClick={() => setHistoryOpen(false)} className="absolute inset-0 z-20 bg-black/30 md:hidden" />}
+    <aside ref={sidebar} aria-label={t('agent.conversations')} className={`${historyOpen ? 'flex' : 'hidden'} absolute inset-y-0 left-0 z-30 w-72 shrink-0 flex-col border-r bg-card md:static md:z-auto md:flex md:w-64 lg:w-72`}>
+      <div className="space-y-4 p-5">
+        <div className="flex items-center gap-2.5"><span className="rounded-xl bg-primary/10 p-2 text-primary"><Bot className="h-5 w-5" /></span><h1 className="flex-1 font-semibold tracking-tight">{t('agent.title')}</h1><button onClick={() => setHistoryOpen(false)} aria-label={t('agent.close_history')} className={`rounded-md p-1.5 md:hidden ${focusStyle}`}><X className="h-4 w-4" /></button></div>
+        <button onClick={newConversation} disabled={sending || loading} className={`flex w-full items-center justify-center gap-2 rounded-xl bg-primary px-3 py-2.5 text-sm font-medium text-primary-foreground shadow-sm transition-opacity hover:opacity-90 disabled:opacity-50 ${focusStyle}`}><Plus className="h-4 w-4" />{t('agent.new')}</button>
+        <div className="relative"><Search className="pointer-events-none absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" /><input aria-label={t('agent.search')} value={search} onChange={e => setSearch(e.target.value)} placeholder={t('agent.search')} className={`w-full rounded-lg border bg-background py-2 pl-9 pr-3 text-xs placeholder:text-muted-foreground ${focusStyle}`} /></div>
+      </div>
+      <p className="px-5 pb-2 text-xs font-medium text-muted-foreground">{t('agent.conversations')} <span className="ml-1 tabular-nums">{sessions.length}</span></p>
+      <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4">
+        {loading ? Array.from({ length: 3 }, (_, i) => <div key={i} className="m-2 h-12 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />) : filtered.length ? filtered.map(item => <div key={item.id} className={`flex min-w-0 items-center rounded-xl pr-2 transition-colors ${selected === item.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted focus-within:bg-muted'}`}><button disabled={sending || deleting === item.id} onClick={() => select(item.id)} aria-current={selected === item.id ? 'page' : undefined} className={`flex min-w-0 flex-1 items-start gap-2.5 rounded-xl p-3 pr-2 text-left disabled:opacity-50 ${focusStyle}`}>
+          <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 opacity-60" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{agents.find(a => a.key === item.agent_key)?.title}{item.updated_at && ` · ${new Date(item.updated_at.endsWith('Z') ? item.updated_at : `${item.updated_at}Z`).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })}`}</span></span>{item.status === 'running' && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
+        </button><button type="button" onClick={() => void deleteConversation(item)} disabled={!!deleting || sending || item.status === 'running'} aria-label={t('agent.delete_named', { title: item.title })} title={t(item.status === 'running' ? 'agent.delete_running' : 'agent.delete')} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-30 ${focusStyle}`}>{deleting === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div>) : <p className="px-3 py-8 text-center text-xs leading-6 text-muted-foreground">{search ? t('agent.no_matches') : t('agent.no_history')}</p>}
+      </nav>
+      <div className="border-t px-5 py-4 text-xs leading-relaxed text-muted-foreground">{t('agent.history_hint')}</div>
+    </aside>
+
+    <section className="flex min-w-0 flex-1 flex-col">
+      <header className="flex min-h-[72px] items-center gap-3 border-b px-4 sm:px-6">
+        <button ref={historyButton} onClick={() => setHistoryOpen(true)} aria-label={t('agent.conversations')} aria-expanded={historyOpen} className={`rounded-lg border p-2 md:hidden ${focusStyle}`}><History className="h-4 w-4" /></button>
+        <div className="min-w-0 flex-1"><h2 className="truncate text-sm font-semibold">{active?.title || t('agent.new')}</h2><p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><span className={`h-1.5 w-1.5 rounded-full ${running ? 'bg-primary' : 'bg-muted-foreground/40'}`} />{running ? t('agent.running') : t('agent.ready')}</p></div>
+        <div className="relative max-w-[45%]"><select disabled={!!selected || sending || !agents.length} aria-label={t('agent.select')} value={active?.agent_key || agentKey} onChange={e => setAgentKey(e.target.value)} className={`max-w-full appearance-none truncate rounded-lg border bg-background py-2 pl-3 pr-8 text-xs font-medium disabled:opacity-70 ${focusStyle}`}>{agents.map(a => <option key={a.key} value={a.key}>{a.title}</option>)}</select><ChevronDown className="pointer-events-none absolute right-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" /></div>
+      </header>
+
+      <div className="relative min-h-0 flex-1">
+        <div ref={scroll} onScroll={() => { const el = scroll.current!; const bottom = el.scrollHeight - el.scrollTop - el.clientHeight < 100; pinned.current = bottom; setAtBottom(bottom); }} className="h-full overflow-y-auto overscroll-contain">
+          {loadingSession && !active ? <div className="mx-auto max-w-3xl space-y-5 p-6" role="status"><span className="sr-only">{t('agent.loading')}</span><div className="ml-auto h-14 w-2/3 animate-pulse rounded-2xl bg-muted motion-reduce:animate-none" /><div className="h-24 w-5/6 animate-pulse rounded-2xl bg-muted/60 motion-reduce:animate-none" /></div> : !messages.length && !visiblePending ? <div className="mx-auto flex min-h-full max-w-2xl flex-col items-center justify-center px-6 py-10 text-center">
+            <div className="mb-5 rounded-2xl border bg-card p-4 shadow-sm"><Bot className="h-8 w-8 text-primary" /></div>
+            <h2 className="text-xl font-semibold tracking-tight sm:text-2xl">{t('agent.welcome')}</h2><p className="mt-3 max-w-md text-sm leading-6 text-muted-foreground">{!loading && !agents.length ? t('agent.unavailable') : t('agent.welcome_hint')}</p>
+            {!!agents.length && <div className="mt-7 grid w-full gap-3 sm:grid-cols-2">{['suggest_query', 'suggest_help'].map(key => <button key={key} onClick={() => { setInput(t(`agent.${key}`)); inputRef.current?.focus(); }} className={`flex items-center justify-between gap-3 rounded-xl border bg-card p-4 text-left text-sm transition-colors hover:border-primary/40 hover:bg-primary/5 ${focusStyle}`}><span>{t(`agent.${key}`)}</span><ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" /></button>)}</div>}
+          </div> : <div className="mx-auto max-w-3xl space-y-7 px-4 py-7 sm:px-8">
+            {messages.filter(m => m.payload.role !== 'tool').map(message => message.payload.role === 'user' ? <div key={message.id} className="flex justify-end"><div className="max-w-[88%] whitespace-pre-wrap break-words rounded-2xl rounded-tr-sm bg-primary/10 px-4 py-3 text-sm leading-7 text-foreground">{message.payload.content}</div></div> : <article key={message.id} className="flex gap-3"><span className="mt-0.5 h-fit shrink-0 rounded-lg border bg-card p-1.5 text-primary"><Bot className="h-4 w-4" /></span><div className="min-w-0 flex-1 space-y-3">
+              <p className="text-xs font-medium text-muted-foreground">{activeAgent?.title || t('agent.title')}</p>
+              {message.payload.content && <MarkdownMessage content={message.payload.content} />}
+              {message.payload.tool_calls?.map(call => <ToolActivity key={call.id} call={call} result={resultFor(message, call)} running={!!running} />)}
+              {message.payload.content && <button onClick={() => copy(message)} aria-label={copied === message.id ? t('agent.copied') : t('agent.copy')} title={t('agent.copy')} className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${focusStyle}`}>{copied === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied === message.id ? t('agent.copied') : t('agent.copy')}</button>}
+            </div></article>)}
+            {visiblePending && <div className="flex justify-end"><div className="max-w-[88%] rounded-2xl bg-primary/10 px-4 py-3 text-sm leading-7"><p className="whitespace-pre-wrap break-words">{visiblePending.content}</p><span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />{t('agent.sending')}</span></div></div>}
+            {running && <div role="status" className="flex items-center gap-2 pl-10 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />{active?.cancel_requested || stopping ? t('agent.stopping') : t('agent.running')}</div>}
+          </div>}
+        </div>
+        {!atBottom && <button onClick={() => toBottom(true)} className={`absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border bg-background px-3 py-2 text-xs shadow-md ${focusStyle}`}><ArrowDown className="h-3.5 w-3.5" />{t('agent.latest')}</button>}
+      </div>
+
+      <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2 sm:px-8">
+        {connectionError && <div role="status" className="mb-3 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-xs"><RefreshCw className="h-3.5 w-3.5 shrink-0" /><span className="flex-1">{t('agent.reconnecting')}</span><button onClick={() => retryPoll.current()} className={`rounded px-1 font-medium text-primary ${focusStyle}`}>{t('agent.retry')}</button></div>}
+        {(error || active?.error) && <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-xs text-destructive"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span className="min-w-0 flex-1 break-words">{error || active?.error}</span>{!agents.length && <button onClick={() => void load()} className={`rounded font-medium ${focusStyle}`}>{t('agent.retry')}</button>}{error && <button onClick={() => setError('')} aria-label={t('agent.dismiss')} className={`rounded ${focusStyle}`}><X className="h-3.5 w-3.5" /></button>}</div>}
+        <form onSubmit={send} className="rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10">
+          <textarea ref={inputRef} aria-label={t('agent.message')} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); void send(); } }} maxLength={32000} rows={1} disabled={loading || !agents.length || sending || loadingSession} placeholder={running ? t('agent.next_message') : t('agent.placeholder')} className="block max-h-[180px] min-h-[56px] w-full resize-none rounded-2xl bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:opacity-50" />
+          <div className="flex items-center justify-between gap-3 px-3 pb-3"><span className="px-1 text-[11px] text-muted-foreground">{input.length > 28000 ? `${input.length.toLocaleString()} / 32,000` : t('agent.keyboard_hint')}</span>{running ? <button type="button" onClick={stop} disabled={stopping || active?.cancel_requested} aria-label={t('agent.stop')} title={t('agent.stop')} className={`flex h-8 w-8 items-center justify-center rounded-xl border bg-background transition-colors hover:bg-muted disabled:opacity-50 ${focusStyle}`}>{stopping ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Square className="h-3.5 w-3.5" />}</button> : <button type="submit" disabled={loading || loadingSession || sending || !input.trim() || !activeAgent} aria-label={t('agent.send')} title={t('agent.send')} className={`flex h-8 w-8 items-center justify-center rounded-xl bg-primary text-primary-foreground transition-opacity hover:opacity-85 disabled:opacity-30 ${focusStyle}`}>{sending ? <Loader2 className="h-4 w-4 animate-spin motion-reduce:animate-none" /> : <ArrowUp className="h-4 w-4" />}</button>}</div>
+        </form>
+        <p className="mt-2 text-center text-[11px] text-muted-foreground">{t('agent.composer_hint')}</p>
+      </div>
+    </section>
+  </div>;
+}
+
+{% endraw %}

@@ -1,0 +1,185 @@
+"""Minimal async tool loop. Hooks operate on copies, never on persisted history."""
+import asyncio
+import copy
+import json
+import logging
+from dataclasses import dataclass, field
+from types import SimpleNamespace
+from typing import Any
+
+logger = logging.getLogger(__name__)
+
+
+class AgentBlocked(Exception):
+    """A deliberate, user-visible denial from a hook or tool."""
+
+
+@dataclass
+class ModelRequestOverride:
+    messages: list[dict] | None = None
+    parameters: dict = field(default_factory=dict)
+
+
+@dataclass
+class ToolArgumentsOverride:
+    arguments: dict
+
+
+@dataclass
+class ToolResultOverride:
+    result: Any
+
+
+@dataclass
+class RunContextOverride:
+    instructions: str
+
+
+@dataclass
+class AgentContext:
+    user: Any
+    session_id: str
+    run_id: str
+    api: Any = None
+    state: dict = field(default_factory=dict)
+
+
+async def run_agent(*, client, config, messages, registry, context, emit, check, hooks=None):
+    """emit(payload, metadata) must persist before returning; check enforces cancellation."""
+    hooks = hooks or {}
+    history = copy.deepcopy(messages)
+    usage = []
+    reported = set()
+
+    async def notify_error(stage, exc):
+        if id(exc) in reported:
+            return
+        reported.add(id(exc))
+        logger.error("Agent failure at %s", stage, exc_info=(type(exc), exc, exc.__traceback__))
+        if "on_error" in hooks:
+            try:
+                await hooks["on_error"](SimpleNamespace(stage=stage, error=exc), context)
+            except Exception:
+                logger.exception("Agent on_error hook failed")
+
+    async def hook(point, **values):
+        fn = hooks.get(point)
+        if fn is None:
+            return None
+        try:
+            return await fn(SimpleNamespace(**copy.deepcopy(values)), context)
+        except AgentBlocked:
+            raise
+        except Exception as exc:
+            await notify_error(point, exc)
+            raise
+
+    async def append(payload, metadata=None):
+        await emit(payload, metadata or {})
+        history.append(payload)
+
+    try:
+        before = await hook("before_run", messages=history)
+        instructions = config["instructions"]
+        if before is not None:
+            if not isinstance(before, RunContextOverride):
+                raise TypeError("before_run must return RunContextOverride or None")
+            instructions += "\n" + before.instructions
+        for step in range(config["max_steps"]):
+            await check()
+            definitions = await registry.definitions()
+            request_messages = [{"role": "system", "content": instructions}, *copy.deepcopy(history)]
+            override = await hook("before_model", messages=request_messages, step=step)
+            parameters = {}
+            if override is not None:
+                if not isinstance(override, ModelRequestOverride):
+                    raise TypeError("before_model must return ModelRequestOverride or None")
+                if override.messages is not None:
+                    request_messages = override.messages
+                # Hooks cannot replace tools, credentials, streaming mode or the client.
+                allowed = {"model", "temperature", "top_p", "max_tokens"}
+                if set(override.parameters) - allowed:
+                    raise ValueError("Unsupported model parameter override")
+                parameters = override.parameters
+            await check()
+            response = await client.chat.completions.create(
+                messages=request_messages,
+                **{"model": config["model"], **parameters},
+                **({"tools": definitions} if definitions else {}),
+            )
+            choice = response.choices[0]
+            message = choice.message
+            calls = message.tool_calls or []
+            if any(call.type != "function" for call in calls):
+                raise ValueError("Only function tool calls are supported")
+            if len({call.id for call in calls}) != len(calls):
+                raise ValueError("Duplicate tool call IDs")
+            payload = {"role": "assistant", "content": message.content}
+            if calls:
+                payload["tool_calls"] = [call.model_dump(exclude_none=True) for call in calls]
+            # Preserve compatible servers' reasoning fields, when present.
+            reasoning = getattr(message, "reasoning_content", None)
+            if reasoning is not None:
+                payload["reasoning_content"] = reasoning
+            await append(payload)
+            if response.usage:
+                usage.append(response.usage.model_dump())
+            if not calls:
+                if choice.finish_reason != "stop":
+                    raise RuntimeError(f"Model did not finish: {choice.finish_reason}")
+                await hook("after_run", messages=history, usage=usage)
+                return
+            for call in calls:
+                await check()
+                actual = None
+                success = False
+                metadata = {"name": call.function.name}
+                try:
+                    actual = json.loads(call.function.arguments)
+                    if not isinstance(actual, dict):
+                        raise AgentBlocked("Tool arguments must be a JSON object")
+                    await registry.validate(call.function.name, actual)
+                    changed = await hook("before_tool", name=call.function.name, arguments=actual,
+                                         call_id=call.id)
+                    if changed is not None:
+                        if not isinstance(changed, ToolArgumentsOverride):
+                            raise TypeError("before_tool must return ToolArgumentsOverride or None")
+                        actual = changed.arguments
+                    await check()
+                    await registry.validate(call.function.name, actual)
+                    # Persist actual arguments BEFORE side effects; recovery never repeats this call.
+                    await emit(None, {"call_id": call.id, "name": call.function.name,
+                                      "arguments": actual, "status": "started"})
+                    try:
+                        result = await registry.execute(call.function.name, actual)
+                        success = True
+                    except AgentBlocked:
+                        raise
+                    except Exception as exc:
+                        await notify_error("tool", exc)
+                        result = {"error": "Tool execution failed; verify results before retrying"}
+                except AgentBlocked as exc:
+                    result = {"error": str(exc)}
+                    metadata["blocked"] = str(exc)
+                except json.JSONDecodeError as exc:
+                    await notify_error("tool", exc)
+                    result = {"error": "Invalid tool arguments"}
+                except Exception as exc:
+                    await notify_error("tool", exc)
+                    # A broken hook must never be silently skipped.
+                    raise
+                changed = await hook("after_tool", name=call.function.name, arguments=actual,
+                                     result=result, success=success, call_id=call.id)
+                if changed is not None:
+                    if not isinstance(changed, ToolResultOverride):
+                        raise TypeError("after_tool must return ToolResultOverride or None")
+                    result = changed.result
+                metadata.update({"arguments": actual, "success": success})
+                await append({"role": "tool", "tool_call_id": call.id,
+                              "content": json.dumps(result, ensure_ascii=False, default=str)}, metadata)
+        raise AgentBlocked("Maximum agent steps reached")
+    except asyncio.CancelledError:
+        raise
+    except Exception as exc:
+        await notify_error("run", exc)
+        raise

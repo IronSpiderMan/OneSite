@@ -646,6 +646,22 @@ def normalize_onesite_config(value: Any) -> dict[str, Any] | None:
     return None
 
 
+class AgentConfig(_StrictConfigModel):
+    """A small built-in agent using an OpenAI-compatible chat endpoint."""
+
+    title: str = "Assistant"
+    base_url: str = "https://api.openai.com/v1"
+    api_key_env: str = "AGENT_API_KEY"
+    model: str
+    instructions: str = "Help the user work with their data."
+    roles: list[Role] = Field(default_factory=lambda: ["admin", "developer"])
+    max_steps: int = Field(default=20, ge=1, le=100)
+    timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    model_tools: dict[str, list[str]] = Field(default_factory=dict)
+    custom_tools: list[str] = Field(default_factory=list)
+    hooks: dict[str, str] = Field(default_factory=dict)
+
+
 class SiteConfig(_ConfigModel):
     """The root configuration object exported by a project's ``site_config.py``."""
 
@@ -683,6 +699,7 @@ class SiteConfig(_ConfigModel):
     kafka: KafkaConfig | None = None
     video_stream: VideoStreamConfig | None = None
     providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
+    agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
     task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)

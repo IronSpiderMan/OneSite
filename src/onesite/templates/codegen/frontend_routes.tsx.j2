@@ -5,6 +5,9 @@ import {
   GeneratedPublicFeatureRoutes,
   GeneratedRouteDefinition,
 } from './GeneratedFeatureRoutes';
+{% if agents_enabled %}
+import AgentPage from './pages/Agent';
+{% endif %}
 import SettingsPage from './pages/Settings';
 import DashboardPage from './pages/Dashboard';
 {% if public_dashboard is defined and public_dashboard.enabled %}
@@ -36,6 +39,9 @@ import {{ model.name }}Page from './pages/{{ model.module_name }}';
 {% endfor %}
 
 const GeneratedBaseRoutes: GeneratedRouteDefinition[] = [
+{% if agents_enabled %}
+  { id: 'builtin.agent', path: '/agent', element: <AgentPage /> },
+{% endif %}
   {
     id: 'builtin.dashboard',
     path: '/dashboard',

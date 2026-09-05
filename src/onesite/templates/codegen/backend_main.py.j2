@@ -154,6 +154,10 @@ async def lifespan(app: FastAPI):
             await external_resource_manager.stop()
             logger.info("External resource synchronization scheduler stopped")
             {% endif %}
+            {% if config.agents %}
+            from app.api.endpoints.agents import shutdown_agent_runs
+            await shutdown_agent_runs()
+            {% endif %}
             # Release application-owned resources before infrastructure shutdown
             await destroy_resources(app)
         finally:
