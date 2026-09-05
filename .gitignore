@@ -29,6 +29,7 @@ ENV/
 .venv/
 
 # Test and lint caches
+.onesite-sync-*/
 .pytest_cache/
 .ruff_cache/
 .coverage

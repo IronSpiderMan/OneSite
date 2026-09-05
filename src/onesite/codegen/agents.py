@@ -16,8 +16,15 @@ from .file_utils import copy_file_with_status
 from .render import generate_file
 
 HOOKS = {"before_run", "before_model", "before_tool", "after_tool", "after_run", "on_error"}
-OPERATIONS = {"list", "get", "create", "update", "delete", "bulk_delete"}
+OPERATIONS = {"list", "get", "create", "update", "delete", "bulk_delete", "import"}
+OPERATION_ALIASES = {"c": ["create"], "r": ["list", "get"], "u": ["update"], "d": ["delete"]}
 IDENTIFIER = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*$")
+
+
+def expand_operation(operation: str) -> list[str]:
+    if operation and set(operation) <= set("crud"):
+        return [name for char in operation for name in OPERATION_ALIASES[char]]
+    return [operation]
 
 
 def validate_agents_config(config: dict) -> None:
@@ -46,18 +53,28 @@ def validate_agents_config(config: dict) -> None:
                 raise SiteConfigError(f"Invalid agent model name: {model}")
             expanded = []
             for operation in operations:
-                if operation == "crud":
-                    expanded.extend(["list", "get", "create", "update", "delete"])
-                elif operation in OPERATIONS:
-                    expanded.append(operation)
-                else:
+                names = expand_operation(operation)
+                if set(names) - OPERATIONS:
                     raise SiteConfigError(f"Unknown agent operation: {model}.{operation}")
+                expanded.extend(names)
             definition["model_tools"][model] = list(dict.fromkeys(expanded))
         for name in definition["custom_tools"]:
             if not IDENTIFIER.fullmatch(name) or name == "__init__" or keyword.iskeyword(name):
                 raise SiteConfigError(f"Invalid custom agent tool: {name}")
         if len(set(definition["custom_tools"])) != len(definition["custom_tools"]):
             raise SiteConfigError("Duplicate custom agent tool")
+        confirmation = definition["require_confirmation"]
+        if isinstance(confirmation, list):
+            tool_names = set(definition["custom_tools"]) | {
+                f"{model}_{op}" for model, ops in definition["model_tools"].items() for op in ops
+            }
+            expanded = []
+            for name in confirmation:
+                names = [name] if name in tool_names else expand_operation(name)
+                if set(names) - OPERATIONS - tool_names:
+                    raise SiteConfigError(f"agents.{key}: Unknown confirmation operation or tool: {name}")
+                expanded.extend(names)
+            definition["require_confirmation"] = list(dict.fromkeys(expanded))
         for hook, handler in definition["hooks"].items():
             if hook not in HOOKS or not re.fullmatch(
                 r"agent_hooks\.[A-Za-z_][A-Za-z0-9_]*", handler
@@ -112,6 +129,8 @@ def generate_agents(config: dict, models: list, cwd: Path, backend: Path) -> Non
                 raise SiteConfigError(f"agents.{key}: {model_name} must be a regular API model")
             if model.get("read_only") and set(operations) - {"list", "get"}:
                 raise SiteConfigError(f"agents.{key}: {model_name} is read-only")
+            if "import" in operations and not model.get("importable"):
+                raise SiteConfigError(f"agents.{key}: {model_name} must enable importable for import")
             for operation in operations:
                 name = f"{model_name}_{operation}"
                 if name in names or len(name) > 64:

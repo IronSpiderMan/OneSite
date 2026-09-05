@@ -130,11 +130,12 @@ def staged_generation(project: Path):
     os.close(descriptor)
     previous_cwd = Path.cwd()
     try:
-        with tempfile.TemporaryDirectory(prefix="onesite-sync-") as temporary:
+        with tempfile.TemporaryDirectory(prefix=".onesite-sync-", dir=project) as temporary:
             staged = Path(temporary) / "project"
             shutil.copytree(project, staged, ignore=shutil.ignore_patterns(
                 "generated", ".git", ".venv", "node_modules", "__pycache__",
                 ".pytest_cache", ".ruff_cache", ".onesite-sync.lock",
+                ".onesite-sync-*",  # Exclude staging directories to avoid recursive copies.
             ))
             source_before = _files(staged / "app")
             templates = Path(__file__).resolve().parent.parent / "templates"

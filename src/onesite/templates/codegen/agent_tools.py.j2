@@ -22,6 +22,7 @@ OPERATIONS = {
     "list": ("get", "/", "r"), "get": ("get", "/{id}", "r"),
     "create": ("post", "/", "c"), "update": ("put", "/{id}", "u"),
     "delete": ("delete", "/{id}", "d"), "bulk_delete": ("post", "/bulk_delete", "d"),
+    "import": ("post", "/import", "cu"),
 }
 
 
@@ -58,9 +59,10 @@ def dereference(value, document, seen=()):
 
 
 class ToolRegistry:
-    def __init__(self, app, config, context, authorization):
+    def __init__(self, app, config, context, authorization, confirm=None):
         self.app, self.config, self.context = app, config, context
         self.authorization = authorization
+        self.confirm = confirm
         self.tools = {}
         document = app.openapi()
         for model_name, operations in config["model_tools"].items():
@@ -81,7 +83,13 @@ class ToolRegistry:
                     locations[name] = param["in"]
                     if param.get("required"):
                         required.append(name)
-                if "requestBody" in endpoint:
+                if operation == "import":
+                    properties["file_content"] = {"type": "string", "maxLength": 1000000,
+                        "description": "UTF-8 text file contents (CSV for the standard importer)."}
+                    properties["file_name"] = {"type": "string", "default": "import.csv",
+                        "pattern": r"^[^/\\\r\n]+$", "minLength": 1, "maxLength": 255}
+                    required.append("file_content")
+                elif "requestBody" in endpoint:
                     body = dereference(endpoint["requestBody"], document)
                     properties["body"] = body["content"]["application/json"]["schema"]
                     if body.get("required"):
@@ -116,7 +124,14 @@ class ToolRegistry:
     def permitted(self, tool, role):
         if "handler" in tool:
             return role in tool["handler"].agent_roles
-        return tool["permission"] in tool["model"]["roles"].get(role, "")
+        return all(p in tool["model"]["roles"].get(role, "") for p in tool["permission"])
+
+    def requires_confirmation(self, name):
+        setting = self.config.get("require_confirmation", False)
+        operation = self.tools[name].get("operation")
+        if isinstance(setting, bool):
+            return setting and operation not in {"list", "get"}
+        return name in setting or operation in setting
 
     def schema(self, tool, role):
         schema = copy.deepcopy(tool["schema"])
@@ -160,7 +175,14 @@ class ToolRegistry:
         return await self.execute(f"{model}_{operation}", arguments)
 
     async def execute(self, name, arguments):
+        arguments = copy.deepcopy(arguments)
         await self.validate(name, arguments)
+        if self.requires_confirmation(name):
+            if self.confirm is None:
+                raise AgentBlocked("User confirmation is required")
+            await self.confirm(name, copy.deepcopy(arguments))
+            # Roles can change while waiting. Approval never grants API permissions.
+            await self.validate(name, arguments)
         tool = self.tools[name]
         if "handler" in tool:
             try:
@@ -182,8 +204,12 @@ class ToolRegistry:
                 query[key] = arguments[key]
         async with httpx.AsyncClient(transport=httpx.ASGITransport(app=self.app),
                                      base_url="http://onesite.internal") as client:
+            body = {"json": arguments["body"]} if "body" in arguments else {}
+            if tool["operation"] == "import":
+                body = {"files": {"file": (arguments.get("file_name", "import.csv"),
+                    arguments["file_content"].encode("utf-8"), "text/plain")}}
             response = await client.request(tool["method"], path, params=query,
-                **({"json": arguments["body"]} if "body" in arguments else {}),
+                **body,
                 headers={"Authorization": self.authorization})
         if response.is_error:
             raise AgentBlocked(f"Business API rejected the request (HTTP {response.status_code})")

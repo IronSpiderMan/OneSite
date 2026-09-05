@@ -1114,11 +1114,23 @@ def generate_locale_files(
         "delete_confirm": "Delete “{{title}}” and all its messages? This cannot be undone.",
         "delete_error": "Unable to delete conversation",
         "delete_running": "Stop the conversation before deleting it",
+        "confirmation_title": "Operation confirmation", "confirmation_pending": "Waiting for confirmation",
+        "confirmation_approved": "Approved", "confirmation_rejected": "Rejected",
+        "confirmation_interrupted": "Confirmation expired or stopped",
+        "confirmation_approve": "Confirm execution", "confirmation_reject": "Reject",
+        "confirmation_hint": "Review the operation and arguments before confirming. Waiting counts toward this turn's timeout.",
+        "confirmation_error": "Unable to submit confirmation. Check the current status before retrying.",
     })
     zh_translations["agent"].update({
         "delete": "删除对话", "delete_named": "删除 {{title}}",
         "delete_confirm": "删除“{{title}}”及其全部消息？此操作无法撤销。",
         "delete_error": "删除对话失败", "delete_running": "请先停止执行，再删除对话",
+        "confirmation_title": "操作确认", "confirmation_pending": "等待用户确认",
+        "confirmation_approved": "已确认", "confirmation_rejected": "已拒绝",
+        "confirmation_interrupted": "确认已过期或停止",
+        "confirmation_approve": "确认执行", "confirmation_reject": "拒绝",
+        "confirmation_hint": "请核对操作及参数后确认。等待时间计入本轮执行超时。",
+        "confirmation_error": "提交确认失败，请检查当前状态后再重试。",
     })
     en_translations["agent"].update(
         {'tool_failed': 'Not completed',

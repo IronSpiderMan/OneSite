@@ -59,4 +59,4 @@ generated/frontend/src-tauri/target/
 .DS_Store
 
 # OneSiteTool
-# Don't ignore generated files usually, but ignore temp stuff if any
+.onesite-sync-*/

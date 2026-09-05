@@ -9,7 +9,8 @@ import request, { getBaseURL, getErrorMessage } from '../utils/request';
 
 type Agent = { key: string; title: string };
 type ToolCall = { id: string; function: { name: string; arguments: string } };
-type Message = { id: string; payload: { role: string; content?: string | null; tool_calls?: ToolCall[]; tool_call_id?: string }; details: { success?: boolean; interrupted?: boolean; blocked?: string; arguments?: unknown } };
+type Confirmation = { name: string; arguments: unknown; status: 'pending' | 'approved' | 'rejected' | 'interrupted' };
+type Message = { id: string; payload: { role: string; content?: string | null; tool_calls?: ToolCall[]; tool_call_id?: string }; details: { success?: boolean; interrupted?: boolean; blocked?: string; arguments?: unknown; confirmations?: Record<string, Confirmation> } };
 type Session = { id: string; title: string; agent_key: string; status: string; updated_at?: string; error?: string; cancel_requested: boolean; messages?: Message[] };
 
 function pretty(value: unknown) {
@@ -95,6 +96,7 @@ export default function AgentPage() {
   const [loadingSession, setLoadingSession] = useState(false);
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [confirming, setConfirming] = useState('');
   const [deleting, setDeleting] = useState('');
   const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
   const [error, setError] = useState('');
@@ -122,6 +124,7 @@ export default function AgentPage() {
   const running = active?.status === 'running';
   const activeAgent = agents.find(agent => agent.key === (active?.agent_key || agentKey));
   const messages = active?.messages || [];
+  const awaitingConfirmation = running && messages.some(m => Object.values(m.details.confirmations || {}).some(c => c.status === 'pending'));
   const visiblePending = pending?.id === selected ? pending : null;
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; clearTimeout(copyTimer.current); }; }, []);
@@ -308,6 +311,25 @@ export default function AgentPage() {
     } catch { setError(t('agent.copy_error')); }
   };
 
+  const decideConfirmation = async (confirmationId: string, approved: boolean) => {
+    const id = selected;
+    if (confirming) return;
+    setConfirming(confirmationId);
+    setError('');
+    try {
+      await request.post(`/agents/sessions/${id}/confirmations/${confirmationId}`, { approved }, { suppressErrorToast: true });
+      if (alive.current && current.current === id) setSession(previous => previous?.id === id ? {
+        ...previous, messages: previous.messages?.map(message => {
+          const confirmation = message.details.confirmations?.[confirmationId];
+          return confirmation ? { ...message, details: { ...message.details, confirmations: {
+            ...message.details.confirmations, [confirmationId]: { ...confirmation, status: approved ? 'approved' : 'rejected' },
+          } } } : message;
+        }),
+      } : previous);
+    } catch (e) { if (alive.current && current.current === id) setError(getErrorMessage(e, t('agent.confirmation_error'))); }
+    finally { if (alive.current) { setConfirming(''); retryStream.current(); } }
+  };
+
   const filtered = [...sessions].sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || '')).filter(s => s.title.toLocaleLowerCase().includes(search.toLocaleLowerCase()));
   const resultFor = (message: Message, call: ToolCall) => {
     for (let index = messages.indexOf(message) + 1; index < messages.length; index++) {
@@ -354,10 +376,18 @@ export default function AgentPage() {
               <p className="text-xs font-medium text-muted-foreground">{activeAgent?.title || t('agent.title')}</p>
               {message.payload.content && <MarkdownMessage content={message.payload.content} />}
               {message.payload.tool_calls?.map(call => <ToolActivity key={call.id} call={call} result={resultFor(message, call)} running={!!running} />)}
+              {Object.entries(message.details.confirmations || {}).map(([id, confirmation]) => <section key={id} aria-label={t('agent.confirmation_title')} className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4 text-sm">
+                <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium">{t(`agent.confirmation_${confirmation.status}`)}</span><code className="break-all text-xs">{confirmation.name}</code></div>
+                <pre tabIndex={0} aria-label={t('agent.tool_arguments')} className="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-lg bg-background p-3 text-xs leading-relaxed">{pretty(confirmation.arguments)}</pre>
+                {confirmation.status === 'pending' && running && !active?.cancel_requested && <><p className="text-xs text-muted-foreground">{t('agent.confirmation_hint')}</p><div className="flex flex-wrap justify-end gap-2">
+                  <button type="button" disabled={!!confirming || stopping} onClick={() => void decideConfirmation(id, false)} className={`rounded-lg border bg-background px-3 py-2 disabled:opacity-50 ${focusStyle}`}>{t('agent.confirmation_reject')}</button>
+                  <button type="button" disabled={!!confirming || stopping} onClick={() => void decideConfirmation(id, true)} className={`rounded-lg bg-primary px-3 py-2 text-primary-foreground disabled:opacity-50 ${focusStyle}`}>{confirming === id ? t('agent.sending') : t('agent.confirmation_approve')}</button>
+                </div></>}
+              </section>)}
               {message.payload.content && <button onClick={() => copy(message)} aria-label={copied === message.id ? t('agent.copied') : t('agent.copy')} title={t('agent.copy')} className={`flex items-center gap-1.5 rounded-md px-1.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground ${focusStyle}`}>{copied === message.id ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}{copied === message.id ? t('agent.copied') : t('agent.copy')}</button>}
             </div></article>)}
             {visiblePending && <div className="flex justify-end"><div className="max-w-[88%] rounded-2xl bg-primary/10 px-4 py-3 text-sm leading-7"><p className="whitespace-pre-wrap break-words">{visiblePending.content}</p><span className="mt-1 flex items-center gap-1 text-xs text-muted-foreground"><Loader2 className="h-3 w-3 animate-spin motion-reduce:animate-none" />{t('agent.sending')}</span></div></div>}
-            {running && <div role="status" className="flex items-center gap-2 pl-10 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />{active?.cancel_requested || stopping ? t('agent.stopping') : t('agent.running')}</div>}
+            {running && <div role="status" className="flex items-center gap-2 pl-10 text-xs text-muted-foreground"><Loader2 className="h-3.5 w-3.5 animate-spin motion-reduce:animate-none" />{active?.cancel_requested || stopping ? t('agent.stopping') : awaitingConfirmation ? t('agent.confirmation_pending') : t('agent.running')}</div>}
           </div>}
         </div>
         {!atBottom && <button onClick={() => toBottom(true)} className={`absolute bottom-4 left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-full border bg-background px-3 py-2 text-xs shadow-md ${focusStyle}`}><ArrowDown className="h-3.5 w-3.5" />{t('agent.latest')}</button>}

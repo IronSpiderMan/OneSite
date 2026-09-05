@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, StrictBool
 from sqlalchemy import delete, update
 from sqlmodel import select, func
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -35,6 +35,10 @@ class SessionInput(BaseModel):
 
 class MessageInput(BaseModel):
     content: str = Field(min_length=1, max_length=32000)
+
+
+class ConfirmationInput(BaseModel):
+    approved: StrictBool
 
 
 def definition(key, user):
@@ -71,6 +75,12 @@ async def finish(id, run_id, error=None):
             return
         history = await rows(session, id)
         for message in history:
+            if message.details.get("confirmations"):
+                message.details = {**message.details, "confirmations": {
+                    key: {**value, "status": "interrupted"} if value["status"] == "pending" else value
+                    for key, value in message.details["confirmations"].items()
+                }}
+                session.add(message)
             if message.details.get("streaming"):
                 message.details = {**message.details, "streaming": False, "interrupted": True}
                 session.add(message)
@@ -154,6 +164,38 @@ async def get_session(id: str, user: User = Depends(deps.get_current_user)):
         return encoded
 
 
+@router.post("/sessions/{id}/confirmations/{confirmation_id}")
+async def decide_confirmation(id: str, confirmation_id: str, body: ConfirmationInput,
+                              user: User = Depends(deps.get_current_user)):
+    async with AsyncSession(db.engine) as session:
+        await owned(session, id, user)
+        # Serialize decisions with stop, finish and execution, across workers.
+        result = await session.execute(update(AgentSession).where(
+            AgentSession.id == id, AgentSession.user_id == user.id,
+            AgentSession.status == "running", AgentSession.cancel_requested.is_(False),
+            AgentSession.expires_at > now(),
+        ).values(updated_at=now()))
+        if not result.rowcount:
+            raise HTTPException(409, "Confirmation is no longer active")
+        item = await session.get(AgentSession, id, populate_existing=True)
+        for message in reversed(await rows(session, id)):
+            confirmations = message.details.get("confirmations", {})
+            value = confirmations.get(confirmation_id)
+            if value is None:
+                continue
+            if value["run_id"] != item.active_run_id or value["status"] != "pending":
+                raise HTTPException(409, "Confirmation has already been answered or expired")
+            status = "approved" if body.approved else "rejected"
+            message.details = {**message.details, "confirmations": {
+                **confirmations, confirmation_id: {**value, "status": status,
+                    "decided_at": now().isoformat(), "decided_by": user.id},
+            }}
+            session.add(message)
+            await session.commit()
+            return {"status": status}
+        raise HTTPException(404, "Confirmation not found")
+
+
 @router.get("/sessions/{id}/events")
 async def session_events(id: str, request: Request, user: User = Depends(deps.get_current_user),
                          auth_session: AsyncSession = Depends(db.get_session)):
@@ -213,7 +255,9 @@ async def execute_turn(app, authorization, user, item, run_id, config):
                 raise AgentBlocked("Execution stopped")
             history = await rows(session, item.id)
             if payload is None:
-                parent = history[-1]
+                parent = next(message for message in reversed(history)
+                    if any(call["id"] == metadata["call_id"]
+                           for call in message.payload.get("tool_calls", [])))
                 parent.details = {**parent.details, "calls": {
                     **parent.details.get("calls", {}), metadata["call_id"]: metadata,
                 }}
@@ -228,6 +272,38 @@ async def execute_turn(app, authorization, user, item, run_id, config):
                 session.add(AgentMessage(session_id=item.id, seq=history[-1].seq + 1,
                     payload=payload, details={**metadata, "run_id": run_id}))
             await session.commit()
+
+    async def confirm(name, arguments):
+        confirmation_id = str(uuid4())
+        async with AsyncSession(db.engine, expire_on_commit=False) as session:
+            result = await session.execute(update(AgentSession).where(
+                AgentSession.id == item.id, AgentSession.active_run_id == run_id,
+                AgentSession.status == "running", AgentSession.cancel_requested.is_(False),
+                AgentSession.expires_at > now(),
+            ).values(updated_at=now()))
+            if not result.rowcount:
+                raise AgentBlocked("Execution stopped")
+            parent = next(message for message in reversed(await rows(session, item.id))
+                          if message.payload.get("tool_calls"))
+            parent.details = {**parent.details, "confirmations": {
+                **parent.details.get("confirmations", {}), confirmation_id: {
+                    "name": name, "arguments": arguments, "status": "pending", "run_id": run_id,
+                },
+            }}
+            message_id = parent.id
+            session.add(parent)
+            await session.commit()
+        while True:
+            await check()
+            async with AsyncSession(db.engine) as session:
+                message = await session.get(AgentMessage, message_id)
+                status = message.details["confirmations"][confirmation_id]["status"]
+            if status == "approved":
+                await check()
+                return
+            if status != "pending":
+                raise AgentBlocked("User rejected this operation; do not retry without a new user request")
+            await asyncio.sleep(0.1)
 
     async def emit_partial(payload):
         nonlocal partial_id
@@ -258,7 +334,7 @@ async def execute_turn(app, authorization, user, item, run_id, config):
         hooks = load_hooks(config)
         async with AsyncSession(db.engine) as session:
             history = [row.payload for row in await rows(session, item.id)]
-        registry = ToolRegistry(app, config, context, authorization)
+        registry = ToolRegistry(app, config, context, authorization, confirm=confirm)
         context.api = registry
         key = os.environ.get(config["api_key_env"]) or dotenv_values(".env").get(config["api_key_env"])
         if not key:

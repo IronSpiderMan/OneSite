@@ -659,6 +659,8 @@ class AgentConfig(_StrictConfigModel):
     timeout_seconds: int = Field(default=120, ge=1, le=3600)
     model_tools: dict[str, list[str]] = Field(default_factory=dict)
     custom_tools: list[str] = Field(default_factory=list)
+    # True confirms writes/custom tools; lists select operations or exact tool names.
+    require_confirmation: bool | list[str] = False
     hooks: dict[str, str] = Field(default_factory=dict)
 
 

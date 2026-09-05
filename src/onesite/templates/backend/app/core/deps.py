@@ -106,6 +106,7 @@ def require_permission(permissions: dict[str, str], operation: str):
 def model_access(permissions: dict[str, str], *, self_profile: bool = False):
     """Keep one actor context through validation and response serialization."""
     async def checker(request: Request, current_user: User = Depends(get_current_user)):
+        from types import SimpleNamespace
         from app.core.access import current_actor, require_operation
         if request.method in {"GET", "HEAD"} and not (
             self_profile and request.url.path.rstrip("/").endswith("/me")
@@ -120,7 +121,9 @@ def model_access(permissions: dict[str, str], *, self_profile: bool = False):
                 require_operation(permissions, operation, current_user)
         if name.startswith("perform_") or "action_states" in name:
             require_operation(permissions, "r", current_user)
-        token = current_actor.set(current_user)
+        # Import releases read transactions between rows. Keep schema permission
+        # checks independent of ORM expiration caused by those rollbacks.
+        token = current_actor.set(SimpleNamespace(id=current_user.id, role=current_user.role))
         try:
             yield current_user
         finally:
