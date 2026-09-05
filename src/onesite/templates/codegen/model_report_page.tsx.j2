@@ -1,11 +1,16 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BarChart3, Download, Loader2, Play, RotateCcw, SlidersHorizontal } from 'lucide-react';
+import { BarChart3, Loader2, Play, RotateCcw, SlidersHorizontal, GripVertical, ArrowUp, ArrowDown, Copy, Trash2, Plus, Undo2, FileText, Eye, Download, Check, X } from 'lucide-react';
+
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 
 import { ModelReportChart } from '../components/visualization-chart';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
+import { formatDateTime, formatTime, getUserTimeZone } from '../lib/datetime';
+import { Popover, PopoverContent, PopoverTrigger } from '../components/ui/popover';
 import { SearchableSelect } from '../components/ui/searchable-select';
 {% for model in report_models %}
 import { get{{ model.name }}ModelReportCatalog, query{{ model.name }}ModelReport } from '../services/{{ model.module_name }}';
@@ -17,6 +22,32 @@ import { get{{ model.name }}ModelReportCatalog, query{{ model.name }}ModelReport
 import { get{{ item.foreign_key.target_model }}s } from '../services/{{ item.foreign_key.target_service }}';
 {% set _ = fk_imports.keys.append(import_key) %}
 {% endif %}{% endif %}{% endfor %}{% endfor %}
+
+{% for model in table_report_models %}
+import { get{{ model.name }}s as readTable{{ model.name }} } from '../services/{{ model.module_name }}';
+{% endfor %}
+type TableField = { key: string; labelKey: string; hiddenForUser?: boolean; permissions: Record<string, string>; render: (item: Record<string, any>, t: ReturnType<typeof useTranslation>['t'], timeZone: string) => React.ReactNode };
+type TableSource = { key: string; visible: Record<string, boolean>; permissions: Record<string, string>; fields: TableField[]; load: (page: number, size: number) => Promise<{ items: any[]; total: number; total_pages: number }> };
+const tableSources: TableSource[] = [
+{% for model in table_report_models %}
+  { key: '{{ model.module_name }}', visible: {{ model.role_visible | tojson }}, permissions: {{ model.role_permissions | tojson }}, load: readTable{{ model.name }}, fields: [
+{% for field in model.fields %}
+{% if 'r' in field.permissions | default('r') %}
+    { key: '{{ field.name }}', labelKey: '{{ field.label_key | default("models." ~ model.module_name ~ ".fields." ~ field.name) }}', hiddenForUser: {{ 'true' if field.name == model.owner_field else 'false' }}, permissions: {{ (field.role_permissions or {}) | tojson }}, render: (item, t, timeZone) => <>
+{% include 'frontend_list_cell.tsx.j2' %}
+    </> },
+{% endif %}
+{% endfor %}
+{% for field in model.extra_fields | default([]) | selectattr('show_in_list') %}
+    { key: '{{ field.name }}', labelKey: '{{ field.label_key }}', permissions: {}, render: (item, t) => <>
+{% include 'frontend_list_extra_cell.tsx.j2' %}
+    </> },
+{% endfor %}
+  ] },
+{% endfor %}
+];
+
+{% include 'frontend_json_preview.tsx.j2' %}
 
 type FieldOption = {
   field: string;
@@ -56,7 +87,7 @@ type QueryResult = {
   meta: { truncated: boolean; limit: number; timezone: string };
 };
 
-const models = [
+const models: Array<{ key: string; load: () => Promise<Catalog>; query: (payload: any) => Promise<QueryResult> }> = [
 {% for model in report_models %}
   {
     key: '{{ model.module_name }}',
@@ -106,6 +137,8 @@ const ReportsPage: React.FC = () => {
   const [clsField, setClsField] = useState('');
   const [countField, setCountField] = useState('$rows');
   const [filterValues, setFilterValues] = useState<Record<string, any>>({});
+  const [lastQuery, setLastQuery] = useState<ChartQuery | null>(null);
+  const [relativeDays, setRelativeDays] = useState<Record<string, number>>({});
   const [result, setResult] = useState<QueryResult | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -117,8 +150,11 @@ const ReportsPage: React.FC = () => {
 
   useEffect(() => {
     if (!activeModel) return;
-    setLoading(true); setError(''); setResult(null);
+    let cancelled = false;
+    setCatalog(null);
+    setLoading(true); setError(''); setResult(null); setLastQuery(null);
     activeModel.load().then((value: Catalog) => {
+      if (cancelled) return;
       setCatalog(value);
       const nextCategory = value.categories[0] || '';
       setCategory(nextCategory);
@@ -129,8 +165,9 @@ const ReportsPage: React.FC = () => {
       setCountField(value.inputs.count[0]?.field || '$rows');
       setBin(value.inputs.x[0]?.bins?.[0] || 'none');
       setAggregations(Object.fromEntries(value.inputs.y.map((item) => [item.field, item.aggregations?.[0] || 'raw'])));
-      setFilterValues({});
-    }).catch((reason: any) => setError(reason?.response?.data?.detail || reason?.message || String(reason))).finally(() => setLoading(false));
+      setFilterValues({}); setRelativeDays({});
+    }).catch((reason: any) => { if (!cancelled) setError(reason?.response?.data?.detail || reason?.message || String(reason)); }).finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
   }, [modelKey]);
 
   useEffect(() => {
@@ -181,14 +218,16 @@ const ReportsPage: React.FC = () => {
         continue;
       }
       const value = filterValues[item.field];
-      if (value === '' || value == null || (Array.isArray(value) && value.length === 0)) continue;
+      if (value === '__all__' || value === '' || value == null || (Array.isArray(value) && value.length === 0)) continue;
       if (item.data_type === 'bool') filters[item.field] = value === true || value === 'true';
       else if (item.data_type === 'int' || item.data_type === 'float') filters[item.field] = Number(value);
       else filters[item.field] = value;
     }
-    setLoading(true); setError('');
+    setLoading(true); setError(''); setResult(null); setLastQuery(null);
     try {
-      setResult(await activeModel.query({ category, chart, bindings, filters }));
+      const query = { model: modelKey, payload: { category, chart, bindings, filters }, relativeDays: { ...relativeDays }, dateTypes: Object.fromEntries(catalog.filters.map((item) => [item.field, item.data_type])) };
+      setResult(await activeModel.query(resolveReportQuery(query)));
+      setLastQuery(query);
     } catch (reason: any) {
       setError(reason?.response?.data?.detail || reason?.message || String(reason));
     } finally {
@@ -197,22 +236,13 @@ const ReportsPage: React.FC = () => {
   };
 
   const reset = () => {
-    setResult(null); setError(''); setFilterValues({});
+    setResult(null); setLastQuery(null); setError(''); setFilterValues({}); setRelativeDays({});
     if (catalog) {
       setXField(catalog.inputs.x[0]?.field || '');
       setYFields(catalog.inputs.y[0] ? [catalog.inputs.y[0].field] : []);
       setClsField(catalog.inputs.cls[0]?.field || '');
       setCountField(catalog.inputs.count[0]?.field || '$rows');
     }
-  };
-
-  const exportCsv = () => {
-    if (!result?.rows.length) return;
-    const columns = Array.from(new Set(result.rows.flatMap((row) => Object.keys(row))));
-    const safe = (value: unknown) => { let text = value == null ? '' : String(value); if (/^[=+\-@]/.test(text)) text = `'${text}`; return `"${text.replace(/"/g, '""')}"`; };
-    const csv = [columns.join(','), ...result.rows.map((row) => columns.map((column) => safe(row[column])).join(','))].join('\n');
-    const url = URL.createObjectURL(new Blob(['\ufeff', csv], { type: 'text/csv;charset=utf-8' }));
-    const link = document.createElement('a'); link.href = url; link.download = `${modelKey}-report.csv`; link.click(); URL.revokeObjectURL(url);
   };
 
   const yCount = activeChart?.y_count?.[0] || 1;
@@ -233,17 +263,11 @@ const ReportsPage: React.FC = () => {
     return column;
   };
 
-  return <div className="mx-auto w-full max-w-[1720px] space-y-5 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden" data-page-kind="reports">
-    <header className="flex shrink-0 flex-wrap items-end justify-between gap-4">
-      <div><div className="mb-2 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.18em] text-primary"><BarChart3 className="h-4 w-4" />{t('reports.builder_kicker', 'Report builder')}</div><h1 className="text-3xl font-bold tracking-tight">{t('reports.builder_title', 'Reports')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('reports.builder_description', 'Choose a model, chart category, style, and field bindings')}</p></div>
-      <Button variant="outline" onClick={exportCsv} disabled={!result?.rows.length}><Download className="mr-2 h-4 w-4" />{t('reports.export_csv', 'Export CSV')}</Button>
-    </header>
-
-    <div className="grid items-start gap-5 xl:min-h-0 xl:flex-1 xl:grid-cols-[340px_minmax(0,1fr)] xl:overflow-hidden">
-      <aside className="flex max-h-[calc(100vh-2rem)] min-h-0 flex-col overflow-hidden rounded-xl border border-border/70 bg-card/70 p-4 shadow-sm xl:h-full xl:max-h-full">
-        <div className="mb-5 flex shrink-0 items-center gap-2"><div className="rounded-lg bg-primary/10 p-2 text-primary"><SlidersHorizontal className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{t('reports.builder_settings', 'Report settings')}</h2><p className="text-xs text-muted-foreground">{t('reports.builder_settings_hint', 'Available choices are controlled by the model')}</p></div></div>
-        <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain pr-1">
-        <Field label={String(t('reports.model', 'Model'))}><Select value={modelKey} onValueChange={setModelKey}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{models.map((item) => <SelectItem key={item.key} value={item.key}>{modelLabel(item.key)}</SelectItem>)}</SelectContent></Select></Field>
+  const chartSettings = <div className="space-y-4">
+      <aside className="flex min-h-0 flex-col gap-4">
+        <div className="flex shrink-0 items-center gap-2"><div className="rounded-lg bg-primary/10 p-2 text-primary"><SlidersHorizontal className="h-4 w-4" /></div><div><h2 className="text-sm font-semibold">{t('reports.builder_settings', 'Report settings')}</h2><p className="text-xs text-muted-foreground">{t('reports.builder_settings_hint', 'Available choices are controlled by the model')}</p></div></div>
+        <div className="space-y-5 pr-1">
+        <Field label={String(t('reports.model', 'Model'))}><Select value={modelKey} disabled={loading} onValueChange={setModelKey}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{models.map((item) => <SelectItem key={item.key} value={item.key}>{modelLabel(item.key)}</SelectItem>)}</SelectContent></Select></Field>
         <Field label={String(t('reports.category', 'Chart category'))}><Select value={category} onValueChange={setCategory}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{(catalog?.categories || []).map((item) => <SelectItem key={item} value={item}>{String(t(`reports.categories.${item}`, categoryLabels[item] || item))}</SelectItem>)}</SelectContent></Select></Field>
         <Field label={String(t('reports.chart', 'Chart style'))}><Select value={chart} onValueChange={setChart}><SelectTrigger><SelectValue /></SelectTrigger><SelectContent>{charts.map((item) => <SelectItem key={item.key} value={item.key}>{chartLabel(item.key, item.label)}</SelectItem>)}</SelectContent></Select></Field>
 
@@ -288,11 +312,11 @@ const ReportsPage: React.FC = () => {
               <SelectItem value="__all__">{String(t('common.all', 'All'))}</SelectItem>
               {(item.enum_values || []).map((value) => <SelectItem key={String(value)} value={String(value)}>{String(t(`models.${modelKey}.enums.${item.field}.${value}`, String(value)))}</SelectItem>)}
             </SelectContent>
-          </Select> : item.data_type === 'date' || item.data_type === 'datetime' ? <div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
-            <input type="date" value={filterValues[`${item.field}_from`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_from`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
+          </Select> : item.data_type === 'date' || item.data_type === 'datetime' ? <div><div className="mb-2"><Select value={String(relativeDays[item.field] || 0)} onValueChange={(value) => setRelativeDays((current) => ({ ...current, [item.field]: Number(value) }))}><SelectTrigger aria-label={String(t('reports.editor.period', 'Date range'))}><SelectValue /></SelectTrigger><SelectContent>{[0, 7, 30, 90].map((days) => <SelectItem key={days} value={String(days)}>{days ? t('reports.editor.last_days', { count: days, defaultValue: `Last ${days} days` }) : t('reports.editor.fixed_dates', 'Fixed dates')}</SelectItem>)}</SelectContent></Select></div><div className="grid grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
+            <input disabled={!!relativeDays[item.field]} type="date" value={filterValues[`${item.field}_from`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_from`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
             <span className="text-sm text-muted-foreground">-</span>
-            <input type="date" value={filterValues[`${item.field}_to`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_to`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
-          </div> : <input
+            <input disabled={!!relativeDays[item.field]} type="date" value={filterValues[`${item.field}_to`] || ''} onChange={(event) => setFilterValues((current) => ({ ...current, [`${item.field}_to`]: event.target.value }))} className="h-10 min-w-0 w-full rounded-md border bg-background/50 px-2 text-sm" />
+          </div></div> : <input
             type={item.data_type === 'time' ? 'time' : item.data_type === 'int' || item.data_type === 'float' ? 'number' : 'text'}
             step={item.data_type === 'float' ? 'any' : undefined}
             value={filterValues[item.field] || ''}
@@ -306,18 +330,23 @@ const ReportsPage: React.FC = () => {
           <Button className="h-11 w-full" onClick={run} disabled={loading || !chart}>{loading ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}{t('reports.run_report', 'Run report')}</Button>
           <Button variant="ghost" size="sm" className="w-full text-muted-foreground" onClick={reset}><RotateCcw className="mr-2 h-3.5 w-3.5" />{t('reports.reset_report', 'Reset')}</Button>
         </div>
-      </aside>
-
-      <main className="min-w-0 space-y-5 xl:h-full xl:min-h-0 xl:overflow-y-auto xl:overscroll-contain">
-        {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
-        {!result?.rows.length ? <section className="flex min-h-[560px] rounded-xl border border-dashed border-border/80 bg-card/30"><div className="m-auto max-w-md px-8 text-center"><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm"><BarChart3 className="h-7 w-7" /></div><h2 className="text-xl font-semibold">{t('reports.builder_empty_title', 'Build a report')}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t('reports.builder_empty_hint', 'Select a model and chart, bind its inputs, then run the query.')}</p></div></section> : <>
-          <section className="rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="text-sm font-semibold">{activeChart ? chartLabel(activeChart.key, activeChart.label) : ''}</h2><p className="mt-1 text-xs text-muted-foreground">{t('reports.result_summary', { model: modelLabel(modelKey, catalog?.title || modelKey), count: result.rows.length })}</p></div>{result.meta.truncated && <Badge variant="outline">{t('reports.truncated_badge', 'Truncated')}</Badge>}</div><div className="h-[440px] p-4"><ModelReportChart chart={result.chart} rows={result.rows} /></div></section>
-          <section className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="border-b px-5 py-4 text-sm font-semibold">{t('reports.details', 'Data details')}</div><div className="max-h-[520px] overflow-auto"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{Object.keys(result.rows[0]).map((column) => <th key={column} className="px-4 py-3 text-left font-medium">{resultColumnLabel(column)}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index} className="border-t">{Object.keys(result.rows[0]).map((column) => <td key={column} className="px-4 py-3">{String(row[column] ?? '')}</td>)}</tr>)}</tbody></table></div></section>
+      </aside>        {error && <div className="rounded-lg border border-destructive/30 bg-destructive/10 px-4 py-3 text-sm text-destructive">{error}</div>}
+        {!result?.rows.length ? <section className="flex min-h-[160px] rounded-xl border border-dashed border-border/80 bg-card/30"><div className="m-auto max-w-md px-8 text-center"><div className="mx-auto mb-5 flex h-16 w-16 items-center justify-center rounded-2xl border bg-background/80 text-primary shadow-sm"><BarChart3 className="h-7 w-7" /></div><h2 className="text-xl font-semibold">{t('reports.builder_empty_title', 'Build a report')}</h2><p className="mt-2 text-sm leading-6 text-muted-foreground">{t('reports.builder_empty_hint', 'Select a model and chart, bind its inputs, then run the query.')}</p></div></section> : <>
+          <section className="rounded-xl border border-border/70 bg-card/70 shadow-sm"><div className="flex items-center justify-between border-b px-5 py-4"><div><h2 className="text-sm font-semibold">{activeChart ? chartLabel(activeChart.key, activeChart.label) : ''}</h2><p className="mt-1 text-xs text-muted-foreground">{t('reports.result_summary', { model: modelLabel(modelKey, catalog?.title || modelKey), count: result.rows.length })}</p></div>{result.meta.truncated && <Badge variant="outline">{t('reports.truncated_badge', 'Truncated')}</Badge>}</div><div className="h-[240px] p-4"><ModelReportChart chart={result.chart} rows={result.rows} /></div></section>
+          <details className="overflow-hidden rounded-xl border border-border/70 bg-card/70 shadow-sm"><summary className="cursor-pointer px-4 py-3 text-sm font-semibold">{t('reports.details', 'Data details')}</summary><div className="overflow-x-auto"><table className="w-full text-sm"><thead className="sticky top-0 bg-muted"><tr>{Object.keys(result.rows[0]).map((column) => <th key={column} className="px-4 py-3 text-left font-medium">{resultColumnLabel(column)}</th>)}</tr></thead><tbody>{result.rows.map((row, index) => <tr key={index} className="border-t">{Object.keys(result.rows[0]).map((column) => <td key={column} className="px-4 py-3">{String(row[column] ?? '')}</td>)}</tr>)}</tbody></table></div></details>
         </>}
-      </main>
-    </div>
+  </div>;
+
+  return <div className="mx-auto w-full max-w-[1920px] space-y-4 xl:flex xl:h-full xl:min-h-0 xl:flex-col xl:overflow-hidden" data-page-kind="reports">
+    <header className="flex shrink-0 items-center gap-3">
+      <div className="rounded-xl border bg-card p-3 text-primary"><BarChart3 className="h-5 w-5" /></div>
+      <div><h1 className="text-2xl font-bold tracking-tight">{t('reports.builder_title', 'Reports')}</h1><p className="mt-1 text-sm text-muted-foreground">{t('reports.builder_description', 'Design report pages with live preview')}</p></div>
+    </header>
+    <ReportEditor query={lastQuery} result={result} chartSettings={chartSettings} />
   </div>;
 };
+
+{% include 'report_editor.tsx.j2' %}
 
 const Field: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => <label className="block space-y-2"><span className="text-xs font-medium text-muted-foreground">{label}</span>{children}</label>;
 export default ReportsPage;

@@ -4,6 +4,7 @@ from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
 
+from onesite_runtime import override_field
 from sqlalchemy import CheckConstraint, Column, JSON, PrimaryKeyConstraint, UniqueConstraint
 from sqlmodel import Field, SQLModel
 
@@ -44,6 +45,22 @@ def _validate_write_value(dtype: str, value: Any) -> None:
             raise ValueError(f"写入值超出 {dtype} 范围")
 
 
+def _parse_display_value(dtype: str, value: Any) -> Any:
+    """Restore a scalar submitted by the UI to its configured field type."""
+    if dtype.startswith("float"):
+        return float(value)
+    if dtype in {"int8", "uint8", "int32", "int64"}:
+        return int(value)
+    if dtype == "bool" and not isinstance(value, bool):
+        normalized = str(value).strip().lower()
+        if normalized in {"true", "1"}:
+            return True
+        if normalized in {"false", "0"}:
+            return False
+        raise ValueError("bool 字段只能写入布尔值")
+    return value
+
+
 class DeviceField(SQLModel, table=True):
     __tablename__ = "device_field"
     __onesite__ = {
@@ -57,7 +74,6 @@ class DeviceField(SQLModel, table=True):
                 "name": "名称", "dtype": "数据类型", "unit": "单位",
                 "address": "地址", "attribute": "属性", "value": "当前值",
                 "report_mode": "上报模式", "deadband": "死区",
-                "heartbeat_interval_seconds": "心跳间隔(秒)",
             }},
             "en": {"name": "Device Fields"},
         },
@@ -67,15 +83,12 @@ class DeviceField(SQLModel, table=True):
         UniqueConstraint(
             "device_id", "device_model_field_id", name="uq_device_field_definition"
         ),
-        CheckConstraint(
-            "heartbeat_interval_seconds IS NULL OR heartbeat_interval_seconds > 0",
-            name="ck_device_field_heartbeat_interval",
-        ),
         CheckConstraint("deadband IS NULL OR deadband >= 0", name="ck_device_field_deadband"),
     )
 
     device_id: str = Field(
         foreign_key="device.id",
+        ondelete="CASCADE",
         index=True,
         sa_column_kwargs={"info": {"site_props": {
             "permissions": "r",
@@ -94,10 +107,27 @@ class DeviceField(SQLModel, table=True):
     unit: Optional[str] = Field(default=None, sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}})
     address: Optional[str] = None
     attribute: DeviceFieldAttribute = DeviceFieldAttribute.READ
-    value: Optional[dict[str, Any]] = Field(default=None, sa_column=Column(JSON))
+    value: Any = Field(default=None, sa_column=Column(JSON))
     report_mode: DeviceReportMode = DeviceReportMode.CHANGE_HEARTBEAT
     deadband: Optional[Decimal] = Field(default=None, ge=0)
-    heartbeat_interval_seconds: Optional[int] = Field(default=60, gt=0)
+
+    @override_field("value")
+    def present_value(self, value: Any) -> str:
+        """Expose the telemetry payload's scalar value in read responses."""
+        if not isinstance(value, dict) or "value" not in value:
+            return "" if value is None else str(value)
+
+        raw_value = value["value"]
+        if isinstance(raw_value, float):
+            return f"{raw_value:.2f}"
+        return "" if raw_value is None else str(raw_value)
+
+    @override_field("value", direction="write")
+    def persist_value(self, value: Any, context) -> dict[str, Any]:
+        """Convert the UI's scalar value back to the persisted JSON payload."""
+        if value is None or (isinstance(value, str) and not value.strip()):
+            return self.value
+        return {"value": _parse_display_value(self.dtype, value)}
 
     async def on_before_create(self) -> None:
         raise ValueError("设备字段由设备模型自动生成，不能手工创建")

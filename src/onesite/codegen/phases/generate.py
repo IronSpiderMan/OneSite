@@ -1365,6 +1365,11 @@ def phase_generate_aggregated(
         m for m in api_models
         if not m.get("is_latest_table") and m.get("reports")
     ]
+    table_report_models = [
+        m for m in frontend_models
+        if not m.get("is_singleton") and not m.get("frontend_only")
+        and any(m.get("role_visible", {}).get(role, False) and "r" in m.get("role_permissions", {}).get(role, "") for role in ("user", "admin", "developer"))
+    ]
     report_models = model_report_models
     generated_route_paths = {
         "builtin.dashboard": "/dashboard",
@@ -1412,7 +1417,7 @@ def phase_generate_aggregated(
         )
     reports_role_visible = {
         role: any(
-            role in model.get("reports", {}).get("permitted_roles", [])
+            role in (model.get("reports") or {}).get("permitted_roles", [])
             for model in report_models
         )
         for role in ("user", "admin", "developer")
@@ -1580,7 +1585,7 @@ def phase_generate_aggregated(
         )
         generate_file(
             "model_report_page.tsx.j2",
-            {"report_models": model_report_models},
+            {"report_models": model_report_models, "table_report_models": table_report_models},
             frontend_path / "src" / "pages" / "Reports.tsx",
         )
 

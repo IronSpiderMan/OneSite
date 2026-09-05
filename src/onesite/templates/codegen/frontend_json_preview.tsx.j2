@@ -1,0 +1,120 @@
+type JsonPreviewSchema = {
+  fields?: Array<{
+    name?: string;
+    labelKey?: string;
+    translations?: Record<string, string>;
+    [key: string]: unknown;
+  }>;
+  [key: string]: unknown;
+};
+
+const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null }> = ({ value, schema }) => {
+  const { t } = useTranslation();
+  if (value === undefined || value === null) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  let parsedValue = value;
+  if (typeof value === 'string') {
+    try {
+      parsedValue = JSON.parse(value);
+    } catch {
+      return <span className="block max-w-[250px] whitespace-pre-line break-words" title={value}>{value}</span>;
+    }
+  }
+
+  if (parsedValue === undefined || parsedValue === null) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  if (typeof parsedValue !== 'object') {
+    return <span>{String(parsedValue)}</span>;
+  }
+
+  const previewValue = (item: unknown, maxLength: number = 80): string => {
+    if (item === null) return 'null';
+    if (item === undefined) return '-';
+
+    const text = typeof item === 'object' ? JSON.stringify(item) : String(item);
+    return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
+  };
+
+  // Structured JSON fields carry their own i18n keys.  Use them in the
+  // compact list preview too, while preserving raw keys for untyped JSON.
+  const labelFor = (key: string): string => {
+    const field = schema?.fields?.find((candidate) => candidate.name === key);
+    if (!field?.labelKey) return key;
+    return String(t(field.labelKey, { defaultValue: field.translations?.en || key }));
+  };
+
+  // Format key-value pairs for objects.
+  const formatKeyValuePairs = (obj: Record<string, unknown>, maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
+    const entries = Object.entries(obj);
+    const lines = entries.map(([key, value]) => {
+      return `${labelFor(key)}: ${previewValue(value)}`;
+    });
+    
+    const preview = lines.slice(0, maxLines).join('\n');
+    const full = lines.join('\n');
+    const hasMore = lines.length > maxLines;
+    
+    return { preview, full, hasMore };
+  };
+
+  // Array objects are common for JSON-backed list fields (for example, [{}]).
+  // Show their first fields directly instead of an opaque one-line JSON blob.
+  const formatObjectItem = (item: Record<string, unknown>): string => {
+    const entries = Object.entries(item);
+    if (!entries.length) return '{}';
+    const fields = entries.slice(0, 3).map(([key, value]) => `${labelFor(key)}: ${previewValue(value, 40)}`);
+    return `${fields.join(' · ')}${entries.length > fields.length ? ' …' : ''}`;
+  };
+
+  // Format array items for arrays.
+  const formatArrayItems = (arr: unknown[], maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
+    const lines = arr.map((item, index) => {
+      const itemStr = item !== null && typeof item === 'object' && !Array.isArray(item)
+        ? formatObjectItem(item as Record<string, unknown>)
+        : previewValue(item);
+      return `${index + 1}. ${itemStr}`;
+    });
+    
+    const preview = lines.slice(0, maxLines).join('\n');
+    const full = lines.join('\n');
+    const hasMore = lines.length > maxLines;
+    
+    return { preview, full, hasMore };
+  };
+
+  const isArray = Array.isArray(parsedValue);
+  const { preview, hasMore } = isArray
+    ? formatArrayItems(parsedValue as unknown[])
+    : formatKeyValuePairs(parsedValue as Record<string, unknown>);
+
+  if (Array.isArray(parsedValue) && parsedValue.length === 0) {
+    return <span className="text-muted-foreground">-</span>;
+  }
+
+  return (
+    <Popover>
+      <PopoverTrigger asChild>
+        <button
+          type="button"
+          className="inline-flex max-w-[250px] items-start gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+          title="View JSON"
+        >
+          <span className="whitespace-pre-line break-all text-left">
+            {preview}
+            {hasMore && <span className="text-muted-foreground">...</span>}
+          </span>
+        </button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-0">
+        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
+          {JSON.stringify(parsedValue, null, 2)}
+        </pre>
+      </PopoverContent>
+    </Popover>
+  );
+};
+

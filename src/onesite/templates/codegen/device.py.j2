@@ -1,6 +1,9 @@
 """Device instances provided by the device_timeseries plugin."""
 from enum import Enum
-from sqlmodel import Field, SQLModel
+from uuid import uuid4
+
+from sqlalchemy import CheckConstraint
+from sqlmodel import Field, SQLModel, select
 
 
 class DeviceProtocol(str, Enum):
@@ -17,16 +20,70 @@ class Device(SQLModel, table=True):
             "zh": {"name": "设备", "fields": {
                 "name": "名称", "device_model_id": "设备模型", "protocol": "协议",
                 "collection_interval_seconds": "采集周期(秒)",
+                "timeout": "离线超时(秒)",
+                "heartbeat_interval_seconds": "心跳间隔(秒)",
             }},
             "en": {"name": "Devices"},
         },
     }
 
-    id: str = Field(
-        primary_key=True,
-        sa_column_kwargs={"info": {"site_props": {"permissions": "cru"}}},
+    __table_args__ = (
+        CheckConstraint("timeout > 0", name="ck_device_timeout"),
+        CheckConstraint(
+            "heartbeat_interval_seconds > 0", name="ck_device_heartbeat_interval"
+        ),
     )
-    name: str = Field(index=True)
+
+    id: str = Field(
+        default_factory=lambda: str(uuid4()),
+        primary_key=True,
+        sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}},
+    )
+    name: str = Field(unique=True, index=True)
     device_model_id: int = Field(foreign_key="device_model.id", index=True)
     protocol: DeviceProtocol
     collection_interval_seconds: int = Field(default=60, gt=0)
+    timeout: int = Field(default=60, gt=0)
+    heartbeat_interval_seconds: int = Field(default=60, gt=0)
+
+    async def on_before_create(self, session) -> None:
+        from app.models.device_model import DeviceModel
+
+        # Serialize creation with field-definition edits until transaction end.
+        model = (await session.exec(
+            select(DeviceModel).where(DeviceModel.id == self.device_model_id)
+            .with_for_update()
+        )).first()
+        if model is None:
+            raise ValueError("设备模型不存在")
+
+    async def on_after_create(self, session) -> None:
+        from app.models.device_field import DeviceField
+        from app.models.device_model_field import DeviceModelField
+
+        definitions = (await session.exec(
+            select(DeviceModelField)
+            .where(DeviceModelField.device_model_id == self.device_model_id)
+        )).all()
+        existing = set((await session.exec(
+            select(DeviceField.device_model_field_id)
+            .where(DeviceField.device_id == self.id)
+        )).all())
+        # Internal initialization deliberately bypasses the manual-create hook.
+        session.add_all([
+            DeviceField(
+                device_id=self.id,
+                device_model_field_id=definition.id,
+                name=definition.name,
+                dtype=str(getattr(definition.dtype, "value", definition.dtype)),
+                unit=definition.unit,
+                address=definition.name,
+            )
+            for definition in definitions if definition.id not in existing
+        ])
+        await session.flush()
+
+    async def on_before_update(self, changes) -> None:
+        if ("device_model_id" in changes
+                and changes["device_model_id"] != self.device_model_id):
+            raise ValueError("设备创建后不能更换设备模型")

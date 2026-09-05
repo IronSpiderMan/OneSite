@@ -1,0 +1,293 @@
+type ChartQuery = { model: string; payload: { category: string; chart: string; bindings: Record<string, any>; filters: Record<string, any> }; relativeDays: Record<string, number>; dateTypes: Record<string, string> };
+type ReportFormat = 'text' | 'markdown' | 'html';
+type ReportLayout = 'single' | 'halves' | 'thirds' | 'wide-left' | 'wide-right';
+type ReportBlock = { id: string; text: string; format?: ReportFormat; query?: ChartQuery; table?: { model: string; page: number; size: number } };
+type ReportRow = { id: string; blocks: ReportBlock[]; layout?: ReportLayout; pageBreak?: boolean };
+type ReportTemplate = { id: string; title: string; subtitle?: string; rows: ReportRow[] };
+let reportIdSequence = 0;
+const reportId = (): string => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+  // Local layout identifiers only: also work on HTTP and older WebViews.
+  reportIdSequence += 1;
+  return `report-${Date.now().toString(36)}-${reportIdSequence.toString(36)}-${Math.random().toString(36).slice(2)}`;
+};
+const resolveReportQuery = (query: ChartQuery, now = new Date()) => {
+  const filters = { ...query.payload.filters };
+  const date = (value: Date) => `${value.getFullYear()}-${String(value.getMonth() + 1).padStart(2, '0')}-${String(value.getDate()).padStart(2, '0')}`;
+  for (const [field, days] of Object.entries(query.relativeDays)) {
+    if (!days) continue;
+    const start = new Date(now); start.setDate(start.getDate() - days + 1);
+    filters[field] = { gte: date(start), lte: query.dateTypes[field] === 'date' ? date(now) : `${date(now)}T23:59:59.999999` };
+  }
+  return { ...query.payload, filters };
+};
+
+const reportLayouts: Record<ReportLayout, string> = { single: '1fr', halves: '1fr 1fr', thirds: '1fr 1fr 1fr', 'wide-left': '2fr 1fr', 'wide-right': '1fr 2fr' };
+const rowLayout = (row: ReportRow): ReportLayout => row.layout || (row.blocks.length === 3 ? 'thirds' : row.blocks.length === 2 ? 'halves' : 'single');
+const emptyReportBlock = (): ReportBlock => ({ id: reportId(), text: '', format: 'markdown' });
+const newReportRow = (layout: ReportLayout = 'single'): ReportRow => ({ id: reportId(), layout, blocks: reportLayouts[layout].split(' ').map(() => emptyReportBlock()) });
+const reorderReportRows = (rows: ReportRow[], from: string, to: string): ReportRow[] => {
+  const source = rows.findIndex((row) => row.id === from), target = rows.findIndex((row) => row.id === to);
+  if (source < 0 || target < 0 || source === target) return rows;
+  const next = [...rows]; next.splice(target, 0, next.splice(source, 1)[0]); return next;
+};
+const resizeReportRow = (rows: ReportRow[], id: string, layout: ReportLayout): ReportRow[] => rows.flatMap((row) => {
+  if (row.id !== id) return [row];
+  const count = reportLayouts[layout].split(' ').length;
+  const blocks = row.blocks.slice(0, count);
+  while (blocks.length < count) blocks.push(emptyReportBlock());
+  // Preserve overflow content in full-width rows instead of silently deleting it.
+  return [{ ...row, layout, blocks }, ...row.blocks.slice(count).map((block) => ({ id: reportId(), layout: 'single' as const, blocks: [block] }))];
+});
+const swapReportBlocks = (rows: ReportRow[], from: string, to: string): ReportRow[] => {
+  const blocks = rows.flatMap((row) => row.blocks), source = blocks.find((block) => block.id === from), target = blocks.find((block) => block.id === to);
+  if (!source || !target || source === target) return rows;
+  return rows.map((row) => ({ ...row, blocks: row.blocks.map((block) => block.id === from ? target : block.id === to ? source : block) }));
+};
+
+const restoreReportLayout = (snapshot: ReportRow[], current: ReportRow[]): ReportRow[] => {
+  const latest = new Map(current.flatMap((row) => row.blocks).map((block) => [block.id, block]));
+  return snapshot.map((row) => ({ ...row, blocks: row.blocks.map((block) => ({ ...block, text: latest.get(block.id)?.text ?? block.text, format: latest.get(block.id)?.format ?? block.format })) }));
+};
+
+const splitReportPages = (rows: ReportRow[]): ReportRow[][] => {
+  const pages: ReportRow[][] = [[]];
+  rows.forEach((row) => { if (row.pageBreak && pages[pages.length - 1].length) pages.push([]); pages[pages.length - 1].push(row); });
+  return pages;
+};
+const removeReportRow = (rows: ReportRow[], id: string): ReportRow[] => {
+  const index = rows.findIndex((row) => row.id === id);
+  if (index < 0) return rows;
+  return rows.filter((row) => row.id !== id).map((row) => rows[index].pageBreak && rows[index + 1]?.id === row.id ? { ...row, pageBreak: true } : row);
+};
+
+const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | null; chartSettings: React.ReactNode }> = ({ query, result, chartSettings }) => {
+  const { t } = useTranslation();
+  const label = (key: string, fallback: string) => String(t(`reports.editor.${key}`, fallback));
+  const storageKey = `onesite.report-pages.v1:${window.location.pathname}`;
+  const [title, setTitle] = useState('');
+  const [subtitle, setSubtitle] = useState('');
+  const [rows, setRows] = useState<ReportRow[]>([]);
+  const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [selected, setSelected] = useState('');
+  const [activeBlockId, setActiveBlockId] = useState('');
+  const [panel, setPanel] = useState<'content' | 'charts'>('content');
+  const [draft, setDraft] = useState<{ id: string; text: string; format: ReportFormat } | null>(null);
+  const [results, setResults] = useState<Record<string, QueryResult>>({});
+  const [tableRefresh, setTableRefresh] = useState(0);
+  const [message, setMessage] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [preview, setPreview] = useState(false);
+  const [dragging, setDragging] = useState('');
+  const [dropTarget, setDropTarget] = useState('');
+  const [history, setHistory] = useState<ReportRow[][]>([]);
+  const canvas = useRef<HTMLDivElement>(null);
+  const generation = useRef(0);
+  const pendingScroll = useRef('');
+  useEffect(() => {
+    if (!pendingScroll.current || !canvas.current) return;
+    const target = Array.from(canvas.current.querySelectorAll<HTMLElement>('[data-block-id]')).find((node) => node.dataset.blockId === pendingScroll.current);
+    target?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); pendingScroll.current = '';
+  }, [rows]);
+  const activeRow = rows.find((row) => row.blocks.some((block) => block.id === activeBlockId));
+  const activeBlock = activeRow?.blocks.find((block) => block.id === activeBlockId);
+  const locked = busy || exporting || !!draft;
+  const layoutLabel = (layout: ReportLayout) => label(`layout_${layout}`, { single: 'One column', halves: 'Two columns', thirds: 'Three columns', 'wide-left': 'Wide left', 'wide-right': 'Wide right' }[layout]);
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
+      if (!Array.isArray(saved) || saved.some((item) => typeof item.title !== 'string' || !Array.isArray(item.rows) || item.rows.some((row: ReportRow) => !Array.isArray(row.blocks) || !row.blocks.length || row.blocks.length > 3 || row.blocks.some((block) => typeof block.text !== 'string')))) throw new Error();
+      setTemplates(saved);
+    } catch { setMessage(label('storage_error', 'Could not read saved templates.')); }
+  }, [storageKey]);
+  const saved = templates.find((item) => item.id === selected);
+  const dirty = saved ? saved.title !== title || (saved.subtitle || '') !== subtitle || JSON.stringify(saved.rows) !== JSON.stringify(rows) : !!title || !!subtitle || rows.length > 0;
+  const canReplacePage = () => !dirty || window.confirm(label('discard', 'Discard unsaved page changes?'));
+  const persist = (next: ReportTemplate[]) => {
+    try { localStorage.setItem(storageKey, JSON.stringify(next)); setTemplates(next); return true; }
+    catch { setMessage(label('save_error', 'Could not save templates. Browser storage may be full or disabled.')); return false; }
+  };
+  const save = (copy: boolean) => {
+    if (!title.trim()) { setMessage(label('title_required', 'Enter a report title.')); return; }
+    const template = { id: copy || !selected ? reportId() : selected, title: title.trim(), subtitle, rows };
+    if (persist([...templates.filter((item) => item.id !== template.id), template])) {
+      setTitle(template.title); setSelected(template.id); setMessage(label('saved', 'Template saved in this browser.'));
+    }
+  };
+  const refresh = async (nextRows = rows) => {
+    const version = ++generation.current;
+    setTableRefresh((value) => value + 1);
+    setBusy(true); setResults({}); setMessage('');
+    const entries = await Promise.all(nextRows.flatMap((row) => row.blocks).filter((block) => block.query).map(async (block) => {
+      try {
+        const model = models.find((item) => item.key === block.query!.model);
+        if (!model) throw new Error(label('unavailable', 'Model unavailable'));
+        return [block.id, await model.query(resolveReportQuery(block.query!))] as const;
+      } catch {
+        if (version === generation.current) setMessage(label('query_error', 'Some charts could not be loaded. Check permissions and query settings.'));
+        return [block.id, null] as const;
+      }
+    }));
+    if (version !== generation.current) return;
+    setResults(Object.fromEntries(entries.filter((entry) => entry[1] !== null)) as Record<string, QueryResult>);
+    setBusy(false);
+  };
+  const commitRows = (next: ReportRow[]) => {
+    if (next === rows) return;
+    setHistory((current) => [...current.slice(-29), rows]); setRows(next);
+    if (!next.some((row) => row.blocks.some((block) => block.id === activeBlockId))) setActiveBlockId(next[0]?.blocks[0]?.id || '');
+  };
+  const updateBlock = (id: string, patch: Partial<ReportBlock>) => setRows((current) => current.map((row) => ({ ...row, blocks: row.blocks.map((block) => block.id === id ? { ...block, ...patch } : block) })));
+  const addRow = (layout: ReportLayout, index = rows.length, pageBreak = false, pageStart = false) => {
+    const row = { ...newReportRow(layout), pageBreak }, next = [...rows];
+    if (pageStart && !pageBreak && next[index]?.pageBreak) { row.pageBreak = true; next[index] = { ...next[index], pageBreak: false }; }
+    next.splice(index, 0, row); pendingScroll.current = row.blocks[0].id;
+    commitRows(next); setActiveBlockId(row.blocks[0].id); setPanel('content');
+  };
+  const duplicateRow = (row: ReportRow) => {
+    const copy = { ...row, pageBreak: false, id: reportId(), blocks: row.blocks.map((block) => ({ ...block, id: reportId() })) };
+    const next = [...rows]; next.splice(rows.indexOf(row) + 1, 0, copy); commitRows(next);
+    setResults((current) => ({ ...current, ...Object.fromEntries(copy.blocks.flatMap((block, index) => current[row.blocks[index].id] ? [[block.id, current[row.blocks[index].id]]] : [])) }));
+    setActiveBlockId(copy.blocks[0].id);
+  };
+  const insertChart = () => {
+    if (!activeBlock || !query || !result) return;
+    commitRows(rows.map((row) => ({ ...row, blocks: row.blocks.map((block) => block.id === activeBlock.id ? { ...block, query: JSON.parse(JSON.stringify(query)) } : block) })));
+    setResults((current) => ({ ...current, [activeBlock.id]: result })); setPanel('content'); setMessage(label('chart_added', 'Chart inserted into the selected block.'));
+  };
+  const exportPdf = async () => {
+    if (!canvas.current || exporting) return;
+    if (canvas.current.querySelector('[data-table-ready="false"]')) { setMessage(label('table_error', 'Table could not be loaded. Check access and retry.')); return; }
+    setExporting(true); setMessage('');
+    let frame: HTMLIFrameElement | undefined;
+    try {
+      // Allow the most recent chart animation and React layout to settle before capture.
+      await new Promise((resolve) => window.setTimeout(resolve, 550));
+      frame = document.createElement('iframe'); frame.title = label('print_view', 'Report print view');
+      frame.style.cssText = 'position:fixed;width:1000px;height:800px;left:-10000px;top:0;border:0';
+      document.body.appendChild(frame);
+      const doc = frame.contentDocument!, content = canvas.current.cloneNode(true) as HTMLElement;
+      content.querySelectorAll('[data-editor-control]').forEach((node) => node.remove());
+      content.querySelectorAll('[data-active]').forEach((node) => node.removeAttribute('data-active'));
+      const originals = canvas.current.querySelectorAll('canvas');
+      content.querySelectorAll('canvas').forEach((node, index) => {
+        const image = doc.createElement('img'); image.src = originals[index].toDataURL('image/png'); image.alt = label('chart', 'Chart');
+        image.style.cssText = 'display:block;width:100%;height:auto';
+        const container = node.parentElement!; container.style.cssText = 'width:100%;height:auto;position:relative'; container.replaceChildren(image);
+      });
+      // Charts carry a pixel height in the live canvas; printed images size proportionally.
+      content.querySelectorAll<HTMLElement>('.report-chart').forEach((node) => { node.style.height = 'auto'; });
+      doc.title = title || 'Report'; doc.documentElement.lang = document.documentElement.lang || 'zh-CN';
+      const base = doc.createElement('base'); base.href = document.baseURI; doc.head.appendChild(base);
+      const style = doc.createElement('style'); style.textContent = REPORT_DOCUMENT_CSS + REPORT_PRINT_CSS;
+      doc.head.appendChild(style); doc.body.appendChild(content);
+      await Promise.race([Promise.all(Array.from(doc.images).map((image) => image.decode().catch(() => undefined))), new Promise((resolve) => window.setTimeout(resolve, 8000))]);
+      await doc.fonts.ready;
+      const printFrame = frame;
+      printFrame.contentWindow!.addEventListener('afterprint', () => printFrame.remove(), { once: true });
+      printFrame.contentWindow!.focus(); printFrame.contentWindow!.print();
+      window.setTimeout(() => printFrame.remove(), 60000);
+    } catch { frame?.remove(); setMessage(label('pdf_error', 'Could not open the print view. Please try again in a browser.')); }
+    finally { setExporting(false); }
+  };
+  const missing = rows.some((row) => row.blocks.some((block) => block.query && !results[block.id]));
+  const iconButton = 'h-7 w-7 shrink-0 p-0';
+  const pages = splitReportPages(rows);
+  const insertionBar = (index: number, pageStart = false) => !preview && <div data-editor-control className="report-insert-bar">
+    {(['single', 'halves', 'thirds'] as ReportLayout[]).map((layout) => <button key={layout} disabled={locked} onClick={() => addRow(layout, index, false, pageStart)}><Plus className="h-3.5 w-3.5" />{layoutLabel(layout)}</button>)}
+    <span /> <button disabled={locked} onClick={() => addRow('single', index, true)}><FileText className="h-3.5 w-3.5" />{label('new_sheet', 'New page')}</button>
+  </div>;
+  const selectBlock = (id: string) => { if (!preview && !draft && !exporting) setActiveBlockId(id); };
+  return <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm">
+    <style>{REPORT_DOCUMENT_CSS}</style>
+    <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b px-4 py-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="w-52"><Select value={selected} disabled={locked} onValueChange={(value) => {
+          if (!canReplacePage()) return;
+          const template = templates.find((item) => item.id === value);
+          if (template) { setSelected(template.id); setTitle(template.title); setSubtitle(template.subtitle || ''); setRows(template.rows); setHistory([]); setActiveBlockId(template.rows[0]?.blocks[0]?.id || ''); void refresh(template.rows); }
+        }}><SelectTrigger aria-label={label('templates', 'Templates')}><SelectValue placeholder={label('templates', 'Templates')} /></SelectTrigger><SelectContent>{templates.map((item) => <SelectItem key={item.id} value={item.id}>{item.title}</SelectItem>)}</SelectContent></Select></div>
+        <Button variant="ghost" size="sm" disabled={locked} onClick={() => { if (!canReplacePage()) return; setSelected(''); setRows([]); setHistory([]); setResults({}); setTitle(''); setSubtitle(''); setActiveBlockId(''); setMessage(''); }}><Plus className="mr-1 h-4 w-4" />{label('new', 'New page')}</Button>
+        <span className="text-xs text-muted-foreground">{dirty ? label('unsaved', 'Unsaved changes') : selected ? label('up_to_date', 'Saved') : label('blank', 'Blank page')}</span>
+      </div>
+      <div className="flex flex-wrap items-center gap-2">
+        <Button size="sm" disabled={!rows.length || locked} onClick={() => save(false)}><Check className="mr-1 h-4 w-4" />{label('save', 'Save template')}</Button>
+        <Button variant="outline" size="sm" disabled={!rows.length || locked} onClick={() => save(true)}>{label('save_copy', 'Save as new template')}</Button>
+        <Button variant="ghost" size="sm" disabled={!selected || locked} aria-label={label('delete_template', 'Delete template')} title={label('delete_template', 'Delete template')} onClick={() => { if (window.confirm(label('confirm_delete', 'Delete this template?')) && persist(templates.filter((item) => item.id !== selected))) setSelected(''); }}><Trash2 className="h-4 w-4" /></Button>
+        <Button variant="outline" size="sm" disabled={!!draft} onClick={() => setPreview(!preview)}><Eye className="mr-1 h-4 w-4" />{preview ? label('edit', 'Edit') : label('focus_preview', 'Focus preview')}</Button>
+        <Button variant="outline" size="sm" disabled={locked || missing || !rows.length} onClick={() => void exportPdf()}>{exporting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}{label('pdf', 'Export PDF')}</Button>
+      </div>
+    </div>
+    {message && <div role="status" className="flex shrink-0 items-center justify-between gap-2 border-b bg-primary/5 px-4 py-2 text-sm">{message}<button aria-label={label('dismiss', 'Dismiss')} onClick={() => setMessage('')}><X className="h-4 w-4" /></button></div>}
+    <div className={`grid min-h-0 flex-1 ${!preview && panel === 'charts' ? 'lg:grid-cols-[360px_minmax(0,1fr)]' : 'grid-cols-1'}`}>
+      {!preview && panel === 'charts' && <aside className="flex min-h-0 flex-col border-b bg-background/50 lg:border-b-0 lg:border-r" aria-label={label('chart_data', 'Chart data')}>
+        <div className="flex shrink-0 items-center justify-between border-b p-4"><h2 className="text-sm font-semibold">{label('chart_data', 'Chart data')}</h2><button aria-label={label('close_chart_panel', 'Close chart panel')} onClick={() => setPanel('content')}><X className="h-4 w-4" /></button></div>
+        <div data-report-scroll="chart-settings" className="max-h-[60vh] min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain p-4 lg:max-h-none">
+          <p className="text-xs text-muted-foreground">{activeBlock ? `${label('target', 'Insert into')} ${label('row', 'Row')} ${rows.indexOf(activeRow!) + 1} / ${label('block', 'Block')} ${activeRow!.blocks.indexOf(activeBlock) + 1}` : label('select_hint', 'Select a block on the page.')}</p>
+          {chartSettings}
+        </div>
+        <div className="shrink-0 border-t p-4"><Button className="w-full" disabled={locked || !activeBlock || !query || !result} onClick={insertChart}><Plus className="mr-1 h-4 w-4" />{label('insert_chart', 'Insert / replace current chart')}</Button></div>
+      </aside>}
+      <main className="flex min-h-0 min-w-0 flex-col bg-slate-100/70 dark:bg-slate-950/30">
+        <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b px-5 py-3 text-xs text-muted-foreground">
+          <span>{preview ? label('live_preview', 'Preview') : label('canvas_hint', 'Add rows on the page, then select a region to edit.')} · A4</span>
+          <div className="flex gap-2"><Button variant="ghost" size="sm" disabled={locked || !history.length} onClick={() => { const previous = restoreReportLayout(history[history.length - 1], rows); setRows(previous); setHistory((current) => current.slice(0, -1)); setActiveBlockId(''); setPanel('content'); }}><Undo2 className="mr-1 h-3.5 w-3.5" />{label('undo', 'Undo layout')}</Button><Button size="sm" variant="ghost" disabled={locked || !rows.length} onClick={() => void refresh()}>{busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}{label('refresh', 'Refresh charts')}</Button></div>
+        </div>
+        <div className="min-h-[420px] flex-1 overflow-auto overscroll-contain p-3 md:p-6">
+          <div ref={canvas} className="report-pages" aria-label={label('document', 'Report document')}>
+            {pages.map((pageRows, pageIndex) => <article key={pageIndex} className="report-document mx-auto">
+              <header className="report-heading"><div className="report-eyebrow">{label('report_label', 'DATA REPORT')} / {pageIndex + 1}</div>
+                {!preview && pageIndex === 0 && <div data-editor-control className="report-title-editor"><input aria-label={label('title', 'Report title')} disabled={locked} placeholder={label('title', 'Report title')} value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label={label('subtitle', 'Subtitle / description')} disabled={locked} placeholder={label('subtitle', 'Subtitle / description')} value={subtitle} onChange={(event) => setSubtitle(event.target.value)} /></div>}
+                <div className={!preview && pageIndex === 0 ? 'report-screen-hidden' : ''}><h1>{title || label('untitled', 'Untitled report')}</h1>{subtitle && <p className="report-subtitle">{subtitle}</p>}</div>
+                <div className="report-meta"><span>{label('report_date', 'Report date')} · {new Date().toLocaleDateString()}</span><span>{pageIndex + 1} / {pages.length}</span></div>
+              </header>
+              {insertionBar(pageRows.length ? rows.indexOf(pageRows[0]) : 0, true)}
+              {pageRows.map((row) => { const index = rows.indexOf(row); return <div key={row.id} data-report-row={row.id} className={`report-canvas-row ${dropTarget === row.id && dragging !== row.id ? 'report-drop-target' : ''} ${dragging === row.id ? 'opacity-40' : ''}`}>
+                {!preview && <>
+                <div data-editor-control className="report-row-tools">
+                  <button disabled={locked} onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); setDragging(row.id); }} onPointerMove={(event) => { if (!dragging) return; setDropTarget(document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-report-row]')?.dataset.reportRow || ''); }} onPointerUp={(event) => { if (!dragging) return; const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-report-row]')?.dataset.reportRow; if (target && !locked) commitRows(reorderReportRows(rows, row.id, target)); event.currentTarget.releasePointerCapture(event.pointerId); setDragging(''); setDropTarget(''); }} onPointerCancel={() => { setDragging(''); setDropTarget(''); }} className="touch-none cursor-grab select-none p-1 text-muted-foreground active:cursor-grabbing" aria-label={`${label('drag_row', 'Drag row')} ${index + 1}`}><GripVertical className="h-4 w-4" /></button>
+                  <span className="flex-1 text-xs font-medium">{label('row', 'Row')} {index + 1} · {layoutLabel(rowLayout(row))}</span>
+                  <div className="w-28"><Select disabled={locked} value={rowLayout(row)} onValueChange={(value) => commitRows(resizeReportRow(rows, row.id, value as ReportLayout))}><SelectTrigger aria-label={label('row_layout', 'Row layout')}><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(reportLayouts) as ReportLayout[]).map((layout) => <SelectItem key={layout} value={layout}>{layoutLabel(layout)}</SelectItem>)}</SelectContent></Select></div>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked || index === 0} aria-label={label('up', 'Move up')} title={label('up', 'Move up')} onClick={() => commitRows(reorderReportRows(rows, row.id, rows[index - 1].id))}><ArrowUp className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked || index === rows.length - 1} aria-label={label('down', 'Move down')} title={label('down', 'Move down')} onClick={() => commitRows(reorderReportRows(rows, row.id, rows[index + 1].id))}><ArrowDown className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked} aria-label={label('duplicate', 'Duplicate row')} title={label('duplicate', 'Duplicate row')} onClick={() => duplicateRow(row)}><Copy className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked} aria-label={label('remove_row', 'Remove row')} title={label('remove_row', 'Remove row')} onClick={() => commitRows(removeReportRow(rows, row.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
+                </div>
+                </>}
+                <div className="report-row" style={ { gridTemplateColumns: reportLayouts[rowLayout(row)] } }>
+                  {row.blocks.map((block, column) => <section key={block.id} data-block-id={block.id} className={`report-block ${block.query ? 'report-chart-card' : ''}`} data-active={!preview && activeBlockId === block.id ? 'true' : undefined} tabIndex={preview ? undefined : 0} aria-label={`${label('row', 'Row')} ${index + 1} / ${label('block', 'Block')} ${column + 1}`} onClick={() => selectBlock(block.id)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectBlock(block.id); } }}>
+                    {!preview && !draft && (activeBlockId === block.id || (!block.text && !block.query && !block.table)) && <div data-editor-control className="report-block-actions">
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text, format: block.format || 'text' }); }}><FileText className="h-4 w-4" />{label('edit_text', 'Edit text')}</button>
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('charts'); }}><BarChart3 className="h-4 w-4" />{label('chart_image', 'Chart / image')}</button>
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); updateBlock(block.id, { table: { model: '', page: 1, size: 20 } }); }}>{label('table_data', 'Table data')}</button>
+                      {block.table && <button disabled={locked} onClick={() => updateBlock(block.id, { table: undefined })}>{label('remove_table', 'Remove table')}</button>}
+                      {block.query && <button disabled={locked} aria-label={label('remove_chart', 'Remove chart')} onClick={(event) => { event.stopPropagation(); commitRows(rows.map((item) => ({ ...item, blocks: item.blocks.map((cell) => cell.id === block.id ? { ...cell, query: undefined } : cell) }))); }}><Trash2 className="h-4 w-4" /></button>}
+                    </div>}
+                    {draft?.id === block.id && <div data-editor-control className="report-inline-editor" onClick={(event) => event.stopPropagation()}>
+                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem></SelectContent></Select>
+                      <textarea autoFocus aria-label={label('text', 'Block content')} value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />
+                      <div className="report-content-actions"><button onClick={() => { updateBlock(draft.id, { text: draft.text, format: draft.format }); setDraft(null); }}>{label('apply_content', 'Save content')}</button><button onClick={() => setDraft(null)}>{label('cancel_content', 'Cancel')}</button></div>
+                      <p>{label('draft_hint', 'Save to render this region. Other regions stay rendered.')}</p>
+                    </div>}
+                    <div hidden={draft?.id === block.id}><ReportContent text={block.text} format={block.format || 'text'} /></div>
+                    {!block.text && !block.query && !block.table && !draft && <div data-editor-control className="report-empty-block">{label('canvas_empty_block', 'Choose text or a chart for this region')}</div>}
+                    {block.table && <ReportDataTable config={block.table} refreshKey={tableRefresh} editing={!preview && activeBlockId === block.id} disabled={locked} onChange={(table) => updateBlock(block.id, { table })} />}
+                    {block.query && (results[block.id] ? <><div className="report-chart" style={ { height: row.blocks.length === 3 ? 220 : 280 } }><ModelReportChart chart={results[block.id].chart} rows={results[block.id].rows} /></div>{results[block.id].meta.truncated && <p className="report-note">{t('reports.truncated_badge', 'Truncated')}</p>}{!results[block.id].rows.length && <p className="report-note">{label('no_data', 'No data for these filters.')}</p>}</> : <p className="report-empty-block">{busy ? label('loading', 'Loading…') : label('needs_refresh', 'Chart unavailable. Refresh to retry.')}</p>)}
+                  </section>)}
+                </div>
+                {insertionBar(index + 1)}
+              </div>; })}
+              <footer className="report-footer"><span>{title || label('untitled', 'Untitled report')}</span><span>{pageIndex + 1} / {pages.length}</span></footer>
+            </article>)}
+          </div>
+        </div>
+      </main>
+    </div>
+  </section>;
+};
+
+{% include 'report_table.tsx.j2' %}
+{% include 'report_document.tsx.j2' %}

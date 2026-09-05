@@ -23,7 +23,7 @@ class DeviceLatest(SQLModel, table=True):
         ),
     )
 
-    device_id: str = Field(foreign_key="device.id")
+    device_id: str = Field(foreign_key="device.id", ondelete="CASCADE")
     metric: str
     value: dict[str, Any] = Field(sa_column=Column(JSON, nullable=False))
     reported_at: datetime = Field(sa_column=Column(DateTime(timezone=True), nullable=False))

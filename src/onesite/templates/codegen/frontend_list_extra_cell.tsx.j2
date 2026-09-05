@@ -1,0 +1,10 @@
+                        {% if field.component | default('') == 'online_status' %}
+                        <Badge variant="outline" className={item.{{ field.name }} ? 'border-emerald-500/40 text-emerald-600' : 'text-muted-foreground'}>
+                            <span className={`mr-1.5 h-2 w-2 rounded-full ${item.{{ field.name }} ? 'bg-emerald-500' : 'bg-muted-foreground/50'}`} />
+                            {t(item.{{ field.name }} ? 'common.online' : 'common.offline')}
+                        </Badge>
+                        {% else %}
+                        <span className="block max-w-[250px] truncate" title={String(item.{{ field.name }} ?? '')}>
+                            {item.{{ field.name }} == null ? '-' : String(item.{{ field.name }})}
+                        </span>
+                        {% endif %}

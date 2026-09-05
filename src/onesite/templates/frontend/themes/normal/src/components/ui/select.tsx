@@ -19,6 +19,7 @@ interface MarkerProps {
   disabled?: boolean
   placeholder?: React.ReactNode
   id?: string
+  'aria-label'?: string
 }
 
 const SelectItem: React.FC<MarkerProps> = () => null
@@ -58,11 +59,13 @@ const Select: React.FC<SelectProps> = ({ children, onValueChange, ...props }) =>
   return (
     <AntSelect
       data-ui="select-trigger"
+      aria-label={parsed.trigger?.['aria-label']}
       className={cn('w-full', parsed.trigger?.className)}
       placeholder={parsed.placeholder}
       options={parsed.options}
       onChange={onValueChange}
       {...props}
+      value={props.value === '' ? undefined : props.value}
     />
   )
 }
