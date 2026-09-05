@@ -5,7 +5,7 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Copy, History, Loader2, MessageSquare, Plus, Search, Square, Terminal, X, AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
-import request, { getErrorMessage } from '../utils/request';
+import request, { getBaseURL, getErrorMessage } from '../utils/request';
 
 type Agent = { key: string; title: string };
 type ToolCall = { id: string; function: { name: string; arguments: string } };
@@ -106,14 +106,13 @@ export default function AgentPage() {
   const sidebar = useRef<HTMLElement>(null);
   const historyButton = useRef<HTMLButtonElement>(null);
   const current = useRef('');
-  const version = useRef(0);
   const submitting = useRef(false);
   const restoreComposerFocus = useRef(false);
   const alive = useRef(true);
   const scroll = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const pinned = useRef(true);
-  const retryPoll = useRef<() => void>(() => {});
+  const retryStream = useRef<() => void>(() => {});
   const copyTimer = useRef<ReturnType<typeof setTimeout>>();
   current.current = selected;
   const draftKey = selected || 'new';
@@ -168,31 +167,54 @@ export default function AgentPage() {
     setLoadingSession(true); setConnectionError(false);
     let activeEffect = true;
     let timer: ReturnType<typeof setTimeout>;
-    let inFlight = false;
-    const poll = async () => {
+    let controller: AbortController | undefined;
+    const connect = async () => {
       clearTimeout(timer);
-      if (inFlight || !activeEffect) return;
-      inFlight = true;
-      const snapshot = version.current;
+      controller?.abort();
+      if (!activeEffect) return;
+      const connection = new AbortController();
+      controller = connection;
       try {
-        const { data } = await request.get<Session>(`/agents/sessions/${selected}`, { suppressErrorToast: true });
-        if (!activeEffect) return;
-        if (snapshot === version.current && !submitting.current) {
-          setSession(data); setLoadingSession(false); setConnectionError(false);
-          setSessions(items => items.map(item => item.id === data.id ? data : item));
-        }
+        const token = localStorage.getItem('token');
+        const response = await fetch(`${getBaseURL().replace(/\/$/, '')}/agents/sessions/${selected}/events`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+          signal: connection.signal,
+        });
+        if (!response.ok || !response.body) throw new Error('Stream unavailable');
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = '';
+        try {
+          while (activeEffect && !connection.signal.aborted) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buffer += decoder.decode(value, { stream: true });
+            let boundary: number;
+            while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+              const event = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+              const dataLine = event.split('\n').find(line => line.startsWith('data: '));
+              if (!dataLine || !activeEffect || connection.signal.aborted || submitting.current) continue;
+              const data: Session = JSON.parse(dataLine.slice(6));
+              if (data.id !== current.current) continue;
+              setSession(data); setLoadingSession(false); setConnectionError(false);
+              setSessions(items => items.map(item => item.id === data.id ? data : item));
+            }
+          }
+        } finally { reader.releaseLock(); }
+        if (!connection.signal.aborted) throw new Error('Stream ended');
       } catch {
-        if (activeEffect) { setConnectionError(true); setLoadingSession(false); }
-      } finally {
-        inFlight = false;
-        if (activeEffect) timer = setTimeout(poll, document.hidden ? 5000 : 1200);
+        if (activeEffect && !connection.signal.aborted) {
+          setConnectionError(true); setLoadingSession(false);
+          timer = setTimeout(connect, 1500);
+        }
       }
     };
-    retryPoll.current = () => { void poll(); };
-    const onVisible = () => { if (!document.hidden) void poll(); };
+    retryStream.current = () => { void connect(); };
+    const onVisible = () => { if (!document.hidden) void connect(); };
     document.addEventListener('visibilitychange', onVisible);
-    void poll();
-    return () => { activeEffect = false; clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
+    void connect();
+    return () => { activeEffect = false; controller?.abort(); clearTimeout(timer); document.removeEventListener('visibilitychange', onVisible); };
   }, [selected]);
 
   const toBottom = useCallback((smooth = false) => {
@@ -207,11 +229,10 @@ export default function AgentPage() {
     observer.observe(scroll.current);
     return () => observer.disconnect();
   }, [toBottom]);
-  useEffect(() => { if (pinned.current) toBottom(); }, [selected, active?.id, messages.length, visiblePending?.content, running, toBottom]);
+  useEffect(() => { if (pinned.current) toBottom(); }, [selected, active?.id, messages.length, messages[messages.length - 1]?.payload.content, visiblePending?.content, running, toBottom]);
   useEffect(() => { if (inputRef.current) { inputRef.current.style.height = 'auto'; inputRef.current.style.height = `${Math.min(inputRef.current.scrollHeight, 180)}px`; } }, [input, selected]);
 
   const select = (id: string) => {
-    version.current += 1;
     current.current = id;
     setSelected(id); setError(''); setHistoryOpen(false);
     pinned.current = true; setAtBottom(true);
@@ -238,7 +259,7 @@ export default function AgentPage() {
     const content = input.trim();
     let id = selected;
     const originalKey = draftKey;
-    submitting.current = true; version.current += 1;
+    submitting.current = true;
     setSending(true); setError(''); pinned.current = true;
     try {
       if (!id) {
@@ -262,20 +283,20 @@ export default function AgentPage() {
         setDrafts(d => ({ ...d, [id || originalKey]: content }));
       }
     } finally {
-      submitting.current = false; version.current += 1;
-      if (alive.current) { restoreComposerFocus.current = true; setSending(false); setPending(null); retryPoll.current(); }
+      submitting.current = false;
+      if (alive.current) { restoreComposerFocus.current = true; setSending(false); setPending(null); retryStream.current(); }
     }
   };
 
   const stop = async () => {
     const id = selected;
     if (stopping) return;
-    setStopping(true); version.current += 1;
+    setStopping(true);
     try {
       await request.post(`/agents/sessions/${id}/stop`, {}, { suppressErrorToast: true });
       if (alive.current && current.current === id) setSession(previous => previous?.id === id ? { ...previous, cancel_requested: true } : previous);
     } catch (e) { if (alive.current && current.current === id) setError(getErrorMessage(e, t('agent.stop_error'))); }
-    finally { if (alive.current) { setStopping(false); version.current += 1; retryPoll.current(); } }
+    finally { if (alive.current) { setStopping(false); retryStream.current(); } }
   };
 
   const copy = async (message: Message) => {
@@ -343,7 +364,7 @@ export default function AgentPage() {
       </div>
 
       <div className="mx-auto w-full max-w-3xl px-4 pb-4 pt-2 sm:px-8">
-        {connectionError && <div role="status" className="mb-3 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-xs"><RefreshCw className="h-3.5 w-3.5 shrink-0" /><span className="flex-1">{t('agent.reconnecting')}</span><button onClick={() => retryPoll.current()} className={`rounded px-1 font-medium text-primary ${focusStyle}`}>{t('agent.retry')}</button></div>}
+        {connectionError && <div role="status" className="mb-3 flex items-center gap-2 rounded-lg border bg-muted/50 px-3 py-2 text-xs"><RefreshCw className="h-3.5 w-3.5 shrink-0" /><span className="flex-1">{t('agent.reconnecting')}</span><button onClick={() => retryStream.current()} className={`rounded px-1 font-medium text-primary ${focusStyle}`}>{t('agent.retry')}</button></div>}
         {(error || active?.error) && <div role="alert" className="mb-3 flex items-start gap-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2.5 text-xs text-destructive"><AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" /><span className="min-w-0 flex-1 break-words">{error || active?.error}</span>{!agents.length && <button onClick={() => void load()} className={`rounded font-medium ${focusStyle}`}>{t('agent.retry')}</button>}{error && <button onClick={() => setError('')} aria-label={t('agent.dismiss')} className={`rounded ${focusStyle}`}><X className="h-3.5 w-3.5" /></button>}</div>}
         <form onSubmit={send} className="rounded-2xl border bg-card shadow-sm transition-shadow focus-within:border-primary/40 focus-within:ring-2 focus-within:ring-primary/10">
           <textarea ref={inputRef} aria-label={t('agent.message')} value={input} onChange={e => setInput(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing && e.nativeEvent.keyCode !== 229) { e.preventDefault(); void send(); } }} maxLength={32000} rows={1} disabled={loading || !agents.length || sending || loadingSession} placeholder={running ? t('agent.next_message') : t('agent.placeholder')} className="block max-h-[180px] min-h-[56px] w-full resize-none rounded-2xl bg-transparent px-4 pb-2 pt-4 text-sm leading-6 outline-none placeholder:text-muted-foreground disabled:opacity-50" />

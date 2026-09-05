@@ -44,7 +44,60 @@ class AgentContext:
     state: dict = field(default_factory=dict)
 
 
-async def run_agent(*, client, config, messages, registry, context, emit, check, hooks=None):
+async def stream_completion(client, request, partial, check):
+    """Assemble indexed tool deltas; incomplete calls must never reach execution."""
+    stream = await client.chat.completions.create(**request, stream=True, stream_options={"include_usage": True})
+    payload = {"role": "assistant", "content": None}
+    tool_calls = {}
+    finish_reason = None
+    usage = None
+    try:
+        async for chunk in stream:
+            await check()
+            if chunk.usage:
+                usage = chunk.usage.model_dump()
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            delta = choice.delta
+            if delta.content:
+                payload["content"] = (payload["content"] or "") + delta.content
+            reasoning = getattr(delta, "reasoning_content", None)
+            if reasoning:
+                payload["reasoning_content"] = payload.get("reasoning_content", "") + reasoning
+            for fragment in delta.tool_calls or []:
+                call = tool_calls.setdefault(fragment.index, {
+                    "id": "", "type": "function", "function": {"name": "", "arguments": ""},
+                })
+                if fragment.id:
+                    call["id"] += fragment.id
+                if fragment.type and fragment.type != "function":
+                    raise ValueError("Only function tool calls are supported")
+                if fragment.function:
+                    call["function"]["name"] += fragment.function.name or ""
+                    call["function"]["arguments"] += fragment.function.arguments or ""
+            if delta.content or reasoning:
+                await partial(copy.deepcopy(payload))
+            if choice.finish_reason:
+                finish_reason = choice.finish_reason
+    finally:
+        await stream.close()
+    if finish_reason not in {"stop", "tool_calls"}:
+        raise RuntimeError(f"Model did not finish: {finish_reason}")
+    calls = [tool_calls[index] for index in sorted(tool_calls)]
+    if calls and (finish_reason != "tool_calls" or any(
+            not call["id"] or not call["function"]["name"] for call in calls)):
+        raise ValueError("Incomplete tool call stream")
+    if len({call["id"] for call in calls}) != len(calls):
+        raise ValueError("Duplicate tool call IDs")
+    if finish_reason == "tool_calls" and not calls:
+        raise ValueError("Missing streamed tool calls")
+    if calls:
+        payload["tool_calls"] = calls
+    return payload, calls, usage
+
+
+async def run_agent(*, client, config, messages, registry, context, emit, check, hooks=None, emit_partial=None):
     """emit(payload, metadata) must persist before returning; check enforces cancellation."""
     hooks = hooks or {}
     history = copy.deepcopy(messages)
@@ -102,31 +155,21 @@ async def run_agent(*, client, config, messages, registry, context, emit, check,
                     raise ValueError("Unsupported model parameter override")
                 parameters = override.parameters
             await check()
-            response = await client.chat.completions.create(
-                messages=request_messages,
+            async def partial(payload):
+                if emit_partial:
+                    await emit_partial(payload)
+
+            payload, raw_calls, model_usage = await stream_completion(client, {
+                "messages": request_messages,
                 **{"model": config["model"], **parameters},
                 **({"tools": definitions} if definitions else {}),
-            )
-            choice = response.choices[0]
-            message = choice.message
-            calls = message.tool_calls or []
-            if any(call.type != "function" for call in calls):
-                raise ValueError("Only function tool calls are supported")
-            if len({call.id for call in calls}) != len(calls):
-                raise ValueError("Duplicate tool call IDs")
-            payload = {"role": "assistant", "content": message.content}
-            if calls:
-                payload["tool_calls"] = [call.model_dump(exclude_none=True) for call in calls]
-            # Preserve compatible servers' reasoning fields, when present.
-            reasoning = getattr(message, "reasoning_content", None)
-            if reasoning is not None:
-                payload["reasoning_content"] = reasoning
+            }, partial, check)
+            calls = [SimpleNamespace(id=call["id"], function=SimpleNamespace(**call["function"]))
+                     for call in raw_calls]
             await append(payload)
-            if response.usage:
-                usage.append(response.usage.model_dump())
+            if model_usage:
+                usage.append(model_usage)
             if not calls:
-                if choice.finish_reason != "stop":
-                    raise RuntimeError(f"Model did not finish: {choice.finish_reason}")
                 await hook("after_run", messages=history, usage=usage)
                 return
             for call in calls:

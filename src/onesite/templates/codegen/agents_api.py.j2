@@ -1,6 +1,8 @@
 """Owner-scoped conversations and bounded background agent turns."""
 import asyncio
 import logging
+import json
+from time import monotonic
 import os
 from datetime import timedelta
 from uuid import uuid4
@@ -8,6 +10,7 @@ from types import SimpleNamespace
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.encoders import jsonable_encoder
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy import delete, update
 from sqlmodel import select, func
@@ -67,6 +70,10 @@ async def finish(id, run_id, error=None):
             await session.rollback()
             return
         history = await rows(session, id)
+        for message in history:
+            if message.details.get("streaming"):
+                message.details = {**message.details, "streaming": False, "interrupted": True}
+                session.add(message)
         pending = {}
         for message in history:
             for call in message.payload.get("tool_calls", []):
@@ -147,6 +154,42 @@ async def get_session(id: str, user: User = Depends(deps.get_current_user)):
         return encoded
 
 
+@router.get("/sessions/{id}/events")
+async def session_events(id: str, request: Request, user: User = Depends(deps.get_current_user),
+                         auth_session: AsyncSession = Depends(db.get_session)):
+    # Authenticate before sending headers; never put credentials in the event URL.
+    await get_session(id, user)
+    # Release the authentication dependency connection for this long-lived response.
+    await auth_session.close()
+
+    async def events():
+        previous = None
+        heartbeat = monotonic()
+        while not await request.is_disconnected():
+            try:
+                async with AsyncSession(db.engine) as session:
+                    current_user = await session.get(User, user.id)
+                    if not current_user or not current_user.is_active:
+                        break
+                data = await get_session(id, current_user)
+            except HTTPException:
+                break
+            serialized = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+            if serialized != previous:
+                yield f"event: session\ndata: {serialized}\n\n"
+                previous = serialized
+                heartbeat = monotonic()
+            elif monotonic() - heartbeat > 15:
+                yield ": keepalive\n\n"
+                heartbeat = monotonic()
+            # Durable snapshots work across workers and recover automatically on reconnect.
+            await asyncio.sleep(0.1 if data["status"] == "running" else 1)
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={
+        "Cache-Control": "no-cache, no-transform", "X-Accel-Buffering": "no",
+    })
+
+
 async def execute_turn(app, authorization, user, item, run_id, config):
     async def check():
         async with AsyncSession(db.engine) as session:
@@ -155,7 +198,10 @@ async def execute_turn(app, authorization, user, item, run_id, config):
                     or current.status != "running" or current.expires_at < now()):
                 raise AgentBlocked("Execution stopped")
 
+    partial_id = None
+
     async def emit(payload, metadata):
+        nonlocal partial_id
         async with AsyncSession(db.engine, expire_on_commit=False) as session:
             # Lock the conversation via a conditional write before sequencing messages.
             result = await session.execute(update(AgentSession).where(
@@ -172,9 +218,37 @@ async def execute_turn(app, authorization, user, item, run_id, config):
                     **parent.details.get("calls", {}), metadata["call_id"]: metadata,
                 }}
                 session.add(parent)
+            elif partial_id is not None and payload.get("role") == "assistant":
+                message = await session.get(AgentMessage, partial_id)
+                message.payload = payload
+                message.details = {**metadata, "run_id": run_id, "streaming": False}
+                session.add(message)
+                partial_id = None
             else:
                 session.add(AgentMessage(session_id=item.id, seq=history[-1].seq + 1,
                     payload=payload, details={**metadata, "run_id": run_id}))
+            await session.commit()
+
+    async def emit_partial(payload):
+        nonlocal partial_id
+        async with AsyncSession(db.engine, expire_on_commit=False) as session:
+            result = await session.execute(update(AgentSession).where(
+                AgentSession.id == item.id, AgentSession.active_run_id == run_id,
+                AgentSession.status == "running", AgentSession.cancel_requested.is_(False),
+                AgentSession.expires_at > now(),
+            ).values(updated_at=now()))
+            if not result.rowcount:
+                raise AgentBlocked("Execution stopped")
+            if partial_id is None:
+                seq = (await session.exec(select(func.max(AgentMessage.seq)).where(
+                    AgentMessage.session_id == item.id))).one() or 0
+                message = AgentMessage(session_id=item.id, seq=seq + 1, payload=payload,
+                    details={"run_id": run_id, "streaming": True})
+                partial_id = message.id
+            else:
+                message = await session.get(AgentMessage, partial_id)
+                message.payload = payload
+            session.add(message)
             await session.commit()
 
     context = AgentContext(user=user, session_id=item.id, run_id=run_id)
@@ -194,7 +268,7 @@ async def execute_turn(app, authorization, user, item, run_id, config):
             run_started = True
             await asyncio.wait_for(run_agent(client=client, config=config, messages=history,
                 registry=registry, context=context, emit=emit, check=check,
-                hooks=hooks), timeout=config["timeout_seconds"])
+                hooks=hooks, emit_partial=emit_partial), timeout=config["timeout_seconds"])
         await finish(item.id, run_id)
     except asyncio.CancelledError:
         await finish(item.id, run_id, "Execution stopped")
