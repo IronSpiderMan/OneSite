@@ -1,0 +1,564 @@
+/* OneSite's arco theme: HSL 204/100/45 primary, 210/20/98 canvas,
+   214/20/91 borders and 0.375rem corners. Actual controls come from Arco. */
+body {
+  --primary-1: 232, 246, 255;
+  --primary-2: 191, 231, 255;
+  --primary-3: 140, 207, 250;
+  --primary-4: 89, 183, 245;
+  --primary-5: 41, 160, 238;
+  --primary-6: 0, 138, 230;
+  --primary-7: 0, 110, 195;
+  --primary-8: 0, 84, 160;
+  --primary-9: 0, 61, 125;
+  --primary-10: 0, 43, 90;
+  --border-radius-small: 4px;
+  --border-radius-medium: 6px;
+  --color-bg-1: #f9fafb;
+  --color-bg-2: #fff;
+  --color-border-2: #e4e9ee;
+  --color-text-1: #212b31;
+  --color-text-2: #4e5969;
+  --color-text-3: #7b8494;
+  margin: 0;
+  background: #f9fafb;
+  color: var(--color-text-1);
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    "PingFang SC",
+    sans-serif;
+}
+* {
+  box-sizing: border-box;
+}
+.studio-layout {
+  min-height: 100vh;
+}
+.studio-sider {
+  position: fixed;
+  inset: 0 auto 0 0;
+  z-index: 10;
+  border-right: 1px solid #e4e9ee;
+  background: #fff;
+}
+.studio-sider .arco-layout-sider-children {
+  display: flex;
+  flex-direction: column;
+}
+.brand {
+  height: 72px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 22px;
+  border-bottom: 1px solid #f2f3f5;
+}
+.brand .arco-avatar {
+  background: rgb(var(--primary-6));
+  font-size: 23px;
+}
+.brand h5.arco-typography {
+  margin: 0;
+  font-size: 18px;
+  letter-spacing: -0.5px;
+}
+.brand h5 .arco-typography {
+  font-size: 12px;
+  font-weight: 400;
+  margin-left: 4px;
+}
+.project-picker {
+  padding: 22px 16px 16px;
+  display: grid;
+  gap: 10px;
+}
+.section-caption {
+  font-size: 12px;
+  letter-spacing: 1px;
+}
+.studio-sider .arco-menu {
+  padding: 0 8px;
+  background: transparent;
+}
+.studio-sider .arco-menu-item {
+  margin-bottom: 6px;
+}
+.sidebar-footer {
+  margin-top: auto;
+  padding: 20px;
+  border-top: 1px solid #f2f3f5;
+}
+.sidebar-footer .arco-typography {
+  font-size: 11px;
+  margin: 10px 0;
+  overflow-wrap: anywhere;
+}
+.studio-body {
+  margin-left: 232px;
+  min-width: 0;
+}
+.studio-header {
+  height: 72px;
+  background: rgba(255, 255, 255, 0.97);
+  border-bottom: 1px solid #e4e9ee;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 28px;
+  position: sticky;
+  top: 0;
+  z-index: 9;
+  gap: 16px;
+}
+.studio-content {
+  padding: 26px 28px 48px;
+}
+.workspace-spin {
+  display: block;
+  width: 100%;
+}
+.workspace-spin > .arco-spin-children {
+  min-width: 0;
+}
+.page-content {
+  max-width: 1480px;
+  margin: 0 auto;
+}
+.busy-content {
+  pointer-events: none;
+}
+.page-heading.arco-page-header {
+  padding: 0 0 24px;
+}
+.page-heading .arco-page-header-title {
+  font-size: 24px;
+  letter-spacing: -0.6px;
+}
+.page-heading .arco-page-header-head {
+  gap: 15px;
+}
+.page-heading .arco-page-header-divider {
+  display: none;
+}
+.page-heading .arco-page-header-heading {
+  flex-wrap: wrap;
+}
+.page-heading .arco-page-header-sub-title {
+  margin-left: 0;
+  margin-top: 5px;
+  font-size: 13px;
+  color: var(--color-text-3);
+}
+.page-heading .arco-page-header-head-main {
+  align-items: flex-start;
+  flex-direction: column;
+}
+.page-heading .arco-page-header-head-wrapper {
+  padding: 0;
+}
+.arco-card {
+  border-radius: 6px;
+  border-color: #e4e9ee;
+  box-shadow: 0 1px 2px rgb(31 56 88 / 3%);
+}
+.arco-card-header {
+  border-bottom-color: #f0f2f5;
+}
+.arco-card-header-title {
+  font-weight: 600;
+}
+.arco-card .arco-card {
+  box-shadow: none;
+}
+.overview-card {
+  border: 1px solid #e4e9ee;
+}
+.overview-card > .arco-card-body {
+  padding: 30px;
+}
+.overview-intro {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+.overview-intro h3.arco-typography {
+  margin: 20px 0 12px;
+  font-size: 26px;
+  letter-spacing: -0.5px;
+}
+.overview-intro .arco-typography {
+  margin-bottom: 16px;
+}
+.hero-icon.arco-avatar {
+  flex: none;
+  background: rgb(var(--primary-1));
+  color: rgb(var(--primary-6));
+  font-size: 38px;
+  margin: 8px 4px;
+}
+.statistics {
+  display: flex;
+  gap: 80px;
+  margin: 20px 0 28px;
+}
+.statistics .arco-statistic-value {
+  font-size: 29px;
+}
+.statistics .arco-statistic-title {
+  color: var(--color-text-3);
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+.workspace-path {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: #f7f9fb;
+  padding: 14px 16px;
+  border-radius: 4px;
+  color: #86909c;
+}
+.workspace-path .arco-typography {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.overview-actions {
+  margin-top: 24px;
+}
+.feature-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 18px;
+  margin: 20px 0;
+}
+.feature-card .arco-card-body {
+  padding: 24px;
+}
+.feature-icon.arco-avatar {
+  background: rgb(var(--primary-1));
+  color: rgb(var(--primary-6));
+  font-size: 22px;
+}
+.feature-card h6.arco-typography {
+  margin: 18px 0 10px;
+}
+.feature-card .arco-typography {
+  font-size: 13px;
+}
+.feature-card .arco-btn {
+  padding: 0;
+}
+.workflow-card .arco-steps {
+  padding: 8px 0;
+}
+.draft-note.arco-typography {
+  margin: 18px 0 0;
+  font-size: 12px;
+}
+.editor-layout {
+  display: grid;
+  grid-template-columns: 216px minmax(0, 1fr);
+  gap: 20px;
+  align-items: start;
+}
+.editor-main {
+  min-width: 0;
+}
+.editor-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 18px;
+  min-height: 32px;
+}
+.editor-toolbar code {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+.file-panel {
+  position: sticky;
+  top: 94px;
+}
+.file-panel .arco-menu {
+  max-height: 68vh;
+  overflow: auto;
+  margin-top: 12px;
+}
+.file-panel .arco-menu-inner {
+  padding: 0;
+}
+.file-panel .arco-menu-item {
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  line-height: 38px;
+  font-size: 12px;
+}
+.file-panel .arco-menu-item .arco-typography {
+  margin: 0;
+  min-width: 0;
+  color: inherit;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+.form-grid.three {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+.form-grid .arco-form-item {
+  min-width: 0;
+}
+.arco-form-layout-vertical > .arco-form-item:last-child {
+  margin-bottom: 0;
+}
+.field-name.arco-btn {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-weight: 500;
+  padding: 0;
+}
+.arco-drawer {
+  max-width: calc(100vw - 24px);
+}
+.field-drawer .arco-drawer-content {
+  padding: 24px;
+}
+.field-flags {
+  margin: 0 0 24px;
+}
+.subcard {
+  margin-bottom: 20px;
+}
+.subcard > .arco-card-body {
+  padding: 14px 18px;
+}
+.subcard .arco-table-th {
+  font-size: 12px;
+}
+.schema-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px 24px;
+}
+.schema-entry {
+  padding-bottom: 18px;
+  border-bottom: 1px solid #f0f2f5;
+  min-width: 0;
+}
+.schema-label {
+  display: flex;
+  margin-bottom: 12px;
+}
+.schema-label code {
+  font-size: 12px;
+  word-break: break-word;
+}
+.schema-label > .arco-space-item:last-child {
+  margin-left: auto;
+}
+.schema-default {
+  width: 100%;
+  justify-content: space-between;
+}
+.schema-default > .arco-space-item:first-child {
+  min-width: 0;
+  max-width: 75%;
+}
+.schema-actions {
+  display: flex;
+  margin-top: 6px;
+}
+.schema-actions .arco-btn {
+  font-size: 11px;
+  padding: 0 6px;
+}
+.studio-code,
+.studio-code.arco-textarea,
+.studio-code .arco-textarea {
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace !important;
+  font-size: 12px !important;
+  line-height: 1.8 !important;
+  tab-size: 4;
+}
+.source-card .arco-textarea {
+  background: #fbfcfe;
+  border-color: #e4e9ee;
+  min-height: 440px;
+}
+.json-editor .arco-textarea {
+  background: #fbfcfe;
+}
+.editor-error {
+  display: block;
+  font-size: 11px;
+  margin-top: 5px;
+}
+.no-margin {
+  margin: 0 !important;
+}
+.dialog-command {
+  margin: 20px 0;
+}
+.dialog-error,
+.global-error {
+  margin: 0 0 18px;
+}
+.dialog-error {
+  margin-top: 18px;
+  margin-bottom: 0;
+}
+.arco-alert-content,
+.arco-modal-content {
+  overflow-wrap: anywhere;
+}
+.terminal-toolbar {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  margin: 22px 0 12px;
+}
+.terminal {
+  background: #17212f;
+  border: 1px solid #26354a;
+  border-radius: 6px;
+  min-height: 320px;
+  max-height: 56vh;
+  padding: 20px;
+  overflow: auto;
+}
+.terminal .arco-typography {
+  color: #d5e3f2;
+  font:
+    12px/1.85 ui-monospace,
+    SFMono-Regular,
+    Consolas,
+    monospace;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.empty-card,
+.loading-card {
+  text-align: center;
+  padding: 60px 25px;
+}
+.empty-card .arco-empty {
+  margin-bottom: 22px;
+}
+.mobile-nav.arco-btn,
+.mobile-project {
+  display: none;
+}
+@media (max-width: 1150px) {
+  .editor-layout {
+    grid-template-columns: 185px minmax(0, 1fr);
+    gap: 16px;
+  }
+  .schema-grid {
+    grid-template-columns: 1fr;
+  }
+  .form-grid.three {
+    grid-template-columns: 1fr 1fr;
+  }
+  .studio-content {
+    padding: 24px 20px;
+  }
+  .studio-header {
+    padding: 0 20px;
+  }
+  .header-context .desktop-tag {
+    display: none;
+  }
+  .editor-toolbar {
+    flex-wrap: wrap;
+  }
+  .statistics {
+    gap: 48px;
+  }
+}
+@media (max-width: 800px) {
+  .studio-sider {
+    display: none;
+  }
+  .studio-body {
+    margin-left: 0;
+  }
+  .studio-header {
+    padding: 12px 16px;
+    height: auto;
+    min-height: 64px;
+    flex-wrap: wrap;
+  }
+  .mobile-nav.arco-btn {
+    display: inline-flex;
+  }
+  .mobile-project {
+    display: flex;
+    gap: 10px;
+    padding: 12px 16px;
+    background: #fff;
+    border-bottom: 1px solid #e4e9ee;
+  }
+  .compact-project {
+    flex: 1;
+  }
+  .header-actions .arco-tag {
+    display: none;
+  }
+  .studio-content {
+    padding: 22px 16px;
+  }
+  .feature-grid,
+  .editor-layout,
+  .schema-grid {
+    grid-template-columns: 1fr;
+  }
+  .file-panel {
+    position: static;
+  }
+  .file-panel .arco-menu {
+    max-height: 165px;
+  }
+  .form-grid.three {
+    grid-template-columns: 1fr;
+  }
+  .page-heading .arco-page-header-head {
+    flex-wrap: wrap;
+  }
+  .overview-card > .arco-card-body {
+    padding: 22px;
+  }
+  .hero-icon {
+    display: none;
+  }
+  .statistics {
+    gap: 36px;
+  }
+  .overview-intro h3.arco-typography {
+    font-size: 23px;
+  }
+  .terminal-toolbar {
+    flex-wrap: wrap;
+  }
+  .feature-card .arco-card-body {
+    padding: 18px;
+  }
+  .hook-toolbar {
+    flex-wrap: wrap;
+  }
+  .hook-toolbar .arco-select {
+    max-width: 100%;
+  }
+  .workflow-card .arco-steps {
+    flex-wrap: wrap;
+  }
+}
