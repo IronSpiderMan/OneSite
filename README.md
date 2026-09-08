@@ -23,6 +23,15 @@ uv run pytest
 uv run ruff check src/onesite src/onesite_runtime tests
 ```
 
+## Local visual editor
+
+Run `site web` (or `.venv/bin/site web` in a development checkout) and open
+`http://127.0.0.1:8765`. Create projects under `projects/`, edit models, fields,
+permissions, hooks and `site_config.py`, then run Sync / Run with live logs.
+The editor uses Arco Design components styled to match OneSite's Arco theme. The standalone
+`python webui.py` entry point also remains available, with no frontend build step or CDN. See the
+[WebUI guide (Chinese)](docs/webui.md).
+
 ## Database migrations
 
 Use Alembic to evolve the schema: for an empty database, run `site db revision -m "initial"`, review the revision, then run `site db upgrade`. Adopt an existing database with matching models using `site db baseline` before changing the models. Keep migration history in `app/migrations/`; sync copies it into the deployment output. See the [migration and compatibility guide (Chinese)](docs/database-migrations.md).
@@ -548,6 +557,21 @@ Project utilities belong in `app/utils/` and are mirrored to
 `generated/backend/app/utils/`.
 
 ### Custom backend APIs, services, and CRUDs
+
+Put Python packages used by developer-owned backend code in
+`app/requirements.extra.txt`, one standard pip requirement per line.
+OneSite merges this file into the generated backend `requirements.txt`,
+deduplicated against its built-in dependencies, so it applies to both
+`site sync --install` and Docker builds:
+
+```text
+boto3>=1.35
+httpx>=0.27,<1
+```
+
+`site init` and `site create` generate the empty file by default. Keep it in
+`app/`; do not edit
+`generated/backend/requirements.txt`, which is regenerated on every sync.
 
 Keep developer-owned backend modules in `app/backend/api/`,
 `app/backend/services/`, and `app/backend/cruds/`. `site sync` mirrors them to

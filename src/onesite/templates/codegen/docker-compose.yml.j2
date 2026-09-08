@@ -11,6 +11,14 @@ services:
       - PROJECT_NAME={{ project_name }}
       - TIMEZONE={{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-{{ config.allowed_origins | tojson }}}
+      {% for agent_key, agent in config.get('agents', {}).items() %}
+      {% if loop.first %}
+      # Global LLM connection shared by all built-in agents.
+      - AGENT_BASE_URL=${AGENT_BASE_URL:-{{ agent.base_url }}}
+      - AGENT_MODEL=${AGENT_MODEL:-{{ agent.model }}}
+      - {{ agent.api_key_env }}=${{ '{' }}{{ agent.api_key_env }}:-}
+      {% endif %}
+      {% endfor %}
       {% if config.get('kafka') %}
       - KAFKA_BROKERS=${KAFKA_BROKERS:-{{ config.kafka.brokers | tojson }}}
       {% for callback in config.kafka.callbacks %}

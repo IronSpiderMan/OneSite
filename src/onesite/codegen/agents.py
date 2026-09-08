@@ -59,7 +59,7 @@ def validate_agents_config(config: dict) -> None:
                 expanded.extend(names)
             definition["model_tools"][model] = list(dict.fromkeys(expanded))
         for name in definition["custom_tools"]:
-            if not IDENTIFIER.fullmatch(name) or name == "__init__" or keyword.iskeyword(name):
+            if not IDENTIFIER.fullmatch(name) or name in {"__init__", "request_input"} or keyword.iskeyword(name):
                 raise SiteConfigError(f"Invalid custom agent tool: {name}")
         if len(set(definition["custom_tools"])) != len(definition["custom_tools"]):
             raise SiteConfigError("Duplicate custom agent tool")

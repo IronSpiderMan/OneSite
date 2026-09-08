@@ -59,10 +59,11 @@ def dereference(value, document, seen=()):
 
 
 class ToolRegistry:
-    def __init__(self, app, config, context, authorization, confirm=None):
+    def __init__(self, app, config, context, authorization, confirm=None, request_input=None):
         self.app, self.config, self.context = app, config, context
         self.authorization = authorization
         self.confirm = confirm
+        self.request_input = request_input
         self.tools = {}
         document = app.openapi()
         for model_name, operations in config["model_tools"].items():
@@ -110,6 +111,20 @@ class ToolRegistry:
             schema["additionalProperties"] = False
             self.tools[name] = {"schema": schema, "handler": handler,
                                 "description": inspect.getdoc(handler) or name}
+        self.tools["request_input"] = {
+            "input": True,
+            "description": "Ask the user to fill a form for missing or uncertain tool arguments. "
+                "Use an available tool_name, fields from its body (or root parameters if no body), "
+                "and partial arguments containing known values. Returns completed arguments; "
+                "does NOT execute or approve the target tool. Never invent unknown values.",
+            "schema": {"type": "object", "properties": {
+                "tool_name": {"type": "string"},
+                "title": {"type": "string", "minLength": 1, "maxLength": 200},
+                "fields": {"type": "array", "items": {"type": "string"},
+                           "minItems": 1, "maxItems": 30, "uniqueItems": True},
+                "arguments": {"type": "object"},
+            }, "required": ["tool_name", "title", "fields", "arguments"], "additionalProperties": False},
+        }
 
     async def user(self):
         async with AsyncSession(db.engine) as session:
@@ -122,11 +137,15 @@ class ToolRegistry:
             return user, role
 
     def permitted(self, tool, role):
+        if tool.get("input"):
+            return self.request_input is not None
         if "handler" in tool:
             return role in tool["handler"].agent_roles
         return all(p in tool["model"]["roles"].get(role, "") for p in tool["permission"])
 
     def requires_confirmation(self, name):
+        if name == "request_input":
+            return False
         setting = self.config.get("require_confirmation", False)
         operation = self.tools[name].get("operation")
         if isinstance(setting, bool):
@@ -174,9 +193,63 @@ class ToolRegistry:
         """Custom tools use the same whitelist, validation and identity boundary."""
         return await self.execute(f"{model}_{operation}", arguments)
 
+    async def input_form(self, arguments):
+        """Only registered, currently permitted schemas can become forms."""
+        _, role = await self.user()
+        tool = self.tools.get(arguments["tool_name"])
+        if tool is None or tool.get("input") or not self.permitted(tool, role):
+            raise AgentBlocked("Form target is unavailable or permission denied")
+        schema = self.schema(tool, role)
+        body = "body" in schema.get("properties", {})
+        fields_schema = schema["properties"]["body"] if body else schema
+        fields = arguments["fields"]
+        if set(fields) - fields_schema.get("properties", {}).keys():
+            raise AgentBlocked("Unknown or inaccessible form fields")
+        # Missing and uncertain values may be fixed by the form. Other parameters must be valid.
+        partial = copy.deepcopy(arguments["arguments"])
+        values = partial.setdefault("body", {}) if body else partial
+        if not isinstance(values, dict):
+            raise AgentBlocked("Form arguments must be an object")
+        for name in fields:
+            values.pop(name, None)
+        partial_schema = copy.deepcopy(schema)
+        editable = partial_schema["properties"]["body"] if body else partial_schema
+        editable["required"] = [name for name in editable.get("required", []) if name not in fields]
+        errors = Draft202012Validator(partial_schema).iter_errors(partial)
+        if any(errors):
+            raise AgentBlocked("Invalid known form parameters")
+        form_schema = {"type": "object", "properties": {
+            name: fields_schema["properties"][name] for name in fields
+        }, "required": [name for name in fields if name in fields_schema.get("required", [])],
+            "additionalProperties": False}
+        initial = arguments["arguments"].get("body", {}) if body else arguments["arguments"]
+        return {"kind": "form", "name": arguments["tool_name"], "title": arguments["title"],
+                "arguments": arguments["arguments"], "fields": fields, "schema": form_schema,
+                "initial": {name: initial[name] for name in fields if name in initial}, "body": body}
+
+    async def input_result(self, form, values):
+        # Recheck the target and its fields using today's permissions, not the saved schema alone.
+        current = await self.input_form({"tool_name": form["name"], "title": form["title"],
+            "arguments": form["arguments"], "fields": form["fields"]})
+        errors = list(Draft202012Validator(current["schema"]).iter_errors(values))
+        if errors:
+            raise AgentBlocked("Invalid form fields: " + ", ".join(
+                ".".join(map(str, error.path)) or "required fields" for error in errors[:5]))
+        arguments = copy.deepcopy(form["arguments"])
+        target = arguments.setdefault("body", {}) if current["body"] else arguments
+        for name in form["fields"]:
+            target.pop(name, None)
+        target.update(values)
+        await self.validate(form["name"], arguments)
+        return {"tool_name": form["name"], "arguments": arguments}
+
     async def execute(self, name, arguments):
         arguments = copy.deepcopy(arguments)
         await self.validate(name, arguments)
+        if name == "request_input":
+            form = await self.input_form(arguments)
+            values = await self.request_input(form)
+            return await self.input_result(form, values)
         if self.requires_confirmation(name):
             if self.confirm is None:
                 raise AgentBlocked("User confirmation is required")

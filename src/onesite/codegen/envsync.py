@@ -31,6 +31,20 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
         "FIRST_SUPERUSER": config.get("first_superuser", "admin@example.com"),
         "FIRST_SUPERUSER_PASSWORD": config.get("first_superuser_password", "admin"),
     }
+    preserve_only_keys = set()
+
+    # All built-in agents share one deployment-level LLM connection.  The API
+    # key is intentionally never sourced from site_config; create its selected
+    # environment key once and preserve any value supplied by the operator.
+    agents = config.get("agents", {})
+    if isinstance(agents, dict) and agents:
+        agent = next(iter(agents.values()))
+        if isinstance(agent, dict):
+            new_keys["AGENT_BASE_URL"] = agent.get("base_url")
+            new_keys["AGENT_MODEL"] = agent.get("model")
+            api_key_env = agent.get("api_key_env", "AGENT_API_KEY")
+            if isinstance(api_key_env, str) and api_key_env:
+                preserve_only_keys.add(api_key_env)
 
     # ``extra`` is the generic escape hatch for backend settings. Keep every
     # entry available for runtime overrides instead of only baking the values
@@ -102,6 +116,14 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
 
     for key, val in new_keys.items():
         updated_lines.append(f"{key}={_env_value(val)}")
+
+    existing_keys = {
+        line.split("=", 1)[0].strip()
+        for line in updated_lines
+        if "=" in line and not line.startswith("#")
+    }
+    for key in sorted(preserve_only_keys - existing_keys):
+        updated_lines.append(f"{key}=")
 
     write_file_with_status(backend_env, "\n".join(updated_lines))
 

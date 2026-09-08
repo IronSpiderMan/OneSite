@@ -54,6 +54,7 @@ newproject/
 test_project/
 myproject/
 myapp/
+projects/
 
 # Logs
 *.log

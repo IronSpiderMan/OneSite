@@ -441,7 +441,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     setGotoPageInput(String(storePage));
   }, [storePage]);
 
-  const handleCreate = () => {
+  const handleCreate = async () => {
     {% if model.page_edit %}
     navigate('/{{ model.module_name }}s/new');
     {% else %}
@@ -465,8 +465,29 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     setValue('{{ rfk.write_name }}', []);
     {% endif %}
     {% endfor %}
-    setIsModalOpen(true);
     Object.entries(fixedFields).forEach(([field, value]) => setValue(field, value));
+    // Embedded child forms receive foreign-key defaults from their parent.
+    // Resolve those defaults before opening so SearchableSelect renders its label,
+    // instead of falling back to the numeric id until the user opens it.
+    await Promise.all([
+    {% for field in model.fields %}
+    {% if field.fk_info %}
+      (async () => {
+        const fixedValue = fixedFields['{{ field.name }}'];
+        if (fixedValue === undefined || fixedValue === null || fixedValue === '') return;
+        try {
+          const fkItem = await get{{ field.fk_info.target_model }}(fixedValue);
+          if (fkItem) {
+            set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: fkItem.{{ field.fk_info.label_field }} || String(fkItem.id) });
+          }
+        } catch (error) {
+          console.error(error);
+        }
+      })(),
+    {% endif %}
+    {% endfor %}
+    ]);
+    setIsModalOpen(true);
     {% endif %}
   };
 
@@ -1130,8 +1151,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% endif %}
       {% endfor %}
       {% if ns.search_field_count %}
-      <div className="{% if ns.search_field_count > 1 or embedded %}rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40{% else %}w-full max-w-sm{% endif %}">
-        {% if ns.search_field_count > 1 or embedded %}
+      <div className={% if ns.search_field_count > 1 %}"rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40"{% else %}{embedded ? 'rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40' : 'w-full max-w-sm'}{% endif %}>
+        {% if ns.search_field_count > 1 %}
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           {% if ns.search_field_count > 1 %}
           <div className="text-xs font-semibold uppercase tracking-[0.1em] text-muted-foreground">{t('common.filters', 'Filters')}</div>
@@ -1162,17 +1183,42 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </div>
         </div>
         {% endif %}
+        {% if ns.search_field_count <= 1 %}
+        {embedded && (
+        <div className="flex justify-end gap-2">
+          {hasPermission('c') && (
+            <Button size="sm" onClick={handleCreate}>
+              <Plus className="mr-1 h-3 w-3" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+            </Button>
+          )}
+          {% if model.has_embedded_page %}
+          {allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setAttachExistingIds([]);
+                setAttachExistingOpen(true);
+              }}
+            >
+              <Plus className="mr-1 h-3 w-3" /> {t('common.add_existing', 'Add existing')}
+            </Button>
+          )}
+          {% endif %}
+        </div>
+        )}
+        {% endif %}
+        <div className={% if ns.search_field_count > 1 %}"mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2"{% else %}{embedded ? 'mt-4' : ''}{% endif %}>
         {% if ns.search_field_count > 1 %}
-        <div className="mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2">
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {% endif %}
           {% for field in model.fields %}
 {% include 'frontend_list_filter_control.tsx.j2' %}
           {% endfor %}
-          {% if ns.search_field_count > 1 %}
+        {% if ns.search_field_count > 1 %}
           </div>
-        </div>
         {% endif %}
+        </div>
       </div>
       {% elif embedded %}
       {/* Embedded mode: action buttons when no search fields */}

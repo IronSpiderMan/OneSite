@@ -31,32 +31,64 @@ INTEGRATION_BACKEND_DEPENDENCIES: Dict[str, List[str]] = {
 }
 
 
+def _requirement_name(requirement: str) -> str | None:
+    """Return a normalized package name for ordinary requirement lines."""
+    value = requirement.strip()
+    if not value or value.startswith(("#", "-")):
+        return None
+    match = re.match(r"[A-Za-z0-9][A-Za-z0-9._-]*", value)
+    if not match:
+        return None
+    return re.sub(r"[-_.]+", "-", match.group(0)).lower()
+
+
+def _append_missing_requirements(requirements_path: Path, dependencies: List[str]) -> None:
+    """Append dependency lines absent from the generated requirements file."""
+    requirements = requirements_path.read_text(encoding="utf-8").splitlines()
+    existing_names = {
+        name for requirement in requirements if (name := _requirement_name(requirement))
+    }
+    existing_lines = {requirement.strip() for requirement in requirements}
+    missing = []
+    for dependency in dependencies:
+        normalized = dependency.strip()
+        if not normalized or normalized.startswith("#"):
+            continue
+        name = _requirement_name(normalized)
+        if normalized in existing_lines or (name is not None and name in existing_names):
+            continue
+        missing.append(normalized)
+        existing_lines.add(normalized)
+        if name is not None:
+            existing_names.add(name)
+    if missing:
+        write_file_with_status(
+            requirements_path,
+            "\n".join([*requirements, *missing]) + "\n",
+        )
+
+
 def _sync_integration_requirements(
     requirements_path: Path,
     site_config: Dict[str, Any],
 ) -> None:
     """Append client libraries required by enabled backend integrations."""
-    requirements = requirements_path.read_text(encoding="utf-8").splitlines()
-    enabled_dependencies = [
+    dependencies = [
         dependency
-        for integration, dependencies in INTEGRATION_BACKEND_DEPENDENCIES.items()
+        for integration, integration_dependencies in INTEGRATION_BACKEND_DEPENDENCIES.items()
         if site_config.get(integration)
-        for dependency in dependencies
+        for dependency in integration_dependencies
     ]
-    existing_dependencies = {
-        re.split(r"[\s\[<>=!~;]", requirement, maxsplit=1)[0].lower()
-        for requirement in requirements
-        if requirement and not requirement.startswith("#")
-    }
-    missing_dependencies = [
-        dependency
-        for dependency in enabled_dependencies
-        if dependency.lower() not in existing_dependencies
-    ]
-    if missing_dependencies:
-        write_file_with_status(
+    _append_missing_requirements(requirements_path, dependencies)
+
+
+def _sync_project_extra_requirements(cwd: Path, requirements_path: Path) -> None:
+    """Merge developer-owned backend dependency declarations when present."""
+    source = get_project_paths(cwd).source / "requirements.extra.txt"
+    if source.exists():
+        _append_missing_requirements(
             requirements_path,
-            "\n".join([*requirements, *missing_dependencies]) + "\n",
+            source.read_text(encoding="utf-8").splitlines(),
         )
 
 
@@ -771,6 +803,7 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
     if template_requirements.exists():
         copy_file_with_status(template_requirements, target_requirements)
         _sync_integration_requirements(target_requirements, site_config)
+        _sync_project_extra_requirements(cwd, target_requirements)
 
     template_backend_dockerfile = template_backend_root / "Dockerfile"
     target_backend_dockerfile = backend_path / "Dockerfile"

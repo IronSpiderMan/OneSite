@@ -657,6 +657,7 @@ class AgentConfig(_StrictConfigModel):
     roles: list[Role] = Field(default_factory=lambda: ["admin", "developer"])
     max_steps: int = Field(default=20, ge=1, le=100)
     timeout_seconds: int = Field(default=120, ge=1, le=3600)
+    user_input_timeout_seconds: int = Field(default=1800, ge=1, le=86400)
     model_tools: dict[str, list[str]] = Field(default_factory=dict)
     custom_tools: list[str] = Field(default_factory=list)
     # True confirms writes/custom tools; lists select operations or exact tool names.

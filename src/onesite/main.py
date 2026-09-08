@@ -26,6 +26,45 @@ app = typer.Typer(
 console = Console()
 
 
+def _webui_script() -> Path:
+    """Find the bundled editor, or its standalone source in an editable checkout."""
+    packaged = Path(__file__).with_name("_webui.py")
+    if packaged.is_file():
+        return packaged
+    standalone = Path(__file__).resolve().parents[2] / "webui.py"
+    if standalone.is_file():
+        return standalone
+    raise FileNotFoundError("WebUI is missing. Reinstall OneSite with the bundled webui.py.")
+
+
+@app.command()
+def web(
+    port: int = typer.Option(8765, "--port", min=0, max=65535, help="Local WebUI port"),
+    projects_dir: Path | None = typer.Option(
+        None, "--projects-dir", help="Project storage directory (default: ./projects)"
+    ),
+    python: Path | None = typer.Option(
+        None, "--python", help="Python executable used by WebUI to invoke OneSite"
+    ),
+    no_browser: bool = typer.Option(False, "--no-browser", help="Do not open a browser automatically"),
+):
+    """Start the local OneSite Studio visual editor."""
+    try:
+        command = [sys.executable, str(_webui_script()), "--port", str(port)]
+        if projects_dir is not None:
+            command.extend(["--projects-dir", str(projects_dir)])
+        if python is not None:
+            command.extend(["--python", str(python)])
+        if no_browser:
+            command.append("--no-browser")
+        # Replace the CLI process so signals reach the editor directly and its
+        # shutdown handler can finish cleaning up running project commands.
+        os.execv(sys.executable, command)
+    except OSError as exc:
+        console.print(f"[bold red]Unable to start WebUI:[/bold red] {exc}")
+        raise typer.Exit(code=1) from exc
+
+
 def _npm_executable() -> str | None:
     """Return the npm executable, accounting for npm.cmd on Windows."""
     return shutil.which("npm.cmd") if os.name == "nt" else shutil.which("npm")
@@ -111,6 +150,7 @@ def _ensure_custom_backend_source(source_dir: Path) -> None:
         directory = source_dir / "backend" / name
         directory.mkdir(parents=True, exist_ok=True)
         (directory / "__init__.py").touch(exist_ok=True)
+    (source_dir / "requirements.extra.txt").touch(exist_ok=True)
 
 
 def _desktop_config_defaults(project_name: str) -> dict[str, object]:

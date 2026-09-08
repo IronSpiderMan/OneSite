@@ -32,6 +32,14 @@ uv run ruff check src/onesite src/onesite_runtime tests
 
 日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.py` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
 
+## 本地可视化编辑器
+
+运行 `site web`（源码开发环境可用 `.venv/bin/site web`），访问
+`http://127.0.0.1:8765`。可在网页中创建 `projects/<项目名>`、设计模型与字段、配置
+`__onesite__` / `site_config.py`、编写 Hook，并执行 Sync / Run 和查看日志。
+界面全部使用 Arco Design 组件，风格与 OneSite 的 Arco 主题一致。
+也可继续运行独立的 `python webui.py`，不需要前端构建或连接 CDN。详见 [WebUI 使用说明](docs/webui.md)。
+
 ## 数据库迁移
 
 使用 Alembic 管理数据库结构：空库执行 `site db revision -m "initial"` 后检查迁移并运行 `site db upgrade`；旧库先用与现有结构匹配的模型执行 `site db baseline`。迁移源文件位于 `app/migrations/`，会随同步复制到部署目录。参见 [迁移、权限和同步说明](docs/database-migrations.md)。
@@ -676,6 +684,20 @@ from app.utils.formatting import format_alarm
 项目工具函数应放在 `app/utils/`，会同步到 `generated/backend/app/utils/`。
 
 ### 自定义后端 API、Service 与 CRUD
+
+自定义后端代码所需的 Python 包请写入
+`app/requirements.extra.txt`，每行一个标准 pip 依赖。OneSite 会将其与
+内置依赖去重后合并到生成的后端 `requirements.txt`，因此 `site sync --install`
+和 Docker 构建都会安装这些依赖：
+
+```text
+boto3>=1.35
+httpx>=0.27,<1
+```
+
+`site init` 和 `site create` 默认会创建这个空文件。请在 `app/` 中维护它，
+不要直接编辑每次同步都会覆盖的
+`generated/backend/requirements.txt`。
 
 开发者维护的后端模块放在 `app/backend/api/`、`app/backend/services/` 和
 `app/backend/cruds/`。执行 `site sync` 后，它们会分别镜像到：

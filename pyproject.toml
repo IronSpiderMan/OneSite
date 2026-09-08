@@ -45,6 +45,9 @@ site = "onesite.main:app"
 [tool.hatch.build.targets.wheel]
 packages = ["src/onesite", "src/onesite_runtime"]
 
+[tool.hatch.build.targets.wheel.force-include]
+"webui.py" = "onesite/_webui.py"
+
 [tool.hatch.build.targets.sdist]
 include = [
     "/src",
@@ -54,7 +57,10 @@ include = [
     "/README.zh-CN.md",
     "/LICENSE",
     "/pyproject.toml",
+    "/webui.py",
+    "/webui_frontend",
 ]
+exclude = ["/webui_frontend/node_modules", "/webui_frontend/dist"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

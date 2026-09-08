@@ -46,6 +46,15 @@ class Settings(BaseSettings):
     {% endfor %}
     {% endif %}
 
+    {% for agent_key, agent in config.get('agents', {}).items() %}
+    {% if loop.first %}
+    # Global LLM connection shared by all built-in agents
+    AGENT_BASE_URL: str = {{ agent.base_url | tojson }}
+    AGENT_API_KEY: Optional[str] = None
+    AGENT_MODEL: str = {{ agent.model | tojson }}
+    {% endif %}
+    {% endfor %}
+
     {% if config.extra %}
     # Custom extra config from site_config.json
     {% for key, value in config.extra.items() %}
