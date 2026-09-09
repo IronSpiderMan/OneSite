@@ -28,6 +28,7 @@ export interface SearchableSelectProps {
   valueLabels?: Record<string, string>
   multiple?: boolean
   disabled?: boolean
+  debounceMs?: number
   optionsKey?: string | number
 }
 
@@ -43,6 +44,7 @@ export function SearchableSelect({
   valueLabels,
   multiple = false,
   disabled = false,
+  debounceMs = 0,
   optionsKey
 }: SearchableSelectProps) {
   const [open, setOpen] = React.useState(false)
@@ -50,10 +52,14 @@ export function SearchableSelect({
   const [selectedItems, setSelectedItems] = React.useState<{ label: string; value: string | number }[]>([])
   const [options, setOptions] = React.useState<{ label: string; value: string | number; description?: string }[]>([])
   const [loading, setLoading] = React.useState(false)
+  const requestId = React.useRef(0)
+  React.useEffect(() => () => { requestId.current += 1 }, [])
   const previousOptionsKey = React.useRef(optionsKey)
 
   React.useEffect(() => {
     if (previousOptionsKey.current === optionsKey) return
+    requestId.current += 1
+    setLoading(false)
     previousOptionsKey.current = optionsKey
     setOptions([])
     setSelectedLabel("")
@@ -69,15 +75,18 @@ export function SearchableSelect({
 
   // Handle search with debounce
   const handleSearch = async (query: string) => {
+    const current = ++requestId.current
     setLoading(true)
+    await new Promise(resolve => setTimeout(resolve, debounceMs))
+    if (current !== requestId.current) return
     try {
       const results = await loadOptions(query)
-      setOptions(results)
+      if (current === requestId.current) setOptions(results)
     } catch (error) {
       console.error("Failed to load options:", error)
-      setOptions([])
+      if (current === requestId.current) setOptions([])
     } finally {
-      setLoading(false)
+      if (current === requestId.current) setLoading(false)
     }
   }
 
@@ -106,7 +115,7 @@ export function SearchableSelect({
             setSelectedItems([])
         }
     } else {
-        if (value) {
+        if (value !== undefined && value !== '') {
             const found = options.find(o => String(o.value) === String(value))
             const nextLabel = found?.label
                 || valueLabels?.[String(value)]
@@ -152,18 +161,20 @@ export function SearchableSelect({
   const handleClear = (e: React.MouseEvent | React.PointerEvent) => {
     e.stopPropagation()
     e.preventDefault()
+    if (disabled) return
     onValueChange('')
     setSelectedLabel('')
     onLabelChange?.('')
   }
 
-  const hasValue = !multiple && selectedLabel && value
+  const hasValue = !multiple && selectedLabel && value !== undefined && value !== ''
 
   return (
     <div className="relative min-w-0 w-full">
     <Popover open={open} onOpenChange={(nextOpen) => !disabled && setOpen(nextOpen)}>
       <PopoverTrigger asChild>
         <Button
+          type="button"
           variant="outline"
           role="combobox"
           aria-expanded={open}
@@ -236,7 +247,7 @@ export function SearchableSelect({
         </Command>
       </PopoverContent>
     </Popover>
-    {hasValue && (
+    {hasValue && !disabled && (
         <X
             className="absolute right-2 top-1/2 -translate-y-1/2 h-3.5 w-3.5 shrink-0 cursor-pointer text-muted-foreground hover:text-foreground z-10"
             onClick={handleClear}

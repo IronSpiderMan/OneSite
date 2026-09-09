@@ -1,3 +1,4 @@
+const formModelLabels: Record<string, { label_key: string; field_labels: Record<string, string> }> = {{ form_model_labels | default({}) | tojson }};
 {% raw %}
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
@@ -7,10 +8,13 @@ import rehypeHighlight from 'rehype-highlight';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Copy, History, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Square, Terminal, X, AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
 import request, { getBaseURL, getErrorMessage } from '../utils/request';
 
+import { SearchableSelect } from '../components/ui/searchable-select';
+
+type Relation = { path: string; label_field: string; parent_field?: string; filter_field?: string };
 type Agent = { key: string; title: string };
 type ToolCall = { id: string; function: { name: string; arguments: string } };
 type FieldSchema = { type?: string; title?: string; description?: string; format?: string; enum?: unknown[]; anyOf?: FieldSchema[]; default?: unknown; minimum?: number; maximum?: number; minLength?: number; maxLength?: number };
-type Interaction = { kind?: 'confirmation' | 'form'; name: string; arguments: unknown; title?: string; schema?: { properties: Record<string, FieldSchema>; required?: string[] }; initial?: Record<string, unknown>; values?: Record<string, unknown>; status: 'pending' | 'approved' | 'submitted' | 'rejected' | 'interrupted' };
+type Interaction = { ui?: { fields: Record<string, Relation> }; kind?: 'confirmation' | 'form'; name: string; arguments: unknown; title?: string; schema?: { properties: Record<string, FieldSchema>; required?: string[] }; initial?: Record<string, unknown>; values?: Record<string, unknown>; status: 'pending' | 'approved' | 'submitted' | 'rejected' | 'interrupted' };
 type Message = { id: string; payload: { role: string; content?: string | null; tool_calls?: ToolCall[]; tool_call_id?: string }; details: { success?: boolean; interrupted?: boolean; blocked?: string; arguments?: unknown; confirmations?: Record<string, Interaction>; interactions?: Record<string, Interaction> } };
 type Session = { id: string; title: string; agent_key: string; status: string; updated_at?: string; error?: string; cancel_requested: boolean; messages?: Message[] };
 
@@ -23,6 +27,54 @@ function interactions(message: Message): Record<string, Interaction> {
   return { ...message.details.confirmations, ...message.details.interactions };
 }
 
+function RelationInput({ relation, value, parent, disabled, readOnly = false, onChange, onValidity }: {
+  relation: Relation; value: string; parent?: unknown; disabled: boolean; readOnly?: boolean;
+  onChange: (value: string) => void; onValidity: (valid: boolean) => void;
+}) {
+  const { t } = useTranslation();
+  const [labels, setLabels] = useState<Record<string, string>>({});
+  const [error, setError] = useState('');
+  const [retry, setRetry] = useState(0);
+  const searchId = useRef(0);
+  useEffect(() => { searchId.current += 1; return () => { searchId.current += 1; }; }, [parent, retry]);
+  useEffect(() => {
+    let active = true;
+    setError('');
+    if (!value) { onValidity(true); return; }
+    onValidity(false);
+    request.get(`${relation.path}/${encodeURIComponent(value)}`, { suppressErrorToast: true }).then(response => {
+      if (!active) return;
+      const item = response.data;
+      if (relation.filter_field && parent !== undefined && parent !== null && parent !== '' && String(item[relation.filter_field]) !== String(parent)) throw new Error(t('agent.form_relation_invalid'));
+      setLabels(previous => ({ ...previous, [value]: String(item[relation.label_field] ?? value) }));
+      onValidity(true);
+    }).catch(e => { if (active) setError(getErrorMessage(e, t('agent.form_relation_invalid'))); });
+    return () => { active = false; };
+  }, [value, relation.path, relation.label_field, relation.filter_field, parent, retry]);
+  const loadOptions = async (query: string) => {
+    const current = ++searchId.current;
+    setError('');
+    try {
+      const params: Record<string, unknown> = { page: 1, size: 20 };
+      if (query) params[relation.label_field] = query;
+      if (relation.parent_field && relation.filter_field) params[relation.filter_field] = parent;
+      const response = await request.get(`${relation.path}/`, { params, suppressErrorToast: true });
+      return response.data.items.map((item: Record<string, unknown>) => ({
+        value: item.id as string | number, label: String(item[relation.label_field] ?? item.id), description: `ID: ${item.id}`,
+      }));
+    } catch (e) { if (current === searchId.current) setError(getErrorMessage(e, t('agent.form_relation_error'))); return []; }
+  };
+  return <div className="space-y-1.5">
+    {readOnly ? <span>{labels[value] ? `${labels[value]} (ID: ${value})` : value}</span> : <SearchableSelect
+      debounceMs={300} value={value} valueLabels={labels} loadOptions={loadOptions} optionsKey={`${parent ?? ''}:${retry}`}
+      placeholder={t('agent.form_select')} searchPlaceholder={t('common.search')} emptyText={t('agent.form_relation_empty')}
+      disabled={disabled || (!!relation.parent_field && (parent === undefined || parent === null || parent === ''))}
+      onValueChange={next => onChange(String(next))}
+    />}
+    {error && <div role="alert" className="text-xs text-destructive">{error} <button type="button" disabled={disabled} onClick={() => setRetry(n => n + 1)}>{t('agent.form_relation_retry')}</button></div>}
+  </div>;
+}
+
 function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled: boolean; onAnswer: (action: 'submit' | 'reject', values: Record<string, unknown>) => Promise<void> }) {
   const { t } = useTranslation();
   const properties = value.schema?.properties || {};
@@ -32,6 +84,35 @@ function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled
     const initial = value.initial?.[name] !== undefined ? value.initial[name] : schema.default;
     return [name, initial == null ? '' : schema.enum || schema.type === 'object' || schema.type === 'array' ? JSON.stringify(initial) : String(initial)];
   })));
+  const modelName = value.name.slice(0, value.name.lastIndexOf('_'));
+  const operation = value.name.slice(value.name.lastIndexOf('_') + 1);
+  const modelLabels = formModelLabels[modelName];
+  const fieldTitle = (name: string) => t(modelLabels?.field_labels[name] || '', { defaultValue: properties[name]?.title || name });
+  const titleKey = `agent.form_title_${operation}`;
+  const title = modelLabels && ['create', 'update', 'list', 'get', 'delete', 'bulk_delete', 'import'].includes(operation)
+    ? t(titleKey, { model: t(modelLabels.label_key, { defaultValue: modelName }) })
+    : value.title || t('agent.form_title');
+  const relations = value.ui?.fields || {};
+  const [validRelations, setValidRelations] = useState<Record<string, boolean>>({});
+  const initialArguments = value.arguments as { body?: Record<string, unknown> } & Record<string, unknown>;
+  const parentValue = (relation: Relation) => relation.parent_field
+    ? draft[relation.parent_field] ?? (initialArguments?.body || initialArguments)?.[relation.parent_field] : undefined;
+  const changeField = (name: string, next: string) => {
+    if ((draft[name] ?? '') === next) return;
+    setDraft(previous => {
+      const updated = { ...previous, [name]: next };
+      const changed = new Set([name]);
+      for (let i = 0; i < Object.keys(relations).length; i++) {
+        for (const [child, relation] of Object.entries(relations)) {
+          if (relation.parent_field && changed.has(relation.parent_field) && !changed.has(child)) {
+            updated[child] = ''; changed.add(child);
+          }
+        }
+      }
+      return updated;
+    });
+    if (relations[name]) setValidRelations(previous => ({ ...previous, [name]: !next }));
+  };
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const answer = async (action: 'submit' | 'reject') => {
@@ -41,6 +122,8 @@ function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled
     if (action === 'submit') {
       for (const [name, raw] of Object.entries(properties)) {
         const text = draft[name] ?? '';
+        if (relations[name] && text !== '' && !validRelations[name]) { setError(t('agent.form_invalid', { field: fieldTitle(name) })); return; }
+        if (relations[name] && text === '' && value.schema?.required?.includes(name) && !raw.anyOf?.some(item => item.type === 'null')) { setError(t('agent.form_invalid', { field: fieldTitle(name) })); return; }
         if (text === '' && raw.anyOf?.some(item => item.type === 'null')) { values[name] = null; continue; }
         if (text === '' && !value.schema?.required?.includes(name)) continue;
         const schema = normalize(raw);
@@ -50,7 +133,7 @@ function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled
             if (!text.trim() || !Number.isFinite(number)) throw new Error('Invalid number');
             values[name] = number;
           } else values[name] = schema.enum || ['object', 'array', 'boolean'].includes(schema.type || '') ? JSON.parse(text) : text;
-        } catch { setError(t('agent.form_invalid', { field: raw.title || name })); return; }
+        } catch { setError(t('agent.form_invalid', { field: fieldTitle(name) })); return; }
       }
     }
     setSubmitting(true);
@@ -58,8 +141,8 @@ function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled
     catch (e) { setError(getErrorMessage(e, t('agent.confirmation_error'))); }
     finally { setSubmitting(false); }
   };
-  return <section className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4 text-sm" aria-label={value.title || t('agent.form_title')}>
-    <p className="font-medium">{value.title || t('agent.form_title')}</p>
+  return <section className="space-y-3 rounded-xl border border-primary/40 bg-primary/5 p-4 text-sm" aria-label={title}>
+    <p className="font-medium">{title}</p>
     {value.status === 'pending' ? <form onSubmit={e => { e.preventDefault(); void answer('submit'); }} className="space-y-3">
       <fieldset disabled={disabled || submitting} className="space-y-3">
         {Object.entries(properties).map(([name, raw]) => {
@@ -68,13 +151,16 @@ function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled
           const choices = schema.enum || (schema.type === 'boolean' ? [true, false] : null);
           const className = 'w-full rounded-md border bg-background px-3 py-2 text-sm disabled:opacity-60';
           return <label key={name} className="block space-y-1.5">
-            <span>{raw.title || name}{required ? ' *' : ''}</span>
-            {choices ? <select className={className} value={draft[name] || ''} required={required} onChange={e => setDraft(previous => ({ ...previous, [name]: e.target.value }))}>
+            <span>{fieldTitle(name)}{required ? ' *' : ''}</span>
+            {relations[name] ? <RelationInput relation={relations[name]} value={draft[name] || ''} parent={parentValue(relations[name])}
+              disabled={disabled || submitting} onChange={next => changeField(name, next)}
+              onValidity={valid => setValidRelations(previous => previous[name] === valid ? previous : { ...previous, [name]: valid })}
+            /> : choices ? <select className={className} value={draft[name] || ''} required={required} onChange={e => changeField(name, e.target.value)}>
               <option value="">{t('agent.form_select')}</option>{choices.map((option, index) => <option key={index} value={JSON.stringify(option)}>{typeof option === 'boolean' ? t(option ? 'agent.form_yes' : 'agent.form_no') : String(option)}</option>)}
-            </select> : ['object', 'array'].includes(schema.type || '') ? <textarea className={className} rows={3} required={required} value={draft[name] || ''} onChange={e => setDraft(previous => ({ ...previous, [name]: e.target.value }))} /> : <input className={className} value={draft[name] || ''} required={required}
+            </select> : ['object', 'array'].includes(schema.type || '') ? <textarea className={className} rows={3} required={required} value={draft[name] || ''} onChange={e => changeField(name, e.target.value)} /> : <input className={className} value={draft[name] || ''} required={required}
               type={['integer', 'number'].includes(schema.type || '') ? 'number' : schema.format === 'date' ? 'date' : 'text'}
               step={schema.type === 'integer' ? 1 : 'any'} min={schema.minimum} max={schema.maximum} minLength={schema.minLength} maxLength={schema.maxLength}
-              onChange={e => setDraft(previous => ({ ...previous, [name]: e.target.value }))} />}
+              onChange={e => changeField(name, e.target.value)} />}
             {raw.description && <span className="block text-xs text-muted-foreground">{raw.description}</span>}
           </label>;
         })}
@@ -87,7 +173,7 @@ function InputCard({ value, disabled, onAnswer }: { value: Interaction; disabled
       {error && <p role="alert" className="text-sm text-destructive">{error}</p>}
     </form> : <>
       <p className="text-xs text-muted-foreground">{t(`agent.${value.status === 'submitted' ? 'form_submitted' : `confirmation_${value.status}`}`)}</p>
-      {value.status === 'submitted' && <dl className="space-y-2">{Object.entries(value.values || {}).map(([name, data]) => <div key={name}><dt className="text-xs text-muted-foreground">{properties[name]?.title || name}</dt><dd className="whitespace-pre-wrap break-words">{typeof data === 'string' ? data : JSON.stringify(data)}</dd></div>)}</dl>}
+      {value.status === 'submitted' && <dl className="space-y-2">{Object.entries(value.values || {}).map(([name, data]) => <div key={name}><dt className="text-xs text-muted-foreground">{fieldTitle(name)}</dt><dd className="whitespace-pre-wrap break-words">{relations[name] && data != null ? <RelationInput relation={relations[name]} value={String(data)} disabled={false} readOnly onChange={() => {}} onValidity={() => {}} /> : typeof data === 'string' ? data : JSON.stringify(data)}</dd></div>)}</dl>}
     </>}
   </section>;
 }

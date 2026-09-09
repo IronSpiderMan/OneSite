@@ -253,7 +253,9 @@ class ToolRegistry:
         initial = normalized.get("body", {}) if body else normalized
         return {"kind": "form", "name": arguments["tool_name"], "title": arguments["title"],
                 "arguments": normalized, "fields": fields, "schema": form_schema,
-                "initial": {name: initial[name] for name in fields if name in initial}, "body": body}
+                "initial": {name: initial[name] for name in fields if name in initial}, "body": body,
+                "ui": {"fields": {name: relation for name, relation in
+                    tool.get("model", {}).get("relations", {}).items() if name in fields}}}
 
     async def input_result(self, form, values):
         # Recheck the target and its fields using today's permissions, not the saved schema alone.

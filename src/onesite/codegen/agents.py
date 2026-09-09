@@ -138,7 +138,20 @@ def generate_agents(config: dict, models: list, cwd: Path, backend: Path) -> Non
                 names.add(name)
             metadata[model_name] = {
                 "path": f"/{model['module_name']}s",
+                "label_key": f"models.{model['module_name']}.name",
+                "field_labels": {f["name"]: f.get("label_key", f"models.{model['module_name']}.fields.{f['name']}")
+                                 for f in model["fields"]},
                 "roles": model["role_permissions"],
+                "relations": {
+                    f["name"]: {
+                        "path": f"/{fk['target_service']}s",
+                        "label_field": fk["label_field"],
+                        "parent_field": fk.get("cascade_parent_field"),
+                        "filter_field": fk.get("cascade_filter_field"),
+                    }
+                    for f in model["fields"]
+                    if (fk := f.get("fk_info"))
+                },
                 "fields": {
                     f["name"]: (
                         {role: "r" for role in ("user", "admin", "developer")}
@@ -202,6 +215,8 @@ def generate_agents(config: dict, models: list, cwd: Path, backend: Path) -> Non
     context = {
         "agents_json": json.dumps(agents, ensure_ascii=False),
         "models_json": json.dumps(metadata, ensure_ascii=False),
+        "form_model_labels": {name: {"label_key": model["label_key"], "field_labels": model["field_labels"]}
+                              for name, model in metadata.items()},
     }
     for template, path in outputs.items():
         generate_file(template, context, path)

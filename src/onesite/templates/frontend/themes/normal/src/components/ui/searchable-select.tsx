@@ -12,6 +12,7 @@ export interface SearchableSelectProps {
   defaultLabel?: string
   valueLabels?: Record<string, string>
   disabled?: boolean
+  debounceMs?: number
   optionsKey?: string | number
   multiple?: boolean
 }
@@ -27,6 +28,7 @@ export function SearchableSelect({
   valueLabels,
   multiple = false,
   disabled = false,
+  debounceMs = 0,
   optionsKey,
 }: SearchableSelectProps) {
   const [options, setOptions] = React.useState<{ label: string; value: string | number; description?: string }[]>([])
@@ -41,13 +43,17 @@ export function SearchableSelect({
   const search = React.useCallback(async (query: string) => {
     const current = ++requestId.current
     setLoading(true)
+    await new Promise(resolve => setTimeout(resolve, debounceMs))
+    if (current !== requestId.current) return
     try {
       const result = await loadOptions(query)
       if (current === requestId.current) setOptions(result)
     } finally {
       if (current === requestId.current) setLoading(false)
     }
-  }, [loadOptions])
+  }, [loadOptions, debounceMs])
+
+  React.useEffect(() => () => { requestId.current += 1 }, [])
 
   const mergedOptions = React.useMemo(() => {
     const seen = new Set(options.map((option) => String(option.value)))
