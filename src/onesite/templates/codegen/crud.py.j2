@@ -719,7 +719,7 @@ async def _enrich_with_fk_labels(
     if {{ fk.name }}_ids:
         from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
         stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
-        stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service }}")
+        stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service or fk.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
@@ -1292,7 +1292,7 @@ async def get_{{ m2m.target_endpoint }}(
     {{ fk_field.name }}_map = {}
     if {{ fk_field.name }}_ids:
         stmt = select({{ fk_field.target_model }}).where({{ fk_field.target_model }}.id.in_({{ fk_field.name }}_ids))
-        stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service }}")
+        stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service or fk_field.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
@@ -1410,7 +1410,7 @@ async def get_{{ rel.name }}(
     {{ fk_field.name }}_map = {}
     if {{ fk_field.name }}_ids:
         stmt = select({{ fk_field.target_model }}).where({{ fk_field.target_model }}.id.in_({{ fk_field.name }}_ids))
-        stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service }}")
+        stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service or fk_field.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)

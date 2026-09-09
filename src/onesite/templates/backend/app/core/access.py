@@ -72,6 +72,20 @@ def policy_for(key: str) -> dict:
     return POLICIES[key]
 
 
+def policy_key_for_model(model: Any, key: str) -> str:
+    """Resolve a missing generated policy key from the SQLModel table name.
+
+    FK label lookups must be permission-scoped too.  Older generated CRUD
+    modules can carry an empty relationship service name, while the target
+    model remains available.  The table name is the OneSite policy key by
+    convention, so it provides a safe compatibility fallback.
+    """
+    if key:
+        return key
+    table_name = getattr(model, "__tablename__", None)
+    return str(table_name) if table_name else ""
+
+
 def scope_statement(statement, model, key: str):
     """Apply target read permission and owner scope before pagination/counting."""
     user = current_actor.get()
@@ -111,6 +125,11 @@ async def require_relation(session, source: str, target: str, identity: Any):
 
 def scope_label_statement(statement, model, key: str):
     from sqlalchemy import false
+    key = policy_key_for_model(model, key)
+    if not key:
+        # Missing policy metadata must not turn a label enrichment query into
+        # a 500 response or disclose rows outside the caller's scope.
+        return statement.where(false())
     user = current_actor.get()
     if user is not None and "r" not in policy_for(key)["permissions"].get(role_of(user), ""):
         return statement.where(false())

@@ -116,13 +116,19 @@ class ToolRegistry:
             "description": "Ask the user to fill a form for missing or uncertain tool arguments. "
                 "Use an available tool_name, fields from its body (or root parameters if no body), "
                 "and partial arguments containing known values. Returns completed arguments; "
+                "arguments must preserve the target tool's parameter structure: for create use "
+                '{"body": {"name": "prefill"}}, for update use {"id": 1, "body": {"name": "prefill"}}. '
+                "fields contains body field names without a body. prefix. Omit unknown values. "
                 "does NOT execute or approve the target tool. Never invent unknown values.",
             "schema": {"type": "object", "properties": {
                 "tool_name": {"type": "string"},
                 "title": {"type": "string", "minLength": 1, "maxLength": 200},
                 "fields": {"type": "array", "items": {"type": "string"},
                            "minItems": 1, "maxItems": 30, "uniqueItems": True},
-                "arguments": {"type": "object"},
+                "arguments": {"type": "object", "description":
+                    "Partial target-tool arguments, including the body wrapper when present. "
+                    "Keep path/query parameters such as id at the root. Provide required values "
+                    "not requested in fields; requested fields may be omitted or prefilled."},
             }, "required": ["tool_name", "title", "fields", "arguments"], "additionalProperties": False},
         }
 
@@ -206,7 +212,18 @@ class ToolRegistry:
         if set(fields) - fields_schema.get("properties", {}).keys():
             raise AgentBlocked("Unknown or inaccessible form fields")
         # Missing and uncertain values may be fixed by the form. Other parameters must be valid.
-        partial = copy.deepcopy(arguments["arguments"])
+        normalized = copy.deepcopy(arguments["arguments"])
+        if body and "body" not in normalized:
+            # Only repair unambiguous body fields. Preserve root parameters and reject
+            # unknown/inaccessible fields through the normal permission-filtered schema.
+            root_names = schema["properties"].keys()
+            body_names = fields_schema.get("properties", {}).keys()
+            if any(name in root_names and name in body_names for name in normalized):
+                raise AgentBlocked("Ambiguous form parameters: put body fields in arguments.body "
+                                   "and keep path/query parameters at the root")
+            normalized["body"] = {name: normalized.pop(name)
+                                  for name in list(normalized) if name in body_names and name not in root_names}
+        partial = copy.deepcopy(normalized)
         values = partial.setdefault("body", {}) if body else partial
         if not isinstance(values, dict):
             raise AgentBlocked("Form arguments must be an object")
@@ -215,16 +232,27 @@ class ToolRegistry:
         partial_schema = copy.deepcopy(schema)
         editable = partial_schema["properties"]["body"] if body else partial_schema
         editable["required"] = [name for name in editable.get("required", []) if name not in fields]
-        errors = Draft202012Validator(partial_schema).iter_errors(partial)
-        if any(errors):
-            raise AgentBlocked("Invalid known form parameters")
+        errors = list(Draft202012Validator(partial_schema).iter_errors(partial))
+        if errors:
+            # Report locations and constraint names, never input values or raw validator messages.
+            details = []
+            for error in errors[:5]:
+                path = ".".join(["arguments", *map(str, error.path)])
+                if error.validator == "required":
+                    missing = [name for name in error.validator_value if name not in error.instance]
+                    details.append(path + ": missing required " + ", ".join(missing))
+                else:
+                    details.append(path + ": violates " + str(error.validator))
+            hint = (" Put body fields in arguments.body; keep path/query parameters at the root."
+                    if body else " Use the target tool's root parameters.")
+            raise AgentBlocked("Invalid known form parameters: " + "; ".join(details) + hint)
         form_schema = {"type": "object", "properties": {
             name: fields_schema["properties"][name] for name in fields
         }, "required": [name for name in fields if name in fields_schema.get("required", [])],
             "additionalProperties": False}
-        initial = arguments["arguments"].get("body", {}) if body else arguments["arguments"]
+        initial = normalized.get("body", {}) if body else normalized
         return {"kind": "form", "name": arguments["tool_name"], "title": arguments["title"],
-                "arguments": arguments["arguments"], "fields": fields, "schema": form_schema,
+                "arguments": normalized, "fields": fields, "schema": form_schema,
                 "initial": {name: initial[name] for name in fields if name in initial}, "body": body}
 
     async def input_result(self, form, values):

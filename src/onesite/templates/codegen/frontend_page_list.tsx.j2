@@ -1184,31 +1184,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         </div>
         {% endif %}
         {% if ns.search_field_count <= 1 %}
-        {embedded && (
-        <div className="flex justify-end gap-2">
-          {hasPermission('c') && (
-            <Button size="sm" onClick={handleCreate}>
-              <Plus className="mr-1 h-3 w-3" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
-            </Button>
-          )}
-          {% if model.has_embedded_page %}
-          {allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setAttachExistingIds([]);
-                setAttachExistingOpen(true);
-              }}
-            >
-              <Plus className="mr-1 h-3 w-3" /> {t('common.add_existing', 'Add existing')}
-            </Button>
-          )}
-          {% endif %}
-        </div>
-        )}
+        <div className={embedded ? 'flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between' : ''}>
+          <div className={embedded ? 'min-w-0 flex-1 sm:max-w-sm' : ''}>
         {% endif %}
-        <div className={% if ns.search_field_count > 1 %}"mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2"{% else %}{embedded ? 'mt-4' : ''}{% endif %}>
+        <div className={% if ns.search_field_count > 1 %}"mt-4 max-h-[40vh] overflow-y-auto overflow-x-hidden pr-2"{% else %}{embedded ? '' : ''}{% endif %}>
         {% if ns.search_field_count > 1 %}
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {% endif %}
@@ -1219,6 +1198,33 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </div>
         {% endif %}
         </div>
+        {% if ns.search_field_count <= 1 %}
+          </div>
+          {embedded && (
+          <div className="flex shrink-0 flex-wrap gap-2">
+            {hasPermission('c') && (
+              <Button size="sm" onClick={handleCreate}>
+                <Plus className="mr-1 h-3 w-3" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+              </Button>
+            )}
+            {% if model.has_embedded_page %}
+            {allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setAttachExistingIds([]);
+                  setAttachExistingOpen(true);
+                }}
+              >
+                <Plus className="mr-1 h-3 w-3" /> {t('common.add_existing', 'Add existing')}
+              </Button>
+            )}
+            {% endif %}
+          </div>
+          )}
+        </div>
+        {% endif %}
       </div>
       {% elif embedded %}
       {/* Embedded mode: action buttons when no search fields */}

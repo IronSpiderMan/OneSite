@@ -272,7 +272,7 @@ async def get_multi_with_fk_labels(
     if {{ fk.name }}_ids:
         from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
         stmt = select({{ fk.target_model }}).where({{ fk.target_model }}.id.in_({{ fk.name }}_ids))
-        stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service }}")
+        stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service or fk.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
             {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
