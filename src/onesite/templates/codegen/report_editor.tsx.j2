@@ -84,16 +84,47 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
   const [busy, setBusy] = useState(false);
   const [exporting, setExporting] = useState(false);
   const [preview, setPreview] = useState(false);
+  const [fullscreen, setFullscreen] = useState(false);
+  const [zoom, setZoom] = useState(0.65);
+  const workspace = useRef<HTMLDivElement>(null);
+  const changeZoom = (value: number) => setZoom(Math.min(2, Math.max(0.25, Math.round(value * 100) / 100)));
+  useEffect(() => {
+    const node = workspace.current;
+    if (!node) return;
+    const wheel = (event: WheelEvent) => {
+      if (!event.ctrlKey && !event.metaKey) return;
+      event.preventDefault();
+      setZoom((current) => Math.min(2, Math.max(0.25, current * Math.exp(-event.deltaY * 0.002))));
+    };
+    node.addEventListener('wheel', wheel, { passive: false });
+    return () => node.removeEventListener('wheel', wheel);
+  }, []);
+  useEffect(() => {
+    if (!fullscreen) return;
+    const previous = document.body.style.overflow;
+    const previousFullscreen = document.body.getAttribute('data-report-fullscreen');
+    document.body.setAttribute('data-report-fullscreen', 'true');
+    document.body.style.overflow = 'hidden';
+    const escape = (event: KeyboardEvent) => { if (event.key === 'Escape') setFullscreen(false); };
+    window.addEventListener('keydown', escape);
+    return () => {
+      document.body.style.overflow = previous;
+      if (previousFullscreen === null) document.body.removeAttribute('data-report-fullscreen');
+      else document.body.setAttribute('data-report-fullscreen', previousFullscreen);
+      window.removeEventListener('keydown', escape);
+    };
+  }, [fullscreen]);
   const [dragging, setDragging] = useState('');
   const [dropTarget, setDropTarget] = useState('');
   const [history, setHistory] = useState<ReportRow[][]>([]);
   const chartTrigger = useRef<HTMLButtonElement | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
+  const editCanvas = useRef<HTMLDivElement>(null);
   const generation = useRef(0);
   const pendingScroll = useRef('');
   useEffect(() => {
-    if (!pendingScroll.current || !canvas.current) return;
-    const target = Array.from(canvas.current.querySelectorAll<HTMLElement>('[data-block-id]')).find((node) => node.dataset.blockId === pendingScroll.current);
+    if (!pendingScroll.current || !editCanvas.current) return;
+    const target = Array.from(editCanvas.current.querySelectorAll<HTMLElement>('[data-block-id]')).find((node) => node.dataset.blockId === pendingScroll.current);
     target?.scrollIntoView({ block: 'nearest', behavior: 'smooth' }); pendingScroll.current = '';
   }, [rows]);
   const activeRow = rows.find((row) => row.blocks.some((block) => block.id === activeBlockId));
@@ -118,8 +149,7 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
     catch { setMessage(label('save_error', 'Could not save templates. Browser storage may be full or disabled.')); return false; }
   };
   const save = (copy: boolean) => {
-    if (!title.trim()) { setMessage(label('title_required', 'Enter a report title.')); return; }
-    const template = { id: copy || !selected ? reportId() : selected, title: title.trim(), subtitle, rows };
+    const template = { id: copy || !selected ? reportId() : selected, title: title.trim() || label('untitled', 'Untitled report') + ' ' + new Date().toLocaleString(), subtitle, rows };
     if (persist([...templates.filter((item) => item.id !== template.id), template])) {
       setTitle(template.title); setSelected(template.id); setMessage(label('saved', 'Template saved in this browser.'));
     }
@@ -209,7 +239,65 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
     <span /> <button disabled={locked} onClick={() => addRow('single', index, true)}><FileText className="h-3.5 w-3.5" />{label('new_sheet', 'New page')}</button>
   </div>;
   const selectBlock = (id: string) => { if (!preview && !draft && !exporting) setActiveBlockId(id); };
-  return <section className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm">
+  const renderPages = (preview: boolean) => (
+          <div ref={preview ? canvas : editCanvas} className="report-pages" aria-label={label('document', 'Report document')}>
+            {pages.map((pageRows, pageIndex) => <article key={pageIndex} className="report-document mx-auto">
+              {pageIndex === 0 && <header className="report-heading">
+                <div className="report-eyebrow">{label('report_label', 'DATA REPORT')}</div>
+                {!preview && <div data-editor-control className="report-title-editor">
+                  <input aria-label={label('title', 'Report title')} disabled={locked} placeholder={label('title', 'Report title')} value={title} onChange={(event) => setTitle(event.target.value)} />
+                  <input aria-label={label('subtitle', 'Subtitle / description')} disabled={locked} placeholder={label('subtitle', 'Subtitle / description')} value={subtitle} onChange={(event) => setSubtitle(event.target.value)} />
+                </div>}
+                {preview && <div><h1>{title || label('untitled', 'Untitled report')}</h1>{subtitle && <p className="report-subtitle">{subtitle}</p>}</div>}
+                <div className="report-meta"><span>{label('report_date', 'Report date')} · {new Date().toLocaleDateString()}</span><span>{pageIndex + 1} / {pages.length}</span></div>
+              </header>}
+              {!preview && insertionBar(pageRows.length ? rows.indexOf(pageRows[0]) : 0, true)}
+              {pageRows.map((row) => { const index = rows.indexOf(row); return <div key={row.id} data-report-row={row.id} className={`report-canvas-row ${dropTarget === row.id && dragging !== row.id ? 'report-drop-target' : ''} ${dragging === row.id ? 'opacity-40' : ''}`}>
+                {!preview && <>
+                <div data-editor-control className="report-row-tools">
+                  <button disabled={locked} onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); setDragging(row.id); }} onPointerMove={(event) => { if (!dragging) return; setDropTarget(document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-report-row]')?.dataset.reportRow || ''); }} onPointerUp={(event) => { if (!dragging) return; const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-report-row]')?.dataset.reportRow; if (target && !locked) commitRows(reorderReportRows(rows, row.id, target)); event.currentTarget.releasePointerCapture(event.pointerId); setDragging(''); setDropTarget(''); }} onPointerCancel={() => { setDragging(''); setDropTarget(''); }} className="touch-none cursor-grab select-none p-1 text-muted-foreground active:cursor-grabbing" aria-label={`${label('drag_row', 'Drag row')} ${index + 1}`}><GripVertical className="h-4 w-4" /></button>
+                  <span className="flex-1 text-xs font-medium">{label('row', 'Row')} {index + 1} · {layoutLabel(rowLayout(row))}</span>
+                  <div className="w-28"><Select disabled={locked} value={rowLayout(row)} onValueChange={(value) => commitRows(resizeReportRow(rows, row.id, value as ReportLayout))}><SelectTrigger aria-label={label('row_layout', 'Row layout')}><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(reportLayouts) as ReportLayout[]).map((layout) => <SelectItem key={layout} value={layout}>{layoutLabel(layout)}</SelectItem>)}</SelectContent></Select></div>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked || index === 0} aria-label={label('up', 'Move up')} title={label('up', 'Move up')} onClick={() => commitRows(reorderReportRows(rows, row.id, rows[index - 1].id))}><ArrowUp className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked || index === rows.length - 1} aria-label={label('down', 'Move down')} title={label('down', 'Move down')} onClick={() => commitRows(reorderReportRows(rows, row.id, rows[index + 1].id))}><ArrowDown className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked} aria-label={label('duplicate', 'Duplicate row')} title={label('duplicate', 'Duplicate row')} onClick={() => duplicateRow(row)}><Copy className="h-3.5 w-3.5" /></Button>
+                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked} aria-label={label('remove_row', 'Remove row')} title={label('remove_row', 'Remove row')} onClick={() => commitRows(removeReportRow(rows, row.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
+                </div>
+                </>}
+                <div className="report-row" style={ { gridTemplateColumns: reportLayouts[rowLayout(row)] } }>
+                  {row.blocks.map((block, column) => <section key={block.id} data-block-id={block.id} className={`report-block ${block.query ? 'report-chart-card' : ''}`} data-active={!preview && activeBlockId === block.id ? 'true' : undefined} tabIndex={preview ? undefined : 0} aria-label={`${label('row', 'Row')} ${index + 1} / ${label('block', 'Block')} ${column + 1}`} onClick={() => { if (!preview) selectBlock(block.id); }} onKeyDown={(event) => { if (!preview && event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectBlock(block.id); } }}>
+                    {!preview && !draft && (activeBlockId === block.id || (!block.text && !block.query && !block.table)) && <div data-editor-control className="report-block-actions">
+                      {!isReportVisual(block.format) && <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text, format: block.format || 'text' }); }}><FileText className="h-4 w-4" />{label('edit_text', 'Edit text')}</button>}
+                      {(!block.text || isReportVisual(block.format)) && <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text || 'flowchart LR\n  A[Start] --> B[End]', format: isReportVisual(block.format) ? block.format! : 'mermaid', visualTitle: block.visualTitle }); }}>{block.text ? label('edit_visual', 'Edit diagram / image') : label('insert_visual', 'Diagram / image')}</button>}
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); chartTrigger.current = event.currentTarget; setActiveBlockId(block.id); setChartTitleDraft(block.chartTitle || ''); setPanel('charts'); }}><BarChart3 className="h-4 w-4" />{block.query ? label('chart_settings', 'Chart settings') : label('data_chart', 'Data chart')}</button>
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); updateBlock(block.id, { table: { model: '', page: 1, size: 20 } }); }}>{label('table_data', 'Table data')}</button>
+                      {block.table && <button disabled={locked} onClick={() => updateBlock(block.id, { table: undefined })}>{label('remove_table', 'Remove table')}</button>}
+                      {block.query && <button disabled={locked} aria-label={label('remove_chart', 'Remove chart')} onClick={(event) => { event.stopPropagation(); commitRows(rows.map((item) => ({ ...item, blocks: item.blocks.map((cell) => cell.id === block.id ? { ...cell, query: undefined } : cell) }))); }}><Trash2 className="h-4 w-4" /></button>}
+                    </div>}
+                    {!preview && draft?.id === block.id && <div data-editor-control className="report-inline-editor" onClick={(event) => event.stopPropagation()}>
+                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent>{isReportVisual(draft.format) ? <><SelectItem value="mermaid">Mermaid</SelectItem><SelectItem value="svg">SVG</SelectItem><SelectItem value="image">{label('image_url', 'Image URL')}</SelectItem></> : <><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem></>}</SelectContent></Select>
+                      {isReportVisual(draft.format) && <label className="report-editor-field">{label('visual_title', 'Title (optional)')}<input value={draft.visualTitle || ''} placeholder={label('visual_title_placeholder', 'Add a title for this diagram or image')} onChange={(event) => setDraft({ ...draft, visualTitle: event.target.value })} /></label>}
+                      <label className="report-editor-field">{draft.format === 'image' ? label('image_url', 'Image URL') : label('text', 'Block content')}
+                        {draft.format === 'image' ? <input autoFocus type="url" placeholder="https://example.com/image.png" value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} /> : <textarea autoFocus value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />}
+                      </label>
+                      {isReportVisual(draft.format) && <div className="report-editor-preview"><span className="report-editor-preview-label">{label('live_preview', 'Preview')}</span><ReportContent text={draft.text} format={draft.format} visualTitle={draft.visualTitle} /></div>}
+                      <div className="report-content-actions"><button onClick={() => { updateBlock(draft.id, { text: draft.text, format: draft.format, visualTitle: draft.visualTitle }); setDraft(null); }}>{label('apply_content', 'Save content')}</button><button onClick={() => setDraft(null)}>{label('cancel_content', 'Cancel')}</button></div>
+                      <p>{label('draft_hint', 'Save to render this region. Other regions stay rendered.')}</p>
+                    </div>}
+                    <div hidden={!preview && draft?.id === block.id}><ReportContent text={preview && draft?.id === block.id ? draft.text : block.text} format={preview && draft?.id === block.id ? draft.format : block.format || 'text'} alt={block.alt} visualTitle={preview && draft?.id === block.id ? draft.visualTitle : block.visualTitle} /></div>
+                    {!preview && !block.text && !block.query && !block.table && !draft && <div data-editor-control className="report-empty-block">{label('canvas_empty_block', 'Choose text or a chart for this region')}</div>}
+                    {block.table && <ReportDataTable config={block.table} refreshKey={tableRefresh} editing={!preview && activeBlockId === block.id} disabled={locked} onChange={(table) => updateBlock(block.id, { table })} />}
+                    {block.query && (results[block.id] ? <><div className="report-chart" style={ { height: row.blocks.length === 3 ? 220 : 280 } }><ModelReportChart chart={results[block.id].chart} rows={results[block.id].rows} model={block.query.model} bindings={block.query.payload.bindings} /></div>{results[block.id].meta.truncated && <p className="report-note">{t('reports.truncated_badge', 'Truncated')}</p>}{!results[block.id].rows.length && <p className="report-note">{label('no_data', 'No data for these filters.')}</p>}</> : <p className="report-empty-block">{busy ? label('loading', 'Loading…') : label('needs_refresh', 'Chart unavailable. Refresh to retry.')}</p>)}
+                    {block.query && block.chartTitle?.trim() && <h3 className="report-visual-title">{block.chartTitle.trim()}</h3>}
+                  </section>)}
+                </div>
+                {!preview && insertionBar(index + 1)}
+              </div>; })}
+              <footer className="report-footer"><span>{''}</span><span>{pageIndex + 1} / {pages.length}</span></footer>
+            </article>)}
+          </div>
+  );
+  return <section className={fullscreen ? "fixed inset-0 z-40 flex flex-col overflow-hidden bg-card" : "flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border bg-card shadow-sm"}>
     <AlertDialog open={!!confirmation} onOpenChange={(open) => { if (!open) setConfirmation(null); }}>
       <AlertDialogContent>
         <AlertDialogHeader>
@@ -240,6 +328,12 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
         <Button size="sm" disabled={!rows.length || locked} onClick={() => save(false)}><Check className="mr-1 h-4 w-4" />{label('save', 'Save template')}</Button>
         <Button variant="outline" size="sm" disabled={!rows.length || locked} onClick={() => save(true)}>{label('save_copy', 'Save as new template')}</Button>
         <Button variant="ghost" size="sm" disabled={!selected || locked} aria-label={label('delete_template', 'Delete template')} title={label('delete_template', 'Delete template')} onClick={() => setConfirmation({ kind: 'delete', action: () => { if (persist(templates.filter((item) => item.id !== selected))) setSelected(''); } })}><Trash2 className="h-4 w-4" /></Button>
+        <Button variant="outline" size="sm" aria-pressed={fullscreen} onClick={() => setFullscreen(!fullscreen)}>{fullscreen ? label('exit_fullscreen', 'Exit fullscreen') : label('fullscreen', 'Fullscreen edit')}</Button>
+        <div className="flex items-center gap-1" title={label('zoom_hint', 'Ctrl / ⌘ + wheel to zoom')}>
+          <Button variant="ghost" size="sm" aria-label={label('zoom_out', 'Zoom out')} disabled={zoom <= 0.25} onClick={() => changeZoom(zoom - 0.1)}>−</Button>
+          <Button variant="ghost" size="sm" aria-label={label('zoom_reset', 'Reset zoom')} onClick={() => changeZoom(1)}>{Math.round(zoom * 100)}%</Button>
+          <Button variant="ghost" size="sm" aria-label={label('zoom_in', 'Zoom in')} disabled={zoom >= 2} onClick={() => changeZoom(zoom + 0.1)}>+</Button>
+        </div>
         <Button variant="outline" size="sm" disabled={!!draft} onClick={() => setPreview(!preview)}><Eye className="mr-1 h-4 w-4" />{preview ? label('edit', 'Edit') : label('focus_preview', 'Focus preview')}</Button>
         <Button variant="outline" size="sm" disabled={locked || missing || !rows.length} onClick={() => void exportPdf()}>{exporting ? <Loader2 className="mr-1 h-4 w-4 animate-spin" /> : <Download className="mr-1 h-4 w-4" />}{label('pdf', 'Export PDF')}</Button>
       </div>
@@ -273,58 +367,14 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
           <span>{preview ? label('live_preview', 'Preview') : label('canvas_hint', 'Add rows on the page, then select a region to edit.')} · A4</span>
           <div className="flex gap-2"><Button variant="ghost" size="sm" disabled={locked || !history.length} onClick={() => { const previous = restoreReportLayout(history[history.length - 1], rows); setRows(previous); setHistory((current) => current.slice(0, -1)); setActiveBlockId(''); setPanel('content'); }}><Undo2 className="mr-1 h-3.5 w-3.5" />{label('undo', 'Undo layout')}</Button><Button size="sm" variant="ghost" disabled={locked || !rows.length} onClick={() => void refresh()}>{busy ? <Loader2 className="mr-1 h-3.5 w-3.5 animate-spin" /> : <RotateCcw className="mr-1 h-3.5 w-3.5" />}{label('refresh', 'Refresh charts')}</Button></div>
         </div>
-        <div className="min-h-[420px] flex-1 overflow-auto overscroll-contain p-3 md:p-6">
-          <div ref={canvas} className="report-pages" aria-label={label('document', 'Report document')}>
-            {pages.map((pageRows, pageIndex) => <article key={pageIndex} className="report-document mx-auto">
-              <header className="report-heading"><div className="report-eyebrow">{label('report_label', 'DATA REPORT')} / {pageIndex + 1}</div>
-                {!preview && pageIndex === 0 && <div data-editor-control className="report-title-editor"><input aria-label={label('title', 'Report title')} disabled={locked} placeholder={label('title', 'Report title')} value={title} onChange={(event) => setTitle(event.target.value)} /><input aria-label={label('subtitle', 'Subtitle / description')} disabled={locked} placeholder={label('subtitle', 'Subtitle / description')} value={subtitle} onChange={(event) => setSubtitle(event.target.value)} /></div>}
-                <div className={!preview && pageIndex === 0 ? 'report-screen-hidden' : ''}><h1>{title || label('untitled', 'Untitled report')}</h1>{subtitle && <p className="report-subtitle">{subtitle}</p>}</div>
-                <div className="report-meta"><span>{label('report_date', 'Report date')} · {new Date().toLocaleDateString()}</span><span>{pageIndex + 1} / {pages.length}</span></div>
-              </header>
-              {insertionBar(pageRows.length ? rows.indexOf(pageRows[0]) : 0, true)}
-              {pageRows.map((row) => { const index = rows.indexOf(row); return <div key={row.id} data-report-row={row.id} className={`report-canvas-row ${dropTarget === row.id && dragging !== row.id ? 'report-drop-target' : ''} ${dragging === row.id ? 'opacity-40' : ''}`}>
-                {!preview && <>
-                <div data-editor-control className="report-row-tools">
-                  <button disabled={locked} onPointerDown={(event) => { if (event.button !== 0) return; event.currentTarget.setPointerCapture(event.pointerId); setDragging(row.id); }} onPointerMove={(event) => { if (!dragging) return; setDropTarget(document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-report-row]')?.dataset.reportRow || ''); }} onPointerUp={(event) => { if (!dragging) return; const target = document.elementFromPoint(event.clientX, event.clientY)?.closest<HTMLElement>('[data-report-row]')?.dataset.reportRow; if (target && !locked) commitRows(reorderReportRows(rows, row.id, target)); event.currentTarget.releasePointerCapture(event.pointerId); setDragging(''); setDropTarget(''); }} onPointerCancel={() => { setDragging(''); setDropTarget(''); }} className="touch-none cursor-grab select-none p-1 text-muted-foreground active:cursor-grabbing" aria-label={`${label('drag_row', 'Drag row')} ${index + 1}`}><GripVertical className="h-4 w-4" /></button>
-                  <span className="flex-1 text-xs font-medium">{label('row', 'Row')} {index + 1} · {layoutLabel(rowLayout(row))}</span>
-                  <div className="w-28"><Select disabled={locked} value={rowLayout(row)} onValueChange={(value) => commitRows(resizeReportRow(rows, row.id, value as ReportLayout))}><SelectTrigger aria-label={label('row_layout', 'Row layout')}><SelectValue /></SelectTrigger><SelectContent>{(Object.keys(reportLayouts) as ReportLayout[]).map((layout) => <SelectItem key={layout} value={layout}>{layoutLabel(layout)}</SelectItem>)}</SelectContent></Select></div>
-                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked || index === 0} aria-label={label('up', 'Move up')} title={label('up', 'Move up')} onClick={() => commitRows(reorderReportRows(rows, row.id, rows[index - 1].id))}><ArrowUp className="h-3.5 w-3.5" /></Button>
-                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked || index === rows.length - 1} aria-label={label('down', 'Move down')} title={label('down', 'Move down')} onClick={() => commitRows(reorderReportRows(rows, row.id, rows[index + 1].id))}><ArrowDown className="h-3.5 w-3.5" /></Button>
-                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked} aria-label={label('duplicate', 'Duplicate row')} title={label('duplicate', 'Duplicate row')} onClick={() => duplicateRow(row)}><Copy className="h-3.5 w-3.5" /></Button>
-                  <Button variant="ghost" size="sm" className={iconButton} disabled={locked} aria-label={label('remove_row', 'Remove row')} title={label('remove_row', 'Remove row')} onClick={() => commitRows(removeReportRow(rows, row.id))}><Trash2 className="h-3.5 w-3.5" /></Button>
-                </div>
-                </>}
-                <div className="report-row" style={ { gridTemplateColumns: reportLayouts[rowLayout(row)] } }>
-                  {row.blocks.map((block, column) => <section key={block.id} data-block-id={block.id} className={`report-block ${block.query ? 'report-chart-card' : ''}`} data-active={!preview && activeBlockId === block.id ? 'true' : undefined} tabIndex={preview ? undefined : 0} aria-label={`${label('row', 'Row')} ${index + 1} / ${label('block', 'Block')} ${column + 1}`} onClick={() => selectBlock(block.id)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectBlock(block.id); } }}>
-                    {!preview && !draft && (activeBlockId === block.id || (!block.text && !block.query && !block.table)) && <div data-editor-control className="report-block-actions">
-                      {!isReportVisual(block.format) && <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text, format: block.format || 'text' }); }}><FileText className="h-4 w-4" />{label('edit_text', 'Edit text')}</button>}
-                      {(!block.text || isReportVisual(block.format)) && <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text || 'flowchart LR\n  A[Start] --> B[End]', format: isReportVisual(block.format) ? block.format! : 'mermaid', visualTitle: block.visualTitle }); }}>{block.text ? label('edit_visual', 'Edit diagram / image') : label('insert_visual', 'Diagram / image')}</button>}
-                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); chartTrigger.current = event.currentTarget; setActiveBlockId(block.id); setChartTitleDraft(block.chartTitle || ''); setPanel('charts'); }}><BarChart3 className="h-4 w-4" />{block.query ? label('chart_settings', 'Chart settings') : label('data_chart', 'Data chart')}</button>
-                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); updateBlock(block.id, { table: { model: '', page: 1, size: 20 } }); }}>{label('table_data', 'Table data')}</button>
-                      {block.table && <button disabled={locked} onClick={() => updateBlock(block.id, { table: undefined })}>{label('remove_table', 'Remove table')}</button>}
-                      {block.query && <button disabled={locked} aria-label={label('remove_chart', 'Remove chart')} onClick={(event) => { event.stopPropagation(); commitRows(rows.map((item) => ({ ...item, blocks: item.blocks.map((cell) => cell.id === block.id ? { ...cell, query: undefined } : cell) }))); }}><Trash2 className="h-4 w-4" /></button>}
-                    </div>}
-                    {draft?.id === block.id && <div data-editor-control className="report-inline-editor" onClick={(event) => event.stopPropagation()}>
-                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent>{isReportVisual(draft.format) ? <><SelectItem value="mermaid">Mermaid</SelectItem><SelectItem value="svg">SVG</SelectItem><SelectItem value="image">{label('image_url', 'Image URL')}</SelectItem></> : <><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem></>}</SelectContent></Select>
-                      {isReportVisual(draft.format) && <label className="report-editor-field">{label('visual_title', 'Title (optional)')}<input value={draft.visualTitle || ''} placeholder={label('visual_title_placeholder', 'Add a title for this diagram or image')} onChange={(event) => setDraft({ ...draft, visualTitle: event.target.value })} /></label>}
-                      <label className="report-editor-field">{draft.format === 'image' ? label('image_url', 'Image URL') : label('text', 'Block content')}
-                        {draft.format === 'image' ? <input autoFocus type="url" placeholder="https://example.com/image.png" value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} /> : <textarea autoFocus value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />}
-                      </label>
-                      {isReportVisual(draft.format) && <div className="report-editor-preview"><span className="report-editor-preview-label">{label('live_preview', 'Preview')}</span><ReportContent text={draft.text} format={draft.format} visualTitle={draft.visualTitle} /></div>}
-                      <div className="report-content-actions"><button onClick={() => { updateBlock(draft.id, { text: draft.text, format: draft.format, visualTitle: draft.visualTitle }); setDraft(null); }}>{label('apply_content', 'Save content')}</button><button onClick={() => setDraft(null)}>{label('cancel_content', 'Cancel')}</button></div>
-                      <p>{label('draft_hint', 'Save to render this region. Other regions stay rendered.')}</p>
-                    </div>}
-                    <div hidden={draft?.id === block.id}><ReportContent text={block.text} format={block.format || 'text'} alt={block.alt} visualTitle={block.visualTitle} /></div>
-                    {!block.text && !block.query && !block.table && !draft && <div data-editor-control className="report-empty-block">{label('canvas_empty_block', 'Choose text or a chart for this region')}</div>}
-                    {block.table && <ReportDataTable config={block.table} refreshKey={tableRefresh} editing={!preview && activeBlockId === block.id} disabled={locked} onChange={(table) => updateBlock(block.id, { table })} />}
-                    {block.query && (results[block.id] ? <><div className="report-chart" style={ { height: row.blocks.length === 3 ? 220 : 280 } }><ModelReportChart chart={results[block.id].chart} rows={results[block.id].rows} model={block.query.model} bindings={block.query.payload.bindings} /></div>{results[block.id].meta.truncated && <p className="report-note">{t('reports.truncated_badge', 'Truncated')}</p>}{!results[block.id].rows.length && <p className="report-note">{label('no_data', 'No data for these filters.')}</p>}</> : <p className="report-empty-block">{busy ? label('loading', 'Loading…') : label('needs_refresh', 'Chart unavailable. Refresh to retry.')}</p>)}
-                    {block.query && block.chartTitle?.trim() && <h3 className="report-visual-title">{block.chartTitle.trim()}</h3>}
-                  </section>)}
-                </div>
-                {insertionBar(index + 1)}
-              </div>; })}
-              <footer className="report-footer"><span>{title || label('untitled', 'Untitled report')}</span><span>{pageIndex + 1} / {pages.length}</span></footer>
-            </article>)}
+        <div ref={workspace} className={`grid min-h-0 flex-1 overflow-hidden ${preview ? "grid-cols-1" : "grid-cols-1 lg:grid-cols-2"}`}>
+          {!preview && <div className="min-w-0 overflow-auto border-r p-3" aria-label={label('edit', 'Edit')}>
+            <div className="mb-3 text-sm font-medium">{label('edit', 'Edit')}</div>
+            <div className="mx-auto w-fit" style={ { zoom } as React.CSSProperties }>{renderPages(false)}</div>
+          </div>}
+          <div className="min-w-0 overflow-auto p-3" aria-label={label('live_preview', 'Preview')}>
+            <div className="mb-3 text-sm font-medium">{label('live_preview', 'Preview')}</div>
+            <div className="mx-auto w-fit" style={ { zoom } as React.CSSProperties }>{renderPages(true)}</div>
           </div>
         </div>
       </main>

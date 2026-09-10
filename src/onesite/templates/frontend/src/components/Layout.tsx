@@ -188,6 +188,7 @@ const AppLayout: React.FC = () => {
       {/* Mobile overlay */}
       {sidebarOpen && (
         <div
+          data-app-navigation
           className="fixed inset-0 z-40 bg-black/50 md:hidden"
           onClick={() => setSidebarOpen(false)}
         />
@@ -195,6 +196,7 @@ const AppLayout: React.FC = () => {
 
       {/* Sidebar */}
       <aside
+        data-app-navigation
         className={cn(
           "fixed inset-y-0 left-0 z-50 bg-card transition-transform duration-300 ease-in-out transform md:translate-x-0",
           sidebarWidth,
@@ -444,11 +446,6 @@ const AppLayout: React.FC = () => {
               <Button variant="ghost" size="icon" className="md:hidden" onClick={() => setSidebarOpen(true)}>
                   <MenuIcon className="h-5 w-5" />
               </Button>
-              {isCollapsed && (
-                <Button variant="ghost" size="icon" className="hidden md:flex" onClick={toggleCollapsed}>
-                  <MenuIcon className="h-5 w-5" />
-                </Button>
-              )}
               {isNeuron && (
                 <div className="neuron-breadcrumbs hidden sm:flex">
                   <span>{projectName.toUpperCase()}</span>

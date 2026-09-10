@@ -153,7 +153,8 @@ const REPORT_DOCUMENT_CSS = `
 .report-document .report-table-source{color:#334155;font-size:12px;font-weight:600;overflow-wrap:anywhere}
 .report-document .report-table-pagination{display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;padding-top:8px;font-size:10px;color:#64748b;border-top:1px solid #e2e8f0}
 .report-document .report-table-pagination>div{display:flex;align-items:center;gap:6px}
-.report-pages{display:flex;flex-direction:column;gap:28px}
+body[data-report-fullscreen="true"] [data-app-navigation]{display:none!important}
+.report-pages{width:794px;display:flex;flex-direction:column;gap:28px}
 .report-document .report-title-editor input{display:block;width:100%;border:0;border-bottom:1px dashed #cbd5e1;background:transparent;padding:4px 0;color:#0f172a;font:inherit;outline:none}
 .report-document .report-title-editor input:first-child{font-size:28px;font-weight:700;line-height:1.4}
 .report-document .report-title-editor input+input{margin-top:10px;font-size:13px;color:#64748b}
@@ -182,7 +183,7 @@ const REPORT_DOCUMENT_CSS = `
 
 `;
 const REPORT_PRINT_CSS = `
-.report-pages{display:block}.report-document + .report-document{break-before:page;margin-top:0}
+.report-pages{display:block;width:auto}.report-document + .report-document{break-before:page;margin-top:0}
 .report-document .report-screen-hidden{display:block}
 
 @page{size:A4 portrait;margin:16mm 14mm 15mm}
