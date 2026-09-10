@@ -83,6 +83,7 @@ import {
   chooseFile,
   modelPaths,
   openProject,
+  chooseProject,
   save,
   reloadProject,
   deleteFile,
@@ -136,6 +137,9 @@ function Heading({ title, subtitle, extra }) {
     />
   );
 }
+function projectName(name) {
+  return name?.split(/[\\/]/).filter(Boolean).at(-1) || "";
+}
 function ProjectSelector({ compact = false }) {
   return (
     <Select
@@ -147,7 +151,7 @@ function ProjectSelector({ compact = false }) {
       value={st.project || undefined}
       options={(st.boot?.projects || []).map((p) => ({
         value: p.name,
-        label: p.name,
+        label: projectName(p.name),
       }))}
       onChange={(name) => run(() => openProject(name))}
     />
@@ -185,7 +189,7 @@ function DraftUpload() {
           if (
             !(await confirmAction(
               "导入编辑草稿",
-              `将草稿载入 ${st.project}，替换当前网页中的编辑内容？`,
+              `将草稿载入 ${projectName(st.project)}，替换当前网页中的编辑内容？`,
               false,
               "导入草稿",
             ))
@@ -207,7 +211,7 @@ function Overview() {
   return (
     <>
       <Heading
-        title={exists ? st.project : "OneSite Studio"}
+        title={exists ? projectName(st.project) : "OneSite Studio"}
         subtitle={
           exists
             ? "从模型到应用，在这里完成。"
@@ -256,7 +260,7 @@ function Overview() {
             </div>
             <div className="workspace-path">
               <IconFolder />
-              <Text copyable>{st.boot.root + "/" + st.project}</Text>
+              <Text copyable>{st.boot.projects.find((p) => p.name === st.project)?.path}</Text>
             </div>
             <Space wrap className="overview-actions">
               <Action type="primary" onClick={() => navigate("models")}>
@@ -275,6 +279,9 @@ function Overview() {
               onClick={() => showModal("project")}
             >
               创建第一个项目
+            </Action>
+            <Action size="large" icon={<IconFolder />} onClick={chooseProject}>
+              打开项目
             </Action>
             <Text type="secondary">
               源码保存在 projects/，随时可用编辑器继续开发。
@@ -1165,6 +1172,7 @@ export function App() {
   useEffect(() => {
     run(async () => {
       st.boot = await api("bootstrap");
+      if (st.boot.initial_project) await openProject(st.boot.initial_project);
       notify();
     });
     const timer = setInterval(pollJobs, 1200);
@@ -1200,6 +1208,9 @@ export function App() {
               工作空间
             </Text>
             <ProjectSelector />
+            <Action type="text" long icon={<IconFolder />} onClick={chooseProject}>
+              打开项目
+            </Action>
             <Action
               type="text"
               long
@@ -1235,7 +1246,7 @@ export function App() {
               </Dropdown>
               <Breadcrumb>
                 <Breadcrumb.Item>工作空间</Breadcrumb.Item>
-                <Breadcrumb.Item>{st.project || "开始构建"}</Breadcrumb.Item>
+                <Breadcrumb.Item>{projectName(st.project) || "开始构建"}</Breadcrumb.Item>
               </Breadcrumb>
               <Tag size="small" className="desktop-tag">
                 本地
@@ -1277,6 +1288,9 @@ export function App() {
           </Layout.Header>
           <div className="mobile-project">
             <ProjectSelector compact />
+            <Action icon={<IconFolder />} onClick={chooseProject}>
+              打开项目
+            </Action>
             <Action icon={<IconPlus />} onClick={() => showModal("project")}>
               新建项目
             </Action>

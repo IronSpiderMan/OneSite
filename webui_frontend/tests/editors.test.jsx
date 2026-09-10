@@ -21,6 +21,7 @@ import {
   adopt,
   restoreDraft,
   save,
+  openProject,
 } from "../src/state";
 
 beforeEach(() => {
@@ -146,4 +147,47 @@ it("saves rendered model with baseline and only clears local draft after server 
   expect(st.revision).toBe("rev2");
   expect(st.dirty).toBe(false);
   expect(localStorage.getItem(draftKey())).toBeNull();
+});
+
+
+it("opens an external directory and keeps a single project entry", async () => {
+  st.boot.projects = [];
+  localStorage.clear();
+  const project = { name: "/external/Demo", path: "/external/Demo", files: { "site_config.json": "{}" }, revision: "external" };
+  const fetch = vi.fn(async (url) => ({ ok: true, json: async () => url.endsWith("open") ? project : { jobs: [] } }));
+  vi.stubGlobal("fetch", fetch);
+  await openProject(undefined, "/external/Demo");
+  expect(JSON.parse(fetch.mock.calls[0][1].body)).toEqual({ path: "/external/Demo" });
+  expect(st.project).toBe(project.name);
+  expect(st.files).toEqual(project.files);
+  await openProject(project.name);
+  expect(st.boot.projects).toEqual([{ name: project.name, path: project.path }]);
+  fetch.mockImplementation(async () => ({ ok: false, json: async () => ({ error: "项目不存在" }) }));
+  await expect(openProject(undefined, "/missing")).rejects.toThrow("项目不存在");
+  expect(st.project).toBe(project.name);
+  expect(st.files).toEqual(project.files);
+});
+
+it("uses the native picker, leaves the project on cancel, and falls back on failure", async () => {
+  const { chooseProject } = await import("../src/state");
+  st.boot.native_picker = true;
+  st.boot.projects = [];
+  localStorage.clear();
+  const project = { name: "/native/Demo", path: "/native/Demo", files: {}, revision: "native" };
+  const fetch = vi.fn(async (url) => ({ ok: true, json: async () =>
+    url.endsWith("select-directory") ? { path: project.path } : url.endsWith("open") ? project : { jobs: [] }
+  }));
+  vi.stubGlobal("fetch", fetch);
+  await chooseProject();
+  expect(st.project).toBe(project.name);
+  expect(JSON.parse(fetch.mock.calls.find(([url]) => url.endsWith("open"))[1].body)).toEqual({ path: project.path });
+  fetch.mockClear();
+  fetch.mockImplementation(async () => ({ ok: true, json: async () => ({ path: null }) }));
+  await chooseProject();
+  expect(fetch).toHaveBeenCalledTimes(1);
+  expect(st.project).toBe(project.name);
+  fetch.mockImplementation(async () => ({ ok: false, json: async () => ({ error: "不可用" }) }));
+  await expect(chooseProject()).rejects.toThrow("不可用");
+  expect(st.modal).toBe("openProject");
+  st.modal = null;
 });

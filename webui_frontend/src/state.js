@@ -241,7 +241,22 @@ export function restoreDraft(saved, sameProject = true) {
   st.errors = new Map(saved.errors || []);
   edit();
 }
-export async function openProject(name) {
+export async function chooseProject() {
+  if (!st.boot?.native_picker) {
+    showModal("openProject");
+    return;
+  }
+  let selected;
+  try {
+    selected = await api("select-directory");
+  } catch (error) {
+    showModal("openProject");
+    throw error;
+  }
+  if (selected.path) await openProject(undefined, selected.path);
+}
+
+export async function openProject(name, path) {
   if (st.dirty) {
     persistDraft();
     if (
@@ -252,9 +267,13 @@ export async function openProject(name) {
         "切换项目",
       ))
     )
-      return;
+      return false;
   }
-  adopt(await api("open", { name }));
+  const project = await api("open", path === undefined ? { name } : { path });
+  name = project.name;
+  if (!st.boot.projects.some((item) => item.name === name))
+    st.boot.projects.push({ name, path: project.path });
+  adopt(project);
   let saved;
   try {
     saved = JSON.parse(localStorage.getItem(draftKey(name)) || "null");
@@ -273,6 +292,7 @@ export async function openProject(name) {
     restoreDraft(saved);
   await pollJobs();
   notify();
+  return true;
 }
 export async function save() {
   await commit();

@@ -39,6 +39,7 @@ def _webui_script() -> Path:
 
 @app.command()
 def web(
+    project: Path | None = typer.Argument(None, help="Project path to open, or create if missing (relative to current directory)"),
     port: int = typer.Option(8765, "--port", min=0, max=65535, help="Local WebUI port"),
     projects_dir: Path | None = typer.Option(
         None, "--projects-dir", help="Project storage directory (default: ./projects)"
@@ -57,6 +58,8 @@ def web(
             command.extend(["--python", str(python)])
         if no_browser:
             command.append("--no-browser")
+        if project is not None:
+            command.extend(["--", str(project)])
         # Replace the CLI process so signals reach the editor directly and its
         # shutdown handler can finish cleaning up running project commands.
         os.execv(sys.executable, command)

@@ -1,6 +1,9 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import {
   Alert,
+  Button,
+  Empty,
+  Spin,
   Form,
   Input,
   Modal,
@@ -18,6 +21,7 @@ import {
   edit,
   notify,
   adopt,
+  openProject,
   closeModal,
   newModelSpec,
   snake,
@@ -46,6 +50,64 @@ export const TEMPLATES = {
     'async def run(**kwargs):\n    return {"status": "ok"}\n',
 };
 
+export function DirectoryPicker({ onSelect }) {
+  const [location, setLocation] = useState(undefined);
+  const [directory, setDirectory] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    onSelect("");
+    api("directories", location === undefined ? {} : { path: location })
+      .then((result) => {
+        if (cancelled) return;
+        setDirectory(result);
+        onSelect(result.is_project ? result.path : "");
+      })
+      .catch((err) => { if (!cancelled) setError(err.message); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [location, onSelect]);
+  function browse(path) {
+    if (path === location) return;
+    onSelect("");
+    setLoading(true);
+    setLocation(path);
+  }
+  return (
+    <Space direction="vertical" style={{ width: "100%" }}>
+      <Typography.Paragraph type="secondary">
+        浏览文件夹，进入 OneSite 项目目录后点击“打开项目”。
+      </Typography.Paragraph>
+      <Space wrap>
+        <Button disabled={loading || !directory?.parent} onClick={() => browse(directory.parent)}>返回上级</Button>
+        <Button disabled={loading || !directory} onClick={() => browse(directory.home)}>主目录</Button>
+        <Button disabled={loading || !directory} onClick={() => browse(directory.root)}>工作空间</Button>
+      </Space>
+      <Typography.Paragraph style={{ overflowWrap: "anywhere", marginBottom: 0 }}>
+        {directory?.path || "正在读取目录…"}
+      </Typography.Paragraph>
+      {error && <Alert type="error" content={error} />}
+      <Spin loading={loading} style={{ display: "block", width: "100%" }}>
+        <div aria-label="文件夹列表" style={{ height: 280, overflowY: "auto", border: "1px solid var(--color-border-2)", borderRadius: 4 }}>
+          {directory?.directories.map((item) => (
+            <Button key={item.path} type="text" long disabled={loading || st.busy}
+              style={{ justifyContent: "flex-start", height: 38 }}
+              onClick={() => browse(item.path)}>
+              <span aria-hidden="true">📁</span>&nbsp;{item.name}
+            </Button>
+          ))}
+          {!loading && !directory?.directories.length && <Empty description="没有子文件夹" />}
+        </div>
+      </Spin>
+      {!loading && !error && directory && <Alert type={directory.is_project ? "success" : "info"}
+        content={directory.is_project ? "已选择 OneSite 项目，可以打开。" : "当前目录不是 OneSite 项目，请继续选择文件夹。"} />}
+    </Space>
+  );
+}
+
 export function EditorDialog() {
   const type = st.modal;
   const [name, setName] = useState(type === "model" ? "Product" : "");
@@ -62,6 +124,7 @@ export function EditorDialog() {
   const [fieldType, setFieldType] = useState("Optional[int]");
   const titles = {
     project: "创建项目",
+    openProject: "打开项目",
     model: "新建模型",
     file: "新建源文件",
     foreignKey: "添加外键关系",
@@ -69,7 +132,9 @@ export function EditorDialog() {
     run: "运行项目",
   };
   async function submit() {
-    if (type === "project") {
+    if (type === "openProject") {
+      if (!(await openProject(undefined, name))) return;
+    } else if (type === "project") {
       if (st.dirty) {
         persistDraft();
         if (
@@ -156,6 +221,7 @@ export function EditorDialog() {
         width: type === "file" ? 760 : 560,
         maxWidth: "calc(100vw - 32px)",
       }}
+      okButtonProps={{ disabled: type === "openProject" && !name }}
       confirmLoading={st.busy}
       okText={
         type === "sync"
@@ -171,6 +237,7 @@ export function EditorDialog() {
       onOk={() => run(submit)}
     >
       <Form layout="vertical" disabled={st.busy}>
+        {type === "openProject" && <DirectoryPicker onSelect={setName} />}
         {type === "project" && (
           <>
             <Typography.Paragraph type="secondary">
