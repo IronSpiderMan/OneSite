@@ -40,12 +40,47 @@ const renderReportHtml = (html: string): React.ReactNode => {
 };
 const ReportContent: React.FC<{ text: string; format: ReportFormat }> = ({ text, format }) => {
   const html = useMemo(() => format === 'html' ? renderReportHtml(text) : null, [text, format]);
+  if (format === 'mermaid') return <ReportMermaid text={text} />;
   if (!text) return null;
   return <div className="report-rich-text">{format === 'html' ? html : format === 'markdown' ? <ReactMarkdown remarkPlugins={[remarkGfm]} skipHtml components={ { a: ({ href, children }) => <a href={safeReportUrl(href || '')} target="_blank" rel="noopener noreferrer">{children}</a>, img: ({ src, alt }) => { const safe = safeReportUrl(src || ''); return safe && /^(https?:\/\/|\/(?!\/))/i.test(safe) ? <img src={safe} alt={alt || ''} referrerPolicy="no-referrer" /> : null; } } }>{text}</ReactMarkdown> : <p className="report-plain-text">{text}</p>}</div>;
 };
 
+// Load the diagram engine only when a report actually contains Mermaid.
+let reportMermaidEngine: Promise<typeof import('mermaid')['default']> | undefined;
+const loadReportMermaid = () => reportMermaidEngine ||= import('mermaid').then(({ default: engine }) => {
+  engine.initialize({ startOnLoad: false, securityLevel: 'strict', theme: 'default', htmlLabels: false, suppressErrorRendering: true, secure: ['secure', 'securityLevel', 'startOnLoad', 'maxTextSize', 'suppressErrorRendering', 'maxEdges', 'htmlLabels'] });
+  return engine;
+}).catch((error) => { reportMermaidEngine = undefined; throw error; });
+const ReportMermaid: React.FC<{ text: string }> = ({ text }) => {
+  const { t } = useTranslation();
+  const [rendered, setRendered] = useState<{ source: string; image?: string; error?: string } | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      try {
+        const engine = await loadReportMermaid();
+        const { svg } = await engine.render(`mermaid-${reportId()}`, text);
+        // Native SVG labels avoid HTML <br> tags that cannot be decoded as XML images.
+        // An SVG image keeps diagram markup isolated and survives the print document clone.
+        const image = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+        const decoded = new Image(); decoded.src = image; await decoded.decode();
+        if (!cancelled) setRendered({ source: text, image });
+      } catch (error) {
+        if (!cancelled) setRendered({ source: text, error: error instanceof Error ? error.message : String(error) });
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [text]);
+  const current = rendered?.source === text ? rendered : null;
+  return <div className="report-mermaid" data-mermaid-ready={current?.image ? 'true' : 'false'}>
+    {current?.image ? <img src={current.image} alt="Mermaid" /> : current?.error ? <div role="alert"><p>{t('reports.editor.mermaid_error', 'Could not display Mermaid. See the error details below.')}</p><pre>{current.error}</pre></div> : <p role="status">{t('reports.editor.loading', 'Loading…')}</p>}
+  </div>;
+};
+
 const REPORT_DOCUMENT_CSS = `
 .report-document{box-sizing:border-box;width:100%;max-width:794px;min-height:1123px;padding:40px 52px 28px;background:#fff;color:#273449;box-shadow:0 4px 24px #0f172a0a;border:1px solid #e2e8f0;border-radius:3px;font-family:Inter,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;font-size:14px;line-height:1.75;color-scheme:light}
+.report-document .report-mermaid img{display:block;width:100%;max-width:100%;height:auto;margin:12px auto;break-inside:avoid}
+.report-document .report-mermaid pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:11px;color:#b45309}
 .report-document *{box-sizing:border-box}
 .report-document .report-heading{border-top:4px solid #4f46e5;border-bottom:1px solid #e2e8f0;padding:22px 0 18px;margin-bottom:26px}
 .report-document .report-eyebrow{color:#6366f1;font-size:10px;font-weight:700;letter-spacing:2.5px;margin-bottom:8px}

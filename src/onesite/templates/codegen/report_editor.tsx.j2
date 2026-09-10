@@ -1,5 +1,5 @@
 type ChartQuery = { model: string; payload: { category: string; chart: string; bindings: Record<string, any>; filters: Record<string, any> }; relativeDays: Record<string, number>; dateTypes: Record<string, string> };
-type ReportFormat = 'text' | 'markdown' | 'html';
+type ReportFormat = 'text' | 'markdown' | 'html' | 'mermaid';
 type ReportLayout = 'single' | 'halves' | 'thirds' | 'wide-left' | 'wide-right';
 type ReportBlock = { id: string; text: string; format?: ReportFormat; query?: ChartQuery; table?: { model: string; page: number; size: number; filters?: Record<string, any>; hiddenFields?: string[] } };
 type ReportRow = { id: string; blocks: ReportBlock[]; layout?: ReportLayout; pageBreak?: boolean };
@@ -162,6 +162,7 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
   const exportPdf = async () => {
     if (!canvas.current || exporting) return;
     if (canvas.current.querySelector('[data-table-ready="false"]')) { setMessage(label('table_error', 'Table could not be loaded. Check access and retry.')); return; }
+    if (canvas.current.querySelector('[data-mermaid-ready="false"]')) { setMessage(label('mermaid_not_ready', 'Mermaid is loading or contains an error. Check the diagram before exporting.')); return; }
     setExporting(true); setMessage('');
     let frame: HTMLIFrameElement | undefined;
     try {
@@ -271,13 +272,14 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
                   {row.blocks.map((block, column) => <section key={block.id} data-block-id={block.id} className={`report-block ${block.query ? 'report-chart-card' : ''}`} data-active={!preview && activeBlockId === block.id ? 'true' : undefined} tabIndex={preview ? undefined : 0} aria-label={`${label('row', 'Row')} ${index + 1} / ${label('block', 'Block')} ${column + 1}`} onClick={() => selectBlock(block.id)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectBlock(block.id); } }}>
                     {!preview && !draft && (activeBlockId === block.id || (!block.text && !block.query && !block.table)) && <div data-editor-control className="report-block-actions">
                       <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text, format: block.format || 'text' }); }}><FileText className="h-4 w-4" />{label('edit_text', 'Edit text')}</button>
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text || 'flowchart LR\n  A[Start] --> B[Process] --> C[End]', format: 'mermaid' }); }}>Mermaid</button>
                       <button disabled={locked} onClick={(event) => { event.stopPropagation(); chartTrigger.current = event.currentTarget; setActiveBlockId(block.id); setPanel('charts'); }}><BarChart3 className="h-4 w-4" />{block.query ? label('chart_settings', 'Chart settings') : label('chart_image', 'Chart / image')}</button>
                       <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); updateBlock(block.id, { table: { model: '', page: 1, size: 20 } }); }}>{label('table_data', 'Table data')}</button>
                       {block.table && <button disabled={locked} onClick={() => updateBlock(block.id, { table: undefined })}>{label('remove_table', 'Remove table')}</button>}
                       {block.query && <button disabled={locked} aria-label={label('remove_chart', 'Remove chart')} onClick={(event) => { event.stopPropagation(); commitRows(rows.map((item) => ({ ...item, blocks: item.blocks.map((cell) => cell.id === block.id ? { ...cell, query: undefined } : cell) }))); }}><Trash2 className="h-4 w-4" /></button>}
                     </div>}
                     {draft?.id === block.id && <div data-editor-control className="report-inline-editor" onClick={(event) => event.stopPropagation()}>
-                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem></SelectContent></Select>
+                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem><SelectItem value="mermaid">Mermaid</SelectItem></SelectContent></Select>
                       <textarea autoFocus aria-label={label('text', 'Block content')} value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />
                       <div className="report-content-actions"><button onClick={() => { updateBlock(draft.id, { text: draft.text, format: draft.format }); setDraft(null); }}>{label('apply_content', 'Save content')}</button><button onClick={() => setDraft(null)}>{label('cancel_content', 'Cancel')}</button></div>
                       <p>{label('draft_hint', 'Save to render this region. Other regions stay rendered.')}</p>
