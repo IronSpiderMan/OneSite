@@ -1,4 +1,5 @@
 import request from '../utils/request';
+import { markDataChanged } from '../utils/query-cache';
 
 const API_URL = '/{{ model.module_name }}/';
 
@@ -17,5 +18,6 @@ export const get{{ model.name }} = async () => {
 
 export const update{{ model.name }} = async (data: Partial<{{ model.name }}>) => {
     const response = await request.put<{{ model.name }}>(API_URL, data, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };

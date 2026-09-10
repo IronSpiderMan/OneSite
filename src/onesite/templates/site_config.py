@@ -4,7 +4,7 @@ This file is executed by ``site sync``. Keep it as trusted project code and
 export exactly one variable named ``config``.
 """
 
-from onesite.config import DesktopConfig, SiteConfig, env, sqlite_url
+from onesite.config import DesktopConfig, SiteConfig, Timezone, env, sqlite_url
 
 
 config = SiteConfig(
@@ -14,7 +14,7 @@ config = SiteConfig(
     # Set SECRET_KEY in the shell or deployment environment for production.
     secret_key=env("SECRET_KEY", default="changeme"),
     access_token_expire_minutes=11520,
-    extra={"TIMEZONE": "Asia/Shanghai"},
+    extra={"TIMEZONE": Timezone.ASIA_SHANGHAI},
     allowed_origins=[
         "http://localhost:5173",
         "http://localhost:3000",

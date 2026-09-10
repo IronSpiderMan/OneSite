@@ -895,6 +895,11 @@ def _process_introspected_class(
         and not override_fields
     )
     mdl["has_read_resolvers"] = bool(extra_fields or override_fields)
+    # Update hooks can modify records other than the returned object.
+    mdl["has_update_hooks"] = any(
+        callable(getattr(obj, hook, None))
+        for hook in ("on_before_update", "on_after_update", "on_after_commit_update")
+    )
     mdl["schema_imports"] = sorted(
         set(mdl["schema_imports"])
         | {item for field in extra_fields for item in field["py_imports"]}

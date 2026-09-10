@@ -103,7 +103,7 @@ const Create{{ model.name }}Page: React.FC = () => {
   const onSubmit = async (values: any) => {
     setSubmitting(true);
     try {
-      await createItem(writablePayload(values, 'c'));
+      await createItem(writablePayload(values, 'c'), { refreshList: false });
       toast.success(t('toast.create_success', 'Created'));
       navigate('/{{ model.module_name }}s');
     } catch (error) {

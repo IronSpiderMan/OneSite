@@ -128,7 +128,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   {% if not model.page_edit %}
   const [searchParams, setSearchParams] = useSearchParams();
   {% endif %}
-  const { sorting, setSorting, data, loading, fetchData, refreshData, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
+  const { sorting, setSorting, data, loading, fetchData, refreshData, ensureList, runAction, fetchItem, createItem, updateItem, deleteItem, bulkDeleteItem } = use{{ model.name }}Store();
   const timeZone = getUserTimeZone();
   {% if not model.page_edit %}
   const [isModalOpen, setIsModalOpen] = useState(false);
@@ -141,7 +141,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const [selectedIds, setSelectedIds] = useState<{{ 'string[]' if 'str' in model.id_type else 'number[]' }}>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
-  const [searchValues, setSearchValues] = useState<Record<string, any>>({});
+  const [searchValues, setSearchValues] = useState<Record<string, any>>(() => {
+    const store = use{{ model.name }}Store.getState();
+    return store.canRestoreList(scopeFilters) ? store.listSearchValues : {};
+  });
+  const scopeFilterKey = JSON.stringify(scopeFilters);
   const [gotoPageInput, setGotoPageInput] = useState('');
   {% if model.multi_display %}
   const [viewMode, setViewMode] = useState<'list' | 'multi'>('{{ model.multi_display.default_view }}');
@@ -373,10 +377,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     {% if model.is_tree %}
     loadRoots(1);
     {% else %}
-    fetchData(1, 20, scopeFilters);
+    if (!use{{ model.name }}Store.getState().canRestoreList(scopeFilters)) setSearchValues({});
+    void ensureList(scopeFilters);
     {% endif %}
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [scopeFilterKey]);
 
   {% if model.multi_display %}
   useEffect(() => {
@@ -864,6 +869,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     treeSearchFiltersRef.current = next;
     loadRoots(1);
     {% else %}
+    use{{ model.name }}Store.getState().setListSearchValues(searchValues);
     fetchData(1, use{{ model.name }}Store.getState().size, next);
     {% endif %}
   };
@@ -884,6 +890,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       searchListenerReady.current = true;
       return;
     }
+    {% if not model.is_tree %}
+    if (JSON.stringify(searchValues) === JSON.stringify(use{{ model.name }}Store.getState().listSearchValues)) return;
+    {% endif %}
     const timer = setTimeout(applySearch, 300);
     return () => clearTimeout(timer);
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1394,9 +1403,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                       {% endif %}
                       onClick={async () => {
                         try {
-                          await perform{{ model.name }}{{ action_name.capitalize() }}(item.id);
+                          await runAction(() => perform{{ model.name }}{{ action_name.capitalize() }}(item.id), {
+                            invalidateList: {{ 'true' if action_config.get("function") else 'false' }},
+                          });
                           toast.success(t('common.success', 'Success'));
-                          fetchData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
                         } catch {
                           toast.error(t('common.error', 'Error'));
                         }
@@ -1699,9 +1709,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             onClick={async (e) => {
                                 e.stopPropagation();
                                 try {
-                                    await perform{{ model.name }}{{ action_name.capitalize() }}(item.id);
+                                    await runAction(() => perform{{ model.name }}{{ action_name.capitalize() }}(item.id), {
+                            invalidateList: {{ 'true' if action_config.get("function") else 'false' }},
+                          });
                                     toast.success(t('common.success', 'Success'));
-                                    fetchData(use{{ model.name }}Store.getState().page, use{{ model.name }}Store.getState().size);
                                 } catch (e) {
                                     toast.error(t('common.error', 'Error'));
                                 }

@@ -10,7 +10,8 @@ from __future__ import annotations
 
 import os
 from enum import Enum
-from typing import Any, Literal
+from typing import Any, Literal, Mapping, Sequence
+from urllib.parse import quote, urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
@@ -35,6 +36,47 @@ class Theme(str, Enum):
     INDUSTRIAL = "industrial"
     NEURON = "neuron"
     ARCO = "arco"
+
+
+class Timezone(str, Enum):
+    """Common IANA timezone names for :attr:`SiteConfig.extra`.
+
+    Use ``Timezone`` instead of a raw string when setting ``extra["TIMEZONE"]``
+    to get editor completion and avoid typos. Any valid IANA timezone string is
+    still accepted for locations not represented here.
+    """
+
+    UTC = "UTC"
+
+    ASIA_SHANGHAI = "Asia/Shanghai"
+    ASIA_HONG_KONG = "Asia/Hong_Kong"
+    ASIA_TOKYO = "Asia/Tokyo"
+    ASIA_SEOUL = "Asia/Seoul"
+    ASIA_SINGAPORE = "Asia/Singapore"
+    ASIA_KOLKATA = "Asia/Kolkata"
+    ASIA_DUBAI = "Asia/Dubai"
+    ASIA_BANGKOK = "Asia/Bangkok"
+    ASIA_JAKARTA = "Asia/Jakarta"
+
+    EUROPE_LONDON = "Europe/London"
+    EUROPE_PARIS = "Europe/Paris"
+    EUROPE_BERLIN = "Europe/Berlin"
+    EUROPE_AMSTERDAM = "Europe/Amsterdam"
+    EUROPE_MADRID = "Europe/Madrid"
+    EUROPE_ROME = "Europe/Rome"
+    EUROPE_MOSCOW = "Europe/Moscow"
+
+    AMERICA_NEW_YORK = "America/New_York"
+    AMERICA_TORONTO = "America/Toronto"
+    AMERICA_CHICAGO = "America/Chicago"
+    AMERICA_DENVER = "America/Denver"
+    AMERICA_PHOENIX = "America/Phoenix"
+    AMERICA_LOS_ANGELES = "America/Los_Angeles"
+    AMERICA_SAO_PAULO = "America/Sao_Paulo"
+
+    AUSTRALIA_SYDNEY = "Australia/Sydney"
+    AUSTRALIA_MELBOURNE = "Australia/Melbourne"
+    PACIFIC_AUCKLAND = "Pacific/Auckland"
 
 
 class ListMode(str, Enum):
@@ -727,3 +769,46 @@ def sqlite_url(path: str = "app.db") -> str:
     """Build a SQLite URL relative to the generated backend working directory."""
 
     return f"sqlite:///./{path.lstrip('./')}"
+
+
+QueryParamValue = str | int | float | bool | None
+QueryParams = (
+    Mapping[str, QueryParamValue]
+    | Sequence[tuple[str, QueryParamValue]]
+)
+
+
+def postgres_url(
+    host: str = "localhost",
+    port: int = 5432,
+    user: str = "postgres",
+    password: str | None = None,
+    db: str = "app",
+    params: QueryParams | None = None,
+) -> str:
+    """Build an encoded PostgreSQL URL for ``SiteConfig.database_url``.
+
+    ``params`` accepts a mapping or a sequence of key/value pairs, such as
+    ``{"sslmode": "require"}``. The generated backend converts the standard
+    ``postgresql://`` scheme to its asyncpg driver variant when it starts.
+    """
+
+    if not host:
+        raise ValueError("PostgreSQL host must not be empty.")
+    if not 1 <= port <= 65535:
+        raise ValueError("PostgreSQL port must be between 1 and 65535.")
+    if not user:
+        raise ValueError("PostgreSQL user must not be empty.")
+    if not db:
+        raise ValueError("PostgreSQL database name must not be empty.")
+
+    # RFC 3986 requires square brackets around IPv6 literals in an authority.
+    escaped_host = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    credentials = quote(user, safe="")
+    if password is not None:
+        credentials += f":{quote(password, safe='')}"
+
+    query = ""
+    if params:
+        query = f"?{urlencode(params)}"
+    return f"postgresql://{credentials}@{escaped_host}:{port}/{quote(db, safe='')}{query}"

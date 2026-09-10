@@ -1,5 +1,14 @@
 import { create } from 'zustand';
+import { getDataRevision } from '../utils/query-cache';
 import { {{ model.name }}, get{{ model.name }}s, get{{ model.name }}, create{{ model.name }}, update{{ model.name }}, delete{{ model.name }}, bulkDelete{{ model.name }} } from '../services/{{ model.module_name }}';
+
+type MutationOptions = { refreshList?: boolean; invalidateList?: boolean };
+const LIST_STALE_MS = 30_000;
+const queryKey = (value: any): string => JSON.stringify(value, (_key, item) =>
+    item && typeof item === 'object' && !Array.isArray(item)
+        ? Object.fromEntries(Object.keys(item).sort().map(key => [key, item[key]]))
+        : item);
+const identityKey = () => queryKey([localStorage.getItem('token'), localStorage.getItem('user_role')]);
 
 interface {{ model.name }}State {
     data: {{ model.name }}[];
@@ -10,126 +19,255 @@ interface {{ model.name }}State {
     currentItem: {{ model.name }} | null;
     filters: Record<string, any>;
     sorting: { sort_by?: string; sort_order?: 'asc' | 'desc' };
+    listSearchValues: Record<string, any>;
+    setListSearchValues: (values: Record<string, any>) => void;
+    canRestoreList: (scope: Record<string, any>) => boolean;
+    ensureList: (scope: Record<string, any>) => Promise<void>;
+    invalidateList: () => void;
     setSorting: (field?: string, direction?: 'asc' | 'desc') => Promise<void>;
     fetchData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
     refreshData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
     fetchItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => Promise<{{ model.name }} | null>;
-    createItem: (item: any) => Promise<void>;
-    updateItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}, item: any) => Promise<void>;
-    deleteItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => Promise<void>;
-    bulkDeleteItem: (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => Promise<void>;
+    runAction: (action: () => Promise<{{ model.name }}>, options?: MutationOptions) => Promise<void>;
+    applyItem: (item: {{ model.name }}, options?: MutationOptions, previousRevision?: number) => Promise<void>;
+    createItem: (item: any, options?: MutationOptions) => Promise<void>;
+    updateItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}, item: any, options?: MutationOptions) => Promise<void>;
+    deleteItem: (id: {{ 'string' if 'str' in model.id_type else 'number' }}, options?: MutationOptions) => Promise<void>;
+    bulkDeleteItem: (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}, options?: MutationOptions) => Promise<void>;
 }
 
-export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get) => ({
-    data: [],
-    total: 0,
-    page: 1,
-    size: 20,
-    loading: false,
-    currentItem: null,
-    filters: {},
-    sorting: {},
-    setSorting: async (field, direction) => {
-        set({ sorting: field ? { sort_by: field, sort_order: direction } : {} });
-        await get().fetchData(1, get().size);
-    },
-    fetchData: async (page = 1, size = 20, filters?: Record<string, any>) => {
-        set({ loading: true });
-        try {
-            const f = filters !== undefined ? filters : get().filters;
-            const result = await get{{ model.name }}s(page, size, { ...f, ...get().sorting });
-            if (result && Array.isArray(result.items)) {
-                set({ 
-                    data: result.items,
-                    total: result.total,
-                    page: result.page,
-                    size: result.size,
-                    filters: f
-                });
-            } else {
-                console.error("Expected paginated response but got:", result);
-                set({ data: [], total: 0 });
+export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get) => {
+    let identity = identityKey();
+    let scopeKey: string | null = null;
+    let fetchedAt = 0;
+    let loadedRevision = -1;
+    let loadedKey: string | null = null;
+    let listVersion = 0;
+    let itemVersion = 0;
+    let listLoading = false;
+    let itemLoading = false;
+    let listRequest: { key: string; promise: Promise<void> } | null = null;
+    let itemRequest: { key: string; promise: Promise<{{ model.name }} | null> } | null = null;
+    const updateLoading = () => set({ loading: listLoading || itemLoading });
+    const invalidateList = () => {
+        fetchedAt = 0;
+        loadedKey = null;
+        listVersion += 1;
+        listRequest = null;
+        listLoading = false;
+        updateLoading();
+    };
+    const ensureIdentity = () => {
+        if (identity === identityKey()) return;
+        identity = identityKey();
+        invalidateList();
+        scopeKey = null;
+        itemVersion += 1;
+        itemRequest = null;
+        itemLoading = false;
+        set({ data: [], total: 0, page: 1, size: 20, filters: {}, sorting: {},
+            currentItem: null, listSearchValues: {}, loading: false });
+    };
+    const loadList = (page: number, size: number, filters: Record<string, any>, quiet = false): Promise<void> => {
+        ensureIdentity();
+        const sorting = get().sorting;
+        const key = queryKey([identity, scopeKey, page, size, filters, sorting]);
+        // Only coalesce the current request. An older query must never overwrite a newer one.
+        if (listRequest?.key === key) return listRequest.promise;
+        const version = ++listVersion;
+        const owner = identity;
+        const revision = getDataRevision();
+        listLoading = !quiet;
+        set({ page, size, filters });
+        updateLoading();
+        const promise = (async () => {
+            try {
+                const result = await get{{ model.name }}s(page, size, { ...filters, ...sorting });
+                if (version !== listVersion || owner !== identityKey()) return;
+                if (revision !== getDataRevision()) {
+                    listRequest = null;
+                    await loadList(page, size, filters, quiet);
+                    return;
+                }
+                if (!result || !Array.isArray(result.items)) throw new Error('Expected paginated response');
+                fetchedAt = Date.now();
+                loadedRevision = revision;
+                loadedKey = queryKey([identity, scopeKey, result.page, result.size, filters, sorting]);
+                set({ data: result.items, total: result.total, page: result.page, size: result.size, filters });
+            } catch (error) {
+                if (version !== listVersion || owner !== identityKey()) return;
+                fetchedAt = 0;
+                loadedKey = null;
+                if (!quiet) set({ data: [], total: 0 });
+                console.error(error);
+            } finally {
+                if (version === listVersion) {
+                    listRequest = null;
+                    listLoading = false;
+                    updateLoading();
+                }
             }
-        } catch (error) {
-            console.error(error);
-            set({ data: [], total: 0 });
-        } finally {
-            set({ loading: false });
-        }
-    },
-    refreshData: async (page?: number, size?: number, filters?: Record<string, any>) => {
-        try {
-            const currentPage = page ?? get().page;
-            const currentSize = size ?? get().size;
-            const f = filters !== undefined ? filters : get().filters;
-            const result = await get{{ model.name }}s(currentPage, currentSize, { ...f, ...get().sorting });
-            if (result && Array.isArray(result.items)) {
-                set({
-                    data: result.items,
-                    total: result.total,
-                    page: result.page,
-                    size: result.size,
-                    filters: f
-                });
-            } else {
-                console.error("Expected paginated response but got:", result);
+        })();
+        listRequest = { key, promise };
+        return promise;
+    };
+    const refreshAfterMutation = async (options?: MutationOptions) => {
+        invalidateList();
+        // Tree pages load their own roots/children; detail/create pages defer until returning.
+        {% if not model.is_tree %}
+        if (options?.refreshList !== false) await get().refreshData();
+        {% endif %}
+    };
+
+    return {
+        data: [], total: 0, page: 1, size: 20, loading: false, currentItem: null,
+        filters: {}, sorting: {}, listSearchValues: {},
+        setListSearchValues: (values) => set({ listSearchValues: values }),
+        canRestoreList: (scope) => identity === identityKey() && scopeKey === queryKey(scope),
+        ensureList: async (scope) => {
+            ensureIdentity();
+            if (!get().canRestoreList(scope)) {
+                invalidateList();
+                scopeKey = queryKey(scope);
+                set({ data: [], total: 0, page: 1, size: 20, filters: scope, sorting: {}, listSearchValues: {} });
             }
-        } catch (error) {
-            console.error(error);
-        }
-    },
-    fetchItem: async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
-        set({ loading: true });
-        try {
-            const result = await get{{ model.name }}(id);
-            set({ currentItem: result });
-            return result;
-        } catch (error) {
-            console.error(error);
-            set({ currentItem: null });
-            return null;
-        } finally {
-            set({ loading: false });
-        }
-    },
-    createItem: async (item: any) => {
-        try {
+            const { page, size, filters, sorting } = get();
+            const key = queryKey([identity, scopeKey, page, size, filters, sorting]);
+            if (loadedKey === key && loadedRevision === getDataRevision() && Date.now() - fetchedAt < LIST_STALE_MS) return;
+            await loadList(page, size, filters);
+        },
+        invalidateList,
+        setSorting: async (field, direction) => {
+            ensureIdentity();
+            set({ sorting: field ? { sort_by: field, sort_order: direction } : {} });
+            await get().fetchData(1, get().size);
+        },
+        fetchData: (page = 1, size = 20, filters) => {
+            ensureIdentity();
+            return loadList(page, size, filters ?? get().filters);
+        },
+        refreshData: (page, size, filters) => {
+            ensureIdentity();
+            return loadList(page ?? get().page, size ?? get().size, filters ?? get().filters, true);
+        },
+        fetchItem: (id) => {
+            ensureIdentity();
+            const key = queryKey([identity, id]);
+            if (itemRequest?.key === key) return itemRequest.promise;
+            const version = ++itemVersion;
+            const owner = identity;
+            itemLoading = true;
+            if (get().currentItem?.id !== id) set({ currentItem: null });
+            updateLoading();
+            const promise = (async () => {
+                try {
+                    const result = await get{{ model.name }}(id);
+                    if (version !== itemVersion || owner !== identityKey()) return null;
+                    set({ currentItem: result });
+                    return result;
+                } catch (error) {
+                    if (version === itemVersion && owner === identityKey()) {
+                        console.error(error);
+                        set({ currentItem: null });
+                    }
+                    return null;
+                } finally {
+                    if (version === itemVersion) {
+                        itemRequest = null;
+                        itemLoading = false;
+                        updateLoading();
+                    }
+                }
+            })();
+            itemRequest = { key, promise };
+            return promise;
+        },
+        runAction: async (action, options) => {
+            ensureIdentity();
+            const owner = identity;
+            const revision = getDataRevision();
+            const result = await action();
+            if (owner !== identityKey()) { ensureIdentity(); return; }
+            await get().applyItem(result, options, revision);
+        },
+        applyItem: async (item, options, previousRevision) => {
+            ensureIdentity();
+            const { data, currentItem, filters, sorting } = get();
+            const previous = data.find(row => row.id === item.id);
+            const orderField = sorting.sort_by || {{ (model.default_order_field or ('created_at' if model.has_created_at else '')) | tojson }};
+            const orderChanged = Boolean(orderField && (!previous ||
+                queryKey((previous as any)[orderField]) !== queryKey((item as any)[orderField])));
+            {% if model.owner_field %}
+            // Ownership is an implicit server filter, even when the search form is empty.
+            const ownerChanged = !previous || !Object.prototype.hasOwnProperty.call(item, '{{ model.owner_field }}') ||
+                queryKey((previous as any)['{{ model.owner_field }}']) !== queryKey((item as any)['{{ model.owner_field }}']);
+            {% endif %}
+            const unrelatedWrite = previousRevision === undefined || loadedRevision !== previousRevision ||
+                getDataRevision() !== previousRevision + 1;
+            const needsRefresh = Boolean(unrelatedWrite{% if model.owner_field %} || ownerChanged{% endif %} || options?.invalidateList || !previous || orderChanged ||
+                Object.values(filters).some(value => value !== undefined && value !== null && value !== ''){% if model.has_read_resolvers or model.has_update_hooks %} || true{% endif %});
+            // Discard pre-mutation responses, even when the existing page can be patched.
+            const hadPendingList = listRequest !== null;
+            listVersion += 1;
+            listRequest = null;
+            listLoading = false;
+            {% if not model.has_read_resolvers %}
+            set({ data: data.map(row => row.id === item.id ? item : row) });
+            {% endif %}
+            if (currentItem?.id === item.id || itemRequest?.key === queryKey([identity, item.id])) {
+                itemVersion += 1;
+                itemRequest = null;
+                itemLoading = false;
+                set({ currentItem: item });
+                {% if model.has_read_resolvers %}
+                // Read resolvers may intentionally return different update/action/detail values.
+                await get().fetchItem(item.id);
+                {% endif %}
+            }
+            updateLoading();
+            if (needsRefresh || hadPendingList) await refreshAfterMutation(options);
+            else loadedRevision = getDataRevision();
+        },
+        createItem: async (item, options) => {
+            ensureIdentity();
+            const owner = identity;
             await create{{ model.name }}(item);
-            const { page, size, filters } = get();
-            await get().fetchData(page, size, filters);
-        } catch (error) {
-            console.error(error);
-            throw error;
-        }
-    },
-    updateItem: async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, item: any) => {
-        try {
-            await update{{ model.name }}(id, item);
-            const { page, size, filters } = get();
-            await get().fetchData(page, size, filters);
-        } catch (error) {
-            console.error(error);
-            throw error;
-        }
-    },
-    deleteItem: async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
-        try {
+            if (owner !== identityKey()) { ensureIdentity(); return; }
+            await refreshAfterMutation(options);
+        },
+        updateItem: async (id, item, options) => {
+            ensureIdentity();
+            const owner = identity;
+            const revision = getDataRevision();
+            const result = await update{{ model.name }}(id, item);
+            if (owner !== identityKey()) { ensureIdentity(); return; }
+            await get().applyItem(result, options, revision);
+        },
+        deleteItem: async (id, options) => {
+            ensureIdentity();
+            const owner = identity;
             await delete{{ model.name }}(id);
-            const { page, size, filters } = get();
-            await get().fetchData(page, size, filters);
-        } catch (error) {
-            console.error(error);
-            throw error;
-        }
-    },
-    bulkDeleteItem: async (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => {
-        try {
+            if (owner !== identityKey()) { ensureIdentity(); return; }
+            if (get().currentItem?.id === id) {
+                itemVersion += 1;
+                itemRequest = null;
+                itemLoading = false;
+                set({ currentItem: null });
+            }
+            await refreshAfterMutation(options);
+        },
+        bulkDeleteItem: async (ids, options) => {
+            ensureIdentity();
+            const owner = identity;
             await bulkDelete{{ model.name }}(ids);
-            const { page, size, filters } = get();
-            await get().fetchData(page, size, filters);
-        } catch (error) {
-            console.error(error);
-            throw error;
-        }
-    },
-}));
+            if (owner !== identityKey()) { ensureIdentity(); return; }
+            if (get().currentItem && ids.includes(get().currentItem!.id)) {
+                itemVersion += 1;
+                itemRequest = null;
+                itemLoading = false;
+                set({ currentItem: null });
+            }
+            await refreshAfterMutation(options);
+        },
+    };
+});

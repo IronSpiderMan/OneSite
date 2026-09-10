@@ -1,4 +1,5 @@
 import request from '../utils/request';
+import { markDataChanged } from '../utils/query-cache';
 {% if model.importable or model.exportable %}
 import type { TaskCenterTask } from './task-center';
 {% endif %}
@@ -62,21 +63,25 @@ export const get{{ model.name }} = async (id: {{ 'string' if 'str' in model.id_t
 
 export const create{{ model.name }} = async (data: any) => {
     const response = await request.post<{{ model.name }}>(`${API_URL}/`, data, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 
 export const update{{ model.name }} = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, data: any) => {
     const response = await request.put<{{ model.name }}>(`${API_URL}/${id}`, data, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 
 export const delete{{ model.name }} = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     const response = await request.delete<{{ model.name }}>(`${API_URL}/${id}`, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 
 export const bulkDelete{{ model.name }} = async (ids: {{ 'string[]' if 'str' in model.id_type else 'number[]' }}) => {
     const response = await request.post<{ deleted: number }>(`${API_URL}/bulk_delete`, { ids }, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 
@@ -103,6 +108,7 @@ export const get{{ model.name }}Definitions = async (id: {{ 'string' if 'str' in
 {% if model.definition_binding_meta.config_field %}
 export const update{{ model.name }}DefinitionConfig = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}, configs: Record<string, any>) => {
     const response = await request.put(`${API_URL}/${id}/definition-config`, configs, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 {% endif %}
@@ -209,6 +215,7 @@ export const get{{ model.name }}ActionStates = async (ids: {{ 'string[]' if 'str
 {% for action_name, action_config in model.actions.items() %}
 export const perform{{ model.name }}{{ action_name.capitalize() }} = async (id: {{ 'string' if 'str' in model.id_type else 'number' }}) => {
     const response = await request.post<{{ model.name }}>(`${API_URL}/${id}/actions/{{ action_name }}`);
+    markDataChanged();
     return response.data;
 };
 {% endfor %}
@@ -222,6 +229,7 @@ export const getMe = async () => {
 
 export const updateMe = async (data: any) => {
     const response = await request.put<{{ model.name }}>(`${API_URL}/me`, data, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 {% endif %}
@@ -337,6 +345,7 @@ export interface {{ model.name }}RealtimeResponse {
 
 export const create{{ model.name }} = async (data: any) => {
     const response = await request.post<{{ model.name }}>(`${API_URL}/`, data, { suppressErrorToast: true });
+    markDataChanged();
     return response.data;
 };
 

@@ -124,13 +124,19 @@ objects, so VS Code, PyCharm, and other Python-aware editors can complete keys
 and validate nested values while you edit:
 
 ```python
-from onesite.config import DesktopConfig, NavBuiltin, NavGroup, NavModel, SiteConfig, Theme
+from onesite.config import (
+    DesktopConfig, NavBuiltin, NavGroup, NavModel, SiteConfig, Theme, Timezone,
+    env, postgres_url,
+)
 
 config = SiteConfig(
     project_name="Inventory",
-    database_url="sqlite:///./app.db",
+    database_url=postgres_url(
+        host="db.example.com", user="inventory", password=env("DATABASE_PASSWORD"),
+        db="inventory", params={"sslmode": "require"},
+    ),
     secret_key="replace-with-a-random-production-secret",
-    extra={"TIMEZONE": "Asia/Shanghai"},
+    extra={"TIMEZONE": Timezone.ASIA_SHANGHAI},
     allowed_origins=["http://localhost:5173", "http://localhost:3000"],
     style=Theme.NORMAL,
     radius=1.0,
@@ -163,9 +169,12 @@ secrets rather than committing them to the file.
 Supported themes are `normal`, `industrial`, and `neuron`. The `style` value is a build-time structural theme: `site sync` selects that theme's list, detail, create, dashboard, settings, profile, singleton, and CSS templates. Theme templates live under `src/onesite/templates/codegen/themes/<style>/` and fall back to the shared codegen templates when an override is absent. The `normal` theme uses Ant Design 6 through generated compatibility adapters and only adds the `antd` dependency to normal builds. Light/dark/system mode remains a browser-side runtime preference and is synchronized with Ant Design's theme algorithm. The `neuron` theme is a dark telemetry-console style with a graphite grid and signal-green accents. Use a production database URL and a strong, private `secret_key` outside local development.
 
 Every key under `extra` is synchronized to the backend `.env`. `TIMEZONE`
-accepts an IANA timezone name, defaults to `Asia/Shanghai`, controls the
-default frontend display timezone and APScheduler cron timezone, while
-datetimes are normalized to UTC before database persistence.
+accepts an IANA timezone name or a `Timezone` enum member, defaults to
+`Timezone.ASIA_SHANGHAI`, controls the default frontend display timezone and
+APScheduler cron timezone, while datetimes are normalized to UTC before
+database persistence. `Timezone` includes common IANA zones; raw strings
+remain available for other valid zones. Use `postgres_url(...)` to assemble an
+encoded PostgreSQL URL from its individual connection fields.
 
 ### Navigation
 
