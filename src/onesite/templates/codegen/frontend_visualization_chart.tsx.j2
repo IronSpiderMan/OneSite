@@ -300,7 +300,7 @@ export const VisualizationChart: React.FC<{
 
 export type ModelReportRow = Record<string, any>;
 
-const modelReportOption = (chart: string, rows: ModelReportRow[]): EChartsCoreOption => {
+const modelReportOption = (chart: string, rows: ModelReportRow[], translate: (slot: string, value: unknown) => string = (_slot, value) => String(value)): EChartsCoreOption => {
   if (chart.startsWith('pie.')) {
     const half = chart === 'pie.half_donut';
     return {
@@ -316,7 +316,7 @@ const modelReportOption = (chart: string, rows: ModelReportRow[]): EChartsCoreOp
         roseType: chart === 'pie.rose' ? 'radius' : undefined,
         padAngle: 2,
         itemStyle: { borderRadius: 5 },
-        data: rows.map((row) => ({ name: String(row.cls ?? ''), value: row.value })),
+        data: rows.map((row) => ({ name: translate('cls', row.cls ?? ''), value: row.value })),
       }],
     };
   }
@@ -331,7 +331,7 @@ const modelReportOption = (chart: string, rows: ModelReportRow[]): EChartsCoreOp
       xAxis: { type: 'value', scale: true },
       yAxis: { type: 'value', scale: true },
       series: names.map((name) => ({
-        name,
+        name: translate('cls', name),
         type: 'scatter',
         symbolSize: 9,
         data: rows.filter((row) => chart !== 'scatter.category' || String(row.cls) === name).map((row) => [row.x, row.y]),
@@ -342,14 +342,14 @@ const modelReportOption = (chart: string, rows: ModelReportRow[]): EChartsCoreOp
   const xValues = unique(rows.map((row) => row.x));
   const yKeys = Object.keys(rows[0] || {}).filter((key) => /^y\d*$/.test(key));
   const classes = rows.some((row) => row.cls != null) ? unique(rows.map((row) => row.cls)) : [''];
-  const base = cartesianBase(xValues);
+  const base = cartesianBase(xValues.map((value) => translate('x', value)));
   const series: any[] = [];
   classes.forEach((className) => {
     yKeys.forEach((yKey, yIndex) => {
       const selected = rows.filter((row) => !className || String(row.cls) === className);
       const values = new Map(selected.map((row) => [String(row.x), row[yKey]]));
       const label = selected[0]?.[`${yKey}_label`] || yKey.toUpperCase();
-      const name = className ? `${className} · ${label}` : label;
+      const name = className ? `${translate('cls', className)} · ${label}` : label;
       const isCombo = chart.includes('bar_line');
       const isBar = chart.startsWith('bar.') || (isCombo && yIndex === 0);
       series.push({
@@ -370,8 +370,15 @@ const modelReportOption = (chart: string, rows: ModelReportRow[]): EChartsCoreOp
 export const ModelReportChart: React.FC<{
   chart: string;
   rows: ModelReportRow[];
-}> = ({ chart, rows }) => {
-  const option = useMemo(() => modelReportOption(chart, rows), [chart, rows]);
+  model?: string;
+  bindings?: Record<string, any>;
+}> = ({ chart, rows, model, bindings }) => {
+  const { t } = useTranslation();
+  const option = useMemo(() => modelReportOption(chart, rows, (slot, value) => {
+    const fallback = String(value);
+    const field = bindings?.[slot]?.field;
+    return model && field ? String(t(`models.${model}.enums.${field}.${fallback}`, fallback)) : fallback;
+  }), [chart, rows, model, bindings, t]);
   return <EChartCanvas option={option} title="Self-service report" className="h-full w-full" />;
 };
 
