@@ -1,7 +1,8 @@
 type ChartQuery = { model: string; payload: { category: string; chart: string; bindings: Record<string, any>; filters: Record<string, any> }; relativeDays: Record<string, number>; dateTypes: Record<string, string> };
-type ReportFormat = 'text' | 'markdown' | 'html' | 'mermaid';
+type ReportFormat = 'text' | 'markdown' | 'html' | 'mermaid' | 'svg' | 'image';
+const isReportVisual = (format?: ReportFormat) => ['mermaid', 'svg', 'image'].includes(format || '');
 type ReportLayout = 'single' | 'halves' | 'thirds' | 'wide-left' | 'wide-right';
-type ReportBlock = { id: string; text: string; format?: ReportFormat; query?: ChartQuery; table?: { model: string; page: number; size: number; filters?: Record<string, any>; hiddenFields?: string[] } };
+type ReportBlock = { id: string; text: string; format?: ReportFormat; alt?: string; visualTitle?: string; query?: ChartQuery; table?: { model: string; page: number; size: number; filters?: Record<string, any>; hiddenFields?: string[] } };
 type ReportRow = { id: string; blocks: ReportBlock[]; layout?: ReportLayout; pageBreak?: boolean };
 type ReportTemplate = { id: string; title: string; subtitle?: string; rows: ReportRow[] };
 let reportIdSequence = 0;
@@ -49,7 +50,7 @@ const swapReportBlocks = (rows: ReportRow[], from: string, to: string): ReportRo
 
 const restoreReportLayout = (snapshot: ReportRow[], current: ReportRow[]): ReportRow[] => {
   const latest = new Map(current.flatMap((row) => row.blocks).map((block) => [block.id, block]));
-  return snapshot.map((row) => ({ ...row, blocks: row.blocks.map((block) => ({ ...block, text: latest.get(block.id)?.text ?? block.text, format: latest.get(block.id)?.format ?? block.format })) }));
+  return snapshot.map((row) => ({ ...row, blocks: row.blocks.map((block) => ({ ...block, text: latest.get(block.id)?.text ?? block.text, visualTitle: latest.has(block.id) ? latest.get(block.id)?.visualTitle : block.visualTitle, alt: latest.has(block.id) ? latest.get(block.id)?.alt : block.alt, format: latest.get(block.id)?.format ?? block.format })) }));
 };
 
 const splitReportPages = (rows: ReportRow[]): ReportRow[][] => {
@@ -74,7 +75,7 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
   const [selected, setSelected] = useState('');
   const [activeBlockId, setActiveBlockId] = useState('');
   const [panel, setPanel] = useState<'content' | 'charts'>('content');
-  const [draft, setDraft] = useState<{ id: string; text: string; format: ReportFormat } | null>(null);
+  const [draft, setDraft] = useState<{ id: string; text: string; format: ReportFormat; visualTitle?: string } | null>(null);
   const [results, setResults] = useState<Record<string, QueryResult>>({});
   const [tableRefresh, setTableRefresh] = useState(0);
   const [message, setMessage] = useState('');
@@ -271,20 +272,24 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
                 <div className="report-row" style={ { gridTemplateColumns: reportLayouts[rowLayout(row)] } }>
                   {row.blocks.map((block, column) => <section key={block.id} data-block-id={block.id} className={`report-block ${block.query ? 'report-chart-card' : ''}`} data-active={!preview && activeBlockId === block.id ? 'true' : undefined} tabIndex={preview ? undefined : 0} aria-label={`${label('row', 'Row')} ${index + 1} / ${label('block', 'Block')} ${column + 1}`} onClick={() => selectBlock(block.id)} onKeyDown={(event) => { if (event.target === event.currentTarget && (event.key === 'Enter' || event.key === ' ')) { event.preventDefault(); selectBlock(block.id); } }}>
                     {!preview && !draft && (activeBlockId === block.id || (!block.text && !block.query && !block.table)) && <div data-editor-control className="report-block-actions">
-                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text, format: block.format || 'text' }); }}><FileText className="h-4 w-4" />{label('edit_text', 'Edit text')}</button>
-                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text || 'flowchart LR\n  A[Start] --> B[Process] --> C[End]', format: 'mermaid' }); }}>Mermaid</button>
-                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); chartTrigger.current = event.currentTarget; setActiveBlockId(block.id); setPanel('charts'); }}><BarChart3 className="h-4 w-4" />{block.query ? label('chart_settings', 'Chart settings') : label('chart_image', 'Chart / image')}</button>
+                      {!isReportVisual(block.format) && <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text, format: block.format || 'text' }); }}><FileText className="h-4 w-4" />{label('edit_text', 'Edit text')}</button>}
+                      {(!block.text || isReportVisual(block.format)) && <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); setPanel('content'); setDraft({ id: block.id, text: block.text || 'flowchart LR\n  A[Start] --> B[End]', format: isReportVisual(block.format) ? block.format! : 'mermaid', visualTitle: block.visualTitle }); }}>{block.text ? label('edit_visual', 'Edit diagram / image') : label('insert_visual', 'Diagram / image')}</button>}
+                      <button disabled={locked} onClick={(event) => { event.stopPropagation(); chartTrigger.current = event.currentTarget; setActiveBlockId(block.id); setPanel('charts'); }}><BarChart3 className="h-4 w-4" />{block.query ? label('chart_settings', 'Chart settings') : label('data_chart', 'Data chart')}</button>
                       <button disabled={locked} onClick={(event) => { event.stopPropagation(); setActiveBlockId(block.id); updateBlock(block.id, { table: { model: '', page: 1, size: 20 } }); }}>{label('table_data', 'Table data')}</button>
                       {block.table && <button disabled={locked} onClick={() => updateBlock(block.id, { table: undefined })}>{label('remove_table', 'Remove table')}</button>}
                       {block.query && <button disabled={locked} aria-label={label('remove_chart', 'Remove chart')} onClick={(event) => { event.stopPropagation(); commitRows(rows.map((item) => ({ ...item, blocks: item.blocks.map((cell) => cell.id === block.id ? { ...cell, query: undefined } : cell) }))); }}><Trash2 className="h-4 w-4" /></button>}
                     </div>}
                     {draft?.id === block.id && <div data-editor-control className="report-inline-editor" onClick={(event) => event.stopPropagation()}>
-                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem><SelectItem value="mermaid">Mermaid</SelectItem></SelectContent></Select>
-                      <textarea autoFocus aria-label={label('text', 'Block content')} value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />
-                      <div className="report-content-actions"><button onClick={() => { updateBlock(draft.id, { text: draft.text, format: draft.format }); setDraft(null); }}>{label('apply_content', 'Save content')}</button><button onClick={() => setDraft(null)}>{label('cancel_content', 'Cancel')}</button></div>
+                      <Select value={draft.format} onValueChange={(value) => setDraft({ ...draft, format: value as ReportFormat })}><SelectTrigger aria-label={label('format', 'Content format')}><SelectValue /></SelectTrigger><SelectContent>{isReportVisual(draft.format) ? <><SelectItem value="mermaid">Mermaid</SelectItem><SelectItem value="svg">SVG</SelectItem><SelectItem value="image">{label('image_url', 'Image URL')}</SelectItem></> : <><SelectItem value="text">{label('plain_text', 'Plain text')}</SelectItem><SelectItem value="markdown">Markdown</SelectItem><SelectItem value="html">HTML</SelectItem></>}</SelectContent></Select>
+                      {isReportVisual(draft.format) && <label className="report-editor-field">{label('visual_title', 'Title (optional)')}<input value={draft.visualTitle || ''} placeholder={label('visual_title_placeholder', 'Add a title for this diagram or image')} onChange={(event) => setDraft({ ...draft, visualTitle: event.target.value })} /></label>}
+                      <label className="report-editor-field">{draft.format === 'image' ? label('image_url', 'Image URL') : label('text', 'Block content')}
+                        {draft.format === 'image' ? <input autoFocus type="url" placeholder="https://example.com/image.png" value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} /> : <textarea autoFocus value={draft.text} onChange={(event) => setDraft({ ...draft, text: event.target.value })} />}
+                      </label>
+                      {isReportVisual(draft.format) && <div className="report-editor-preview"><span className="report-editor-preview-label">{label('live_preview', 'Preview')}</span><ReportContent text={draft.text} format={draft.format} visualTitle={draft.visualTitle} /></div>}
+                      <div className="report-content-actions"><button onClick={() => { updateBlock(draft.id, { text: draft.text, format: draft.format, visualTitle: draft.visualTitle }); setDraft(null); }}>{label('apply_content', 'Save content')}</button><button onClick={() => setDraft(null)}>{label('cancel_content', 'Cancel')}</button></div>
                       <p>{label('draft_hint', 'Save to render this region. Other regions stay rendered.')}</p>
                     </div>}
-                    <div hidden={draft?.id === block.id}><ReportContent text={block.text} format={block.format || 'text'} /></div>
+                    <div hidden={draft?.id === block.id}><ReportContent text={block.text} format={block.format || 'text'} alt={block.alt} visualTitle={block.visualTitle} /></div>
                     {!block.text && !block.query && !block.table && !draft && <div data-editor-control className="report-empty-block">{label('canvas_empty_block', 'Choose text or a chart for this region')}</div>}
                     {block.table && <ReportDataTable config={block.table} refreshKey={tableRefresh} editing={!preview && activeBlockId === block.id} disabled={locked} onChange={(table) => updateBlock(block.id, { table })} />}
                     {block.query && (results[block.id] ? <><div className="report-chart" style={ { height: row.blocks.length === 3 ? 220 : 280 } }><ModelReportChart chart={results[block.id].chart} rows={results[block.id].rows} /></div>{results[block.id].meta.truncated && <p className="report-note">{t('reports.truncated_badge', 'Truncated')}</p>}{!results[block.id].rows.length && <p className="report-note">{label('no_data', 'No data for these filters.')}</p>}</> : <p className="report-empty-block">{busy ? label('loading', 'Loading…') : label('needs_refresh', 'Chart unavailable. Refresh to retry.')}</p>)}
