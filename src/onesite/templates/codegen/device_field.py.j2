@@ -1,9 +1,10 @@
-"""Per-device field configuration provided by the device_timeseries plugin."""
+"""Per-device field configuration provided by the device_timeseries module."""
 import inspect
 from decimal import Decimal
 from enum import Enum
 from typing import Any, Optional
 
+from onesite.config import OneSiteConfig, EditMode
 from onesite_runtime import override_field
 from sqlalchemy import CheckConstraint, Column, JSON, PrimaryKeyConstraint, UniqueConstraint
 from sqlmodel import Field, SQLModel, select
@@ -63,21 +64,30 @@ def _parse_display_value(dtype: str, value: Any) -> Any:
 
 class DeviceField(SQLModel, table=True):
     __tablename__ = "device_field"
-    __onesite__ = {
-        "icon": "SlidersHorizontal",
-        "permissions": {"user": "r", "admin": "ru", "developer": "ru"},
-        "visible": [],
-        "standalone": False,
-        "translations": {
-            "zh": {"name": "设备字段", "fields": {
-                "device_id": "设备", "device_model_field_id": "模型字段",
-                "name": "名称", "dtype": "数据类型", "unit": "单位",
-                "address": "地址", "attribute": "属性", "value": "当前值",
-                "report_mode": "上报模式", "deadband": "死区",
-            }},
-            "en": {"name": "Device Fields"},
+    __onesite__ = OneSiteConfig(
+        icon="SlidersHorizontal",
+        permissions={"user": "r", "admin": "ru", "developer": "ru"},
+        visible=[],
+        standalone=False,
+        edit_mode=EditMode.INPLACE_EDIT,
+        translations={
+            "zh": {
+                "name": "设备字段",
+                "fields": {
+                    "device_id": "设备",
+                    "device_model_field_id": "模型字段",
+                    "name": "名称",
+                    "dtype": "数据类型",
+                    "unit": "单位",
+                    "address": "地址",
+                    "attribute": "属性",
+                    "value": "当前值",
+                    "report_mode": "上报模式",
+                    "deadband": "死区",
+                },
+            }
         },
-    }
+    )
     __table_args__ = (
         PrimaryKeyConstraint("device_id", "name", name="pk_device_field"),
         UniqueConstraint(

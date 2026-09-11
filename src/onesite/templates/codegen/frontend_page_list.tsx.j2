@@ -483,7 +483,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         try {
           const fkItem = await get{{ field.fk_info.target_model }}(fixedValue);
           if (fkItem) {
-            set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: fkItem.{{ field.fk_info.label_field }} || String(fkItem.id) });
+            set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: String(fkItem.{{ field.fk_info.label_field }} ?? fkItem.id) });
           }
         } catch (error) {
           console.error(error);
@@ -645,7 +645,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       if (item.{{ field.name }}) {
         const fkItem = await get{{ field.fk_info.target_model }}(item.{{ field.name }});
         if (fkItem) {
-          set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: fkItem.{{ field.fk_info.label_field }} || String(fkItem.id) });
+          set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: String(fkItem.{{ field.fk_info.label_field }} ?? fkItem.id) });
         } else {
           set{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({});
         }

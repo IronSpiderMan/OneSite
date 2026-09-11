@@ -1,21 +1,50 @@
-"""Device model provided by the device_timeseries plugin."""
+"""Device model definitions for the device_timeseries module."""
+
 from typing import Optional
 
-from sqlmodel import Field, SQLModel
+from onesite.config import ImportExportConfig, OneSiteConfig, EditMode, ListMode
+from sqlmodel import Field, SQLModel, select
 
 
 class DeviceModel(SQLModel, table=True):
     __tablename__ = "device_model"
-    __onesite__ = {
-        "icon": "Boxes",
-        "translations": {
-            "zh": {"name": "设备模型", "fields": {
-                "name": "名称", "description": "说明",
-            }},
-            "en": {"name": "Device Models"},
+    __onesite__ = OneSiteConfig(
+        icon="Boxes",
+        edit_mode=EditMode.PAGE_EDIT,
+        list_mode=ListMode.GRID,
+        # The model owns a nested collection of DeviceModelField records, which
+        # cannot be represented faithfully by OneSite's flat CSV exchange.
+        importable=ImportExportConfig(custom=True),
+        exportable=ImportExportConfig(custom=True),
+        track=["c", "u", "d", "bulk_delete"],
+        permissions={"user": "r", "admin": "crud", "developer": "crud"},
+        translations={
+            "zh": {
+                "name": "设备模型",
+                "fields": {"name": "名称", "description": "说明"},
+            }
         },
-    }
+    )
 
     id: Optional[int] = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True)
     description: Optional[str] = None
+
+    async def _ensure_unused(self, session) -> None:
+        from app.models.device import Device
+
+        await session.exec(select(DeviceModel).where(DeviceModel.id == self.id).with_for_update())
+
+        device_id = (
+            await session.exec(
+                select(Device.id).where(Device.device_model_id == self.id).limit(1)
+            )
+        ).first()
+        if device_id is not None:
+            raise ValueError("设备模型已被设备使用，不能修改或删除")
+
+    async def on_before_update(self, session) -> None:
+        await self._ensure_unused(session)
+
+    async def on_before_delete(self, session) -> None:
+        await self._ensure_unused(session)

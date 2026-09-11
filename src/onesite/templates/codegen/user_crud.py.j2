@@ -190,10 +190,11 @@ async def get_with_fk_labels(
     if fk_id is not None:
         from app.models.{{ fk.target_source_module }} import {{ fk.target_model }}
         fk_obj = await session.get({{ fk.target_model }}, fk_id)
-        item_dict["{{ fk.name }}_label"] = (
-            getattr(fk_obj, "{{ fk.label_field }}", None) or str(fk_obj.id)
-            if fk_obj is not None else None
-        )
+        if fk_obj is not None:
+            label = getattr(fk_obj, "{{ fk.label_field }}", None)
+            item_dict["{{ fk.name }}_label"] = str(label) if label is not None else str(fk_obj.id)
+        else:
+            item_dict["{{ fk.name }}_label"] = None
     else:
         item_dict["{{ fk.name }}_label"] = None
     {% endfor %}
@@ -275,7 +276,8 @@ async def get_multi_with_fk_labels(
         stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service or fk.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
-            {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+            label = getattr(obj, "{{ fk.label_field }}", None)
+            {{ fk.name }}_map[obj.id] = str(label) if label is not None else str(obj.id)
     {% endfor %}
     
     # Enrich items with labels

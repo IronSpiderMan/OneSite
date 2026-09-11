@@ -626,6 +626,7 @@ class OneSiteConfig(_ConfigModel):
 
     translations: dict[str, Any] = Field(default_factory=dict)
     icon: str | None = None
+    label_field: str | None = None
     permissions: ModelPermissions | None = None
     visible: ModelVisibility | None = None
     owner_field: str | None = None

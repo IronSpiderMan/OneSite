@@ -1,0 +1,477 @@
+"""Excel import and export for device point configuration.
+
+The device worksheet keeps columns A:F as a read-only reference to one device
+model.  Device blocks start at H and occupy seven columns; each next block is
+separated by one blank column.  Missing models and their field definitions are created from columns A:F.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import math
+import re
+import zipfile
+from collections import Counter, defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal
+
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core.config import settings
+from app.core.db import engine
+from app.models.connector import Connector
+from app.models.device import Device
+from app.models.device_field import DeviceField, DeviceFieldAttribute, DeviceReportMode
+from app.models.device_model import DeviceModel
+from app.models.device_model_field import DeviceModelField
+from app.models.dgroup import DGroup
+from app.custom_io.device_model import _FieldInput, _optional_number, _parse_enum_values
+
+
+MAX_WORKBOOK_BYTES = 32 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+MAX_SHEETS = 1_000
+MAX_ROWS_PER_SHEET = 10_000
+_SHEET_NAME_UNSAFE = re.compile(r"[\\[\\]:*?/\\\\]")
+_MODEL_HEADERS = ["模型名称", "模型描述"]
+_FIELD_HEADERS = ["属性名", "数据类型", "单位", "枚举值（用；分割，如：“男；女；未知”）", "最小值", "最大值"]
+_DEVICE_HEADERS = ["设备名称", "设备组", "连接器", "采集周期", "是否启用", "离线超时", "心跳间隔"]
+_POINT_HEADERS = ["地址", "读写方式", "上报方式"]
+_DEVICE_START_COLUMN = 8
+_DEVICE_BLOCK_WIDTH = 7
+_DEVICE_COLUMN_STRIDE = 8
+
+
+class _PointConfig(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    address: str = Field(min_length=1, max_length=4096)
+    attribute: Literal["read", "subscribe", "read_subscribe", "write"]
+    report_mode: Literal["periodic", "change", "change_heartbeat"]
+
+    @field_validator("address")
+    @classmethod
+    def _strip_address(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("地址不能为空")
+        return value
+
+
+class _DeviceInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    name: str = Field(min_length=1, max_length=255)
+    dgroup_name: str | None = None
+    connector_title: str = Field(min_length=1, max_length=255)
+    collection_interval_seconds: int = Field(ge=1)
+    enabled: bool
+    timeout: int = Field(ge=1)
+    heartbeat_interval_seconds: int = Field(ge=1)
+    point_configs: dict[str, _PointConfig]
+
+    @field_validator("name", "connector_title")
+    @classmethod
+    def _strip_required_text(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("不能为空")
+        return value
+
+    @field_validator("dgroup_name", mode="before")
+    @classmethod
+    def _empty_group_is_none(cls, value: Any) -> Any:
+        return None if value is None or not str(value).strip() else str(value).strip()
+
+
+class _SheetInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+    model_name: str = Field(min_length=1, max_length=255)
+    field_names: list[str]
+    description: str | None = None
+    fields: list[_FieldInput] = Field(default_factory=list)
+    devices: list[_DeviceInput]
+
+    @field_validator("model_name")
+    @classmethod
+    def _strip_model_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("模型名称不能为空")
+        return value
+
+    @model_validator(mode="after")
+    def _validate_names(self) -> "_SheetInput":
+        field_duplicates = [name for name, count in Counter(self.field_names).items() if count > 1]
+        if field_duplicates:
+            raise ValueError(f"属性名重复: {', '.join(sorted(field_duplicates))}")
+        device_duplicates = [name for name, count in Counter(device.name for device in self.devices).items() if count > 1]
+        if device_duplicates:
+            raise ValueError(f"设备名称重复: {', '.join(sorted(device_duplicates))}")
+        expected = set(self.field_names)
+        for device in self.devices:
+            if set(device.point_configs) != expected:
+                raise ValueError(f"设备“{device.name}”的点位配置必须覆盖全部模型属性")
+        return self
+
+
+def _result() -> dict[str, Any]:
+    return {"success": 0, "created": 0, "updated": 0, "failed": 0, "errors": [], "message": ""}
+
+
+def _add_error(result: dict[str, Any], source: str, message: str) -> None:
+    result["failed"] += 1
+    result["errors"].append(f"{source}: {message}")
+
+
+def _is_blank(value: Any) -> bool:
+    return value is None or (isinstance(value, str) and not value.strip())
+
+
+def _cell_value(cell: Any, location: str) -> Any:
+    if getattr(cell, "data_type", None) == "f":
+        raise ValueError(f"{location} 不支持公式")
+    return cell.value
+
+
+def _required_text(value: Any, location: str) -> str:
+    if _is_blank(value):
+        raise ValueError(f"{location} 不能为空")
+    return str(value).strip()
+
+
+def _required_positive_int(value: Any, location: str) -> int:
+    if _is_blank(value) or isinstance(value, bool):
+        raise ValueError(f"{location} 必须是大于 0 的整数")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{location} 必须是大于 0 的整数") from exc
+    if not math.isfinite(number) or not number.is_integer() or number < 1:
+        raise ValueError(f"{location} 必须是大于 0 的整数")
+    return int(number)
+
+
+def _required_bool(value: Any, location: str) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)) and not isinstance(value, bool) and value in (0, 1):
+        return bool(value)
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "是", "启用"}:
+            return True
+        if normalized in {"false", "0", "否", "禁用"}:
+            return False
+    raise ValueError(f"{location} 必须是布尔值")
+
+
+def _column_name(column: int) -> str:
+    name = ""
+    while column:
+        column, remainder = divmod(column - 1, 26)
+        name = chr(65 + remainder) + name
+    return name
+
+
+def _read_sheet(worksheet: Any) -> _SheetInput:
+    """Consume the read-only XML stream once, keeping only parsed points."""
+    if worksheet.max_row > MAX_ROWS_PER_SHEET:
+        raise ValueError(f"最多允许 {MAX_ROWS_PER_SHEET} 行点位配置")
+    rows = worksheet.iter_rows()
+    def values(cells):
+        return [_cell_value(cell, f"{worksheet.title}!{getattr(cell, 'coordinate', '?')}") for cell in cells]
+    headers, metadata, point_headers = [values(next(rows, ())) for _ in range(3)]
+    if headers[:2] != _MODEL_HEADERS or point_headers[:6] != _FIELD_HEADERS:
+        raise ValueError("设备模板表头不一致")
+    model_name = _required_text(metadata[0], "模型名称")
+    devices = []
+    starts = []
+    for start in range(7, len(headers), 8):
+        block = headers[start:start + 7]
+        if all(_is_blank(value) for value in block):
+            continue
+        if block != _DEVICE_HEADERS or point_headers[start:start + 3] != _POINT_HEADERS:
+            raise ValueError(f"{_column_name(start + 1)} 列设备表头与模板不一致")
+        data = metadata[start:start + 7]
+        devices.append(_DeviceInput.model_validate({
+            "name": _required_text(data[0], "设备名称"),
+            "dgroup_name": data[1],
+            "connector_title": _required_text(data[2], "连接器"),
+            "collection_interval_seconds": _required_positive_int(data[3], "采集周期"),
+            "enabled": _required_bool(data[4], "是否启用"),
+            "timeout": _required_positive_int(data[5], "离线超时"),
+            "heartbeat_interval_seconds": _required_positive_int(data[6], "心跳间隔"),
+            "point_configs": {},
+        }))
+        starts.append(start)
+    if not devices:
+        raise ValueError("至少需要一个设备定义")
+    inactive = set(range(7, len(headers), 8)) - set(starts)
+    for start in inactive:
+        if any(not _is_blank(v) for v in metadata[start:start + 7] + point_headers[start:start + 7]):
+            raise ValueError("设备定义缺少表头")
+    field_names = []
+    definitions = []
+    for row_number, cells in enumerate(rows, 4):
+        if row_number > MAX_ROWS_PER_SHEET:
+            raise ValueError("点位行数超过限制")
+        row = values(cells)
+        for start in inactive:
+            if any(not _is_blank(v) for v in row[start:start + 7]):
+                raise ValueError("设备定义缺少表头")
+        if all(_is_blank(v) for v in row[:6]):
+            if any(not _is_blank(v) for start in starts for v in row[start:start + 3]):
+                raise ValueError(f"第 {row_number} 行设备点位配置没有对应的模型属性")
+            continue
+        name = _required_text(row[0], f"第 {row_number} 行属性名")
+        field_names.append(name)
+        definitions.append(_FieldInput(
+            name=name,
+            dtype=_required_text(row[1], "数据类型").lower(),
+            unit=row[2],
+            enum_values=_parse_enum_values(row[3]),
+            min_value=_optional_number(row[4], "最小值"),
+            max_value=_optional_number(row[5], "最大值"),
+        ))
+        for start, device in zip(starts, devices):
+            device.point_configs[name] = _PointConfig(
+                address=_required_text(row[start], f"第 {row_number} 行地址"),
+                attribute=_required_text(row[start + 1], "读写方式").lower(),
+                report_mode=_required_text(row[start + 2], "上报方式").lower(),
+            )
+    if not field_names:
+        raise ValueError("至少需要一个模型属性")
+    return _SheetInput(model_name=model_name, description=str(metadata[1]).strip() if metadata[1] is not None else None, fields=definitions, field_names=field_names, devices=devices)
+
+
+def _read_documents(file: Path, result: dict[str, Any]) -> list[tuple[str, _SheetInput]]:
+    if not file.is_file():
+        _add_error(result, str(file), "上传文件不存在")
+        return []
+    if file.suffix.lower() != ".xlsx":
+        _add_error(result, file.name, "请上传 .xlsx 格式的设备模板")
+        return []
+    if file.stat().st_size > MAX_WORKBOOK_BYTES:
+        _add_error(result, file.name, "Excel 文件超过 32 MiB 限制")
+        return []
+    try:
+        with zipfile.ZipFile(file) as archive:
+            if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
+                _add_error(result, file.name, "Excel 解压后超过 256 MiB 安全限制")
+                return []
+        workbook = load_workbook(file, read_only=True, data_only=False)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        _add_error(result, file.name, f"无法读取 Excel 文件: {exc}")
+        return []
+    try:
+        if not workbook.worksheets:
+            _add_error(result, file.name, "Excel 文件没有工作表")
+            return []
+        if len(workbook.worksheets) > MAX_SHEETS:
+            _add_error(result, file.name, f"最多允许 {MAX_SHEETS} 个工作表")
+            return []
+        documents = []
+        for worksheet in workbook.worksheets:
+            try:
+                documents.append((worksheet.title, _read_sheet(worksheet)))
+            except (TypeError, ValueError) as exc:
+                _add_error(result, f"工作表“{worksheet.title}”", str(exc))
+    finally:
+        workbook.close()
+    model_counts = Counter(document.model_name for _, document in documents)
+    unique_models = [(sheet, document) for sheet, document in documents if model_counts[document.model_name] == 1]
+    for sheet, document in documents:
+        if model_counts[document.model_name] > 1:
+            _add_error(result, f"工作表“{sheet}”", f"模型名称重复: {document.model_name}")
+    device_counts = Counter(device.name for _, document in unique_models for device in document.devices)
+    valid = []
+    for sheet, document in unique_models:
+        duplicates = [device.name for device in document.devices if device_counts[device.name] > 1]
+        if duplicates:
+            for name in sorted(set(duplicates)):
+                _add_error(result, f"工作表“{sheet}”", f"设备名称重复: {name}")
+        else:
+            valid.append((sheet, document))
+    return valid
+
+
+async def _import_one_device(document: _SheetInput, item: _DeviceInput) -> bool:
+    """Import each device and its points in one transaction."""
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        async with session.begin():
+            connector = (await session.exec(select(Connector).where(Connector.title == item.connector_title))).one_or_none()
+            if connector is None:
+                raise ValueError(f"连接器不存在: {item.connector_title}")
+            group = None
+            if item.dgroup_name:
+                groups = (await session.exec(select(DGroup).where(DGroup.name == item.dgroup_name))).all()
+                if len(groups) != 1:
+                    raise ValueError(f"设备组不存在或不唯一: {item.dgroup_name}")
+                group = groups[0]
+            model = (await session.exec(select(DeviceModel).where(DeviceModel.name == document.model_name))).one_or_none()
+            if model is None:
+                model = DeviceModel(name=document.model_name, description=document.description)
+                session.add(model)
+                await session.flush()
+                for definition in document.fields:
+                    session.add(DeviceModelField(device_model_id=model.id, **definition.model_dump()))
+                await session.flush()
+            definitions = {field.name: field for field in (await session.exec(
+                select(DeviceModelField).where(DeviceModelField.device_model_id == model.id)
+            )).all()}
+            if set(document.field_names) != set(definitions):
+                raise ValueError(f"模型“{model.name}”的属性定义与当前系统不一致")
+            device = (await session.exec(select(Device).where(Device.name == item.name))).one_or_none()
+            created = device is None
+            if device is not None and device.device_model_id != model.id:
+                raise ValueError(f"设备“{item.name}”已属于其他设备模型")
+            if created:
+                device = Device(name=item.name, device_model_id=model.id, connector_id=connector.id)
+            device.dgroup_id = group.id if group else None
+            device.connector_id = connector.id
+            device.collection_interval_seconds = item.collection_interval_seconds
+            device.enabled = item.enabled
+            device.timeout = item.timeout
+            device.heartbeat_interval_seconds = item.heartbeat_interval_seconds
+            session.add(device)
+            await session.flush()
+            fields = {field.device_model_field_id: field for field in (await session.exec(
+                select(DeviceField).where(DeviceField.device_id == device.id)
+            )).all()}
+            for name, config in item.point_configs.items():
+                definition = definitions[name]
+                field = fields.get(definition.id)
+                if field is None:
+                    field = DeviceField(device_id=device.id, device_model_field_id=definition.id,
+                                        name=definition.name, dtype=str(getattr(definition.dtype, "value", definition.dtype)),
+                                        unit=definition.unit)
+                field.address = config.address
+                field.attribute = DeviceFieldAttribute(config.attribute)
+                field.report_mode = DeviceReportMode(config.report_mode)
+                session.add(field)
+            await session.flush()
+        return created
+
+
+async def import_device(file: Path, context: Any | None = None) -> dict[str, Any]:
+    """Each device rolls back independently on validation or database failure."""
+    result = _result()
+    if context is not None:
+        await context.set_progress(10, "正在解析 Excel，设备总数待确认")
+    documents = await asyncio.to_thread(_read_documents, file, result)
+    total = sum(len(document.devices) for _, document in documents)
+    processed = 0
+
+    async def report(stage: str) -> None:
+        if context is not None:
+            await context.set_progress(
+                10 + int(processed * 90 / total) if total else 100,
+                f"{stage}；已处理 {processed}/{total}，成功 {result['success']}，失败 {result['failed']}",
+            )
+
+    for sheet, document in documents:
+        for item in document.devices:
+            # Publish outside the device transaction: progress uses a separate session.
+            await report(f"正在写入设备：{item.name}")
+            try:
+                created = await _import_one_device(document, item)
+            except Exception as exc:
+                _add_error(result, f"工作表“{sheet}”设备“{item.name}”", f"设备事务已回滚: {exc}")
+            else:
+                result["created" if created else "updated"] += 1
+                result["success"] += 1
+            processed += 1
+            await report(f"已处理设备：{item.name}")
+            await asyncio.sleep(0)
+    result["total"] = total
+    result["processed"] = processed
+    result["message"] = "设备导入完成。" if total else "未找到可导入的设备工作表。"
+    await report(result["message"])
+    return result
+
+
+def _sheet_name(name: str, used_names: set[str]) -> str:
+    base = _SHEET_NAME_UNSAFE.sub("_", name).strip()[:31] or "设备模型"
+    candidate, suffix = base, 1
+    while candidate.lower() in used_names:
+        suffix_text = f"-{suffix}"
+        candidate = f"{base[:31 - len(suffix_text)]}{suffix_text}"
+        suffix += 1
+    used_names.add(candidate.lower())
+    return candidate
+
+
+def _write_sheet(worksheet: Any, model: DeviceModel, definitions: list[DeviceModelField], devices: list[tuple[Device, Connector, DGroup | None]], configs: dict[tuple[str, int], DeviceField]) -> None:
+    worksheet.append(_MODEL_HEADERS)
+    worksheet.append([model.name, model.description])
+    worksheet.append(_FIELD_HEADERS)
+    for cell in (*worksheet[1], *worksheet[3]):
+        cell.alignment = Alignment(horizontal="center")
+    for column in "ABCDEF":
+        worksheet.column_dimensions[column].width = 13
+    for definition in definitions:
+        worksheet.append([definition.name, getattr(definition.dtype, "value", definition.dtype), definition.unit, "；".join(definition.enum_values or []) or None, definition.min_value, definition.max_value])
+    for index, (device, connector, group) in enumerate(devices):
+        start = _DEVICE_START_COLUMN + index * _DEVICE_COLUMN_STRIDE
+        for offset, header in enumerate(_DEVICE_HEADERS):
+            worksheet.cell(1, start + offset, header).alignment = Alignment(horizontal="center")
+        for offset, value in enumerate([device.name, group.name if group else None, connector.title, device.collection_interval_seconds, device.enabled, device.timeout, device.heartbeat_interval_seconds]):
+            worksheet.cell(2, start + offset, value)
+        for offset, header in enumerate(_POINT_HEADERS):
+            worksheet.cell(3, start + offset, header).alignment = Alignment(horizontal="center")
+        for row, definition in enumerate(definitions, start=4):
+            config = configs.get((device.id, definition.id))
+            worksheet.cell(row, start, config.address if config and config.address else definition.name)
+            worksheet.cell(row, start + 1, getattr(getattr(config, "attribute", None), "value", getattr(config, "attribute", "read")))
+            worksheet.cell(row, start + 2, getattr(getattr(config, "report_mode", None), "value", getattr(config, "report_mode", "change_heartbeat")))
+        for offset in range(_DEVICE_BLOCK_WIDTH):
+            worksheet.column_dimensions[_column_name(start + offset)].width = 13
+
+
+async def export_device(filters: dict[str, Any], context: Any | None = None) -> Path:
+    """Export devices grouped by model using the device custom-IO template."""
+    filters = filters or {}
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        statement = select(Device).order_by(Device.device_model_id, Device.name)
+        if filters.get("name"):
+            statement = statement.where(Device.name.contains(str(filters["name"])))
+        devices = (await session.exec(statement)).all()
+        model_ids = {device.device_model_id for device in devices}
+        models_by_id = {model.id: model for model in (await session.exec(select(DeviceModel).where(DeviceModel.id.in_(model_ids)))).all()} if model_ids else {}
+        definitions_by_model: dict[int, list[DeviceModelField]] = defaultdict(list)
+        if model_ids:
+            for definition in (await session.exec(select(DeviceModelField).where(DeviceModelField.device_model_id.in_(model_ids)).order_by(DeviceModelField.device_model_id, DeviceModelField.name))).all():
+                definitions_by_model[definition.device_model_id].append(definition)
+        connectors_by_id = {connector.id: connector for connector in (await session.exec(select(Connector).where(Connector.id.in_({device.connector_id for device in devices})))).all()} if devices else {}
+        groups_by_id = {group.id: group for group in (await session.exec(select(DGroup).where(DGroup.id.in_({device.dgroup_id for device in devices if device.dgroup_id is not None})))).all()} if any(device.dgroup_id is not None for device in devices) else {}
+        configs = {(field.device_id, field.device_model_field_id): field for field in (await session.exec(select(DeviceField).where(DeviceField.device_id.in_({device.id for device in devices})))).all()} if devices else {}
+    return await asyncio.to_thread(
+        _save_export, devices, models_by_id, definitions_by_model, connectors_by_id, groups_by_id, configs
+    )
+
+
+def _save_export(devices, models_by_id, definitions_by_model, connectors_by_id, groups_by_id, configs) -> Path:
+    grouped: dict[int, list[Device]] = defaultdict(list)
+    for device in devices:
+        if device.device_model_id in models_by_id and device.connector_id in connectors_by_id:
+            grouped[device.device_model_id].append(device)
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    used_names: set[str] = set()
+    for model_id, model_devices in grouped.items():
+        model = models_by_id[model_id]
+        worksheet = workbook.create_sheet(_sheet_name(model.name, used_names))
+        _write_sheet(worksheet, model, definitions_by_model[model_id], [(device, connectors_by_id[device.connector_id], groups_by_id.get(device.dgroup_id)) for device in model_devices], configs)
+    if not grouped:
+        workbook.create_sheet("device01")
+    export_dir = Path(settings.UPLOAD_DIR) / "exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    destination = export_dir / f"device-excel-export-{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    workbook.save(destination)
+    workbook.close()
+    return destination

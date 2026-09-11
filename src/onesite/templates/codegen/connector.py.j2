@@ -1,0 +1,173 @@
+"""Protocol connection definitions; drivers are supplied by the project."""
+
+from enum import Enum
+from typing import Optional
+
+from onesite.config import (
+    DetailUIConfig,
+    ModelAction,
+    ModelUIConfig,
+    OneSiteConfig,
+    ReportInputs,
+    ReportsConfig, NetworkDeviceConfig,
+)
+from sqlalchemy import Column, JSON
+from sqlmodel import Field, SQLModel, select
+
+
+class ConnectorProtocol(str, Enum):
+    MQTT = "mqtt"
+    OPCUA = "opcua"
+    MODBUS_TCP = "modbus_tcp"
+    MODBUS_RTU = "modbus_rtu"
+    FILE = "file"
+
+
+class AuthType(str, Enum):
+    NONE = "none"
+    PASSWORD = "password"
+    TOKEN = "token"
+    TLS = "tls"
+
+    __i18n__ = {
+        "zh": {
+            "none": "无",
+            "password": "账密",
+            "token": "令牌",
+            "tls": "证书",
+        }
+    }
+
+
+def _auth_config_field(*auth_types: AuthType):
+    return Field(
+        default=None,
+        sa_column_kwargs={
+            "info": {
+                "site_props": {
+                    "visible_when": {
+                        "$root.auth_type": [auth_type.value for auth_type in auth_types]
+                    },
+                    "clear_when_hidden": True,
+                }
+            }
+        },
+    )
+
+
+class AuthConfig(SQLModel):
+    __onesite__ = OneSiteConfig(
+        ui=ModelUIConfig(
+            detail=DetailUIConfig(
+                layout=[
+                    ["username", "password", "token"],
+                    ["ca_cert", "client_cert", "client_key"],
+                ]
+            )
+        )
+    )
+
+    username: Optional[str] = _auth_config_field(AuthType.PASSWORD)
+    password: Optional[str] = _auth_config_field(AuthType.PASSWORD)
+    token: Optional[str] = _auth_config_field(AuthType.TOKEN)
+    ca_cert: Optional[str] = _auth_config_field(AuthType.TLS)
+    client_cert: Optional[str] = _auth_config_field(AuthType.TLS)
+    client_key: Optional[str] = _auth_config_field(AuthType.TLS)
+
+    __i18n__ = {
+        "zh": {
+            "username": "账号",
+            "password": "密码",
+            "token": "令牌",
+            "ca_cert": "CA 证书",
+            "client_cert": "客户端证书",
+            "client_key": "客户端私钥",
+        }
+    }
+
+
+class Connector(SQLModel, table=True):
+    __tablename__ = "connector"
+    __onesite__ = OneSiteConfig(
+        icon="Usb",
+        page_edit=True,
+        exportable=True,
+        importable=True,
+        track=["c", "u", "d", "bulk_delete", "import", "export"],
+        permissions={"user": "r", "admin": "crud", "developer": "crud"},
+        actions={
+            "toggle_enabled": ModelAction(
+                toggle="is_enabled",
+                permissions="da",
+            ),
+        },
+        reports=ReportsConfig(
+            categories=["composition"],
+            inputs=ReportInputs(cls=["protocol"], count=["$rows"]),
+            filters=["protocol"],
+        ),
+        network_device=NetworkDeviceConfig(
+            url_field='endpoint',
+            status_field="is_online",  # 默认是 "online"
+            timeout=1.5,  # 默认 1 秒
+            show_in_list=True,
+            show_in_detail=True,
+            udp_payload="ping",
+        ),
+        ui=ModelUIConfig(
+            detail=DetailUIConfig(
+                layout=[
+                    {
+                        "section": "basic",
+                        "title": "基本信息",
+                        "items": [["title", "protocol", "endpoint", "is_enabled"]],
+                    },
+                    {
+                        "section": "auth_config",
+                        "title": "鉴权设置",
+                        "items": [
+                            [
+                                {"field": "auth_type", "span": 1},
+                                {"field": "auth_config", "span": 3},
+                            ]
+                        ],
+                    },
+                ]
+            )
+        ),
+        translations={
+            "zh": {
+                "name": "连接器",
+                "fields": {
+                    "title": "连接名",
+                    "protocol": "协议",
+                    "endpoint": "连接地址",
+                    "is_enabled": "是否启用",
+                    "auth_type": "鉴权方式",
+                    "auth_config": "鉴权配置",
+                },
+            }
+        },
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(unique=True, nullable=False)
+    protocol: ConnectorProtocol = Field(default=ConnectorProtocol.OPCUA, nullable=False)
+    endpoint: str = Field(
+        min_length=1,
+        description="Southbound endpoint，例如 opc.tcp://host:4840 或 tcp://host:502",
+    )
+    is_enabled: bool = True
+    auth_type: Optional[AuthType] = AuthType.NONE
+    auth_config: AuthConfig = Field(default_factory=AuthConfig, sa_column=Column(JSON))
+
+    async def on_before_delete(self, session) -> None:
+        from app.models.device import Device
+
+        device_id = (
+            await session.exec(
+                select(Device.id).where(Device.connector_id == self.id).limit(1)
+            )
+        ).first()
+        if device_id is not None:
+            raise ValueError("连接器下已有设备，不能删除")

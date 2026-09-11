@@ -1,0 +1,428 @@
+"""Excel import and export for device model definitions.
+
+The workbook format follows ``device_model_template.xlsx``: one worksheet is
+one device model, with model metadata on row 2 and field definitions from row
+4 onward.
+"""
+
+from __future__ import annotations
+
+import math
+import re
+import zipfile
+from collections import Counter, defaultdict
+from datetime import datetime
+from pathlib import Path
+from typing import Any, Literal
+
+from openpyxl import Workbook, load_workbook
+from openpyxl.styles import Alignment
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from sqlalchemy import delete
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core.config import settings
+from app.core.db import engine
+from app.models.device import Device
+from app.models.device_model import DeviceModel
+from app.models.device_model_field import DeviceModelField
+
+
+MAX_WORKBOOK_BYTES = 32 * 1024 * 1024
+MAX_UNCOMPRESSED_BYTES = 256 * 1024 * 1024
+MAX_SHEETS = 1_000
+MAX_ROWS_PER_SHEET = 10_000
+_SHEET_NAME_UNSAFE = re.compile(r"[\\[\\]:*?/\\\\]")
+_MODEL_HEADERS = ["模型名称", "模型描述"]
+_FIELD_HEADERS = [
+    "属性名",
+    "数据类型",
+    "单位",
+    "枚举值（用；分割，如：“男；女；未知”）",
+    "最小值",
+    "最大值",
+]
+_NUMERIC_TYPES = {"float32", "float64", "int8", "int32", "int64", "uint8"}
+
+
+class _FieldInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    dtype: Literal[
+        "str", "bool", "float32", "float64", "int8", "int32", "int64", "uint8", "enum"
+    ]
+    unit: str | None = None
+    enum_values: list[str] | None = None
+    min_value: float | None = None
+    max_value: float | None = None
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("属性名不能为空")
+        return value
+
+    @field_validator("unit", mode="before")
+    @classmethod
+    def _empty_unit_is_none(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+    @field_validator("enum_values")
+    @classmethod
+    def _clean_enum_values(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        return [value.strip() for value in values if value.strip()]
+
+    @model_validator(mode="after")
+    def _validate_type_constraints(self) -> "_FieldInput":
+        if self.dtype == "enum":
+            if not self.enum_values:
+                raise ValueError("enum 类型必须提供至少一个枚举值")
+            if self.min_value is not None or self.max_value is not None:
+                raise ValueError("enum 类型不能设置最小值或最大值")
+        else:
+            if self.enum_values:
+                raise ValueError("只有 enum 类型可以设置枚举值")
+            if self.dtype not in _NUMERIC_TYPES and (
+                self.min_value is not None or self.max_value is not None
+            ):
+                raise ValueError("只有数值类型可以设置最小值或最大值")
+        if (
+            self.min_value is not None
+            and self.max_value is not None
+            and self.min_value > self.max_value
+        ):
+            raise ValueError("最小值不能大于最大值")
+        return self
+
+
+class _ModelInput(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    name: str = Field(min_length=1, max_length=255)
+    description: str | None = None
+    fields: list[_FieldInput] = Field(default_factory=list)
+
+    @field_validator("name")
+    @classmethod
+    def _strip_name(cls, value: str) -> str:
+        value = value.strip()
+        if not value:
+            raise ValueError("模型名称不能为空")
+        return value
+
+    @field_validator("description", mode="before")
+    @classmethod
+    def _empty_description_is_none(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        value = str(value).strip()
+        return value or None
+
+    @model_validator(mode="after")
+    def _field_names_are_unique(self) -> "_ModelInput":
+        duplicates = [
+            name for name, count in Counter(field.name for field in self.fields).items() if count > 1
+        ]
+        if duplicates:
+            raise ValueError(f"属性名重复: {', '.join(sorted(duplicates))}")
+        return self
+
+
+def _result() -> dict[str, Any]:
+    return {
+        "success": 0,
+        "created": 0,
+        "updated": 0,
+        "failed": 0,
+        "errors": [],
+        "message": "",
+    }
+
+
+def _add_error(result: dict[str, Any], source: str, message: str) -> None:
+    result["failed"] += 1
+    result["errors"].append(f"{source}: {message}")
+
+
+def _ensure_safe_workbook(file: Path, result: dict[str, Any]) -> bool:
+    if not file.is_file():
+        _add_error(result, str(file), "上传文件不存在")
+        return False
+    if file.suffix.lower() != ".xlsx":
+        _add_error(result, file.name, "请上传 .xlsx 格式的设备模型模板")
+        return False
+    if file.stat().st_size > MAX_WORKBOOK_BYTES:
+        _add_error(result, file.name, "Excel 文件超过 32 MiB 限制")
+        return False
+    try:
+        with zipfile.ZipFile(file) as archive:
+            if sum(entry.file_size for entry in archive.infolist()) > MAX_UNCOMPRESSED_BYTES:
+                _add_error(result, file.name, "Excel 解压后超过 256 MiB 安全限制")
+                return False
+    except (OSError, zipfile.BadZipFile):
+        _add_error(result, file.name, "不是有效的 .xlsx 文件")
+        return False
+    return True
+
+
+def _cell_value(cell: Any, location: str) -> Any:
+    if getattr(cell, "data_type", None) == "f":
+        raise ValueError(f"{location} 不支持公式")
+    return cell.value
+
+
+def _required_text(value: Any, location: str) -> str:
+    if value is None:
+        raise ValueError(f"{location} 不能为空")
+    text = str(value).strip()
+    if not text:
+        raise ValueError(f"{location} 不能为空")
+    return text
+
+
+def _optional_number(value: Any, location: str) -> float | None:
+    if value is None or (isinstance(value, str) and not value.strip()):
+        return None
+    if isinstance(value, bool):
+        raise ValueError(f"{location} 必须是数字")
+    try:
+        number = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{location} 必须是数字") from exc
+    if not math.isfinite(number):
+        raise ValueError(f"{location} 必须是有限数字")
+    return number
+
+
+def _parse_enum_values(value: Any) -> list[str] | None:
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    return [item.strip() for item in re.split(r"[;；]", text) if item.strip()]
+
+
+def _read_sheet(worksheet: Any) -> _ModelInput:
+    if worksheet.max_row > MAX_ROWS_PER_SHEET:
+        raise ValueError(f"最多允许 {MAX_ROWS_PER_SHEET} 行字段定义")
+
+    model_headers = [
+        _cell_value(worksheet.cell(1, column), f"{worksheet.title}!{column}1")
+        for column in range(1, 3)
+    ]
+    if model_headers != _MODEL_HEADERS:
+        raise ValueError("第 1 行必须为“模型名称、模型描述”")
+    field_headers = [
+        _cell_value(worksheet.cell(3, column), f"{worksheet.title}!{column}3")
+        for column in range(1, 7)
+    ]
+    if field_headers != _FIELD_HEADERS:
+        raise ValueError("第 3 行字段表头与设备模型模板不一致")
+
+    name = _required_text(_cell_value(worksheet.cell(2, 1), f"{worksheet.title}!A2"), "模型名称")
+    description = _cell_value(worksheet.cell(2, 2), f"{worksheet.title}!B2")
+    fields: list[dict[str, Any]] = []
+    for row_number, row in enumerate(
+        worksheet.iter_rows(min_row=4, max_col=6, values_only=False), start=4
+    ):
+        values = [
+            _cell_value(cell, f"{worksheet.title}!{chr(65 + column)}{row_number}")
+            for column, cell in enumerate(row)
+        ]
+        if all(value is None or (isinstance(value, str) and not value.strip()) for value in values):
+            continue
+        fields.append({
+            "name": _required_text(values[0], f"第 {row_number} 行属性名"),
+            "dtype": _required_text(values[1], f"第 {row_number} 行数据类型").lower(),
+            "unit": values[2],
+            "enum_values": _parse_enum_values(values[3]),
+            "min_value": _optional_number(values[4], f"第 {row_number} 行最小值"),
+            "max_value": _optional_number(values[5], f"第 {row_number} 行最大值"),
+        })
+    return _ModelInput.model_validate({"name": name, "description": description, "fields": fields})
+
+
+def _read_models(file: Path, result: dict[str, Any]) -> list[tuple[str, _ModelInput]]:
+    if not _ensure_safe_workbook(file, result):
+        return []
+    try:
+        workbook = load_workbook(file, read_only=True, data_only=False)
+    except (OSError, ValueError, zipfile.BadZipFile) as exc:
+        _add_error(result, file.name, f"无法读取 Excel 文件: {exc}")
+        return []
+
+    try:
+        if not workbook.worksheets:
+            _add_error(result, file.name, "Excel 文件没有工作表")
+            return []
+        if len(workbook.worksheets) > MAX_SHEETS:
+            _add_error(result, file.name, f"最多允许 {MAX_SHEETS} 个工作表")
+            return []
+        documents: list[tuple[str, _ModelInput]] = []
+        for worksheet in workbook.worksheets:
+            try:
+                documents.append((worksheet.title, _read_sheet(worksheet)))
+            except (TypeError, ValueError) as exc:
+                _add_error(result, f"工作表“{worksheet.title}”", str(exc))
+    finally:
+        workbook.close()
+
+    counts = Counter(model.name for _, model in documents)
+    unique: list[tuple[str, _ModelInput]] = []
+    for sheet_name, model in documents:
+        if counts[model.name] > 1:
+            _add_error(result, f"工作表“{sheet_name}”", f"模型名称重复: {model.name}")
+        else:
+            unique.append((sheet_name, model))
+    return unique
+
+
+async def import_device_model(file: Path, context: Any | None = None) -> dict[str, Any]:
+    """Replace each unused model's field definitions with the worksheet contents."""
+    result = _result()
+    documents = _read_models(file, result)
+    if not documents:
+        result["message"] = "未找到可导入的设备模型工作表。"
+        return result
+
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        try:
+            async with session.begin():
+                names = {model.name for _, model in documents}
+                existing_rows = (await session.exec(
+                    select(DeviceModel).where(DeviceModel.name.in_(names))
+                )).all()
+                existing = {model.name: model for model in existing_rows}
+                existing_ids = {model.id for model in existing_rows if model.id is not None}
+                in_use_ids: set[int] = set()
+                if existing_ids:
+                    in_use_ids = set((await session.exec(
+                        select(Device.device_model_id).where(Device.device_model_id.in_(existing_ids))
+                    )).all())
+
+                for sheet_name, document in documents:
+                    model = existing.get(document.name)
+                    if model is not None and model.id in in_use_ids:
+                        _add_error(
+                            result,
+                            f"工作表“{sheet_name}”",
+                            f"设备模型“{document.name}”已被设备使用，不能修改",
+                        )
+                        continue
+                    if model is None:
+                        model = DeviceModel(name=document.name, description=document.description)
+                        session.add(model)
+                        await session.flush()
+                        result["created"] += 1
+                    else:
+                        model.description = document.description
+                        session.add(model)
+                        await session.exec(
+                            delete(DeviceModelField).where(
+                                DeviceModelField.device_model_id == model.id
+                            )
+                        )
+                        result["updated"] += 1
+
+                    for definition in document.fields:
+                        session.add(DeviceModelField(
+                            device_model_id=model.id,
+                            **definition.model_dump(),
+                        ))
+        except Exception as exc:
+            result["created"] = 0
+            result["updated"] = 0
+            result["success"] = 0
+            result["failed"] += len(documents)
+            result["errors"].append(f"导入: {exc}")
+            result["message"] = "导入已回滚。"
+            return result
+
+    result["success"] = result["created"] + result["updated"]
+    result["message"] = "设备模型导入完成。"
+    return result
+
+
+def _sheet_name(name: str, used_names: set[str]) -> str:
+    base = _SHEET_NAME_UNSAFE.sub("_", name).strip() or "设备模型"
+    base = base[:31]
+    candidate = base
+    suffix = 1
+    while candidate.lower() in used_names:
+        suffix_text = f"-{suffix}"
+        candidate = f"{base[:31 - len(suffix_text)]}{suffix_text}"
+        suffix += 1
+    used_names.add(candidate.lower())
+    return candidate
+
+
+def _write_sheet(worksheet: Any, model: DeviceModel | None, fields: list[DeviceModelField]) -> None:
+    worksheet.append(_MODEL_HEADERS)
+    worksheet.append([model.name if model else None, model.description if model else None])
+    worksheet.append(_FIELD_HEADERS)
+    for cell in (*worksheet[1], *worksheet[3]):
+        cell.alignment = Alignment(horizontal="center")
+    for column in "ABCDEF":
+        worksheet.column_dimensions[column].width = 13
+
+    for definition in fields:
+        dtype = getattr(definition.dtype, "value", definition.dtype)
+        enum_values = definition.enum_values or []
+        worksheet.append([
+            definition.name,
+            dtype,
+            definition.unit,
+            "；".join(enum_values) if enum_values else None,
+            definition.min_value,
+            definition.max_value,
+        ])
+
+
+async def export_device_model(filters: dict[str, Any], context: Any | None = None) -> Path:
+    """Export each device model into its own template-shaped worksheet."""
+    filters = filters or {}
+    async with AsyncSession(engine, expire_on_commit=False) as session:
+        statement = select(DeviceModel).order_by(DeviceModel.name)
+        if filters.get("name"):
+            statement = statement.where(DeviceModel.name.contains(str(filters["name"])))
+        models = (await session.exec(statement)).all()
+        model_ids = {model.id for model in models if model.id is not None}
+        definitions_by_model: dict[int, list[DeviceModelField]] = defaultdict(list)
+        if model_ids:
+            definitions = (await session.exec(
+                select(DeviceModelField)
+                .where(DeviceModelField.device_model_id.in_(model_ids))
+                .order_by(DeviceModelField.device_model_id, DeviceModelField.name)
+            )).all()
+            for definition in definitions:
+                definitions_by_model[definition.device_model_id].append(definition)
+
+    workbook = Workbook()
+    workbook.remove(workbook.active)
+    used_names: set[str] = set()
+    if not models:
+        worksheet = workbook.create_sheet("model01")
+        _write_sheet(worksheet, None, [])
+    else:
+        for model in models:
+            worksheet = workbook.create_sheet(_sheet_name(model.name, used_names))
+            _write_sheet(worksheet, model, definitions_by_model.get(model.id, []))
+
+    export_dir = Path(settings.UPLOAD_DIR) / "exports"
+    export_dir.mkdir(parents=True, exist_ok=True)
+    destination = export_dir / (
+        f"device-model-excel-export-{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+    )
+    workbook.save(destination)
+    workbook.close()
+    return destination

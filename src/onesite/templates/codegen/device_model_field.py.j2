@@ -1,8 +1,9 @@
-"""Device field definitions provided by the device_timeseries plugin."""
-from decimal import Decimal
-from enum import Enum
-from typing import Any, Optional
+"""Field definitions owned by a device model."""
 
+from enum import Enum
+from typing import Optional
+
+from onesite.config import OneSiteConfig
 from pydantic import model_validator
 from sqlalchemy import CheckConstraint, Column, JSON, UniqueConstraint
 from sqlmodel import Field, SQLModel, select
@@ -20,48 +21,43 @@ class DeviceDataType(str, Enum):
     ENUM = "enum"
 
 
-_NUMERIC_TYPES = {
-    DeviceDataType.FLOAT32, DeviceDataType.FLOAT64, DeviceDataType.INT8,
-    DeviceDataType.INT32, DeviceDataType.INT64, DeviceDataType.UINT8,
-}
-_INTEGER_LIMITS = {
-    DeviceDataType.INT8: (-128, 127),
-    DeviceDataType.INT32: (-(2**31), 2**31 - 1),
-    DeviceDataType.INT64: (-(2**63), 2**63 - 1),
-    DeviceDataType.UINT8: (0, 255),
+NUMERIC_TYPES = {
+    DeviceDataType.FLOAT32,
+    DeviceDataType.FLOAT64,
+    DeviceDataType.INT8,
+    DeviceDataType.INT32,
+    DeviceDataType.INT64,
+    DeviceDataType.UINT8,
 }
 
 
 class DeviceModelField(SQLModel, table=True):
     __tablename__ = "device_model_field"
-    __onesite__ = {
-        "icon": "ListTree",
-        "visible": [],
-        "standalone": False,
-        "translations": {
-            "zh": {"name": "设备模型字段", "fields": {
-                "device_model_id": "设备模型", "name": "字段名",
-                "dtype": "数据类型", "unit": "单位", "enum_values": "枚举值",
-                "min_value": "最小值", "max_value": "最大值",
-            }},
-            "en": {"name": "Device Model Fields"},
+    __onesite__ = OneSiteConfig(
+        icon="ListTree",
+        visible=[],
+        standalone=False,
+        permissions={"user": "r", "admin": "crud", "developer": "crud"},
+        translations={
+            "zh": {
+                "name": "设备模型字段",
+                "fields": {
+                    "device_model_id": "设备模型",
+                    "name": "字段名",
+                    "dtype": "数据类型",
+                    "unit": "单位",
+                    "enum_values": "枚举值",
+                    "min_value": "最小值",
+                    "max_value": "最大值",
+                },
+            }
         },
-    }
+    )
     __table_args__ = (
         UniqueConstraint("device_model_id", "name", name="uq_device_model_field_name"),
         CheckConstraint(
             "min_value IS NULL OR max_value IS NULL OR min_value <= max_value",
             name="ck_device_model_field_range",
-        ),
-        CheckConstraint(
-            "(dtype = 'ENUM' AND enum_values IS NOT NULL) OR "
-            "(dtype <> 'ENUM' AND enum_values IS NULL)",
-            name="ck_device_model_field_enum_values",
-        ),
-        CheckConstraint(
-            "dtype IN ('FLOAT32', 'FLOAT64', 'INT8', 'INT32', 'INT64', 'UINT8') "
-            "OR (min_value IS NULL AND max_value IS NULL)",
-            name="ck_device_model_field_numeric_range",
         ),
     )
 
@@ -71,7 +67,9 @@ class DeviceModelField(SQLModel, table=True):
         index=True,
         sa_column_kwargs={"info": {"site_props": {
             "reverse": {
-                "editor": "embedded", "allow_existing": False,
+                "editor": "inline",
+                "layout": "table",
+                "allow_existing": False,
                 "on_remove": "delete",
             },
         }}},
@@ -79,35 +77,45 @@ class DeviceModelField(SQLModel, table=True):
     name: str
     dtype: DeviceDataType
     unit: Optional[str] = None
-    enum_values: Optional[Any] = Field(default=None, sa_column=Column(JSON(none_as_null=True)))
-    min_value: Optional[Decimal] = None
-    max_value: Optional[Decimal] = None
+    enum_values: Optional[list[str]] = Field(
+        default=None, sa_column=Column(
+            JSON(none_as_null=True),
+            info={
+                "site_props": {
+                    "visible_when": {"dtype": ["enum"]},
+                    "required_when": {"dtype": ["enum"]},
+                    "clear_when_hidden": True,
+                }
+            }
+        )
+    )
+    min_value: Optional[float] = Field(default=None, sa_column_kwargs={"info": {"site_props": {
+        "visible_when": {"dtype": [item.value for item in NUMERIC_TYPES]},
+        "clear_when_hidden": True,
+    }}})
+    max_value: Optional[float] = Field(default=None, sa_column_kwargs={"info": {"site_props": {
+        "visible_when": {"dtype": [item.value for item in NUMERIC_TYPES]},
+        "clear_when_hidden": True,
+    }}})
+
     @model_validator(mode="after")
     def validate_definition(self):
         if self.dtype == DeviceDataType.ENUM:
-            if not isinstance(self.enum_values, (list, dict)) or not self.enum_values:
-                raise ValueError("enum dtype requires non-empty enum_values")
+            if not isinstance(self.enum_values, list) or not self.enum_values:
+                raise ValueError("enum 类型必须提供非空 enum_values")
         elif self.enum_values is not None:
-            raise ValueError("enum_values is only valid for enum dtype")
-
-        if self.dtype not in _NUMERIC_TYPES and (
-            self.min_value is not None or self.max_value is not None
+            raise ValueError("只有 enum 类型可以设置 enum_values")
+        if self.dtype not in NUMERIC_TYPES and (
+                self.min_value is not None or self.max_value is not None
         ):
-            raise ValueError("min_value and max_value are only valid for numeric dtype")
+            raise ValueError("只有数值类型可以设置 min_value/max_value")
         if (
-            self.min_value is not None and self.max_value is not None
-            and self.min_value > self.max_value
+                self.min_value is not None
+                and self.max_value is not None
+                and self.min_value > self.max_value
         ):
-            raise ValueError("min_value must not exceed max_value")
-
-        limits = _INTEGER_LIMITS.get(self.dtype)
-        if limits:
-            lower, upper = map(Decimal, limits)
-            for name, value in (("min_value", self.min_value), ("max_value", self.max_value)):
-                if value is not None and not lower <= value <= upper:
-                    raise ValueError(f"{name} is outside the range of {self.dtype.value}")
+            raise ValueError("min_value 不能大于 max_value")
         return self
-
 
     async def _ensure_models_unused(self, session, model_ids) -> None:
         from app.models.device import Device

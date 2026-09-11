@@ -752,7 +752,18 @@ Foreign keys are inferred from a `{target}_id` field with `foreign_key="target.i
 category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 ```
 
-The generated UI selects and displays related labels. Make a useful target label field `unique=True` and/or `is_search_field=True`.
+The generated UI selects and displays related labels. By default OneSite uses a
+readable string search field, then falls back to common text fields such as
+`name` or `title`. Set `label_field` when a model needs an explicit relationship
+label; this is independent from fields enabled as filters:
+
+```python
+class Device(SQLModel, table=True):
+    __onesite__ = OneSiteConfig(label_field="name")
+```
+
+Generated `*_label` response values are always serialized as strings, including
+when an explicitly selected label field is numeric.
 
 For many-to-many relations, mark the link table:
 

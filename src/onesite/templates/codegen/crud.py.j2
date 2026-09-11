@@ -722,7 +722,8 @@ async def _enrich_with_fk_labels(
         stmt = scope_label_statement(stmt, {{ fk.target_model }}, "{{ fk.target_service or fk.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
-            {{ fk.name }}_map[obj.id] = getattr(obj, "{{ fk.label_field }}", None) or str(obj.id)
+            label = getattr(obj, "{{ fk.label_field }}", None)
+            {{ fk.name }}_map[obj.id] = str(label) if label is not None else str(obj.id)
     {% endfor %}
 
     enriched = []
@@ -1295,7 +1296,8 @@ async def get_{{ m2m.target_endpoint }}(
         stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service or fk_field.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
-            {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
+            label = getattr(obj, "{{ fk_field.label_field }}", None)
+            {{ fk_field.name }}_map[obj.id] = str(label) if label is not None else str(obj.id)
     {% endfor %}
 
     enriched = []
@@ -1413,7 +1415,8 @@ async def get_{{ rel.name }}(
         stmt = scope_label_statement(stmt, {{ fk_field.target_model }}, "{{ fk_field.target_service or fk_field.target_source_module }}")
         result = await session.exec(stmt)
         for obj in result.all():
-            {{ fk_field.name }}_map[obj.id] = getattr(obj, "{{ fk_field.label_field }}", None) or str(obj.id)
+            label = getattr(obj, "{{ fk_field.label_field }}", None)
+            {{ fk_field.name }}_map[obj.id] = str(label) if label is not None else str(obj.id)
     {% endfor %}
 
     enriched = []

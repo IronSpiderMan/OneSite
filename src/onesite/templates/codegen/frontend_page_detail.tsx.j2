@@ -631,7 +631,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (item.{{ field.name }}) {
         get{{ field.fk_info.target_model }}(item.{{ field.name }}).then((fkItem: any) => {
           if (fkItem) {
-            setEdit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: fkItem.{{ field.fk_info.label_field }} || String(fkItem.id) });
+            setEdit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels({ [String(fkItem.id)]: String(fkItem.{{ field.fk_info.label_field }} ?? fkItem.id) });
           }
         });
       }

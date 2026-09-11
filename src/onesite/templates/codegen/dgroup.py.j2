@@ -1,0 +1,39 @@
+"""Hierarchical device groups."""
+
+from typing import Optional
+
+from onesite.config import OneSiteConfig, TreeLeafConfig, TreeViewConfig, EditMode
+from sqlmodel import Field, SQLModel
+
+
+class DGroup(SQLModel, table=True):
+    __tablename__ = "dgroup"
+    __onesite__ = OneSiteConfig(
+        icon="Group",
+        edit_mode=EditMode.FORM_EDIT,
+        track=["c", "u", "d", "bulk_delete"],
+        tree_view=TreeViewConfig(
+            leaf=TreeLeafConfig(
+                model="Device",
+                parent_field="dgroup_id",
+                label_field="name",
+                page_size=20,
+            )
+        ),
+        permissions={"user": "r", "admin": "crud", "developer": "crud"},
+        translations={
+            "zh": {
+                "name": "设备组",
+                "fields": {
+                    "name": "组名",
+                    "description": "描述",
+                    "parent_id": "上级组",
+                },
+            }
+        },
+    )
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    name: str = Field(index=True)
+    description: Optional[str] = None
+    parent_id: Optional[int] = Field(default=None, foreign_key="dgroup.id", index=True)

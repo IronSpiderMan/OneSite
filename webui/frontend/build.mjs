@@ -71,16 +71,11 @@ for (const file of result.outputFiles) {
     `studio.${ext}: ${file.contents.length} bytes / ${zipped.length} gzip`,
   );
 }
-const python = resolve(root, "../webui.py");
+const python = resolve(root, "../src/assets.py");
 const source = readFileSync(python, "utf8");
 const start = "# BEGIN GENERATED ARCO ASSETS";
 const end = "# END GENERATED ARCO ASSETS";
 if (!source.includes(start) || !source.includes(end))
-  throw Error("Missing WebUI asset markers");
-const block = `${start}\n# Built by webui_frontend/build.mjs. Do not edit encoded assets.\n# fmt: off\nASSETS = {\n${encoded.join("\n")}\n}\n# fmt: on\n${end}`;
-writeFileSync(
-  python,
-  source.slice(0, source.indexOf(start)) +
-    block +
-    source.slice(source.indexOf(end) + end.length),
-);
+  throw Error("Missing asset markers in assets.py");
+const block = `"""\nWebUI 前端静态资源.\n\nBase64+gzip编码的前端构建产物。\n由 webui/frontend/build.mjs 生成，不要手动编辑。\n"""\n\nfrom __future__ import annotations\n\nimport base64\n\n${start}\n# Built by webui/frontend/build.mjs. Do not edit encoded assets.\n# fmt: off\nASSETS = {\n${encoded.join("\n")}\n}\n# fmt: on\n${end}\n`;
+writeFileSync(python, block);

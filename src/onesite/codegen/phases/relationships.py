@@ -20,6 +20,48 @@ from .base import ROLE_ORDER, ROLE_TO_ENUM, console, pluralize
 _RELATION_EDITORS = {"select", "inline", "embedded", "readonly", "hidden"}
 
 
+def _model_label_field(model: ModelDefinition) -> str:
+    """Choose a stable, human-readable field for relationship labels.
+
+    Search fields and relationship labels serve different purposes.  In
+    particular, FK/numeric fields are useful filters but poor labels.  Keep
+    existing string search-field behavior, while falling back to conventional
+    text fields before accepting a non-string search field.
+    """
+    fields = list(model.get("fields", []))
+    field_by_name = {field["name"]: field for field in fields}
+    explicit = model.get("site_props", {}).get("label_field")
+    if explicit:
+        if explicit not in field_by_name:
+            raise ValueError(
+                f"{model['name']}.label_field {explicit!r} does not exist"
+            )
+        return explicit
+
+    def is_text_field(name: str | None) -> bool:
+        field = field_by_name.get(name or "")
+        return bool(
+            field
+            and field.get("ui_type") == "str"
+            and not field.get("fk_info")
+            and "r" in field.get("permissions", "")
+        )
+
+    unique_search = model.get("unique_search_field")
+    if is_text_field(unique_search):
+        return unique_search
+
+    search_field = model.get("search_field")
+    if is_text_field(search_field):
+        return search_field
+
+    for candidate in ("name", "title", "label", "slug", "email", "username", "full_name"):
+        if is_text_field(candidate):
+            return candidate
+
+    return unique_search or search_field or "id"
+
+
 def _inline_field_type(field: dict) -> str:
     """Return a dependency-free type for an inline relation item schema."""
     if field.get("is_enum"):
@@ -223,9 +265,7 @@ def _resolve_fk_labels_and_reverse(
             fk["target_endpoint"] = f"{target_model['module_name']}s"
             fk["target_id_type"] = target_model["id_type"]
 
-            fk["label_field"] = (
-                target_model.get("unique_search_field") or target_model["search_field"]
-            )
+            fk["label_field"] = _model_label_field(target_model)
             label = next((field for field in target_model["fields"] if field.name == fk["label_field"]), None)
             model.setdefault("read_label_permissions", {})[fk["name"] + "_label"] = {
                 role: "r" if "r" in target_model["role_permissions"].get(role, "")
@@ -293,7 +333,7 @@ def _resolve_fk_labels_and_reverse(
                 "source_module": model["source_module"],
                 "source_id_type": model["id_type"],
                 "source_fk_field": fk["name"],
-                "label_field": model.get("unique_search_field") or model["search_field"],
+                "label_field": _model_label_field(model),
                 "display": editor != "hidden" and fk.get("reverse_display", True),
                 "editor": editor,
                 "inline_layout": inline_layout,
@@ -916,9 +956,7 @@ def _apply_m2m_direction(
                 "target_model": to_model["name"],
                 "target_service": to_model["module_name"],
                 "target_endpoint": f"{to_model['module_name']}s",
-                "label_field": (
-                    to_model.get("unique_search_field") or to_model["search_field"]
-                ),
+                "label_field": _model_label_field(to_model),
                 "target_readable_fields": [
                     f for f in to_model["fields"]
                     if "r" in f["permissions"] and f["name"] != "password"
@@ -959,9 +997,7 @@ def _apply_m2m_direction(
             "source_model": from_model["name"],
             "source_service": from_model["module_name"],
             "source_endpoint": f"{from_model['module_name']}s",
-            "label_field": (
-                from_model.get("unique_search_field") or from_model["search_field"]
-            ),
+            "label_field": _model_label_field(from_model),
             "source_readable_fields": [
                 f for f in from_model["fields"]
                 if "r" in f["permissions"] and f["name"] != "password"

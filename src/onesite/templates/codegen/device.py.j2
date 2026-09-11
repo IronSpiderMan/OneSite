@@ -1,37 +1,75 @@
-"""Device instances provided by the device_timeseries plugin."""
+"""Device instances with connector, group and lifecycle state."""
+
+from datetime import datetime
 from enum import Enum
 from uuid import uuid4
+from typing import Optional
 
-from sqlalchemy import CheckConstraint
+from onesite.config import ImportExportConfig, OneSiteConfig
+from sqlalchemy import CheckConstraint, Column, DateTime
 from sqlmodel import Field, SQLModel, select
 
 
-class DeviceProtocol(str, Enum):
-    OPCUA = "opcua"
-    MQTT = "mqtt"
-    MODBUS = "modbus"
+class DeviceStatus(str, Enum):
+    INACTIVE = "inactive"
+    ONLINE = "online"
+    OFFLINE = "offline"
+    DISABLED = "disabled"
+
+    __i18n__ = {
+        "zh": {
+            "inactive": "未激活",
+            "online": "在线",
+            "offline": "离线",
+            "disabled": "已禁用",
+        },
+        "en": {
+            "inactive": "Inactive",
+            "online": "Online",
+            "offline": "Offline",
+            "disabled": "Disabled",
+        },
+    }
 
 
 class Device(SQLModel, table=True):
     __tablename__ = "device"
-    __onesite__ = {
-        "icon": "Cpu",
-        "translations": {
-            "zh": {"name": "设备", "fields": {
-                "name": "名称", "device_model_id": "设备模型", "protocol": "协议",
-                "collection_interval_seconds": "采集周期(秒)",
-                "timeout": "离线超时(秒)",
-                "heartbeat_interval_seconds": "心跳间隔(秒)",
-            }},
-            "en": {"name": "Devices"},
+    __onesite__ = OneSiteConfig(
+        icon="Cpu",
+        page_edit=True,
+        importable=ImportExportConfig(custom=True),
+        exportable=ImportExportConfig(custom=True),
+        track=["c", "u", "d", "bulk_delete", "import", "export"],
+        permissions={"user": "r", "admin": "crud", "developer": "crud"},
+        actions={
+            "toggle_enabled": {
+                "toggle": "enabled",
+                "permissions": "da",
+            }
         },
-    }
+        translations={
+            "zh": {
+                "name": "设备",
+                "fields": {
+                    'id': '设备 ID',
+                    "name": "名称",
+                    "dgroup_id": "设备组",
+                    "device_model_id": "设备模型",
+                    "connector_id": "连接器",
+                    "collection_interval_seconds": "采集周期(秒)",
+                    "enabled": "启用",
+                    "status": "状态",
+                    "last_online_at": "最后在线时间",
+                    "timeout": "离线超时(秒)",
+                    "heartbeat_interval_seconds": "心跳间隔(秒)"
+                },
+            }
+        },
+    )
 
     __table_args__ = (
         CheckConstraint("timeout > 0", name="ck_device_timeout"),
-        CheckConstraint(
-            "heartbeat_interval_seconds > 0", name="ck_device_heartbeat_interval"
-        ),
+        CheckConstraint("heartbeat_interval_seconds > 0", name="ck_device_heartbeat_interval"),
     )
 
     id: str = Field(
@@ -40,9 +78,35 @@ class Device(SQLModel, table=True):
         sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}},
     )
     name: str = Field(unique=True, index=True)
+    dgroup_id: Optional[int] = Field(
+        default=None,
+        foreign_key="dgroup.id",
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {
+            "reverse": {
+                "editor": "embedded",
+                "allow_existing": True,
+                "on_remove": "nullify",
+            },
+        }}},
+    )
     device_model_id: int = Field(foreign_key="device_model.id", index=True)
-    protocol: DeviceProtocol
+    connector_id: int = Field(foreign_key="connector.id", index=True)
     collection_interval_seconds: int = Field(default=60, gt=0)
+    enabled: bool = True
+    status: DeviceStatus = Field(
+        default=DeviceStatus.INACTIVE,
+        index=True,
+        sa_column_kwargs={"info": {"site_props": {"permissions": "r"}}},
+    )
+    last_online_at: Optional[datetime] = Field(
+        default=None,
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=True,
+            info={"site_props": {"permissions": "r"}},
+        ),
+    )
     timeout: int = Field(default=60, gt=0)
     heartbeat_interval_seconds: int = Field(default=60, gt=0)
 
@@ -87,3 +151,8 @@ class Device(SQLModel, table=True):
         if ("device_model_id" in changes
                 and changes["device_model_id"] != self.device_model_id):
             raise ValueError("设备创建后不能更换设备模型")
+
+
+    async def on_after_update(self, changes) -> None:
+        if "enabled" in changes:
+            self.status = DeviceStatus.INACTIVE if self.enabled else DeviceStatus.DISABLED
