@@ -1214,5 +1214,28 @@ def generate_locale_files(
          'composer_hint': '工具执行过程会显示在对话中。',
          'send_error': '暂时无法确认是否发送成功。草稿已保留，请检查对话后再发送。'}
     )
+    en_translations["reports"]["editor"].update({
+        "storage_error": "Could not load saved templates.",
+        "save_error": "Could not save the template.",
+        "saved": "Template saved.",
+        "deleted": "Template deleted.",
+        "import_json": "Import JSON",
+        "export_json": "Export JSON",
+        "imported": "Template imported.",
+        "import_error": "Could not import this JSON template.",
+        "storage_hint": "Templates are saved to your account. Charts refresh when a template is opened.",
+    })
+    zh_translations["reports"]["editor"].update({
+        "storage_error": "无法加载已保存的模板。",
+        "save_error": "无法保存模板。",
+        "saved": "模板已保存。",
+        "deleted": "模板已删除。",
+        "import_json": "从 JSON 导入",
+        "export_json": "导出 JSON",
+        "imported": "模板已导入。",
+        "import_error": "无法导入此 JSON 模板。",
+        "storage_hint": "模板已保存到当前账号；打开模板时会重新查询图表数据。",
+    })
+
     write_file_with_status(locale_dir / "en.json", json.dumps(en_translations, indent=2))
     write_file_with_status(locale_dir / "zh.json", json.dumps(zh_translations, indent=2, ensure_ascii=False))

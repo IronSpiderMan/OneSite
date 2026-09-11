@@ -1,12 +1,13 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { BarChart3, Loader2, Play, RotateCcw, SlidersHorizontal, GripVertical, ArrowUp, ArrowDown, Copy, Trash2, Plus, Undo2, FileText, Eye, Download, Check, X } from 'lucide-react';
+import { BarChart3, Loader2, Play, RotateCcw, SlidersHorizontal, GripVertical, ArrowUp, ArrowDown, Copy, Trash2, Plus, Undo2, FileText, Eye, Download, Upload, Check, X } from 'lucide-react';
 
 import * as ReportSettingsDialog from '@radix-ui/react-dialog';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
 import { ModelReportChart } from '../components/visualization-chart';
+import { createReportTemplate, deleteReportTemplate, getReportTemplates, updateReportTemplate } from '../services/report-templates';
 import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { TimePicker } from '../components/ui/time-picker';

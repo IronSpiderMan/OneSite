@@ -1,0 +1,28 @@
+"""Persisted, user-owned report page templates."""
+
+from datetime import datetime, timezone
+from uuid import uuid4
+
+from sqlalchemy import Column, DateTime
+from sqlmodel import Field, SQLModel
+
+
+class ReportTemplate(SQLModel, table=True):
+    __tablename__ = "report_templates"
+
+    id: str = Field(default_factory=lambda: str(uuid4()), primary_key=True)
+    owner_id: int = Field(index=True, nullable=False)
+    title: str
+    content: str
+    created_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(DateTime(timezone=True), nullable=False),
+    )
+    updated_at: datetime = Field(
+        default_factory=lambda: datetime.now(timezone.utc),
+        sa_column=Column(
+            DateTime(timezone=True),
+            nullable=False,
+            onupdate=lambda: datetime.now(timezone.utc),
+        ),
+    )

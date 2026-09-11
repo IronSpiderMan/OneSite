@@ -5,6 +5,11 @@ type ReportLayout = 'single' | 'halves' | 'thirds' | 'wide-left' | 'wide-right';
 type ReportBlock = { id: string; text: string; format?: ReportFormat; alt?: string; visualTitle?: string; chartTitle?: string; query?: ChartQuery; table?: { model: string; page: number; size: number; filters?: Record<string, any>; hiddenFields?: string[] } };
 type ReportRow = { id: string; blocks: ReportBlock[]; layout?: ReportLayout; pageBreak?: boolean };
 type ReportTemplate = { id: string; title: string; subtitle?: string; rows: ReportRow[] };
+const validReportTemplate = (value: any): value is ReportTemplate => !!value
+  && typeof value.id === 'string'
+  && typeof value.title === 'string'
+  && Array.isArray(value.rows)
+  && value.rows.every((row: ReportRow) => Array.isArray(row.blocks) && row.blocks.length && row.blocks.length <= 3 && row.blocks.every((block) => typeof block.text === 'string'));
 let reportIdSequence = 0;
 const reportId = (): string => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -72,6 +77,7 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
   const [subtitle, setSubtitle] = useState('');
   const [rows, setRows] = useState<ReportRow[]>([]);
   const [templates, setTemplates] = useState<ReportTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(true);
   const [selected, setSelected] = useState('');
   const [confirmation, setConfirmation] = useState<{ kind: 'discard' | 'delete'; action: () => void } | null>(null);
   const [activeBlockId, setActiveBlockId] = useState('');
@@ -120,6 +126,7 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
   const chartTrigger = useRef<HTMLButtonElement | null>(null);
   const canvas = useRef<HTMLDivElement>(null);
   const editCanvas = useRef<HTMLDivElement>(null);
+  const importInput = useRef<HTMLInputElement>(null);
   const generation = useRef(0);
   const pendingScroll = useRef('');
   useEffect(() => {
@@ -129,14 +136,30 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
   }, [rows]);
   const activeRow = rows.find((row) => row.blocks.some((block) => block.id === activeBlockId));
   const activeBlock = activeRow?.blocks.find((block) => block.id === activeBlockId);
-  const locked = busy || exporting || !!draft;
+  const locked = busy || exporting || !!draft || templatesLoading;
   const layoutLabel = (layout: ReportLayout) => label(`layout_${layout}`, { single: 'One column', halves: 'Two columns', thirds: 'Three columns', 'wide-left': 'Wide left', 'wide-right': 'Wide right' }[layout]);
   useEffect(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(storageKey) || '[]');
-      if (!Array.isArray(saved) || saved.some((item) => typeof item.title !== 'string' || !Array.isArray(item.rows) || item.rows.some((row: ReportRow) => !Array.isArray(row.blocks) || !row.blocks.length || row.blocks.length > 3 || row.blocks.some((block) => typeof block.text !== 'string')))) throw new Error();
-      setTemplates(saved);
-    } catch { setMessage(label('storage_error', 'Could not read saved templates.')); }
+    let active = true;
+    const load = async () => {
+      try {
+        let saved = (await getReportTemplates()) as ReportTemplate[];
+        // Move existing browser-only templates to the database once, without
+        // keeping localStorage as an ongoing source of truth.
+        if (!saved.length) {
+          let legacy: unknown = [];
+          try { legacy = JSON.parse(localStorage.getItem(storageKey) || '[]'); }
+          catch { /* Browser storage may be unavailable; database templates still work. */ }
+          if (Array.isArray(legacy) && legacy.every(validReportTemplate) && legacy.length) {
+            saved = await Promise.all(legacy.map(({ title, subtitle, rows }) => createReportTemplate({ title, subtitle, rows })));
+            localStorage.removeItem(storageKey);
+          }
+        }
+        if (active) setTemplates(saved);
+      } catch { if (active) setMessage(label('storage_error', 'Could not load saved templates.')); }
+      finally { if (active) setTemplatesLoading(false); }
+    };
+    void load();
+    return () => { active = false; };
   }, [storageKey]);
   const saved = templates.find((item) => item.id === selected);
   const dirty = saved ? saved.title !== title || (saved.subtitle || '') !== subtitle || JSON.stringify(saved.rows) !== JSON.stringify(rows) : !!title || !!subtitle || rows.length > 0;
@@ -144,15 +167,44 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
     if (dirty) setConfirmation({ kind: 'discard', action });
     else action();
   };
-  const persist = (next: ReportTemplate[]) => {
-    try { localStorage.setItem(storageKey, JSON.stringify(next)); setTemplates(next); return true; }
-    catch { setMessage(label('save_error', 'Could not save templates. Browser storage may be full or disabled.')); return false; }
+  const save = async (copy: boolean) => {
+    const payload = { title: title.trim() || label('untitled', 'Untitled report') + ' ' + new Date().toLocaleString(), subtitle, rows };
+    try {
+      const template = (copy || !selected ? await createReportTemplate(payload) : await updateReportTemplate(selected, payload)) as ReportTemplate;
+      setTemplates((current) => [...current.filter((item) => item.id !== template.id), template]);
+      setTitle(template.title); setSelected(template.id); setMessage(label('saved', 'Template saved.'));
+    } catch { setMessage(label('save_error', 'Could not save the template.')); }
   };
-  const save = (copy: boolean) => {
-    const template = { id: copy || !selected ? reportId() : selected, title: title.trim() || label('untitled', 'Untitled report') + ' ' + new Date().toLocaleString(), subtitle, rows };
-    if (persist([...templates.filter((item) => item.id !== template.id), template])) {
-      setTitle(template.title); setSelected(template.id); setMessage(label('saved', 'Template saved in this browser.'));
-    }
+  const removeTemplate = async () => {
+    if (!selected) return;
+    try {
+      await deleteReportTemplate(selected);
+      setTemplates((current) => current.filter((item) => item.id !== selected));
+      setSelected(''); setMessage(label('deleted', 'Template deleted.'));
+    } catch { setMessage(label('save_error', 'Could not save the template.')); }
+  };
+  const exportJson = () => {
+    if (!rows.length) return;
+    const content = JSON.stringify({ version: 1, report: { title: title.trim() || label('untitled', 'Untitled report'), subtitle, rows } }, null, 2);
+    const blob = new Blob([content], { type: 'application/json' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.download = `${(title || 'report').replace(/[^a-z0-9_-]+/gi, '-').replace(/^-+|-+$/g, '') || 'report'}.json`;
+    link.click();
+    window.setTimeout(() => URL.revokeObjectURL(link.href), 0);
+  };
+  const importJson = async (file?: File) => {
+    if (!file) return;
+    try {
+      const parsed = JSON.parse(await file.text());
+      const candidate = parsed?.report || parsed;
+      if (!candidate || typeof candidate.title !== 'string' || !Array.isArray(candidate.rows) || !candidate.rows.every((row: ReportRow) => Array.isArray(row.blocks) && row.blocks.length && row.blocks.length <= 3 && row.blocks.every((block) => typeof block.text === 'string'))) throw new Error();
+      const template = await createReportTemplate({ title: candidate.title || label('untitled', 'Untitled report'), subtitle: typeof candidate.subtitle === 'string' ? candidate.subtitle : '', rows: candidate.rows });
+      setTemplates((current) => [...current, template as ReportTemplate]);
+      setSelected(template.id); setTitle(template.title); setSubtitle(template.subtitle || ''); setRows(template.rows as ReportRow[]); setHistory([]); setActiveBlockId(template.rows[0]?.blocks[0]?.id || ''); setMessage(label('imported', 'Template imported.'));
+      void refresh(template.rows as ReportRow[]);
+    } catch { setMessage(label('import_error', 'Could not import this JSON template.')); }
+    finally { if (importInput.current) importInput.current.value = ''; }
   };
   const refresh = async (nextRows = rows) => {
     const version = ++generation.current;
@@ -325,9 +377,12 @@ const ReportEditor: React.FC<{ query: ChartQuery | null; result: QueryResult | n
         <span className="text-xs text-muted-foreground">{dirty ? label('unsaved', 'Unsaved changes') : selected ? label('up_to_date', 'Saved') : label('blank', 'Blank page')}</span>
       </div>
       <div className="flex flex-wrap items-center gap-2">
-        <Button size="sm" disabled={!rows.length || locked} onClick={() => save(false)}><Check className="mr-1 h-4 w-4" />{label('save', 'Save template')}</Button>
-        <Button variant="outline" size="sm" disabled={!rows.length || locked} onClick={() => save(true)}>{label('save_copy', 'Save as new template')}</Button>
-        <Button variant="ghost" size="sm" disabled={!selected || locked} aria-label={label('delete_template', 'Delete template')} title={label('delete_template', 'Delete template')} onClick={() => setConfirmation({ kind: 'delete', action: () => { if (persist(templates.filter((item) => item.id !== selected))) setSelected(''); } })}><Trash2 className="h-4 w-4" /></Button>
+        <input ref={importInput} type="file" accept="application/json,.json" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; replacePage(() => { void importJson(file); }); }} />
+        <Button size="sm" disabled={!rows.length || locked} onClick={() => void save(false)}><Check className="mr-1 h-4 w-4" />{label('save', 'Save template')}</Button>
+        <Button variant="outline" size="sm" disabled={!rows.length || locked} onClick={() => void save(true)}>{label('save_copy', 'Save as new template')}</Button>
+        <Button variant="outline" size="sm" disabled={locked} onClick={() => importInput.current?.click()}><Upload className="mr-1 h-4 w-4" />{label('import_json', 'Import JSON')}</Button>
+        <Button variant="outline" size="sm" disabled={!rows.length || locked} onClick={exportJson}><Download className="mr-1 h-4 w-4" />{label('export_json', 'Export JSON')}</Button>
+        <Button variant="ghost" size="sm" disabled={!selected || locked} aria-label={label('delete_template', 'Delete template')} title={label('delete_template', 'Delete template')} onClick={() => setConfirmation({ kind: 'delete', action: () => { void removeTemplate(); } })}><Trash2 className="h-4 w-4" /></Button>
         <Button variant="outline" size="sm" aria-pressed={fullscreen} onClick={() => setFullscreen(!fullscreen)}>{fullscreen ? label('exit_fullscreen', 'Exit fullscreen') : label('fullscreen', 'Fullscreen edit')}</Button>
         <div className="flex items-center gap-1" title={label('zoom_hint', 'Ctrl / ⌘ + wheel to zoom')}>
           <Button variant="ghost" size="sm" aria-label={label('zoom_out', 'Zoom out')} disabled={zoom <= 0.25} onClick={() => changeZoom(zoom - 0.1)}>−</Button>

@@ -1,0 +1,137 @@
+"""Private, database-backed storage for report page templates."""
+
+import json
+from typing import Any
+
+from fastapi import APIRouter, Depends, HTTPException, status
+from sqlmodel import Field, SQLModel, select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.models.report_template import ReportTemplate
+from app.models.user import User
+
+
+class ReportTemplatePayload(SQLModel):
+    title: str = Field(min_length=1, max_length=250)
+    subtitle: str | None = Field(default=None, max_length=1000)
+    rows: list[dict[str, Any]] = Field(default_factory=list)
+
+
+class ReportTemplateRead(ReportTemplatePayload):
+    id: str
+
+
+router = APIRouter()
+_REPORT_ROLES = {{ report_roles | tojson }}
+_MAX_CONTENT_BYTES = 1_000_000
+
+
+def _role(current_user: User) -> str:
+    raw_role = getattr(current_user, "role", "user")
+    return str(getattr(raw_role, "value", raw_role))
+
+
+def _require_report_access(current_user: User) -> None:
+    if _role(current_user) not in _REPORT_ROLES:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Reports are not available for this role")
+
+
+def _serialize(payload: ReportTemplatePayload) -> str:
+    content = json.dumps(
+        {"subtitle": payload.subtitle, "rows": payload.rows},
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    if len(content.encode("utf-8")) > _MAX_CONTENT_BYTES:
+        raise HTTPException(status_code=413, detail="Report template is too large")
+    return content
+
+
+def _read(template: ReportTemplate) -> ReportTemplateRead:
+    try:
+        content = json.loads(template.content)
+    except (TypeError, json.JSONDecodeError) as exc:
+        raise HTTPException(status_code=500, detail="Stored report template is invalid") from exc
+    if not isinstance(content, dict) or not isinstance(content.get("rows"), list):
+        raise HTTPException(status_code=500, detail="Stored report template is invalid")
+    return ReportTemplateRead(
+        id=template.id,
+        title=template.title,
+        subtitle=content.get("subtitle"),
+        rows=content["rows"],
+    )
+
+
+async def _owned_template(session: AsyncSession, template_id: str, owner_id: int) -> ReportTemplate:
+    result = await session.exec(
+        select(ReportTemplate).where(
+            ReportTemplate.id == template_id,
+            ReportTemplate.owner_id == owner_id,
+        )
+    )
+    template = result.first()
+    if not template:
+        raise HTTPException(status_code=404, detail="Report template not found")
+    return template
+
+
+@router.get("/", response_model=list[ReportTemplateRead])
+async def list_report_templates(
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> list[ReportTemplateRead]:
+    _require_report_access(current_user)
+    result = await session.exec(
+        select(ReportTemplate)
+        .where(ReportTemplate.owner_id == current_user.id)
+        .order_by(ReportTemplate.updated_at.desc())
+    )
+    return [_read(template) for template in result.all()]
+
+
+@router.post("/", response_model=ReportTemplateRead, status_code=status.HTTP_201_CREATED)
+async def create_report_template(
+    payload: ReportTemplatePayload,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> ReportTemplateRead:
+    _require_report_access(current_user)
+    template = ReportTemplate(
+        owner_id=current_user.id,
+        title=payload.title,
+        content=_serialize(payload),
+    )
+    session.add(template)
+    await session.commit()
+    await session.refresh(template)
+    return _read(template)
+
+
+@router.put("/{template_id}", response_model=ReportTemplateRead)
+async def update_report_template(
+    template_id: str,
+    payload: ReportTemplatePayload,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> ReportTemplateRead:
+    _require_report_access(current_user)
+    template = await _owned_template(session, template_id, current_user.id)
+    template.title = payload.title
+    template.content = _serialize(payload)
+    session.add(template)
+    await session.commit()
+    await session.refresh(template)
+    return _read(template)
+
+
+@router.delete("/{template_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def delete_report_template(
+    template_id: str,
+    session: AsyncSession = Depends(db.get_session),
+    current_user: User = Depends(deps.get_current_user),
+) -> None:
+    _require_report_access(current_user)
+    template = await _owned_template(session, template_id, current_user.id)
+    await session.delete(template)
+    await session.commit()

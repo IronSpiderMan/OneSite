@@ -1,0 +1,31 @@
+import request from '../utils/request';
+
+export type StoredReportTemplate = {
+  id: string;
+  title: string;
+  subtitle?: string;
+  rows: any[];
+};
+
+export type ReportTemplatePayload = Omit<StoredReportTemplate, 'id'>;
+
+const API_URL = '/report-templates';
+
+export const getReportTemplates = async () => {
+  const response = await request.get<StoredReportTemplate[]>(`${API_URL}/`);
+  return response.data;
+};
+
+export const createReportTemplate = async (payload: ReportTemplatePayload) => {
+  const response = await request.post<StoredReportTemplate>(`${API_URL}/`, payload, { suppressErrorToast: true });
+  return response.data;
+};
+
+export const updateReportTemplate = async (id: string, payload: ReportTemplatePayload) => {
+  const response = await request.put<StoredReportTemplate>(`${API_URL}/${encodeURIComponent(id)}`, payload, { suppressErrorToast: true });
+  return response.data;
+};
+
+export const deleteReportTemplate = async (id: string) => {
+  await request.delete(`${API_URL}/${encodeURIComponent(id)}`, { suppressErrorToast: true });
+};

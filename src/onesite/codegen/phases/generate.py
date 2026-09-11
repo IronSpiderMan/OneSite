@@ -1172,6 +1172,7 @@ def phase_generate_aggregated(
         public_dashboard_enabled=bool(public_dashboard.get("enabled")),
         import_export_enabled=background_tasks_enabled,
         custom_api_modules=custom_api_modules,
+        reports_enabled=model_reports_enabled,
     )
 
     if tools or scheduled_tasks or import_export_enabled:
@@ -1597,6 +1598,26 @@ def phase_generate_aggregated(
             "report_runtime.py.j2",
             {},
             backend_path / "app" / "core" / "reports.py",
+        )
+        report_roles = sorted({
+            role
+            for model in report_models
+            for role in model["reports"].get("permitted_roles", [])
+        })
+        generate_file(
+            "report_template_model.py.j2",
+            {},
+            backend_path / "app" / "models" / "report_template.py",
+        )
+        generate_file(
+            "report_template_api.py.j2",
+            {"report_roles": report_roles},
+            backend_path / "app" / "api" / "endpoints" / "report_templates.py",
+        )
+        generate_file(
+            "frontend_report_template_service.ts.j2",
+            {},
+            frontend_path / "src" / "services" / "report-templates.ts",
         )
         generate_file(
             "model_report_page.tsx.j2",
