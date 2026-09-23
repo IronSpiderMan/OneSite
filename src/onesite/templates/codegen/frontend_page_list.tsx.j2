@@ -904,7 +904,11 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% for field in model.fields %}
       {% if 'r' in field.permissions %}
       case '{{ field.name }}':
-        {% if field.fk_info %}
+        {% if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
+        return Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length
+          ? <div className="flex flex-wrap gap-1">{item.{{ field.name }}.map((label: string, index: number) => <Badge key={`${label}-${index}`} variant="secondary">{label}</Badge>)}</div>
+          : <span className="text-muted-foreground">-</span>;
+        {% elif field.fk_info %}
         return item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-');
         {% elif field.ui_type == 'bool' %}
         return <Badge variant={item.{{ field.name }} ? 'default' : 'secondary'}>{item.{{ field.name }} ? t('common.yes', 'Yes') : t('common.no', 'No')}</Badge>;

@@ -16,6 +16,7 @@ def update_api_router(
     public_dashboard_enabled: bool = False,
     agents_enabled: bool = False,
     reports_enabled: bool = False,
+    schedule_enabled: bool = False,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -25,6 +26,10 @@ def update_api_router(
 
     imports.append("from app.api.endpoints import login")
     routers.append('api_router.include_router(login.router, tags=["login"])')
+
+    if schedule_enabled:
+        imports.append("from app.api.endpoints import schedule_calendar")
+        routers.append('api_router.include_router(schedule_calendar.router, prefix="/schedules", tags=["schedules"])')
 
     imports.append("from app.api.endpoints import video_streams")
     routers.append(

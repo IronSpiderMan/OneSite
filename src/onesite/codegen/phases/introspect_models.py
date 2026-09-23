@@ -417,6 +417,10 @@ def _build_model_dict(
         union_key=result.union_key,
         importable=result.importable,
         exportable=result.exportable,
+        custom_importable=isinstance(result.model_site_props.get("importable"), dict)
+        and result.model_site_props["importable"].get("custom") is True,
+        custom_exportable=isinstance(result.model_site_props.get("exportable"), dict)
+        and result.model_site_props["exportable"].get("custom") is True,
         import_key=result.import_key,
         visualize=result.model_site_props.get("visualize"),
         dashboard_metrics=result.model_site_props.get("dashboard_metrics", []),
@@ -982,7 +986,10 @@ def _introspect_module(
 # ── Public entry point ───────────────────────────────────────────────────
 
 
-def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
+def phase_introspect(
+    backend_path: Path, *, site_config: dict[str, Any] | None = None,
+    source_path: Path | None = None,
+) -> list[ModelDefinition]:
     """Import every SQLModel module and extract field-level metadata.
 
     Returns an empty list only when the project contains no models. Import and
@@ -1021,6 +1028,19 @@ def phase_introspect(backend_path: Path) -> list[ModelDefinition]:
                     f"Model validation failed while introspecting {full_module_name}"
                 )
             found_models.extend(module_models)
+
+        # Generate Schedule while the project's model modules are still loaded.
+        # A second full introspection would re-import every SQLModel class and
+        # mistake the operation_log generated on the first pass for user input.
+        from .schedule import phase_generate_schedule_model
+
+        if phase_generate_schedule_model(site_config or {}, found_models, backend_path, source_path):
+            importlib.invalidate_caches()
+            module = importlib.import_module("app.models.schedule")
+            schedule_models = _introspect_module(module, "schedule")
+            if schedule_models is None:
+                raise ModelIntrospectionError("Could not introspect generated Schedule model")
+            found_models.extend(schedule_models)
 
         seen_keys = {}
         for model in found_models:

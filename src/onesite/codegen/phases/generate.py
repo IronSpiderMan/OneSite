@@ -1173,7 +1173,23 @@ def phase_generate_aggregated(
         import_export_enabled=background_tasks_enabled,
         custom_api_modules=custom_api_modules,
         reports_enabled=model_reports_enabled,
+        schedule_enabled=bool(site_config.get("schedule", {}).get("enabled")),
     )
+
+    if site_config.get("schedule", {}).get("enabled"):
+        from shutil import copy2
+        schedule_pages = frontend_path / "src/pages/schedule"
+        copy2(schedule_pages / "index.tsx", schedule_pages / "rules.tsx")
+        generate_file(
+            "schedule_calendar_api.py.j2",
+            {"schedule": site_config["schedule"]},
+            backend_path / "app/api/endpoints/schedule_calendar.py",
+        )
+        generate_file(
+            "schedule_calendar_page.tsx.j2",
+            {"schedule": site_config["schedule"]},
+            frontend_path / "src/pages/schedule/index.tsx",
+        )
 
     if tools or scheduled_tasks or import_export_enabled:
         generate_file(
@@ -1391,6 +1407,8 @@ def phase_generate_aggregated(
         "builtin.dashboard": "/dashboard",
         "builtin.settings": "/settings",
     }
+    if site_config.get("schedule", {}).get("enabled"):
+        generated_route_paths["builtin.schedule-rules"] = "/schedules/rules"
     if site_config.get("agents"):
         generated_route_paths["builtin.agent"] = "/agent"
     if report_models:
@@ -1529,6 +1547,7 @@ def phase_generate_aggregated(
         "frontend_routes.tsx.j2",
         {
             "models": frontend_models,
+            "schedule_enabled": bool(site_config.get("schedule", {}).get("enabled")),
             "external_resources_enabled": external_resources_enabled,
             "reports_enabled": bool(report_models),
             "import_export_enabled": background_tasks_enabled,

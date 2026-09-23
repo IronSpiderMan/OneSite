@@ -65,7 +65,9 @@ def _generate_staged_code() -> None:
     )
 
     # Phase 3 — Introspect
-    models = phase_introspect.phase_introspect(backend_path)
+    models = phase_introspect.phase_introspect(
+        backend_path, site_config=site_config, source_path=cwd / "app"
+    )
     if not models:
         return
 

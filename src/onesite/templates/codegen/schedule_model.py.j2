@@ -1,0 +1,133 @@
+"""Built-in calendar schedule for {{ schedule.target_model }}."""
+
+from datetime import date
+from enum import Enum, IntEnum
+from sqlalchemy import JSON
+from sqlalchemy.types import TypeDecorator
+from sqlmodel import Field, SQLModel
+from onesite_runtime import override_field
+
+
+class DateListJSON(TypeDecorator):
+    impl = JSON
+    cache_ok = True
+
+    def process_bind_param(self, value, dialect):
+        return [item.isoformat() if isinstance(item, date) else item for item in value] if value is not None else None
+
+    def process_result_value(self, value, dialect):
+        return [date.fromisoformat(item) if isinstance(item, str) else item for item in value] if value is not None else None
+
+
+class Shift(str, Enum):
+    DAY = "day"
+    NIGHT = "night"
+    FULL_DAY = "full_day"
+
+    __i18n__ = {"zh": {"day": "白班", "night": "晚班", "full_day": "全天"},
+                "en": {"day": "Day", "night": "Night", "full_day": "Full day"}}
+
+
+class Recurrence(str, Enum):
+    DAILY = "daily"
+    WEEKLY = "weekly"
+    MONTHLY = "monthly"
+    DATES = "dates"
+
+    __i18n__ = {"zh": {"daily": "每日", "weekly": "每周", "monthly": "每月", "dates": "指定日期"},
+                "en": {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly", "dates": "Selected dates"}}
+
+
+class Weekday(IntEnum):
+    MONDAY = 0
+    TUESDAY = 1
+    WEDNESDAY = 2
+    THURSDAY = 3
+    FRIDAY = 4
+    SATURDAY = 5
+    SUNDAY = 6
+
+
+class MonthDay(IntEnum):
+{% for day in range(1, 32) %}
+    DAY_{{ day }} = {{ day }}
+{% endfor %}
+
+
+class Schedule(SQLModel, table=True):
+    __onesite__ = {
+        "icon": "CalendarDays",
+        "page_edit": True,
+        "permissions": {{ schedule.role_permissions | tojson }},
+        "actions": {"toggle_enabled": {"toggle": "enabled", "permissions": "da"}},
+        "translations": {
+            "zh": {"name": "排期", "fields": {
+                "target_id": "排期对象", "shift": "班次", "recurrence": "重复方式",
+                "start_date": "开始日期", "end_date": "结束日期", "enabled": "启用",
+                "weekdays": "星期几", "month_days": "每月日期", "dates": "指定日期"}},
+            "en": {"name": "Schedule"},
+        },
+    }
+
+    id: int | None = Field(default=None, primary_key=True)
+    target_id: {{ schedule.target_id_type }} = Field(foreign_key="{{ schedule.target_table }}.id", index=True)
+    shift: Shift = Field(default=Shift.DAY)
+    recurrence: Recurrence = Field(default=Recurrence.DAILY)
+    start_date: date = Field(default_factory=date.today, index=True)
+    end_date: date | None = Field(default=None, index=True)
+    enabled: bool = Field(default=True, index=True)
+    weekdays: list[Weekday] = Field(default_factory=list, sa_type=JSON, sa_column_kwargs={"info": {"site_props": {"visible_when": {"recurrence": ["weekly"]}}}})
+    month_days: list[MonthDay] = Field(default_factory=list, sa_type=JSON, sa_column_kwargs={"info": {"site_props": {"visible_when": {"recurrence": ["monthly"]}}}})
+    dates: list[date] = Field(default_factory=list, sa_type=DateListJSON, sa_column_kwargs={"info": {"site_props": {"visible_when": {"recurrence": ["dates"]}}}})
+
+    @override_field("weekdays")
+    def display_weekdays(self, value) -> list[str]:
+        names = ("周一", "周二", "周三", "周四", "周五", "周六", "周日")
+        return [names[day] for day in (value or []) if isinstance(day, int) and 0 <= day <= 6]
+
+    @override_field("month_days")
+    def display_month_days(self, value) -> list[str]:
+        return [f"{day}日" for day in (value or [])]
+
+    @staticmethod
+    def _validate_rule(values: dict) -> None:
+        shift = values["shift"]
+        shift = shift.value if isinstance(shift, Shift) else shift
+        if shift not in {item.value for item in Shift}:
+            raise ValueError("shift must be day, night, or full_day")
+        recurrence = values["recurrence"]
+        recurrence = recurrence.value if isinstance(recurrence, Recurrence) else recurrence
+        if recurrence not in {item.value for item in Recurrence}:
+            raise ValueError("invalid recurrence")
+        start = values["start_date"]
+        end = values["end_date"]
+        if end is not None and end < start:
+            raise ValueError("end_date must be on or after start_date")
+        if recurrence == "weekly" and (not values["weekdays"] or any(not isinstance(day, (int, Weekday)) or isinstance(day, bool) or day not in Weekday._value2member_map_ for day in values["weekdays"])):
+            raise ValueError("weekly schedules require weekdays in 0..6")
+        if recurrence == "monthly" and (not values["month_days"] or any(not isinstance(day, (int, MonthDay)) or isinstance(day, bool) or day not in MonthDay._value2member_map_ for day in values["month_days"])):
+            raise ValueError("monthly schedules require month_days in 1..31")
+        if recurrence == "dates":
+            if not values["dates"]:
+                raise ValueError("dates schedules require at least one date")
+            for item in values["dates"]:
+                try:
+                    parsed = item if isinstance(item, date) else date.fromisoformat(item)
+                except (TypeError, ValueError) as exc:
+                    raise ValueError("dates must contain ISO dates") from exc
+                if parsed < start or (end is not None and parsed > end):
+                    raise ValueError("specified dates must be within the schedule range")
+
+    async def on_before_create(self, session) -> None:
+        from app.models.{{ schedule.target_module }} import {{ schedule.target_model }}
+        if await session.get({{ schedule.target_model }}, self.target_id) is None:
+            raise ValueError("schedule target does not exist")
+        self._validate_rule({name: getattr(self, name) for name in (
+            "shift", "recurrence", "start_date", "end_date", "weekdays", "month_days", "dates"
+        )})
+
+    async def on_before_update(self, changes) -> None:
+        values = {name: changes.get(name, getattr(self, name)) for name in (
+            "shift", "recurrence", "start_date", "end_date", "weekdays", "month_days", "dates"
+        )}
+        self._validate_rule(values)

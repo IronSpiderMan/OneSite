@@ -189,6 +189,19 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
         <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
     )} />
+    {% elif model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
+    <Controller control={editControl} name="{{ field.name }}" defaultValue={[]} render={({ field: { onChange, value } }) => (
+        <SearchableSelect value={Array.isArray(value) ? value : []} onValueChange={onChange} multiple
+            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
+            valueLabels={Object.fromEntries(Array.from({ length: {{ 7 if field.name == 'weekdays' else 31 }} }, (_, index) => [
+                String({{ 'index' if field.name == 'weekdays' else 'index + 1' }}),
+                {% if field.name == 'weekdays' %}new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { weekday: 'long' }).format(new Date(2024, 0, index + 1)){% else %}`${index + 1}日`{% endif %},
+            ]))}
+            loadOptions={async () => Array.from({ length: {{ 7 if field.name == 'weekdays' else 31 }} }, (_, index) => ({
+                value: {{ 'index' if field.name == 'weekdays' else 'index + 1' }},
+                label: {% if field.name == 'weekdays' %}new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { weekday: 'long' }).format(new Date(2024, 0, index + 1)){% else %}`${index + 1}日`{% endif %},
+            }))} />
+    )} />
     {% elif field.is_enum and field.is_multi_select %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
         <SearchableSelect value={value || []} onValueChange={onChange} multiple={true}
@@ -446,7 +459,7 @@ const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
 };
 
 const {{ model.name }}DetailPage: React.FC = () => {
-    const { t } = useTranslation();
+    const { t, i18n } = useTranslation();
     const timeZone = getUserTimeZone();
     const { id } = useParams<{ id: string }>();
     const [searchParams] = useSearchParams();
@@ -1440,7 +1453,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                         {% if model.page_edit %}{isEditing ? (
                         <form id="detail-edit-form" className="space-y-4">
                             {% for field in model.fields %}
-                            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+                            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %}{% if field.visible_when %} && ({% for controller, values in field.visible_when.items() %}{{ '' if loop.first else ' && ' }}({{ values | tojson }} as any[]).includes(watchEdit('{{ controller }}')){% endfor %}){% endif %} && (
                             <div className="space-y-2">
                                 <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
                                 {% if field.composite_selector %}
@@ -1526,8 +1539,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             multiple={true}
                                             placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
                                             searchPlaceholder={`${t('common.search')}...`}
-                                            loadOptions={async () => {{ field.enum_values | tojson }}.map((v: string) => ({
-                                                label: t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v),
+                                            {% if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
+                                            valueLabels={Object.fromEntries({{ field.enum_values | tojson }}.map((v: number) => [String(v), {% if field.name == 'weekdays' %}new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { weekday: 'long' }).format(new Date(2024, 0, v + 1)){% else %}`${v}日`{% endif %}]))}
+                                            {% endif %}
+                                            loadOptions={async () => {{ field.enum_values | tojson }}.map((v: {{ 'number' if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] else 'string' }}) => ({
+                                                label: {% if model.module_name == 'schedule' and field.name == 'weekdays' %}new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { weekday: 'long' }).format(new Date(2024, 0, v + 1)){% elif model.module_name == 'schedule' and field.name == 'month_days' %}`${v}日`{% else %}t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v){% endif %},
                                                 value: v,
                                             }))}
                                         />

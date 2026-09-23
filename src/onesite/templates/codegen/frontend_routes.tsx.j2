@@ -1,4 +1,7 @@
 import React from 'react';
+{% if schedule_enabled %}
+import ScheduleRulesPage from './pages/schedule/rules';
+{% endif %}
 import {
   applyGeneratedRouteOverrides,
   GeneratedFeatureRoutes,
@@ -39,6 +42,9 @@ import {{ model.name }}Page from './pages/{{ model.module_name }}';
 {% endfor %}
 
 const GeneratedBaseRoutes: GeneratedRouteDefinition[] = [
+{% if schedule_enabled %}
+  { id: 'builtin.schedule-rules', path: '/schedules/rules', element: <ScheduleRulesPage /> },
+{% endif %}
 {% if agents_enabled %}
   { id: 'builtin.agent', path: '/agent', element: <AgentPage /> },
 {% endif %}

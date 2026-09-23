@@ -1,0 +1,75 @@
+"""Bounded expansion of schedule rules for the calendar page."""
+
+from datetime import date, timedelta
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import or_
+from sqlmodel import select
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.models.schedule import Schedule, Recurrence
+from app.models.{{ schedule.target_module }} import {{ schedule.target_model }}
+
+
+router = APIRouter(dependencies=[Depends(deps.model_access(
+    {{ schedule.role_permissions | tojson }}
+))])
+
+
+def _occurs(rule: Schedule, day: date) -> bool:
+    recurrence = rule.recurrence.value if isinstance(rule.recurrence, Recurrence) else rule.recurrence
+    if recurrence == "daily":
+        return True
+    if recurrence == "weekly":
+        return day.weekday() in (rule.weekdays or [])
+    if recurrence == "monthly":
+        return day.day in (rule.month_days or [])
+    if recurrence == "dates":
+        return day in (rule.dates or [])
+    return False
+
+
+@router.get("/calendar")
+async def get_calendar(
+    start: date = Query(...),
+    end: date = Query(...),
+    session: AsyncSession = Depends(db.get_session),
+):
+    """Return occurrences in [start, end); a caller may request up to 62 days."""
+    days = (end - start).days
+    if days < 1 or days > 62:
+        raise HTTPException(status_code=422, detail="Calendar range must be 1–62 days")
+    result = await session.exec(
+        select(Schedule).where(
+            Schedule.enabled == True,
+            Schedule.start_date < end,
+            or_(Schedule.end_date == None, Schedule.end_date >= start),
+        )
+    )
+    rules = result.all()
+    target_ids = {rule.target_id for rule in rules}
+    if not target_ids:
+        return []
+    targets = await session.exec(
+        select({{ schedule.target_model }}.id, {{ schedule.target_model }}.{{ schedule.display_field }})
+        .where({{ schedule.target_model }}.id.in_(target_ids))
+    )
+    labels = {target_id: str(label) for target_id, label in targets.all()}
+    events = []
+    for rule in rules:
+        if rule.target_id not in labels:
+            continue
+        first = max(start, rule.start_date)
+        last = min(end - timedelta(days=1), rule.end_date or end - timedelta(days=1))
+        day = first
+        while day <= last:
+            if _occurs(rule, day):
+                events.append({
+                    "date": day.isoformat(),
+                    "schedule_id": rule.id,
+                    "target_id": rule.target_id,
+                    "target_label": labels[rule.target_id],
+                    "shift": rule.shift.value if hasattr(rule.shift, "value") else rule.shift,
+                })
+            day += timedelta(days=1)
+    return events

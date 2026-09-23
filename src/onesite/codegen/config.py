@@ -16,6 +16,28 @@ class SiteConfigError(ValueError):
     """Raised when a project configuration cannot be loaded or validated."""
 
 
+def validate_schedule_config(config: Dict[str, Any]) -> None:
+    """Validate the optional calendar schedule declaration."""
+    schedule = config.setdefault("schedule", {"enabled": False})
+    if schedule is None:
+        schedule = {"enabled": False}
+        config["schedule"] = schedule
+    if not isinstance(schedule, dict):
+        raise SiteConfigError("site_config field 'schedule' must be an object.")
+    unknown = set(schedule) - {"enabled", "target_model", "display_field"}
+    if unknown:
+        raise SiteConfigError("Unsupported schedule keys: " + ", ".join(sorted(unknown)))
+    enabled = schedule.setdefault("enabled", False)
+    if not isinstance(enabled, bool):
+        raise SiteConfigError("schedule.enabled must be a boolean.")
+    for key in ("target_model", "display_field"):
+        value = schedule.get(key)
+        if value is not None and (not isinstance(value, str) or not _MODULE_NAME_RE.fullmatch(value)):
+            raise SiteConfigError(f"schedule.{key} must be a Python identifier.")
+        if enabled and not value:
+            raise SiteConfigError(f"schedule.{key} is required when schedule is enabled.")
+
+
 _TOOL_INPUT_TYPE_ALIASES = {
     "str": "str",
     "string": "str",

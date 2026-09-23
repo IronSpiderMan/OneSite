@@ -1,0 +1,132 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import { ChevronLeft, ChevronRight, Plus } from 'lucide-react';
+import { Link } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { toast } from 'sonner';
+import request from '../../utils/request';
+import { performScheduleToggle_enabled } from '../../services/schedule';
+import { Button } from '../../components/ui/button';
+
+type CalendarEvent = {
+  date: string;
+  schedule_id: number;
+  target_id: string | number;
+  target_label: string;
+  shift: 'day' | 'night' | 'full_day';
+};
+
+const dateKey = (date: Date) =>
+  `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+
+const ScheduleCalendarPage: React.FC = () => {
+  const { i18n } = useTranslation();
+  const [month, setMonth] = useState(() => new Date(new Date().getFullYear(), new Date().getMonth(), 1));
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [revision, setRevision] = useState(0);
+  const role = localStorage.getItem('user_role') || 'user';
+  const rolePermissions: Record<string, string> = {{ schedule.role_permissions | tojson }};
+  const canEdit = (rolePermissions[role] || '').includes('u');
+  const canCreate = (rolePermissions[role] || '').includes('c');
+  const locale = i18n.language.startsWith('zh') ? 'zh-CN' : 'en-US';
+
+  const days = useMemo(() => {
+    const first = new Date(month.getFullYear(), month.getMonth(), 1);
+    const start = new Date(first);
+    start.setDate(first.getDate() - ((first.getDay() + 6) % 7));
+    const last = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+    const end = new Date(last);
+    end.setDate(last.getDate() + (7 - last.getDay()) % 7);
+    const dayCount = Math.round((end.getTime() - start.getTime()) / 86400000) + 1;
+    return Array.from({ length: dayCount }, (_, index) => {
+      const day = new Date(start);
+      day.setDate(start.getDate() + index);
+      return day;
+    });
+  }, [month]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    const end = new Date(days[days.length - 1]);
+    end.setDate(end.getDate() + 1);
+    setLoading(true);
+    request.get<CalendarEvent[]>('/schedules/calendar', {
+      params: { start: dateKey(days[0]), end: dateKey(end) },
+      signal: controller.signal,
+    }).then(response => setEvents(response.data))
+      .catch(error => { if (error?.code !== 'ERR_CANCELED') toast.error(i18n.language.startsWith('zh') ? '加载排期失败' : 'Failed to load schedules'); })
+      .finally(() => { if (!controller.signal.aborted) setLoading(false); });
+    return () => controller.abort();
+  }, [days, revision, i18n.language]);
+
+  const byDate = useMemo(() => {
+    const result: Record<string, CalendarEvent[]> = {};
+    for (const event of events) (result[event.date] ||= []).push(event);
+    return result;
+  }, [events]);
+
+  const shiftLabel = (shift: CalendarEvent['shift']) => {
+    const labels = i18n.language.startsWith('zh')
+      ? { day: '白班', night: '晚班', full_day: '全天' }
+      : { day: 'Day', night: 'Night', full_day: 'Full day' };
+    return labels[shift];
+  };
+
+  const disableRule = async (event: CalendarEvent) => {
+    try {
+      await performScheduleToggle_enabled(event.schedule_id);
+      setRevision(value => value + 1);
+    } catch {
+      toast.error(i18n.language.startsWith('zh') ? '停用失败' : 'Could not disable schedule');
+    }
+  };
+
+  const moveMonth = (delta: number) => setMonth(value => new Date(value.getFullYear(), value.getMonth() + delta, 1));
+  const todayKey = dateKey(new Date());
+
+  return (
+    <div className="space-y-4 p-4 md:p-6">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div>
+          <h1 className="text-2xl font-semibold">{i18n.language.startsWith('zh') ? '排期日历' : 'Schedule calendar'}</h1>
+          <p className="text-sm text-muted-foreground">{loading ? (i18n.language.startsWith('zh') ? '加载中…' : 'Loading…') : month.toLocaleDateString(locale, { year: 'numeric', month: 'long' })}</p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" onClick={() => moveMonth(-1)} aria-label="Previous month"><ChevronLeft size={16} /></Button>
+          <Button variant="outline" onClick={() => setMonth(new Date(new Date().getFullYear(), new Date().getMonth(), 1))}>{i18n.language.startsWith('zh') ? '今天' : 'Today'}</Button>
+          <Button variant="outline" onClick={() => moveMonth(1)} aria-label="Next month"><ChevronRight size={16} /></Button>
+          <Link to="/schedules/rules" className="inline-flex h-10 items-center rounded-md border border-input px-4 text-sm hover:bg-accent/50">{i18n.language.startsWith('zh') ? '规则列表' : 'Rules'}</Link>
+          {canCreate && <Link to="/schedules/new" className="inline-flex h-10 items-center gap-1 rounded-md bg-primary px-4 text-sm text-primary-foreground hover:bg-primary/90"><Plus size={16} />{i18n.language.startsWith('zh') ? '新建排期' : 'New schedule'}</Link>}
+        </div>
+      </div>
+      <div className="grid grid-cols-7 border-l border-t rounded-md overflow-hidden">
+        {Array.from({ length: 7 }, (_, index) => {
+          const day = new Date(2024, 0, 1 + index);
+          return <div key={index} className="border-b border-r bg-muted/50 p-2 text-center text-sm font-medium">{day.toLocaleDateString(locale, { weekday: 'short' })}</div>;
+        })}
+        {days.map(day => {
+          const key = dateKey(day);
+          const muted = day.getMonth() !== month.getMonth();
+          const isToday = key === todayKey;
+          return <div key={key} className={`min-h-28 border-b border-r p-2 ${muted ? 'bg-muted/30 text-muted-foreground' : ''}`}>
+            <div className="mb-1 text-sm font-medium">
+              <span aria-current={isToday ? 'date' : undefined} className={isToday ? 'inline-flex h-7 w-7 items-center justify-center rounded-full bg-primary font-semibold text-primary-foreground' : ''}>
+                {day.getDate()}
+              </span>
+            </div>
+            <div className="space-y-1">
+              {(byDate[key] || []).sort((a, b) => ({ full_day: 0, day: 1, night: 2 }[a.shift] - { full_day: 0, day: 1, night: 2 }[b.shift])).map(event =>
+                <div key={event.schedule_id} className="rounded bg-primary/10 px-1.5 py-1 text-xs" title={event.target_label}>
+                  <Link to={`/schedules/${event.schedule_id}`} className="font-medium hover:underline">{shiftLabel(event.shift)} · {event.target_label}</Link>
+                  {canEdit && <button type="button" onClick={() => disableRule(event)} className="ml-1 text-muted-foreground hover:underline">{i18n.language.startsWith('zh') ? '停用' : 'Disable'}</button>}
+                </div>
+              )}
+            </div>
+          </div>;
+        })}
+      </div>
+    </div>
+  );
+};
+
+export default ScheduleCalendarPage;

@@ -708,6 +708,20 @@ class AgentConfig(_StrictConfigModel):
     hooks: dict[str, str] = Field(default_factory=dict)
 
 
+class ScheduleConfig(_StrictConfigModel):
+    """Opt-in calendar schedules for one project model."""
+
+    enabled: bool = False
+    target_model: str | None = None
+    display_field: str | None = None
+
+    @model_validator(mode="after")
+    def validate_target(self) -> "ScheduleConfig":
+        if self.enabled and (not self.target_model or not self.display_field):
+            raise ValueError("enabled schedule requires target_model and display_field")
+        return self
+
+
 class SiteConfig(_ConfigModel):
     """The root configuration object exported by a project's ``site_config.py``."""
 
@@ -748,6 +762,7 @@ class SiteConfig(_ConfigModel):
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: list[DashboardTool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
+    schedule: ScheduleConfig | None = None
     task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)
     public_dashboard: PublicDashboardConfig = Field(default_factory=PublicDashboardConfig)
 

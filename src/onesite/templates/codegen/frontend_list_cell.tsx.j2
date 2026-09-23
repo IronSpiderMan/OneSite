@@ -1,4 +1,10 @@
-                        {% if field.fk_info %}
+                        {% if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
+                        <div className="flex max-w-[14rem] flex-wrap gap-1">
+                          {Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length
+                            ? item.{{ field.name }}.map((label: string, index: number) => <Badge key={`${label}-${index}`} variant="secondary">{label}</Badge>)
+                            : <span className="text-muted-foreground">-</span>}
+                        </div>
+                        {% elif field.fk_info %}
                         <span className="block max-w-[250px] truncate" title={item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}>
                         {item.{{ field.name }}_label || (item.{{ field.name }} ? `ID: ${item.{{ field.name }}}` : '-')}
                         </span>

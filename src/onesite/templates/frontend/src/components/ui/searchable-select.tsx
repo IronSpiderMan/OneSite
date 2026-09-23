@@ -216,7 +216,7 @@ export function SearchableSelect({
           <CommandEmpty>
             {loading ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : emptyText}
           </CommandEmpty>
-          <CommandGroup>
+          <CommandGroup className="max-h-[min(20rem,calc(100dvh-8rem))] overflow-y-auto overscroll-contain">
             {options.map((option) => {
                 const isSelected = multiple 
                     ? Array.isArray(value) && value.some(v => String(v) === String(option.value))

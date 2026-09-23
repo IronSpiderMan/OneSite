@@ -384,7 +384,7 @@ def get_model_fields(
                     is_enum = True
                     is_multi_select = True
                     enum_values = [e.value for e in item_type]
-                    type_str = "List[str]"
+                    type_str = "List[int]" if issubclass(item_type, int) else "List[str]"
                 elif inspect.isclass(item_type) and _is_pydantic_model(item_type):
                     type_str = f"List[{item_type.__name__}]"
                     json_py_imports.append(item_type.__name__)
