@@ -6,6 +6,7 @@ import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, Cart
 import { toast } from 'sonner';
 import { Button } from '../components/ui/button';
 import { SearchableSelect } from '../components/ui/searchable-select';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../components/ui/select';
 import { useSystemConfigStore } from '../stores/useSystemConfigStore';
 import Markdown from 'react-markdown';
 import { GeneratedDashboardWidgets, isDashboardWidgetVisible } from '../GeneratedDashboardWidgets';
@@ -962,14 +963,40 @@ const DashboardPage: React.FC = () => {
                                                     </div>;
                                                 }
                                                 if (filter.type === 'multi_select') {
-                                                    return <select key={filter.key} multiple value={filters[filter.key] || []} onChange={(event) => updateFilter(filter.key, Array.from(event.currentTarget.selectedOptions, (option) => option.value))} className="min-h-9 max-w-44 rounded-lg border bg-background/60 px-2 text-xs">
-                                                        {available.map((option) => <option key={String(option.value)} value={String(option.value)}>{optionLabel(option)}</option>)}
-                                                    </select>;
+                                                    const translatedOptions = available.map((option) => ({
+                                                        label: optionLabel(option),
+                                                        value: String(option.value),
+                                                    }));
+                                                    return <div key={filter.key} className="w-44 max-w-full text-xs">
+                                                        <SearchableSelect
+                                                            multiple
+                                                            value={filters[filter.key] || []}
+                                                            onValueChange={(value) => updateFilter(filter.key, value)}
+                                                            placeholder={filter.label}
+                                                            searchPlaceholder={`${t('common.search', 'Search')}...`}
+                                                            valueLabels={Object.fromEntries(translatedOptions.map((option) => [option.value, option.label]))}
+                                                            loadOptions={async (query) => {
+                                                                const normalizedQuery = query.trim().toLowerCase();
+                                                                return normalizedQuery
+                                                                    ? translatedOptions.filter((option) => option.label.toLowerCase().includes(normalizedQuery))
+                                                                    : translatedOptions;
+                                                            }}
+                                                        />
+                                                    </div>;
                                                 }
-                                                return <select key={filter.key} value={filters[filter.key] ?? ''} onChange={(event) => updateFilter(filter.key, event.target.value)} className="h-9 max-w-44 rounded-lg border bg-background/60 px-2 text-xs">
-                                                    <option value="">{filter.label}</option>
-                                                    {available.map((option) => <option key={String(option.value)} value={String(option.value)}>{optionLabel(option)}</option>)}
-                                                </select>;
+                                                return <Select
+                                                    key={filter.key}
+                                                    value={filters[filter.key] || '__all__'}
+                                                    onValueChange={(value) => updateFilter(filter.key, value === '__all__' ? '' : value)}
+                                                >
+                                                    <SelectTrigger className="h-9 w-44 max-w-full text-xs">
+                                                        <SelectValue placeholder={filter.label} />
+                                                    </SelectTrigger>
+                                                    <SelectContent>
+                                                        <SelectItem value="__all__">{filter.label}</SelectItem>
+                                                        {available.map((option) => <SelectItem key={String(option.value)} value={String(option.value)}>{optionLabel(option)}</SelectItem>)}
+                                                    </SelectContent>
+                                                </Select>;
                                             })}
                                         </div>
                                     )}
