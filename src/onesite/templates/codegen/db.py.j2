@@ -1,6 +1,10 @@
 from functools import wraps
 from typing import AsyncGenerator, Awaitable, Callable, ParamSpec, TypeVar
 from pathlib import Path
+
+# Install naming conventions before any application models can be imported.
+import app.core.tablenames  # noqa: F401
+
 from sqlalchemy.ext.asyncio import create_async_engine
 from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel
