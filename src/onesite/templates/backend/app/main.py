@@ -7,6 +7,7 @@ from app.api.api import api_router
 from contextlib import asynccontextmanager
 
 from app.core.config import settings
+from app.core.docs import register_docs
 from app.core.db import init_db
 from app.core.error_handlers import register_error_handlers
 from app.initial_data import init_data
@@ -27,10 +28,12 @@ async def lifespan(app: FastAPI):
 app = FastAPI(
     title=settings.PROJECT_NAME,
     openapi_url=f"{settings.API_V1_STR}/openapi.json",
+    docs_url=None,
     lifespan=lifespan
 )
 
 register_error_handlers(app)
+register_docs(app)
 
 # Set all CORS enabled origins
 if settings.BACKEND_CORS_ORIGINS:

@@ -685,6 +685,13 @@ window.__ENV__ = {
 def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, Any]):
     template_backend_root = Path(__file__).resolve().parent.parent / "templates" / "backend"
 
+    for asset in (template_backend_root / "static" / "swagger-ui").iterdir():
+        copy_file_with_status(asset, backend_path / "static" / "swagger-ui" / asset.name)
+    copy_file_with_status(
+        template_backend_root / "app" / "core" / "docs.py",
+        backend_path / "app" / "core" / "docs.py",
+    )
+
     _ensure_init_py(backend_path / "app")
     _ensure_init_py(backend_path / "app" / "api")
     _ensure_init_py(backend_path / "app" / "api" / "endpoints")

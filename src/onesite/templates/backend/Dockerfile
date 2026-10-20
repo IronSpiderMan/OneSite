@@ -71,6 +71,7 @@ COPY --from=production-builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs
 COPY --from=production-builder /build/nuitka_entrypoint.dist/ /app/
 COPY --from=production-builder /app/alembic.ini /app/alembic.ini
 COPY --from=production-builder /app/migrations/ /app/migrations/
+COPY --from=production-builder /app/static/ /app/static/
 
 EXPOSE 80
 
