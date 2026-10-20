@@ -35,7 +35,7 @@ def validate_filter_default(value, field, context, filter_type=None):
                 fail()
         return value
     multi = filter_type == "multi_select" or (filter_type is None and field.get("is_multi_select"))
-    if multi:
+    if multi or (filter_type is None and field.get("is_enum") and isinstance(value, list)):
         if not isinstance(value, list) or any(v is None for v in value):
             fail()
         return [validate_filter_default(v, {**field, "is_multi_select": False}, context, "select") for v in value]

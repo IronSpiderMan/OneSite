@@ -522,7 +522,7 @@ def _apply_filters(
     {% elif field.is_enum and field.is_multi_select %}
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
-    {{ field.name }}: Optional[str] = None,
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.fk_info %}
     {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
@@ -572,7 +572,7 @@ def _apply_filters(
             statement = statement.where(_sub)
     {% elif field.is_enum %}
     if {{ field.name }}:
-        statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
+        statement = statement.where(col({{ model.name }}.{{ field.name }}).in_([{{ field.name }}] if isinstance({{ field.name }}, str) else {{ field.name }}))
     {% elif field.fk_info %}
     if {{ field.name }} is not None:
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
@@ -622,7 +622,7 @@ async def get_multi(
     {% elif field.is_enum and field.is_multi_select %}
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
-    {{ field.name }}: Optional[str] = None,
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.fk_info %}
     {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
@@ -779,7 +779,7 @@ async def get_multi_with_fk_labels(
     {% elif field.is_enum and field.is_multi_select %}
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
-    {{ field.name }}: Optional[str] = None,
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.fk_info %}
     {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}
@@ -850,7 +850,7 @@ async def count(
     {% elif field.is_enum and field.is_multi_select %}
     {{ field.name }}: Optional[List[str]] = None,
     {% elif field.is_enum %}
-    {{ field.name }}: Optional[str] = None,
+    {{ field.name }}: Optional[List[str]] = None,
     {% elif field.fk_info %}
     {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
     {% elif field.ui_type == 'str' %}

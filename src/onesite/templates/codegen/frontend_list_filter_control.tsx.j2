@@ -39,9 +39,9 @@
               onChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
               placeholder={t('common.select_time', 'Select time')}
             />
-            {% elif field.is_enum and field.is_multi_select %}
+            {% elif field.is_enum %}
             <SearchableSelect
-              value={searchValues['{{ field.name }}'] || []}
+              value={Array.isArray(searchValues['{{ field.name }}']) ? searchValues['{{ field.name }}'] : searchValues['{{ field.name }}'] != null && searchValues['{{ field.name }}'] !== '' && searchValues['{{ field.name }}'] !== '__all__' ? [String(searchValues['{{ field.name }}'])] : []}
               onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
               multiple={true}
               placeholder={t('common.all', 'All')}
@@ -52,23 +52,6 @@
                 {% endfor %}
               ]}
             />
-            {% elif field.is_enum %}
-            <Select
-              value={searchValues['{{ field.name }}'] || '__all__'}
-              onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
-            >
-              <SelectTrigger className="h-9 min-w-0 w-full">
-                <SelectValue placeholder={t('common.all', 'All')} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__all__">{t('common.all', 'All')}</SelectItem>
-                {% for enum_val in field.enum_values %}
-                <SelectItem value="{{ enum_val }}">{
-                    t('models.{{ model.module_name }}.enums.{{ field.name }}.{{ enum_val }}', '{{ enum_val }}')
-                }</SelectItem>
-                {% endfor %}
-              </SelectContent>
-            </Select>
             {% elif field.ui_type == 'str' %}
             <Input
               className="h-9 min-w-0 w-full"

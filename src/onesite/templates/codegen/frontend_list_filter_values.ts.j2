@@ -8,10 +8,12 @@
     if (searchValues['{{ field.name }}_to']) next['{{ field.name }}_to'] = `${searchValues['{{ field.name }}_to']}{% if field.ui_type == 'datetime' %}T23:59:59{% endif %}`;
     {% elif field.ui_type == 'time' %}
     if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
-    {% elif field.is_enum and field.is_multi_select %}
-    if (Array.isArray(searchValues['{{ field.name }}']) && searchValues['{{ field.name }}'].length > 0) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
     {% elif field.is_enum %}
-    if (searchValues['{{ field.name }}'] && searchValues['{{ field.name }}'] !== '__all__') next['{{ field.name }}'] = searchValues['{{ field.name }}'];
+    {
+      const value = searchValues['{{ field.name }}'];
+      const values = Array.isArray(value) ? value : value != null && value !== '' && value !== '__all__' ? [String(value)] : [];
+      if (values.length > 0) next['{{ field.name }}'] = values;
+    }
     {% elif field.ui_type == 'str' %}
     if (searchValues['{{ field.name }}']) next['{{ field.name }}'] = searchValues['{{ field.name }}'];
     {% endif %}

@@ -205,7 +205,7 @@ class {{ model.name }}Service:
         {% elif field.is_enum and field.is_multi_select %}
         {{ field.name }}: Optional[List[str]] = None,
         {% elif field.is_enum %}
-        {{ field.name }}: Optional[str] = None,
+        {{ field.name }}: Optional[List[str]] = None,
         {% elif field.fk_info %}
         {{ field.name }}: Optional[{{ field.fk_info.target_id_type }}] = None,
         {% elif field.ui_type == 'str' %}

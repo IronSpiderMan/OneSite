@@ -157,8 +157,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         defaults['{{ field.name }}_from'] = value.slice(0, 10);
         defaults['{{ field.name }}_to'] = value.slice(0, 10);
       }
-      {% elif field.is_multi_select %}
-      defaults['{{ field.name }}'] = value.map(String);
+      {% elif field.is_enum or field.is_multi_select %}
+      defaults['{{ field.name }}'] = (Array.isArray(value) ? value : [value]).map(String);
       {% else %}
       defaults['{{ field.name }}'] = String(value);
       {% endif %}
