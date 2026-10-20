@@ -39,9 +39,9 @@ def test_generated_pages_share_mutation_results_and_restore_lists():
     assert "markDataChanged();" in update
     detail_query = service.split("export const getRequestItem =", 1)[1].split("};", 1)[0]
     assert "markDataChanged();" not in detail_query
-    assert "void ensureList(scopeFilters);" in listing
+    assert "void ensureList(scopeFilters, buildSearchFilters(values), values);" in listing
     assert "fetchData(1, 20, scopeFilters)" not in listing
-    assert "store.canRestoreList(scopeFilters) ? store.listSearchValues : {}" in listing
+    assert "store.canRestoreList(scopeFilters) ? store.listSearchValues : getDefaultSearchValues()" in listing
     assert "await runAction(() => performRequestItemEnable(item.id)" in listing
     assert "await runAction(() => performRequestItemEnable(currentItem.id)" in detail
     assert "await fetchItem(currentItem!.id)" not in detail

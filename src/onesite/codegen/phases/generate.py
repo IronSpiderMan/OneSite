@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from ...project_paths import get_project_paths
+from ..filter_defaults import validate_filter_default
 from ..file_utils import copy_file_with_status
 from ..custom_backend import sync_custom_backend
 from ..i18n import generate_locale_files
@@ -160,6 +161,9 @@ def _resolve_visualize_filters(
                 "joins": [],
                 "new_joins": [],
             }
+            if "default" in flt:
+                default_field = field_def
+                resolved["default"] = validate_filter_default(flt["default"], default_field, f"{model['name']}.visualize.filters.default", "select")
             resolved_filters.append(resolved)
             continue
 
@@ -245,6 +249,9 @@ def _resolve_visualize_filters(
                 "filter_label_field": filter_label_field,
                 "joins": joins,
             }
+            if "default" in flt:
+                default_field = next((f for f in filter_model["fields"] if f["name"] == "id"), {})
+                resolved["default"] = validate_filter_default(flt["default"], default_field, f"{model['name']}.visualize.filters.default", "select")
             resolved_filters.append(resolved)
 
     if resolved_filters:

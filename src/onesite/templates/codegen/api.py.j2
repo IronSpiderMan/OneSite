@@ -6,7 +6,7 @@ import uuid
 {% if model.importable %}
 from pathlib import Path
 {% endif %}
-from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+from datetime import date, datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 from fastapi import APIRouter, Depends, HTTPException, Query, Body{% if model.importable %}, UploadFile, File{% endif %}
 {% if model.is_notification_table or model.actions or model.importable or model.exportable or model.module_name == "user" or model.owner_field or model.has_read_resolvers or model.is_timescaledb or model.definition_binding_meta or model.reverse_definition_bindings or model.dict_key_reference_meta or model.inline_relations or model.m2m_fields or model.reverse_m2m or model.dashboard_metrics or model.reports %}
 from app.models.user import User
@@ -451,9 +451,9 @@ async def read_{{ model.lower_name }}s(
     {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = Query(None, description="Filter by {{ field.name }}"),
-    {% elif field.ui_type == 'datetime' %}
-    {{ field.name }}_from: Optional[datetime] = Query(None, description="Filter by {{ field.name }} from"),
-    {{ field.name }}_to: Optional[datetime] = Query(None, description="Filter by {{ field.name }} to"),
+    {% elif field.ui_type in ['datetime', 'date'] %}
+    {{ field.name }}_from: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = Query(None, description="Filter by {{ field.name }} from"),
+    {{ field.name }}_to: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = Query(None, description="Filter by {{ field.name }} to"),
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.is_enum and field.is_multi_select %}
@@ -511,7 +511,7 @@ async def read_{{ model.lower_name }}s(
         {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
-        {% elif field.ui_type == 'datetime' %}
+        {% elif field.ui_type in ['datetime', 'date'] %}
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.ui_type == 'time' %}
@@ -1125,7 +1125,7 @@ async def perform_{{ model.lower_name }}_{{ action_name }}(
     {% else %}
     # Resolve special placeholders in data
     import re
-    from datetime import datetime, timedelta
+    from datetime import date, datetime, timedelta
 
     resolved_data = {}
     for k, v in action_data.get("data", {}).items():

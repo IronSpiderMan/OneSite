@@ -82,6 +82,27 @@ function checkTypes() {
     }));
 }
 async function main() {
+    // Defaults reach the first request, while a deliberately cleared filter survives navigation.
+    {
+        const x = setup(), s = x.store.getState;
+        const observed = [];
+        x.services.getRequestItems = async (page, size, filters) => {
+            observed.push(clone(filters));
+            return {items: [], total: 0, page, size};
+        };
+        await s().ensureList({parent_id: 7}, {parent_id: 7, enabled: false, count: 0}, {enabled: 'false', count: '0'});
+        assert.deepEqual(observed[0], {parent_id: 7, enabled: false, count: 0});
+        assert.equal(s().listSearchValues.enabled, 'false');
+        s().setListSearchValues({});
+        await s().fetchData(1, 20, {parent_id: 7});
+        await s().ensureList({parent_id: 7}, {parent_id: 7, enabled: false}, {enabled: 'false'});
+        assert.deepEqual(clone(s().listSearchValues), {});
+        assert.deepEqual(clone(s().filters), {parent_id: 7});
+        await s().ensureList({parent_id: 8}, {parent_id: 8, enabled: false}, {enabled: 'false'});
+        assert.equal(s().listSearchValues.enabled, 'false');
+        assert.deepEqual(observed.at(-1), {parent_id: 8, enabled: false});
+    }
+
     checkTypes();
     // Detail round-trip preserves pagination, raw form values and fresh empty/nonempty pages.
     {

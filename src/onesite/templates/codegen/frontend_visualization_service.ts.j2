@@ -18,7 +18,7 @@ export type VisualizationSpec = {
   renderer: string;
   contract: string;
   inputs: Record<string, VisualizationBinding | VisualizationBinding[]>;
-  filters: Array<{ key: string; label: string; type: string; option_i18n_key?: string }>;
+  filters: Array<{ key: string; label: string; type: string; option_i18n_key?: string; default?: any }>;
   placement: { page: string; span: number; order: number };
   options: Record<string, any>;
 };

@@ -1,6 +1,7 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useRef, useState } from 'react';
 import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, ArrowDownRight, ArrowUpRight{% for icon in dashboard_metric_icons | default([]) %}{% if icon not in ['Loader2', 'RefreshCw', 'ChevronLeft', 'ChevronRight', 'CalendarDays', 'BarChart3', 'Activity', 'ArrowDownRight', 'ArrowUpRight', 'Play', 'Pencil', 'Power', 'PowerOff', 'Terminal'] %}, {{ icon }}{% endif %}{% endfor %}{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
+import { visualizationFilterDefaults } from '../utils/filterDefaults';
 import { useTranslation } from 'react-i18next';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
 import { toast } from 'sonner';
@@ -257,7 +258,16 @@ const DashboardPage: React.FC = () => {
         {% endif %}
     {% endfor %}
     {% if ns.has_filters %}
-    const [filterValues, setFilterValues] = useState<Record<string, Record<string, string>>>({});
+    const getChartFilterDefaults = () => ({
+      {% for m in models %}{% if m.visualize and m.visualize.get('resolved_filters') %}
+      '{{ m.module_name }}': {
+        {% for rf in m.visualize.resolved_filters %}{% if rf.default is defined and rf.default is not none %}
+        '{{ rf.filter_key }}': String({{ rf.default | tojson }}),
+        {% endif %}{% endfor %}
+      },
+      {% endif %}{% endfor %}
+    });
+    const [filterValues, setFilterValues] = useState<Record<string, Record<string, string>>>(getChartFilterDefaults);
     const [filterLabels, setFilterLabels] = useState<Record<string, Record<string, string>>>({});
     {% endif %}
     {% if site_logger %}
@@ -309,7 +319,7 @@ const DashboardPage: React.FC = () => {
                 const specs = await getVisualizations();
                 setVisualizationSpecs(specs);
                 const responses = await Promise.allSettled(specs.map(async (spec) => {
-                    const data = await queryVisualization(spec.key, { filters: visualizationFilters[spec.key] || {} });
+                    const data = await queryVisualization(spec.key, { filters: visualizationFilters[spec.key] ?? visualizationFilterDefaults(spec) });
                     return { key: spec.key, data };
                 }));
                 responses.forEach((response, index) => {
@@ -929,7 +939,7 @@ const DashboardPage: React.FC = () => {
                     {visualizationSpecs.map((spec) => {
                         const data = visualizationData[spec.key];
                         const error = visualizationErrors[spec.key];
-                        const filters = visualizationFilters[spec.key] || {};
+                        const filters = visualizationFilters[spec.key] ?? visualizationFilterDefaults(spec);
                         const options = visualizationOptions[spec.key]?.filters || {};
                         const spanClass = spec.placement.span === 4 ? 'xl:col-span-4'
                             : spec.placement.span === 6 ? 'xl:col-span-6'
@@ -937,7 +947,7 @@ const DashboardPage: React.FC = () => {
                             : 'xl:col-span-12';
                         const updateFilter = (key: string, value: any) => setVisualizationFilters((current) => ({
                             ...current,
-                            [spec.key]: { ...(current[spec.key] || {}), [key]: value },
+                            [spec.key]: { ...(current[spec.key] ?? visualizationFilterDefaults(spec)), [key]: value },
                         }));
                         return (
                             <section key={spec.key} className={`col-span-12 overflow-hidden rounded-2xl border border-border/60 bg-card shadow-sm ${spanClass}`}>
@@ -947,6 +957,8 @@ const DashboardPage: React.FC = () => {
                                     </div>
                                     {spec.filters.length > 0 && (
                                         <div className="flex max-w-full flex-wrap justify-end gap-2">
+                                            <Button variant="outline" size="sm" onClick={() => setVisualizationFilters(current => ({ ...current, [spec.key]: {} }))}>{t('common.clear', 'Clear')}</Button>
+                                            <Button variant="outline" size="sm" onClick={() => setVisualizationFilters(current => ({ ...current, [spec.key]: visualizationFilterDefaults(spec) }))}>{t('common.reset', 'Reset')}</Button>
                                             {spec.filters.map((filter) => {
                                                 const available = options[filter.key] || [];
                                                 const optionLabel = (option: { label: string; value: any }) => filter.option_i18n_key
@@ -1166,6 +1178,8 @@ const DashboardPage: React.FC = () => {
                                 return filters.length > 0 ? (
                                     <div className="relative mx-5 mb-2 rounded-xl border border-border/40 bg-muted/25 p-2.5 sm:mx-6">
                                         <div className="flex min-w-0 flex-wrap items-center gap-2">
+                                            <Button variant="outline" size="sm" onClick={() => { setFilterValues(current => ({ ...current, [chart.moduleName]: {} })); setFilterLabels(current => ({ ...current, [chart.moduleName]: {} })); }}>{t('common.clear', 'Clear')}</Button>
+                                            <Button variant="outline" size="sm" onClick={() => { setFilterValues(current => ({ ...current, [chart.moduleName]: (getChartFilterDefaults() as Record<string, Record<string, string>>)[chart.moduleName] || {} })); setFilterLabels(current => ({ ...current, [chart.moduleName]: {} })); }}>{t('common.reset', 'Reset')}</Button>
                                             {filters.map((f) => (
                                                 <div key={f.key} className="w-40">
                                                     <SearchableSelect

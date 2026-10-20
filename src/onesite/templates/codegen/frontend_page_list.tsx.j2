@@ -1,5 +1,6 @@
 {% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
 {% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
+import { resolveFilterDefault } from '../../utils/filterDefaults';
 import React, { useState, useEffect, useRef } from 'react';
 import { ArrowUpDown, ArrowUp, ArrowDown, Plus, Pencil, Trash2, Loader2, Eye{% if model.edit_mode == 'inplace_edit' %}, Save, X{% endif %}{% if model.importable %}, Upload{% endif %}{% if model.exportable %}, Download{% endif %}, Trash{% if model.is_tree %}, ChevronRight, ChevronDown, CornerDownRight, Folder, FolderOpen{% if model.tree_leaf %}, FileText{% endif %}{% endif %} } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
@@ -141,9 +142,47 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const [selectedIds, setSelectedIds] = useState<{{ 'string[]' if 'str' in model.id_type else 'number[]' }}>([]);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [isBulkDeleting, setIsBulkDeleting] = useState(false);
+  const getDefaultSearchValues = (): Record<string, any> => {
+    const defaults: Record<string, any> = {};
+    const role = localStorage.getItem('user_role') || 'user';
+    {% for field in model.fields %}
+    {% if field.is_search_field and field.filter_default is defined and field.filter_default is not none %}
+    if (({{ (field.role_permissions or {'user': 'r', 'admin': 'r', 'developer': 'r'}) | tojson }} as Record<string, string>)[role]?.includes('r')) {
+      const value = resolveFilterDefault({{ field.filter_default | tojson }});
+      {% if field.ui_type in ['datetime', 'date'] %}
+      if (value && typeof value === 'object') {
+        if (value.start != null) defaults['{{ field.name }}_from'] = value.start.slice(0, 10);
+        if (value.end != null) defaults['{{ field.name }}_to'] = value.end.slice(0, 10);
+      } else if (value != null) {
+        defaults['{{ field.name }}_from'] = value.slice(0, 10);
+        defaults['{{ field.name }}_to'] = value.slice(0, 10);
+      }
+      {% elif field.is_multi_select %}
+      defaults['{{ field.name }}'] = value.map(String);
+      {% else %}
+      defaults['{{ field.name }}'] = String(value);
+      {% endif %}
+    }
+    {% endif %}
+    {% endfor %}
+    return defaults;
+  };
+  const buildSearchFilters = (searchValues: Record<string, any>) => {
+    const next: Record<string, any> = {};
+    const role = localStorage.getItem('user_role') || 'user';
+    {% include 'frontend_list_filter_values.ts.j2' %}
+    {% for field in model.fields %}
+    {% if field.role_permissions %}
+    if (!({{ field.role_permissions | tojson }} as Record<string, string>)[role]?.includes('r')) {
+      delete next['{{ field.name }}']; delete next['{{ field.name }}_from']; delete next['{{ field.name }}_to'];
+    }
+    {% endif %}
+    {% endfor %}
+    return { ...next, ...scopeFilters };
+  };
   const [searchValues, setSearchValues] = useState<Record<string, any>>(() => {
     const store = use{{ model.name }}Store.getState();
-    return store.canRestoreList(scopeFilters) ? store.listSearchValues : {};
+    return store.canRestoreList(scopeFilters) ? store.listSearchValues : getDefaultSearchValues();
   });
   const scopeFilterKey = JSON.stringify(scopeFilters);
   const [gotoPageInput, setGotoPageInput] = useState('');
@@ -375,10 +414,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   useEffect(() => {
     {% if model.is_tree %}
+    treeSearchFiltersRef.current = buildSearchFilters(searchValues);
     loadRoots(1);
     {% else %}
-    if (!use{{ model.name }}Store.getState().canRestoreList(scopeFilters)) setSearchValues({});
-    void ensureList(scopeFilters);
+    const store = use{{ model.name }}Store.getState();
+    const values = store.canRestoreList(scopeFilters) ? store.listSearchValues : getDefaultSearchValues();
+    setSearchValues(values);
+    void ensureList(scopeFilters, buildSearchFilters(values), values);
     {% endif %}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [scopeFilterKey]);
@@ -863,8 +905,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   {% endif %}
 
   const applySearch = () => {
-    const next: Record<string, any> = { ...scopeFilters };
-    {% include 'frontend_list_filter_values.ts.j2' %}
+    const next = buildSearchFilters(searchValues);
     {% if model.is_tree %}
     treeSearchFiltersRef.current = next;
     loadRoots(1);
@@ -875,7 +916,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   };
 
   const resetSearch = () => {
-    setSearchValues({});
+    setSearchValues(getDefaultSearchValues());
     {% for field in model.fields %}
     {% if field.fk_info and field.is_search_field %}
     setSearch{{ field.name|replace('_', ' ')|title|replace(' ', '') }}Labels({});
@@ -1159,7 +1200,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
       {% set ns = namespace(search_field_count=0) %}
       {% for field in model.fields %}
-          {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
+          {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','date','time'] or field.is_enum) %}
       {% set ns.search_field_count = ns.search_field_count + 1 %}
       {% elif field.fk_info and field.is_search_field %}
       {% set ns.search_field_count = ns.search_field_count + 1 %}
@@ -1174,6 +1215,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% endif %}
           <div className="flex items-center gap-2">
             {% if ns.search_field_count > 1 %}
+            <Button variant="outline" size="sm" type="button" onClick={() => setSearchValues({})}>{t('common.clear', 'Clear')}</Button>
             <Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button>
             {% endif %}
             {embedded && hasPermission('c') && (
@@ -1199,6 +1241,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         </div>
         {% endif %}
         {% if ns.search_field_count <= 1 %}
+        <div className="mb-2 flex gap-2"><Button variant="outline" size="sm" onClick={() => setSearchValues({})}>{t('common.clear', 'Clear')}</Button><Button variant="outline" size="sm" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button></div>
         <div className={embedded ? 'flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between' : ''}>
           <div className={embedded ? 'min-w-0 flex-1 sm:max-w-sm' : ''}>
         {% endif %}
@@ -1207,7 +1250,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           <div className="grid min-w-0 grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
         {% endif %}
           {% for field in model.fields %}
+{hasFieldPerm('{{ field.name }}', 'r') && (<>
 {% include 'frontend_list_filter_control.tsx.j2' %}
+</>)}
           {% endfor %}
         {% if ns.search_field_count > 1 %}
           </div>

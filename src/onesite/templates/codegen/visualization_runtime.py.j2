@@ -62,7 +62,7 @@ def _public_spec(spec: dict[str, Any]) -> dict[str, Any]:
         "filters": [
             {
                 name: item[name]
-                for name in ("key", "label", "type", "option_i18n_key")
+                for name in ("key", "label", "type", "option_i18n_key", "default")
                 if name in item
             }
             for item in spec["filters"]

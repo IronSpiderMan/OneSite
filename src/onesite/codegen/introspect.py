@@ -14,6 +14,7 @@ from sqlmodel import SQLModel
 
 from onesite.config import normalize_onesite_config
 
+from .filter_defaults import validate_filter_default
 from .naming import to_snake as _to_snake
 from .types import FieldDefinition, ForeignKeyInfo, ModelIntrospectResult
 from .metadata.fields import (
@@ -644,6 +645,11 @@ def get_model_fields(
 
         minimum, maximum = _get_numeric_bounds(field)
 
+        if site_props.get("filter_default") is not None and (
+            not is_search_field or not (ui_type in ("bool", "str", "date", "datetime", "time") or is_enum or fk_info)
+        ):
+            raise ValueError(f"{model_cls.__name__}.{name}.filter_default requires a supported search field")
+
         fields.append(
             FieldDefinition(
                 name=name,
@@ -681,6 +687,11 @@ def get_model_fields(
                 is_multi_select=is_multi_select,
                 enum_values=enum_values,
                 enum_translations=enum_translations,
+                filter_default=validate_filter_default(
+                    site_props.get("filter_default"),
+                    {"ui_type": ui_type, "is_enum": is_enum, "enum_values": enum_values, "is_multi_select": is_multi_select},
+                    f"{model_cls.__name__}.{name}.filter_default",
+                ),
                 is_search_field=is_search_field,
                 fk_info=fk_info,
                 allow_download=allow_download,

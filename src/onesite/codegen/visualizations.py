@@ -11,6 +11,7 @@ from typing import Any, Iterable
 
 from ..visualization import DashboardMetric, DataBinding, Visualization
 from .metadata.dashboard_metrics import _normalize_dashboard_metrics
+from .filter_defaults import validate_filter_default
 from .time_filters import RELATIVE_TIME_PERIODS
 from .types import FieldDefinition, ModelDefinition
 
@@ -549,6 +550,11 @@ def compile_visualizations(
                 "type": filter_type,
                 "binding": resolved,
             }
+            if "default" in raw_filter:
+                compiled_filter["default"] = validate_filter_default(
+                    raw_filter["default"], target_field or {},
+                    f"{key}.filters.{filter_key}.default", filter_type,
+                )
             if target_field is not None and target_field.get("is_enum"):
                 target_model = refs[-1]
                 compiled_filter["option_i18n_key"] = (

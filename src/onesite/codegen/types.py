@@ -90,6 +90,7 @@ class FieldDefinition:
     is_multi_select: bool = False
     enum_values: list = field(default_factory=list)
     enum_translations: dict = field(default_factory=dict)
+    filter_default: Any = None
     is_search_field: bool = False
     fk_info: ForeignKeyInfo | None = None
     # Resolved UI selector for the non-id component of a two-column composite

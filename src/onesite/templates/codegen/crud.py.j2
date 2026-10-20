@@ -1,6 +1,6 @@
 from app.core.access import require_relation, scope_statement, scope_label_statement
 from typing import Optional, List, Dict, Any
-from datetime import datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
+from datetime import date, datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
 {% if model.uses_composite_identity %}import base64
 import json
 {% endif %}
@@ -514,9 +514,9 @@ def _apply_filters(
     {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
-    {% elif field.ui_type == 'datetime' %}
-    {{ field.name }}_from: Optional[datetime] = None,
-    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type in ['datetime', 'date'] %}
+    {{ field.name }}_from: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
+    {{ field.name }}_to: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum and field.is_multi_select %}
@@ -547,7 +547,7 @@ def _apply_filters(
     {% if field.ui_type == 'bool' %}
     if {{ field.name }} is not None:
         statement = statement.where({{ model.name }}.{{ field.name }} == {{ field.name }})
-    {% elif field.ui_type == 'datetime' %}
+    {% elif field.ui_type in ['datetime', 'date'] %}
     if {{ field.name }}_from is not None:
         if isinstance({{ field.name }}_from, datetime):
             {{ field.name }}_from = to_utc({{ field.name }}_from)
@@ -614,9 +614,9 @@ async def get_multi(
     {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
-    {% elif field.ui_type == 'datetime' %}
-    {{ field.name }}_from: Optional[datetime] = None,
-    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type in ['datetime', 'date'] %}
+    {{ field.name }}_from: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
+    {{ field.name }}_to: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum and field.is_multi_select %}
@@ -651,7 +651,7 @@ async def get_multi(
         {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
-        {% elif field.ui_type == 'datetime' %}
+        {% elif field.ui_type in ['datetime', 'date'] %}
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.is_enum %}
@@ -771,9 +771,9 @@ async def get_multi_with_fk_labels(
     {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
-    {% elif field.ui_type == 'datetime' %}
-    {{ field.name }}_from: Optional[datetime] = None,
-    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type in ['datetime', 'date'] %}
+    {{ field.name }}_from: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
+    {{ field.name }}_to: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum and field.is_multi_select %}
@@ -811,7 +811,7 @@ async def get_multi_with_fk_labels(
         {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
-        {% elif field.ui_type == 'datetime' %}
+        {% elif field.ui_type in ['datetime', 'date'] %}
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.is_enum %}
@@ -842,9 +842,9 @@ async def count(
     {% if field.is_search_field %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = None,
-    {% elif field.ui_type == 'datetime' %}
-    {{ field.name }}_from: Optional[datetime] = None,
-    {{ field.name }}_to: Optional[datetime] = None,
+    {% elif field.ui_type in ['datetime', 'date'] %}
+    {{ field.name }}_from: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
+    {{ field.name }}_to: Optional[{{ 'date' if field.ui_type == 'date' else 'datetime' }}] = None,
     {% elif field.ui_type == 'time' %}
     {{ field.name }}: Optional[time] = None,
     {% elif field.is_enum and field.is_multi_select %}
@@ -877,7 +877,7 @@ async def count(
         {% if field.is_search_field %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
-        {% elif field.ui_type == 'datetime' %}
+        {% elif field.ui_type in ['datetime', 'date'] %}
         {{ field.name }}_from={{ field.name }}_from,
         {{ field.name }}_to={{ field.name }}_to,
         {% elif field.is_enum %}

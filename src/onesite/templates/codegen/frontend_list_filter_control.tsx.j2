@@ -1,4 +1,4 @@
-              {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','time'] or field.is_enum) %}
+              {% if field.is_search_field and (field.ui_type in ['bool','str','datetime','date','time'] or field.is_enum) %}
           <div className="min-w-0 space-y-2">
             {% if ns.search_field_count > 1 %}
             <Label className="block truncate" title={String(t('{{ field.label_key }}'))}>{t('{{ field.label_key }}')}</Label>
@@ -17,7 +17,7 @@
                 <SelectItem value="false">{t('common.no', 'No')}</SelectItem>
               </SelectContent>
             </Select>
-            {% elif field.ui_type == 'datetime' %}
+            {% elif field.ui_type in ['datetime', 'date'] %}
             <div className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] items-center gap-2">
               <Input
                 type="date"

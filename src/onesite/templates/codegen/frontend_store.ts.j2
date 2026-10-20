@@ -22,7 +22,7 @@ interface {{ model.name }}State {
     listSearchValues: Record<string, any>;
     setListSearchValues: (values: Record<string, any>) => void;
     canRestoreList: (scope: Record<string, any>) => boolean;
-    ensureList: (scope: Record<string, any>) => Promise<void>;
+    ensureList: (scope: Record<string, any>, initialFilters?: Record<string, any>, initialSearchValues?: Record<string, any>) => Promise<void>;
     invalidateList: () => void;
     setSorting: (field?: string, direction?: 'asc' | 'desc') => Promise<void>;
     fetchData: (page?: number, size?: number, filters?: Record<string, any>) => Promise<void>;
@@ -124,12 +124,12 @@ export const use{{ model.name }}Store = create<{{ model.name }}State>((set, get)
         filters: {}, sorting: {}, listSearchValues: {},
         setListSearchValues: (values) => set({ listSearchValues: values }),
         canRestoreList: (scope) => identity === identityKey() && scopeKey === queryKey(scope),
-        ensureList: async (scope) => {
+        ensureList: async (scope, initialFilters, initialSearchValues) => {
             ensureIdentity();
             if (!get().canRestoreList(scope)) {
                 invalidateList();
                 scopeKey = queryKey(scope);
-                set({ data: [], total: 0, page: 1, size: 20, filters: scope, sorting: {}, listSearchValues: {} });
+                set({ data: [], total: 0, page: 1, size: 20, filters: initialFilters ?? scope, sorting: {}, listSearchValues: initialSearchValues ?? {} });
             }
             const { page, size, filters, sorting } = get();
             const key = queryKey([identity, scopeKey, page, size, filters, sorting]);
