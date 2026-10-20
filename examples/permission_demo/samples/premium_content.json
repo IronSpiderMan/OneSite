@@ -1,0 +1,45 @@
+{
+  "model": "PremiumContent",
+  "description": "admin+ only. User role cannot access this model; admin and developer have full crud. Menu hidden from users via visible_roles.",
+  "endpoint": "/api/v1/premium_contents",
+  "create_payload": {
+    "title": "New Premium Content",
+    "body": "Exclusive premium content body.",
+    "price": 49.99
+  },
+  "update_payload": {
+    "title": "Updated Premium Content",
+    "price": 59.99
+  },
+  "samples": [
+    {
+      "title": "Advanced Trading Strategies",
+      "body": "Detailed analysis of market trends and trading patterns.",
+      "price": 99.99
+    },
+    {
+      "title": "Executive Summary Q1",
+      "body": "Financial results and projections for the quarter.",
+      "price": 149.99
+    },
+    {
+      "title": "Premium Research Report",
+      "body": "In-depth industry analysis with expert commentary.",
+      "price": 199.99
+    }
+  ],
+  "tests": [
+    {
+      "role": "user",
+      "expect": { "list": 403, "create": 403, "detail": 403, "update": 403, "delete": 403 }
+    },
+    {
+      "role": "admin",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    },
+    {
+      "role": "developer",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    }
+  ]
+}

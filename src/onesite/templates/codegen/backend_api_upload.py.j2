@@ -31,3 +31,66 @@ async def upload_file(file: UploadFile = File(...)):
         return {"url": url, "filename": unique_filename}
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Could not save file: {str(e)}")
+
+
+@router.post("/upload/private/{model}/{field}")
+async def upload_private_file(
+    model: str,
+    field: str,
+    file: UploadFile = File(...),
+    current_user=Depends(get_current_user),
+):
+    """Write an upload-only secret outside every public static directory.
+
+    There is deliberately no GET route: the returned reference is for trusted
+    server-side consumers, not a download URL. CRUD authorization still controls
+    which records a caller can attach the reference to.
+    """
+    import os
+    import re
+    from sqlmodel import SQLModel
+    from app.core.access import role_of
+    from app.core.access_policies import POLICIES
+
+    policy = POLICIES.get(model)
+    table = SQLModel.metadata.tables.get(model)
+    column = table.c.get(field) if table is not None else None
+    props = column.info.get("site_props", {}) if column is not None else {}
+    if not policy or props.get("component") != "file" or props.get("private") is not True:
+        raise HTTPException(status_code=404, detail="Private file field not found")
+    role = role_of(current_user)
+    model_grants = policy.get("permissions", {}).get(role, "")
+    field_grants = policy.get("fields", {}).get(field, {}).get(role, "")
+    if not any(op in model_grants and op in field_grants for op in ("c", "u")):
+        raise HTTPException(status_code=403, detail="Permission denied")
+
+    directory = Path(settings.PRIVATE_UPLOAD_DIR).resolve()
+    public_directories = (Path(settings.UPLOAD_DIR).resolve(), Path("static").resolve())
+    if any(directory == public or public in directory.parents for public in public_directories):
+        raise HTTPException(status_code=500, detail="Private storage must be outside public directories")
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    extension = Path(file.filename or "").suffix
+    if not re.fullmatch(r"\.[A-Za-z0-9]{1,12}", extension):
+        extension = ""
+    filename = f"{uuid.uuid4()}{extension}"
+    destination = directory / filename
+    created = False
+    try:
+        descriptor = os.open(destination, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        created = True
+        with os.fdopen(descriptor, "wb") as output:
+            total = 0
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > settings.PRIVATE_UPLOAD_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="Private file exceeds upload size limit")
+                output.write(chunk)
+        if total == 0:
+            raise HTTPException(status_code=400, detail="Private file is empty")
+    except BaseException:
+        if created:
+            destination.unlink(missing_ok=True)
+        raise
+    finally:
+        await file.close()
+    return {"url": f"/private-uploads/{filename}", "filename": filename}

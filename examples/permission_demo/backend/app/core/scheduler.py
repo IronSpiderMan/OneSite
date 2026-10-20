@@ -1,0 +1,200 @@
+import asyncio
+from datetime import datetime
+from typing import Any, Callable, Dict, List, Optional
+
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
+from apscheduler.triggers.interval import IntervalTrigger
+
+
+class TaskRegistry:
+    """Memory-only task registry - state is lost on restart"""
+
+    def __init__(self):
+        self._tasks: Dict[str, dict] = {}
+        self._scheduler = AsyncIOScheduler()
+
+    def _resolve_func(self, func_path: str) -> Callable:
+        """Resolve function path like 'app.tasks.alarm:daily_summary'"""
+        module_path, func_name = func_path.split(":")
+        import importlib
+        module = importlib.import_module(module_path)
+        return getattr(module, func_name)
+
+    def _make_wrapper(self, func_path: str):
+        """Create a wrapper function that resolves the target function at call time."""
+        async def wrapper():
+            func = self._resolve_func(func_path)
+            if asyncio.iscoroutinefunction(func):
+                await func()
+            else:
+                func()
+        return wrapper
+
+    def register(self, config: dict) -> bool:
+        """Register a task. Returns True if successful."""
+        name = config["name"]
+        func_path = config["func"]
+
+        self._tasks[name] = {
+            "name": name,
+            "func_path": func_path,
+            "cron": config.get("cron", ""),
+            "interval": config.get("interval", 0),  # 0 means cron task, >0 means interval in seconds
+            "description": config.get("description", ""),
+            "enabled": config.get("enabled", True),
+            "_job": None,
+        }
+
+        return True
+
+    def _add_to_scheduler(self, name: str):
+        task = self._tasks.get(name)
+        if not task or not task["enabled"]:
+            return
+
+        # Remove existing job if any
+        if task["_job"]:
+            try:
+                self._scheduler.remove_job(name)
+            except Exception:
+                pass
+
+        try:
+            wrapper = self._make_wrapper(task["func_path"])
+            if task["interval"] > 0:
+                # Interval task
+                job = self._scheduler.add_job(
+                    wrapper,
+                    trigger=IntervalTrigger(seconds=task["interval"]),
+                    id=name,
+                    replace_existing=True,
+                )
+            else:
+                # Cron task
+                job = self._scheduler.add_job(
+                    wrapper,
+                    trigger=CronTrigger.from_crontab(task["cron"]),
+                    id=name,
+                    replace_existing=True,
+                )
+            task["_job"] = job
+        except Exception as e:
+            print(f"Failed to add task {name} to scheduler: {e}")
+
+    def enable(self, name: str) -> bool:
+        """Enable a task"""
+        if name not in self._tasks:
+            return False
+        self._tasks[name]["enabled"] = True
+        if self._scheduler.running:
+            self._add_to_scheduler(name)
+        return True
+
+    def disable(self, name: str) -> bool:
+        """Disable a task"""
+        if name not in self._tasks:
+            return False
+        self._tasks[name]["enabled"] = False
+        if self._tasks[name]["_job"]:
+            try:
+                self._scheduler.remove_job(name)
+            except Exception:
+                pass
+            self._tasks[name]["_job"] = None
+        return True
+
+    def update_cron(self, name: str, cron: str) -> bool:
+        """Update task cron expression"""
+        if name not in self._tasks:
+            return False
+        self._tasks[name]["cron"] = cron
+        self._tasks[name]["interval"] = 0  # Switch to cron mode
+        if self._tasks[name]["enabled"] and self._scheduler.running:
+            self._add_to_scheduler(name)
+        return True
+
+    def update_interval(self, name: str, interval: int) -> bool:
+        """Update task interval in seconds"""
+        if name not in self._tasks:
+            return False
+        self._tasks[name]["interval"] = interval
+        if interval > 0:
+            self._tasks[name]["cron"] = ""  # Clear cron when using interval
+        if self._tasks[name]["enabled"] and self._scheduler.running:
+            self._add_to_scheduler(name)
+        return True
+
+    def update_description(self, name: str, description: str) -> bool:
+        """Update task description"""
+        if name not in self._tasks:
+            return False
+        self._tasks[name]["description"] = description
+        return True
+
+    def _format_next_run(self, job) -> Optional[str]:
+        """Format next_run time in local timezone without timezone suffix."""
+        if not job or not job.next_run_time:
+            return None
+        dt = job.next_run_time
+        if dt.tzinfo is not None:
+            dt = dt.replace(tzinfo=None)
+        return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+    def get_tasks(self) -> List[dict]:
+        """Get all registered tasks"""
+        return [
+            {
+                "name": t["name"],
+                "func": t["func_path"],
+                "cron": t["cron"],
+                "interval": t["interval"],
+                "description": t.get("description", ""),
+                "enabled": t["enabled"],
+                "next_run": self._format_next_run(t["_job"]) if t["_job"] else None,
+            }
+            for t in self._tasks.values()
+        ]
+
+    def get_task(self, name: str) -> Optional[dict]:
+        """Get a single task by name"""
+        t = self._tasks.get(name)
+        if not t:
+            return None
+        return {
+            "name": t["name"],
+            "func": t["func_path"],
+            "cron": t["cron"],
+            "interval": t["interval"],
+            "description": t.get("description", ""),
+            "enabled": t["enabled"],
+            "next_run": self._format_next_run(t["_job"]) if t["_job"] else None,
+        }
+
+    async def run(self, name: str) -> bool:
+        """Manually trigger a task"""
+        if name not in self._tasks:
+            return False
+        func = self._resolve_func(self._tasks[name]["func_path"])
+        if asyncio.iscoroutinefunction(func):
+            await func()
+        else:
+            func()
+        return True
+
+    def start(self):
+        """Start the scheduler and add all enabled tasks"""
+        if not self._scheduler.running:
+            self._scheduler.start()
+        for name in self._tasks:
+            if self._tasks[name]["enabled"]:
+                self._add_to_scheduler(name)
+
+    def stop(self):
+        """Stop the scheduler"""
+        if self._scheduler.running:
+            self._scheduler.shutdown()
+
+
+# Global singleton instance
+task_registry = TaskRegistry()

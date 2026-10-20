@@ -1,0 +1,51 @@
+{
+  "model": "MemberOnlyPost",
+  "description": "user=r | admin=cru | developer=crud. Users can only read; admins can create/read/update; developers have full access.",
+  "endpoint": "/api/v1/member_only_posts",
+  "create_payload": {
+    "title": "New Member Post",
+    "content": "Members-only content here.",
+    "member_level": "gold"
+  },
+  "update_payload": {
+    "title": "Updated Member Post",
+    "content": "Updated members-only content.",
+    "member_level": "silver"
+  },
+  "samples": [
+    {
+      "title": "Gold Member Benefits",
+      "content": "Exclusive benefits for gold members include priority support.",
+      "member_level": "gold"
+    },
+    {
+      "title": "Silver Member Tips",
+      "content": "Tips and tricks to get the most out of your membership.",
+      "member_level": "silver"
+    },
+    {
+      "title": "Member Lounge News",
+      "content": "The member lounge has been renovated with new seating.",
+      "member_level": "gold"
+    },
+    {
+      "title": "Bronze Welcome",
+      "content": "Welcome to our bronze tier members!",
+      "member_level": "bronze"
+    }
+  ],
+  "tests": [
+    {
+      "role": "user",
+      "expect": { "list": 200, "create": 403, "detail": 200, "update": 403, "delete": 403 }
+    },
+    {
+      "role": "admin",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 403 }
+    },
+    {
+      "role": "developer",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    }
+  ]
+}

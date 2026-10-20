@@ -14,6 +14,7 @@ interface FileUploadProps {
     maxSize?: number; // in MB
     readOnly?: boolean;
     allowDownload?: boolean;
+    privateUpload?: { model: string; field: string };
 }
 
 export const FileUpload: React.FC<FileUploadProps> = ({
@@ -23,7 +24,8 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     accept = "*",
     maxSize = 20, // Default 20MB
     readOnly = false,
-    allowDownload = true
+    allowDownload = true,
+    privateUpload,
 }) => {
     const inputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
@@ -64,7 +66,10 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             const formData = new FormData();
             formData.append('file', file);
 
-            const response = await request.post('/upload', formData, {
+            const uploadUrl = privateUpload
+                ? `/upload/private/${encodeURIComponent(privateUpload.model)}/${encodeURIComponent(privateUpload.field)}`
+                : '/upload';
+            const response = await request.post(uploadUrl, formData, {
                 headers: {
                     'Content-Type': 'multipart/form-data',
                 },
@@ -73,7 +78,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             let fileUrl = response.data.url;
             // Handle URL correction similar to ImageUpload
             // If the URL is relative (e.g. /uploads/...), prepend backend URL if in dev mode
-            if (!fileUrl.startsWith('http') && import.meta.env.VITE_API_URL) {
+            if (!privateUpload && !fileUrl.startsWith('http') && import.meta.env.VITE_API_URL) {
                  const baseUrl = import.meta.env.VITE_API_URL.replace(/\/api\/v1\/?$/, '');
                  fileUrl = `${baseUrl}${fileUrl.startsWith('/') ? '' : '/'}${fileUrl}`;
             }
@@ -102,25 +107,25 @@ export const FileUpload: React.FC<FileUploadProps> = ({
         <div className={cn("space-y-4 w-full", className)}>
             {value ? (
                 <div className="relative flex items-center p-4 w-full max-w-sm rounded-lg border bg-muted/50 hover:bg-muted transition-colors">
-                    <div className="mr-4 flex-shrink-0 cursor-pointer" onClick={() => setPreviewOpen(true)}>
+                    <div className="mr-4 flex-shrink-0 cursor-pointer" onClick={() => !privateUpload && setPreviewOpen(true)}>
                         {getFileIcon(value)}
                     </div>
                     <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium truncate cursor-pointer hover:underline" 
                            title={getFileName(value)}
-                           onClick={() => setPreviewOpen(true)}
+                           onClick={() => !privateUpload && setPreviewOpen(true)}
                         >
                             {getFileName(value)}
                         </p>
                         <div className="flex gap-2">
-                             <Button 
+                            {!privateUpload && <Button
                                 variant="link" 
                                 className="h-auto p-0 text-xs text-primary"
-                                onClick={() => setPreviewOpen(true)}
+                                onClick={() => !privateUpload && setPreviewOpen(true)}
                             >
                                 Preview
-                            </Button>
-                            {allowDownload && (
+                            </Button>}
+                            {allowDownload && !privateUpload && (
                                 <>
                                     <span className="text-xs text-muted-foreground">|</span>
                                     <Button 
@@ -186,12 +191,12 @@ export const FileUpload: React.FC<FileUploadProps> = ({
             />
             
             <Modal
-                isOpen={previewOpen}
+                isOpen={previewOpen && !privateUpload}
                 onClose={() => setPreviewOpen(false)}
                 title={`Preview: ${value ? getFileName(value) : ''}`}
                 className="max-w-4xl w-full"
             >
-                {value && <FilePreview url={value} />}
+                {value && !privateUpload && <FilePreview url={value} />}
             </Modal>
         </div>
     );

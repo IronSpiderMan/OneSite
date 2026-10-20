@@ -916,6 +916,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         return item.{{ field.name }} ? <img src={item.{{ field.name }}} alt="{{ field.name }}" className="h-24 w-full rounded-md border object-cover" /> : <span className="text-muted-foreground">-</span>;
         {% elif field.ui_type == 'images' %}
         return Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length ? <div className="flex items-center gap-2"><img src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-16 w-16 rounded-md border object-cover" />{item.{{ field.name }}.length > 1 && <span className="text-xs text-muted-foreground">+{item.{{ field.name }}.length - 1}</span>}</div> : <span className="text-muted-foreground">-</span>;
+        {% elif field.ui_type == 'file' and field.private_upload %}
+        return item.{{ field.name }} ? <span>{String(item.{{ field.name }}).split('/').pop()}</span> : <span className="text-muted-foreground">-</span>;
         {% elif field.ui_type == 'file' %}
         return item.{{ field.name }} ? <a href={item.{{ field.name }}} target="_blank" rel="noopener noreferrer" className="break-all text-primary hover:underline">{t('common.download', 'Download')}</a> : <span className="text-muted-foreground">-</span>;
         {% elif field.ui_type == 'video_stream' %}
@@ -1543,7 +1545,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         )} />
                         {% elif field.ui_type == 'file' %}
                         <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
-                            <FileUpload value={value} onChange={onChange} allowDownload={ {{ "true" if field.allow_download else "false" }} } />
+                            <FileUpload value={value} onChange={onChange} allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
                         )} />
                         {% elif field.ui_type == 'video_stream' %}
                         <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
@@ -2241,7 +2243,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                                 <FileUpload
                                     value={value}
                                     onChange={onChange}
-                                    allowDownload={ {{ "true" if field.allow_download else "false" }} }
+                                    allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %}
                                 />
                             )}
                         />

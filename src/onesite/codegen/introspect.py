@@ -297,6 +297,13 @@ def get_model_fields(
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
         allow_download = site_props.get("allow_download", True)
+        private_upload = site_props.get("private", False)
+        if not isinstance(private_upload, bool):
+            raise ValueError(f"{model_cls.__name__}.{name} site_props.private must be a boolean")
+        if private_upload:
+            if site_props.get("component") != "file":
+                raise ValueError(f"{model_cls.__name__}.{name} private uploads require component='file'")
+            allow_download = False
         stream_config = site_props.get("stream", {}) or {}
         if not isinstance(stream_config, dict):
             raise ValueError(f"{model_cls.__name__}.{name} site_props.stream must be an object")
@@ -476,6 +483,8 @@ def get_model_fields(
         elif site_props.get("component") == "images":
             ui_type = "images"
         elif site_props.get("component") == "file":
+            if private_upload and ui_type != "str":
+                raise ValueError(f"{model_cls.__name__}.{name} private files require a string field")
             ui_type = "file"
         elif site_props.get("component") == "video_stream":
             if ui_type != "str":
@@ -675,6 +684,7 @@ def get_model_fields(
                 is_search_field=is_search_field,
                 fk_info=fk_info,
                 allow_download=allow_download,
+                private_upload=private_upload,
                 stream_protocol=stream_protocol,
                 stream_autoplay=stream_boolean_options["autoplay"],
                 stream_muted=stream_boolean_options["muted"],

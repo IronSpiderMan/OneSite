@@ -132,7 +132,7 @@ const {{ model.name }}Page: React.FC = () => {
               name="{{ field.name }}"
               control={control}
               render={({ field: { onChange, value } }) => (
-                <FileUpload value={value} onChange={onChange} />
+                <FileUpload value={value} onChange={onChange}{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
               )}
             />
 

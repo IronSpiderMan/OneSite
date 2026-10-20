@@ -1,0 +1,32 @@
+{
+  "model": "AdminConfig",
+  "description": "Singleton, admin+ only. There is only ever one record. User role cannot access. Menu hidden from users via visible_roles.",
+  "endpoint": "/api/v1/admin_config",
+  "get_payload": null,
+  "update_payload": {
+    "site_name": "Updated Site Name",
+    "max_upload_size": 100,
+    "enable_registration": false
+  },
+  "samples": [
+    {
+      "site_name": "Permission Demo",
+      "max_upload_size": 50,
+      "enable_registration": true
+    }
+  ],
+  "tests": [
+    {
+      "role": "user",
+      "expect": { "get": 403, "update": 403 }
+    },
+    {
+      "role": "admin",
+      "expect": { "get": 200, "update": 200 }
+    },
+    {
+      "role": "developer",
+      "expect": { "get": 200, "update": 200 }
+    }
+  ]
+}

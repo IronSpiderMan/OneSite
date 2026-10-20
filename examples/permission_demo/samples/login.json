@@ -1,0 +1,24 @@
+{
+  "samples": [
+    {
+      "role": "user",
+      "email": "alice@example.com",
+      "password": "password123"
+    },
+    {
+      "role": "admin",
+      "email": "bob@example.com",
+      "password": "password123"
+    },
+    {
+      "role": "developer",
+      "email": "carol@example.com",
+      "password": "password123"
+    },
+    {
+      "role": "inactive_user",
+      "email": "inactive@example.com",
+      "password": "password123"
+    }
+  ]
+}

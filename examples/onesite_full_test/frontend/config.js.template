@@ -1,0 +1,7 @@
+// Runtime configuration - values are substituted at container startup
+window.__ENV__ = {
+  DOMAIN: '${DOMAIN}',
+  API_URL: '${API_URL}',
+  NODE_ENV: '${NODE_ENV}',
+  BUILD_VERSION: '${BUILD_VERSION}',
+};

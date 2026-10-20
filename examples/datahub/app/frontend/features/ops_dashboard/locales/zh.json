@@ -1,0 +1,18 @@
+{
+  "active_pipelines": "活跃管道",
+  "records_today": "今日处理记录",
+  "p95_latency": "P95 延迟",
+  "throughput": "流式处理吞吐量",
+  "records_per_second": "千条记录 / 秒",
+  "mock_data_hint": "当前为 Feature 示例使用的固定模拟数据",
+  "workspace_kicker": "自定义前端 Feature",
+  "workspace_title": "数据运营工作台",
+  "workspace_description": "一个拥有独立 service 和 Zustand store、同时复用生成应用外壳的多页面自定义区域。",
+  "public_status": "公开状态页",
+  "connector_activity": "连接器活动",
+  "back_workspace": "返回运营工作台",
+  "connector": "数据连接器",
+  "schema_valid": "Schema 校验通过",
+  "back_sync_tasks": "返回同步任务",
+  "custom_override": "自定义生成页面替换"
+}

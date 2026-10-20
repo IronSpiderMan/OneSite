@@ -15,6 +15,9 @@ class Settings(BaseSettings):
     
     # Upload config
     UPLOAD_DIR: str = "{{ config.upload_dir }}"
+    # Never mounted as StaticFiles. Private file fields are upload-only secrets.
+    PRIVATE_UPLOAD_DIR: str = "private_uploads"
+    PRIVATE_UPLOAD_MAX_BYTES: int = 20 * 1024 * 1024
     TIMEZONE: str = "{{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}"
 
     # Optional external RTSP-to-HLS gateway; OneSite does not manage MediaMTX.

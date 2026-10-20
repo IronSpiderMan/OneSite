@@ -1,0 +1,51 @@
+{
+  "model": "PublicArticle",
+  "description": "Default crud for all roles. Every user has full access.",
+  "endpoint": "/api/v1/public_articles",
+  "create_payload": {
+    "title": "New Public Article",
+    "content": "This article is visible to everyone.",
+    "is_published": true
+  },
+  "update_payload": {
+    "title": "Updated Public Article",
+    "content": "Updated content here.",
+    "is_published": false
+  },
+  "samples": [
+    {
+      "title": "Getting Started Guide",
+      "content": "Welcome to the platform! This guide covers the basics.",
+      "is_published": true
+    },
+    {
+      "title": "Public Announcement",
+      "content": "System maintenance scheduled for this weekend.",
+      "is_published": true
+    },
+    {
+      "title": "Community Guidelines",
+      "content": "Please follow these guidelines when posting.",
+      "is_published": true
+    },
+    {
+      "title": "Unpublished Draft",
+      "content": "This is a draft that is not yet published.",
+      "is_published": false
+    }
+  ],
+  "tests": [
+    {
+      "role": "user",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    },
+    {
+      "role": "admin",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    },
+    {
+      "role": "developer",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    }
+  ]
+}

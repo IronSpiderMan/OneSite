@@ -1,0 +1,45 @@
+from typing import Optional
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect, Depends, Query
+from app.core import db
+from app.core.ws import manager, ws_auth
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+router = APIRouter()
+
+@router.websocket("")
+async def websocket_endpoint(
+    websocket: WebSocket,
+    token: Optional[str] = Query(None),
+):
+    user = None
+    try:
+        # We MUST accept the connection first to be able to send messages
+        await websocket.accept()
+        
+        if not token:
+            await websocket.close(code=1008)
+            return
+
+        from app.core.db import engine
+        async with AsyncSession(engine) as session:
+            try:
+                user = await ws_auth(token, session)
+            except Exception:
+                await websocket.close(code=1008)
+                return
+
+        # Session is closed here — DB connection released back to pool.
+        # The receive loop must NOT hold a DB session: SQLite concurrency
+        # limits will block other WebSocket auth attempts otherwise.
+        if user.id not in manager.active_connections:
+            manager.active_connections[user.id] = set()
+        manager.active_connections[user.id].add(websocket)
+
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        if user:
+            manager.disconnect(user.id, websocket)
+    except Exception:
+        if user:
+            manager.disconnect(user.id, websocket)

@@ -1,0 +1,29 @@
+flowchart LR
+
+subgraph A[现场采集层]
+    PLC[PLC / 工业设备]
+    OPCUA[OPC UA采集服务]
+end
+
+subgraph B[消息传输层]
+    KAFKA[Apache Kafka<br>Topic: opcua_data]
+end
+
+subgraph C[时序数据层]
+    TSDB[(TimescaleDB<br>PostgreSQL + 时序数据)]
+end
+
+subgraph D[业务应用层]
+    NEXUS[Nexus平台<br>设备管理 / 数据分析 / API]
+end
+
+PLC -->|OPC UA协议| OPCUA
+OPCUA -->|JSON消息| KAFKA
+KAFKA -->|Consumer写入| TSDB
+TSDB -->|SQL查询| NEXUS
+
+style PLC fill:#E8F4FD,stroke:#2B6CB0
+style OPCUA fill:#E8F4FD,stroke:#2B6CB0
+style KAFKA fill:#FFF5EB,stroke:#DD6B20
+style TSDB fill:#E6FFFA,stroke:#319795
+style NEXUS fill:#FAF5FF,stroke:#805AD5

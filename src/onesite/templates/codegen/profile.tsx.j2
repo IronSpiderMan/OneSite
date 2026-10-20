@@ -198,7 +198,7 @@ export default function ProfilePage() {
                   onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
                 />
       {% elif field.ui_type == 'file' %}
-                <FileUpload
+                <FileUpload{% if field.private_upload %} privateUpload={ { model: 'user', field: '{{ field.name }}' } }{% endif %}
                   value={me.{{ field.name }} || ''}
                   onChange={(v) => setMe((prev) => (prev ? { ...prev, {{ field.name }}: v } : prev))}
                 />

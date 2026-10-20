@@ -1,0 +1,117 @@
+"""Coverage for model and JSON-submodel form layouts."""
+
+from pathlib import Path
+from typing import Optional
+
+from jinja2 import Environment, FileSystemLoader
+from pydantic import BaseModel
+from sqlalchemy import JSON, Column
+from sqlmodel import Field, SQLModel
+
+from onesite.codegen.introspect import get_model_fields
+from onesite.codegen.phases.introspect_models import _build_model_dict
+
+
+class AuthConfig(BaseModel):
+    __onesite__ = {
+        "ui": {
+            "detail": {
+                "layout": [
+                    ["client_id", "client_secret"],
+                    {"section": "options", "title": "Options", "items": ["enabled"]},
+                ]
+            }
+        }
+    }
+
+    client_id: str = ""
+    client_secret: str = ""
+    enabled: bool = True
+
+
+class FormLayoutRecord(SQLModel, table=True):
+    __tablename__ = "test_form_layout_record"
+    __onesite__ = {
+        "ui": {
+            "detail": {
+                "layout": [
+                    ["title", "endpoint"],
+                    {"section": "connection", "title": "Connection", "items": ["is_enabled"]},
+                ]
+            }
+        }
+    }
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str
+    endpoint: str
+    is_enabled: bool = True
+    auth_config: AuthConfig = Field(default_factory=AuthConfig, sa_column=Column(JSON))
+
+
+def _model():
+    result = get_model_fields(FormLayoutRecord, "form_layout_record")
+    return _build_model_dict("FormLayoutRecord", "form_layout_record", "form_layout_record", result)
+
+
+def test_modal_form_uses_its_own_ui_form_layout():
+    model = _model()
+
+    assert model.form_layout[0]["columns"] == 2
+    assert model.form_layout[1]["items"][0]["title"] == "Connection"
+    # Fields omitted from the configured layout remain editable.
+    assert model.form_layout[-1]["items"][0]["field"] == "auth_config"
+
+    template_dir = Path(__file__).parents[1] / "src" / "onesite" / "templates" / "codegen"
+    rendered = Environment(loader=FileSystemLoader(template_dir)).get_template(
+        "frontend_page_list.tsx.j2"
+    ).render(model=model)
+
+    assert 'const formLayout = ' in rendered
+    assert '"title": "Connection"' in rendered
+    assert "renderModalFormLayoutNode" in rendered
+    assert "'title': ((!editingId" in rendered
+    assert "'title': ({(!editingId" not in rendered
+    assert "const [isSaving, setIsSaving] = useState(false);" in rendered
+    assert '<Button type="submit" disabled={isSaving}>' in rendered
+    assert "t('common.saving', 'Saving...')" in rendered
+    assert "t('common.deleting', 'Deleting...')" in rendered
+    assert rendered.count('animate-spin') >= 3
+    assert rendered.count("event.preventDefault();") >= 2
+    assert "void confirmBulkDelete();" in rendered
+    assert "if (!isBulkDeleting) setBulkDeleteOpen(open);" in rendered
+
+    service = Environment(loader=FileSystemLoader(template_dir)).get_template(
+        "frontend_service.ts.j2"
+    ).render(model=model)
+    assert "`${API_URL}/bulk_delete`, { ids }, { suppressErrorToast: true }" in service
+
+
+def test_json_submodel_emits_and_uses_its_own_form_layout():
+    result = get_model_fields(FormLayoutRecord, "form_layout_record")
+    auth_field = next(field for field in result.fields if field.name == "auth_config")
+
+    assert auth_field.json_model_schema["layout"][0]["items"][0]["field"] == "client_id"
+    assert auth_field.json_model_schema["layout"][1]["items"][0]["title"] == "Options"
+
+    component = (
+        Path(__file__).parents[1]
+        / "src"
+        / "onesite"
+        / "templates"
+        / "frontend"
+        / "src"
+        / "components"
+        / "ui"
+        / "json-model-editor.tsx"
+    ).read_text(encoding="utf-8")
+    assert "schema.layout?.length" in component
+    assert "renderLayoutNode" in component
+
+    model = _model()
+    template_dir = Path(__file__).parents[1] / "src" / "onesite" / "templates" / "codegen"
+    detail_page = Environment(loader=FileSystemLoader(template_dir)).get_template(
+        "frontend_page_detail.tsx.j2"
+    ).render(model=model)
+    assert "import { JsonModelDetail }" in detail_page
+    assert "<JsonModelDetail schema=" in detail_page

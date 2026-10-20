@@ -1,0 +1,228 @@
+{
+  "common": {
+    "welcome": "欢迎",
+    "login": "登录",
+    "logout": "退出登录",
+    "settings": "设置",
+    "language": "语言",
+    "timezone": "时区",
+    "theme": "主题",
+    "save": "保存",
+    "cancel": "取消",
+    "create": "创建",
+    "edit": "编辑",
+    "delete": "删除",
+    "actions": "操作",
+    "search": "搜索",
+    "filters": "筛选",
+    "reset": "重置",
+    "all": "全部",
+    "yes": "是",
+    "no": "否",
+    "loading": "加载中...",
+    "success": "成功",
+    "error": "错误",
+    "confirm_delete": "确定要删除此项吗？",
+    "upload": "上传",
+    "no result": "结果为空",
+    "previous": "前一页",
+    "next": "后一页",
+    "first": "首页",
+    "last": "末页",
+    "page_info": "第",
+    "of_page": "页，共",
+    "page_size": "每页条数",
+    "select": "选择",
+    "auto_refresh": "自动刷新",
+    "refresh_interval": "刷新频率",
+    "local_storage": "本地存储",
+    "back": "返回",
+    "back_home": "返回首页",
+    "retry": "重试",
+    "profile": "个人信息",
+    "bulk_delete": "批量删除"
+  },
+  "menu": {
+    "dashboard": "仪表盘"
+  },
+  "dashboard": {
+    "total": "总计",
+    "no_models": "没有可用于仪表盘的模型",
+    "no_visualizations": "未配置可视化",
+    "no_data": "暂无数据",
+    "period_day": "按日",
+    "period_week": "按周",
+    "period_month": "按月"
+  },
+  "notifications": {
+    "title": "消息通知",
+    "empty": "暂无消息",
+    "detail": "消息详情",
+    "new": "收到新消息",
+    "mark_all_read": "全部已读"
+  },
+  "errors": {
+    "403": {
+      "title": "无权限访问",
+      "desc": "你没有权限访问此页面。"
+    },
+    "404": {
+      "title": "页面不存在",
+      "desc": "你访问的页面不存在或已被移除。"
+    },
+    "500": {
+      "title": "服务异常",
+      "desc": "发生了一些错误，请稍后重试或返回首页。"
+    },
+    "offline": {
+      "code": "离线",
+      "title": "网络不可用",
+      "desc": "网络连接失败，请检查网络后重试。"
+    }
+  },
+  "login": {
+    "title": "登录",
+    "description": "输入您的邮箱和密码以访问管理面板",
+    "email": "电子邮箱",
+    "emailPlaceholder": "m@example.com",
+    "password": "密码",
+    "signIn": "登录",
+    "signingIn": "登录中...",
+    "error": "登录失败，请检查您的凭据。",
+    "demo": "演示账号：admin@example.com / admin"
+  },
+  "settings": {
+    "system_title": "系统配置",
+    "save_system": "保存系统配置",
+    "custom_title": "个性化配置",
+    "save_custom": "保存个性化配置"
+  },
+  "profile": {
+    "basic": "基础信息",
+    "full_name_placeholder": "请输入姓名",
+    "change_password": "修改密码",
+    "old_password": "当前密码",
+    "new_password": "新密码",
+    "confirm_password": "确认密码",
+    "password_mismatch": "两次输入的密码不一致",
+    "password_changed": "密码修改成功"
+  },
+  "alert": {
+    "delete_title": "确认删除",
+    "bulk_delete_confirm": "确定要删除这些项目吗？"
+  },
+  "toast": {
+    "create_success": "创建成功",
+    "update_success": "更新成功",
+    "delete_success": "删除成功",
+    "delete_failed": "删除失败",
+    "save_failed": "保存失败"
+  },
+  "models": {
+    "user": {
+      "name": "用户",
+      "fields": {
+        "email": "邮箱",
+        "full_name": "姓名",
+        "avatar": "头像",
+        "is_active": "是否启用",
+        "role": "角色",
+        "id": "Id",
+        "hashed_password": "Hashed Password",
+        "created_at": "创建时间",
+        "updated_at": "更新时间",
+        "password": "密码"
+      }
+    },
+    "admin_settings": {
+      "name": "AdminSettings",
+      "fields": {
+        "id": "Id",
+        "banner_text": "Banner Text",
+        "maintenance_mode": "Maintenance Mode"
+      }
+    },
+    "notification": {
+      "name": "Notification",
+      "fields": {
+        "id": "Id",
+        "title": "Title",
+        "summary": "Summary",
+        "content": "Content",
+        "created_at": "Created At",
+        "is_read": "Is Read",
+        "user_id": "User Id"
+      }
+    },
+    "metric": {
+      "name": "Metric",
+      "fields": {
+        "id": "Id",
+        "name": "Name",
+        "value": "Value",
+        "recorded_at": "Recorded At"
+      }
+    },
+    "system_config": {
+      "name": "SystemConfig",
+      "fields": {
+        "id": "Id",
+        "site_name": "站点名称",
+        "day_shift_start_at": "Day Shift Start At",
+        "day_shift_end_at": "Day Shift End At",
+        "night_shift_start_at": "Night Shift Start At",
+        "night_shift_end_at": "Night Shift End At",
+        "allow_registration": "允许注册"
+      }
+    },
+    "product": {
+      "name": "Product",
+      "fields": {
+        "id": "Id",
+        "name": "Name",
+        "status": "Status",
+        "is_featured": "Is Featured",
+        "category_id": "Category Id",
+        "variants": "Variants",
+        "meta_data": "Meta Data",
+        "created_at": "Created At",
+        "cover_image": "Cover Image",
+        "manual_file": "Manual File",
+        "import_source": "Import Source",
+        "internal_note": "Internal Note"
+      }
+    },
+    "custom_config": {
+      "name": "CustomConfig",
+      "fields": {
+        "language": "语言",
+        "timezone": "时区",
+        "theme": "主题"
+      }
+    },
+    "tag": {
+      "name": "Tag",
+      "fields": {
+        "id": "Id",
+        "name": "Name"
+      }
+    },
+    "category": {
+      "name": "Category",
+      "fields": {
+        "id": "Id",
+        "name": "Name",
+        "description": "Description"
+      }
+    },
+    "product_tag": {
+      "name": "ProductTag",
+      "fields": {
+        "id": "Id",
+        "product_id": "Product Id",
+        "tag_id": "Tag Id",
+        "order": "Order"
+      }
+    }
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "active_pipelines": "Active pipelines",
+  "records_today": "Records processed today",
+  "p95_latency": "P95 latency",
+  "throughput": "Streaming throughput",
+  "records_per_second": "thousand records / second",
+  "mock_data_hint": "Deterministic sample data for the feature example",
+  "workspace_kicker": "Custom frontend Feature",
+  "workspace_title": "Data Operations Workspace",
+  "workspace_description": "A multi-page custom area backed by its own service and Zustand store while sharing the generated application shell.",
+  "public_status": "Public status page",
+  "connector_activity": "Connector activity",
+  "back_workspace": "Back to operations workspace",
+  "connector": "Data connector",
+  "schema_valid": "Schema validation passed",
+  "back_sync_tasks": "Back to sync tasks",
+  "custom_override": "Custom generated-page override"
+}

@@ -96,6 +96,7 @@ class FieldDefinition:
     # FK, e.g. (a_id, b_name) -> (b.a_id, b.name).
     composite_selector: dict[str, Any] | None = None
     allow_download: bool = True
+    private_upload: bool = False
     stream_protocol: str = "auto"
     stream_autoplay: bool = False
     stream_muted: bool = True

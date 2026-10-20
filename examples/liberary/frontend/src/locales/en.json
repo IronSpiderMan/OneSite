@@ -1,0 +1,185 @@
+{
+  "common": {
+    "welcome": "Welcome",
+    "login": "Login",
+    "logout": "Logout",
+    "settings": "Settings",
+    "language": "Language",
+    "timezone": "Timezone",
+    "theme": "Theme",
+    "save": "Save",
+    "cancel": "Cancel",
+    "create": "Create",
+    "edit": "Edit",
+    "delete": "Delete",
+    "actions": "Actions",
+    "search": "Search",
+    "filters": "Filters",
+    "reset": "Reset",
+    "all": "All",
+    "yes": "Yes",
+    "no": "No",
+    "loading": "Loading...",
+    "success": "Success",
+    "error": "Error",
+    "confirm_delete": "Are you sure you want to delete this item?",
+    "upload": "Upload",
+    "no result": "No result",
+    "previous": "Previous",
+    "next": "Next",
+    "first": "First",
+    "last": "Last",
+    "page_info": "Page",
+    "of_page": "of",
+    "page_size": "Page size",
+    "select": "Select",
+    "auto_refresh": "Auto Refresh",
+    "refresh_interval": "Refresh Interval",
+    "local_storage": "Local Storage",
+    "back": "Back",
+    "back_home": "Back Home",
+    "retry": "Retry",
+    "profile": "Profile",
+    "bulk_delete": "Bulk Delete"
+  },
+  "menu": {
+    "dashboard": "Dashboard"
+  },
+  "dashboard": {
+    "total": "total",
+    "no_models": "No models available for dashboard",
+    "no_visualizations": "No visualizations configured",
+    "no_data": "No data available",
+    "period_day": "Daily",
+    "period_week": "Weekly",
+    "period_month": "Monthly"
+  },
+  "notifications": {
+    "title": "Notifications",
+    "empty": "No notifications",
+    "detail": "Notification",
+    "new": "New notification",
+    "mark_all_read": "Mark all read"
+  },
+  "errors": {
+    "403": {
+      "title": "Access denied",
+      "desc": "You don't have permission to view this page."
+    },
+    "404": {
+      "title": "Page not found",
+      "desc": "The page you\u2019re looking for doesn\u2019t exist."
+    },
+    "500": {
+      "title": "Something went wrong",
+      "desc": "Please try again or return to the home page."
+    },
+    "offline": {
+      "code": "OFFLINE",
+      "title": "You are offline",
+      "desc": "Network connection failed. Please check your connection and try again."
+    }
+  },
+  "login": {
+    "title": "Sign in",
+    "description": "Enter your email and password to access the admin panel",
+    "email": "Email",
+    "emailPlaceholder": "m@example.com",
+    "password": "Password",
+    "signIn": "Sign In",
+    "signingIn": "Signing in...",
+    "error": "Login failed. Please check your credentials.",
+    "demo": "Demo: admin@example.com / admin"
+  },
+  "settings": {
+    "system_title": "System Settings",
+    "save_system": "Save System Settings",
+    "custom_title": "Personal Settings",
+    "save_custom": "Save Personal Settings"
+  },
+  "profile": {
+    "basic": "Basic Info",
+    "full_name_placeholder": "Enter your name",
+    "change_password": "Change Password",
+    "old_password": "Old Password",
+    "new_password": "New Password",
+    "confirm_password": "Confirm Password",
+    "password_mismatch": "Passwords do not match",
+    "password_changed": "Password changed successfully"
+  },
+  "alert": {
+    "delete_title": "Confirm deletion",
+    "bulk_delete_confirm": "Are you sure you want to delete these items?"
+  },
+  "toast": {
+    "create_success": "Created",
+    "update_success": "Updated",
+    "delete_success": "Deleted",
+    "delete_failed": "Delete failed",
+    "save_failed": "Save failed"
+  },
+  "models": {
+    "user": {
+      "name": "User",
+      "fields": {
+        "email": "Email",
+        "full_name": "Full Name",
+        "avatar": "Avatar",
+        "is_active": "Is Active",
+        "role": "Role",
+        "id": "Id",
+        "hashed_password": "Hashed Password",
+        "created_at": "Created At",
+        "updated_at": "Updated At",
+        "password": "Password"
+      }
+    },
+    "subject": {
+      "name": "Subject",
+      "fields": {
+        "id": "Id",
+        "title": "Title"
+      }
+    },
+    "author": {
+      "name": "Author",
+      "fields": {
+        "id": "Id",
+        "name": "Name"
+      }
+    },
+    "book_subject_link": {
+      "name": "BookSubjectLink",
+      "fields": {
+        "id": "Id",
+        "book_id": "Book Id",
+        "subject_id": "Subject Id"
+      }
+    },
+    "system_config": {
+      "name": "SystemConfig",
+      "fields": {
+        "id": "Id",
+        "site_name": "Site Name",
+        "allow_registration": "Allow Registration"
+      }
+    },
+    "book": {
+      "name": "Book",
+      "fields": {
+        "id": "Id",
+        "title": "Title",
+        "published_at": "Published At",
+        "author_id": "Author"
+      }
+    },
+    "custom_config": {
+      "name": "CustomConfig",
+      "fields": {
+        "language": "Language",
+        "timezone": "Timezone",
+        "theme": "Theme"
+      }
+    }
+  }
+}

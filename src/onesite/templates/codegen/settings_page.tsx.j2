@@ -292,7 +292,7 @@ const SettingsPage: React.FC = () => {
                         name="{{ field.name }}"
                         control={control}
                         render={({ field: { onChange, value } }) => (
-                          <FileUpload value={value} onChange={onChange} />
+                          <FileUpload value={value} onChange={onChange}{% if field.private_upload %} privateUpload={ { model: '{{ system_model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
                         )}
                       />
                       {% elif field.ui_type == 'video_stream' %}
@@ -461,7 +461,7 @@ const SettingsPage: React.FC = () => {
                 name="{{ field.name }}"
                 control={control}
                 render={({ field: { onChange, value } }) => (
-                  <FileUpload value={value} onChange={onChange} />
+                  <FileUpload value={value} onChange={onChange}{% if field.private_upload %} privateUpload={ { model: '{{ custom_model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
                 )}
               />
               {% elif field.ui_type == 'video_stream' %}

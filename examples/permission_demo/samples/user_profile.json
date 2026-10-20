@@ -1,0 +1,90 @@
+{
+  "model": "UserProfile",
+  "description": "user=cru | admin=cru | developer=crud. All can create/read/update, only developer can delete. Field-level permissions vary.",
+  "endpoint": "/api/v1/user_profiles",
+  "create_payload": {
+    "display_name": "New User",
+    "bio": "A new user profile.",
+    "phone": "555-0000",
+    "ssn": "XXX-XX-0000",
+    "internal_note": "New user note.",
+    "loyalty_points": 0
+  },
+  "update_payload": {
+    "display_name": "Updated Name",
+    "bio": "Updated bio.",
+    "loyalty_points": 50
+  },
+  "samples": [
+    {
+      "display_name": "Alice User",
+      "bio": "Just a regular user exploring the platform.",
+      "phone": "555-0100",
+      "ssn": "XXX-XX-0001",
+      "internal_note": "Standard user, no special privileges.",
+      "loyalty_points": 100
+    },
+    {
+      "display_name": "Bob Admin",
+      "bio": "Platform administrator keeping things running.",
+      "phone": "555-0101",
+      "ssn": "XXX-XX-0002",
+      "internal_note": "Admin user — can manage most resources.",
+      "loyalty_points": 500
+    },
+    {
+      "display_name": "Carol Developer",
+      "bio": "Senior developer with full system access.",
+      "phone": "555-0102",
+      "ssn": "XXX-XX-0003",
+      "internal_note": "Developer — has unrestricted access.",
+      "loyalty_points": 1000
+    }
+  ],
+  "field_level_tests": [
+    {
+      "description": "phone field — admin+ only",
+      "role": "user",
+      "field": "phone",
+      "expected_in_response": false
+    },
+    {
+      "description": "phone field — admin can see",
+      "role": "admin",
+      "field": "phone",
+      "expected_in_response": true
+    },
+    {
+      "description": "ssn field — developer only",
+      "role": "admin",
+      "field": "ssn",
+      "expected_in_response": false
+    },
+    {
+      "description": "ssn field — developer can see",
+      "role": "developer",
+      "field": "ssn",
+      "expected_in_response": true
+    },
+    {
+      "description": "loyalty_points — user can read only",
+      "role": "user",
+      "field": "loyalty_points",
+      "expected_in_response": true
+    }
+  ],
+  "tests": [
+    {
+      "role": "user",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 403 }
+    },
+    {
+      "role": "admin",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 403 }
+    },
+    {
+      "role": "developer",
+      "expect": { "list": 200, "create": 200, "detail": 200, "update": 200, "delete": 200 }
+    }
+  ]
+}

@@ -207,7 +207,7 @@ export default function RegisterPage() {
                     name="{{ field.name }}"
                     rules={ { required: true } }
                     render={({ field: { onChange, value } }) => (
-                      <FileUpload value={value} onChange={onChange} />
+                      <FileUpload value={value} onChange={onChange}{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
                     )}
                   />
 {% elif field.ui_type == 'video_stream' %}

@@ -1,0 +1,124 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    --background: 0 0% 100%;
+    --foreground: 222.2 84% 4.9%;
+    --card: 0 0% 100%;
+    --card-foreground: 222.2 84% 4.9%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222.2 84% 4.9%;
+    --primary: 221.2 83.2% 53.3%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 210 40% 96.1%;
+    --secondary-foreground: 222.2 47.4% 11.2%;
+    --muted: 210 40% 96.1%;
+    --muted-foreground: 215.4 16.3% 46.9%;
+    --accent: 210 40% 96.1%;
+    --accent-foreground: 222.2 47.4% 11.2%;
+    --destructive: 0 84.2% 60.2%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 214.3 31.8% 91.4%;
+    --input: 214.3 31.8% 91.4%;
+    --ring: 221.2 83.2% 53.3%;
+    --radius: 0.5rem;
+    --shadow-sm-style: 0 1px 2px 0 rgb(2 6 23 / 0.06);
+    --shadow-md-style: 0 8px 20px -12px rgb(15 23 42 / 0.14);
+  }
+ 
+  .dark {
+    --background: 222.2 84% 4.9%;
+    --foreground: 210 40% 98%;
+    --card: 222.2 84% 4.9%;
+    --card-foreground: 210 40% 98%;
+    --popover: 222.2 84% 4.9%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 217.2 91.2% 59.8%;
+    --primary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 217.2 32.6% 17.5%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217.2 32.6% 17.5%;
+    --muted-foreground: 215 20.2% 65.1%;
+    --accent: 217.2 32.6% 17.5%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 62.8% 30.6%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 217.2 32.6% 17.5%;
+    --input: 217.2 32.6% 17.5%;
+    --ring: 224.3 76.3% 48%;
+  }
+
+  html.theme-iothub {
+    --background: 222 50% 6%;
+    --foreground: 210 40% 98%;
+    --card: 220 34% 12%;
+    --card-foreground: 210 40% 98%;
+    --popover: 220 34% 12%;
+    --popover-foreground: 210 40% 98%;
+    --primary: 160 84% 39%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 217 22% 16%;
+    --secondary-foreground: 210 40% 98%;
+    --muted: 217 22% 16%;
+    --muted-foreground: 215 20.2% 72%;
+    --accent: 210 24% 18%;
+    --accent-foreground: 210 40% 98%;
+    --destructive: 0 72% 44%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 215 18% 22%;
+    --input: 215 18% 22%;
+    --ring: 160 84% 39%;
+  }
+}
+ 
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+    font-family: Inter, Segoe UI, system-ui, sans-serif;
+    
+  }
+  h1, h2, h3, h4, h5, h6 {
+    font-weight: 700;
+  }
+}
+
+@layer base {
+  html.theme-iothub body {
+    background-image:
+      radial-gradient(1200px 800px at 65% 12%, rgba(16, 185, 129, 0.35), rgba(16, 185, 129, 0) 60%),
+      radial-gradient(900px 700px at 25% 78%, rgba(37, 99, 235, 0.25), rgba(37, 99, 235, 0) 65%),
+      radial-gradient(700px 500px at 90% 85%, rgba(14, 165, 233, 0.18), rgba(14, 165, 233, 0) 60%),
+      linear-gradient(180deg, rgba(0, 0, 0, 0.55) 0%, rgba(0, 0, 0, 0.15) 55%, rgba(0, 0, 0, 0.45) 100%);
+    background-attachment: fixed;
+  }
+
+  html.theme-iothub .bg-card {
+    background-color: hsl(var(--card) / 0.72);
+    backdrop-filter: blur(14px);
+  }
+
+  html.theme-iothub .bg-popover {
+    background-color: hsl(var(--popover) / 0.72);
+    backdrop-filter: blur(14px);
+  }
+}
+
+@layer utilities {
+  .shadow-sm {
+    box-shadow: var(--shadow-sm-style);
+  }
+  .shadow, .shadow-md {
+    box-shadow: var(--shadow-md-style);
+  }
+  button {
+    transition: transform 0.15s ease, box-shadow 0.2s ease, filter 0.2s ease;
+  }
+  button:hover {
+    filter: saturate(1.06);
+  }
+}

@@ -41,7 +41,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         ) : <span className="text-muted-foreground italic">No images</span>}
         {% elif field.ui_type == 'file' %}
         {currentItem.{{ field.name }} ? (
-            <FileUpload value={currentItem.{{ field.name }}} onChange={() => {}} readOnly={true} allowDownload={ {{ "true" if field.allow_download else "false" }} } />
+            <FileUpload value={currentItem.{{ field.name }}} onChange={() => {}} readOnly={true} allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
         ) : <span className="text-muted-foreground italic">No file</span>}
         {% elif field.ui_type == 'video_stream' %}
         {currentItem.{{ field.name }} ? (
@@ -183,7 +183,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
     )} />
     {% elif field.ui_type == 'file' %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
-        <FileUpload value={value} onChange={onChange} allowDownload={ {{ "true" if field.allow_download else "false" }} } />
+        <FileUpload value={value} onChange={onChange} allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
     )} />
     {% elif field.ui_type == 'video_stream' %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
@@ -1516,7 +1516,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         <FileUpload
                                             value={value}
                                             onChange={onChange}
-                                            allowDownload={ {{ "true" if field.allow_download else "false" }} }
+                                            allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %}
                                         />
                                     )}
                                 />
@@ -1836,7 +1836,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                         value={currentItem.{{ field.name }}}
                                         onChange={() => {}}
                                         readOnly={true}
-                                        allowDownload={ {{ "true" if field.allow_download else "false" }} }
+                                        allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %}
                                     />
                                 ) : (
                                     <span className="text-muted-foreground italic">No file</span>

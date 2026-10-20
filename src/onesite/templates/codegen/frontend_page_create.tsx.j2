@@ -200,7 +200,7 @@ const Create{{ model.name }}Page: React.FC = () => {
                   <FileUpload
                     value={value}
                     onChange={onChange}
-                    allowDownload={ {{ "true" if field.allow_download else "false" }} }
+                    allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %}
                   />
                 )}
               />
