@@ -2546,7 +2546,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           ){% if not as_expression %}{{ '}' }}{% endif %}
           {%- endmacro %}
           {(() => {
-            const formLayout = {{ model.form_layout | default([]) | tojson }} as any[];
+            const formLayout = (editingId
+              ? {{ model.edit_layout | default(model.form_layout) | default([]) | tojson }}
+              : {{ model.create_layout | default(model.form_layout) | default([]) | tojson }}) as any[];
             const formFields: Record<string, React.ReactNode> = {
               {% for field in model.fields %}
               '{{ field.name }}': ({{ modal_form_field(field, true) }}),
@@ -2572,7 +2574,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
               }
               if (node.kind === 'section') {
                 const items = node.items.map((item: any, index: number) => renderModalFormLayoutNode(item, `${key}-${index}`)).filter(Boolean);
-                return items.length ? <fieldset key={key} className={`min-w-0 rounded-md border p-4 ${spanClasses[node.span] || ''}`}><legend className="px-1 text-sm font-semibold">{node.title}</legend><div className="space-y-4">{items}</div></fieldset> : null;
+                return items.length ? <fieldset key={key} className={`min-w-0 rounded-md border p-4 ${spanClasses[node.span] || ''}`}><legend className="px-1 text-sm font-semibold">{String(t(node.title, node.title))}</legend><div className="space-y-4">{items}</div></fieldset> : null;
               }
               return null;
             };

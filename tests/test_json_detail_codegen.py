@@ -30,7 +30,7 @@ class JsonDetailRecord(SQLModel, table=True):
     settings: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
 
 
-def test_json_arrays_render_as_related_style_tabs_and_tables():
+def test_json_collections_render_inline_with_configuration_fields():
     result = get_model_fields(JsonDetailRecord, "json_detail_record")
     model = _build_model_dict(
         "JsonDetailRecord", "json_detail_record", "json_detail_record", result
@@ -44,10 +44,12 @@ def test_json_arrays_render_as_related_style_tabs_and_tables():
     settings = next(field for field in result.fields if field.name == "settings")
     keyed_entries = next(field for field in result.fields if field.name == "keyed_entries")
     assert entries.json_kind == "array"
+    assert 'role="tablist"' not in detail_page
     assert settings.json_kind == "object"
 
-    assert "activeTab === 'json-array-entries'" in detail_page
-    assert "activeTab === 'json-array-untyped_entries'" in detail_page
+    assert "json-array-entries" not in detail_page
+    assert "case 'entries':" in detail_page
+    assert "json-array-untyped_entries" not in detail_page
     assert (
         "<TableHead>{t('json_models.json_entry.fields.name')}</TableHead>"
         in detail_page
@@ -59,15 +61,14 @@ def test_json_arrays_render_as_related_style_tabs_and_tables():
     assert "<TableHead>name</TableHead>" not in detail_page
     assert "<TableHead>enabled</TableHead>" not in detail_page
     assert "items.flatMap((item: unknown)" in detail_page
-    assert '<JsonModelTableEditor\n                                        collectionKind="array"' in detail_page
-    assert '<JsonDynamicTableEditor collectionKind="array"' in detail_page
+    assert '<JsonModelArrayEditor itemSchema=' in detail_page
+    assert '<JsonInput value={value}' in detail_page
     assert "JSON.stringify(currentItem.entries, null, 2)" not in detail_page
-    assert "activeTab === 'json-dict-keyed_entries'" in detail_page
-    assert "activeTab === 'json-dict-settings'" in detail_page
+    assert "json-dict-keyed_entries" not in detail_page
+    assert "json-dict-settings" not in detail_page
     assert "Object.entries(currentItem.keyed_entries as Record<string, any>)" in detail_page
     assert "Object.entries(currentItem.settings as Record<string, any>)" in detail_page
-    assert '<JsonModelTableEditor\n                                        collectionKind="dict"' in detail_page
-    assert '<JsonDynamicTableEditor collectionKind="dict"' in detail_page
+    assert '<JsonModelTableEditor collectionKind="dict"' in detail_page
     assert "JSON.stringify(currentItem.settings, null, 2)" not in detail_page
     assert model.json_array_fields == [entries, next(field for field in result.fields if field.name == "untyped_entries")]
     assert model.json_dict_fields == [keyed_entries, settings]

@@ -285,9 +285,8 @@ def _build_model_dict(
     if id_type.startswith("Optional[") and id_type.endswith("]"):
         id_type = id_type[len("Optional["):-1]
 
-    # Object-like JSON arrays behave more like inline related records on the
-    # detail page than scalar fields.  Keep scalar date/time arrays in the
-    # basic-information form, where their dedicated editor remains useful.
+    # Collection metadata selects inline detail tables, not separate tabs.
+    # JSON values belong to the model configuration in every editing surface.
     json_array_fields = [
         field
         for field in result.fields
@@ -304,16 +303,15 @@ def _build_model_dict(
         and field.type.startswith("Dict[")
         and "r" in field.permissions
     ]
-    json_tab_names = {field.name for field in json_array_fields + json_dict_fields}
     detail_layout_fields = [
         field.name
         for field in result.fields
-        if field.name not in json_tab_names and "r" in field.permissions
+        if "r" in field.permissions
     ]
     detail_auto_fields = [
         field.name
         for field in result.fields
-        if not field.fk_info and field.name not in json_tab_names and "r" in field.permissions
+        if "r" in field.permissions
     ]
     detail_layout = _normalize_ui_layout(
         result.model_site_props.get("ui"),
@@ -339,8 +337,25 @@ def _build_model_dict(
         view="form",
         append_fields=form_fields,
     )
+    # A single declaration can describe all views. Explicit view overrides remain
+    # supported, but a form-only configuration also supplies the detail grouping.
+    if not detail_layout and configured_form_layout:
+        detail_layout = _form_layout_from_detail_layout(
+            configured_form_layout, detail_layout_fields
+        )
+    if not detail_layout:
+        detail_layout = [{
+            "kind": "row", "columns": 1, "items": [{
+                "kind": "section", "section": "basic",
+                "title": "common.basic_information", "span": 1,
+                "items": _form_layout_from_detail_layout([], detail_auto_fields),
+            }],
+        }] if detail_auto_fields else []
     form_layout = configured_form_layout or _form_layout_from_detail_layout(
         detail_layout, form_fields
+    )
+    edit_layout = _form_layout_from_detail_layout(
+        form_layout, [field.name for field in result.fields if "u" in field.permissions]
     )
     create_fields = [
         field.name
@@ -393,6 +408,7 @@ def _build_model_dict(
         detail_layout=detail_layout,
         form_layout=form_layout,
         create_layout=create_layout,
+        edit_layout=edit_layout,
         json_array_fields=json_array_fields,
         json_dict_fields=json_dict_fields,
         id_type=id_type,

@@ -1,3 +1,177 @@
+{% macro detail_m2m_editors() -%}
+                            {% for m2m in model.m2m_fields %}
+                            <div className="space-y-2">
+                                <Label>{t('models.{{ m2m.target_service }}.plural')}</Label>
+                                <Controller
+                                    control={editControl}
+                                    name="{{ m2m.write_name }}"
+                                    render={({ field: { onChange, value } }) => (
+                                        {% if m2m.editor == 'inline' %}
+                                        <JsonModelArrayEditor
+                                            itemSchema={ {{ m2m.inline_schema | tojson }} }
+                                            value={value}
+                                            onChange={onChange}
+                                            showJsonMode={false}
+                                            foreignKeyLoaders={{ '{{' }}
+                                                {% for field in m2m.inline_schema.fields %}
+                                                {% if field.foreignKey %}
+                                                '{{ field.name }}': async (query) => {
+                                                    const filters = query ? { {{ field.foreignKey.labelField }}: query } : undefined;
+                                                    const response = await {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService.get{{ field.foreignKey.targetModel }}s(1, 20, filters);
+                                                    return response.items.map((item: any) => ({ label: item.{{ field.foreignKey.labelField }} || item.id, value: item.id }));
+                                                },
+                                                {% endif %}
+                                                {% endfor %}
+                                            {{ '}}' }}
+                                        />
+                                        {% elif m2m.order_field %}
+                                        <LinkTableOrderedSelect
+                                            value={value}
+                                            onValueChange={onChange}
+                                            placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
+                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
+                                            valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                                            loadOptions={async (query) => {
+                                                const filters = query ? { {{ m2m.label_field }}: query } : undefined;
+                                                const response = await get{{ m2m.target_model }}s(1, 20, filters);
+                                                return response.items.map((item: any) => ({ label: item.{{ m2m.label_field }} || item.id, value: item.id }));
+                                            }}
+                                        />
+                                        {% else %}
+                                        <SearchableSelect
+                                            value={value}
+                                            onValueChange={onChange}
+                                            multiple={true}
+                                            placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
+                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
+                                            valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+                                            loadOptions={async (query) => {
+                                                const filters = query ? { {{ m2m.label_field }}: query } : undefined;
+                                                const response = await get{{ m2m.target_model }}s(1, 20, filters);
+                                                return response.items.map((item: any) => ({ label: item.{{ m2m.label_field }} || item.id, value: item.id }));
+                                            }}
+                                        />
+                                        {% endif %}
+                                    )}
+                                />
+                            </div>
+                            {% endfor %}
+{%- endmacro %}
+{% macro collection_array_detail(field) -%}
+<div className="overflow-x-auto rounded-md border">
+                            {% if field.json_item_schema and field.json_item_schema.fields %}
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        {% for item_field in field.json_item_schema.fields %}
+                                        <TableHead>{t('{{ item_field.labelKey or item_field.name }}')}</TableHead>
+                                        {% endfor %}
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.length > 0 ? (
+                                        currentItem.{{ field.name }}.map((item: any, index: number) => (
+                                            <TableRow key={index}>
+                                                {% for item_field in field.json_item_schema.fields %}
+                                                <TableCell>
+                                                    {% if item_field.kind == 'bool' %}
+                                                    {item?.{{ item_field.name }} == null ? '-' : (item.{{ item_field.name }} ? t('common.yes') : t('common.no'))}
+                                                    {% elif item_field.kind == 'datetime' %}
+                                                    {item?.{{ item_field.name }} ? formatDateTime(item.{{ item_field.name }}, timeZone) : '-'}
+                                                    {% else %}
+                                                    {typeof item?.{{ item_field.name }} === 'object' ? JSON.stringify(item.{{ item_field.name }}) : String(item?.{{ item_field.name }} ?? '-')}
+                                                    {% endif %}
+                                                </TableCell>
+                                                {% endfor %}
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={ {{ field.json_item_schema.fields | length }} } className="h-24 text-center">
+                                                {t('common.no_result')}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                            {% else %}
+                            {(() => {
+                                const items = Array.isArray(currentItem.{{ field.name }}) ? currentItem.{{ field.name }} : [];
+                                const columns = Array.from(new Set(items.flatMap((item: unknown) =>
+                                    item !== null && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item) : []
+                                )));
+                                return (
+                                    <Table>
+                                        <TableHeader>
+                                            <TableRow>{columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</TableRow>
+                                        </TableHeader>
+                                        <TableBody>
+                                            {items.length > 0 ? items.map((item: any, index: number) => (
+                                                <TableRow key={index}>
+                                                    {columns.map((column) => (
+                                                        <TableCell key={column}>
+                                                            {typeof item?.[column] === 'object' ? JSON.stringify(item[column]) : String(item?.[column] ?? '-')}
+                                                        </TableCell>
+                                                    ))}
+                                                </TableRow>
+                                            )) : (
+                                                <TableRow><TableCell colSpan={Math.max(columns.length, 1)} className="h-24 text-center">{t('common.no_result')}</TableCell></TableRow>
+                                            )}
+                                        </TableBody>
+                                    </Table>
+                                );
+                            })()}
+                            {% endif %}
+                        </div>
+{%- endmacro %}
+{% macro collection_dict_detail(field) -%}
+<div className="overflow-x-auto rounded-md border">
+                            <Table>
+                                <TableHeader>
+                                    <TableRow>
+                                        <TableHead>{t('json_editor.key')}</TableHead>
+                                        {% if field.json_item_schema and field.json_item_schema.fields %}
+                                        {% for item_field in field.json_item_schema.fields %}
+                                        <TableHead>{t('{{ item_field.labelKey or item_field.name }}')}</TableHead>
+                                        {% endfor %}
+                                        {% else %}
+                                        <TableHead>{t('json_editor.object')}</TableHead>
+                                        {% endif %}
+                                    </TableRow>
+                                </TableHeader>
+                                <TableBody>
+                                    {currentItem.{{ field.name }} && typeof currentItem.{{ field.name }} === 'object' && !Array.isArray(currentItem.{{ field.name }}) && Object.keys(currentItem.{{ field.name }}).length > 0 ? (
+                                        Object.entries(currentItem.{{ field.name }} as Record<string, any>).map(([key, item]) => (
+                                            <TableRow key={key}>
+                                                <TableCell className="font-medium">{key}</TableCell>
+                                                {% if field.json_item_schema and field.json_item_schema.fields %}
+                                                {% for item_field in field.json_item_schema.fields %}
+                                                <TableCell>
+                                                    {% if item_field.kind == 'bool' %}
+                                                    {item?.{{ item_field.name }} == null ? '-' : (item.{{ item_field.name }} ? t('common.yes') : t('common.no'))}
+                                                    {% elif item_field.kind == 'datetime' %}
+                                                    {item?.{{ item_field.name }} ? formatDateTime(item.{{ item_field.name }}, timeZone) : '-'}
+                                                    {% else %}
+                                                    {typeof item?.{{ item_field.name }} === 'object' ? JSON.stringify(item.{{ item_field.name }}) : String(item?.{{ item_field.name }} ?? '-')}
+                                                    {% endif %}
+                                                </TableCell>
+                                                {% endfor %}
+                                                {% else %}
+                                                <TableCell>{typeof item === 'object' ? JSON.stringify(item) : String(item ?? '-')}</TableCell>
+                                                {% endif %}
+                                            </TableRow>
+                                        ))
+                                    ) : (
+                                        <TableRow>
+                                            <TableCell colSpan={ {{ (field.json_item_schema.fields | length + 1) if field.json_item_schema and field.json_item_schema.fields else 2 }} } className="h-24 text-center">
+                                                {t('common.no_result')}
+                                            </TableCell>
+                                        </TableRow>
+                                    )}
+                                </TableBody>
+                            </Table>
+                        </div>
+{%- endmacro %}
 {% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
 {% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
 {% macro detail_read_field(field) -%}
@@ -55,6 +229,10 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
             {String(currentItem.{{ field.name }} ?? '-')}
         </pre>
+        {% elif field in model.json_array_fields %}
+        {{ collection_array_detail(field) }}
+        {% elif field in model.json_dict_fields %}
+        {{ collection_dict_detail(field) }}
         {% elif field.ui_type == 'json' and field.json_model_schema %}
         <JsonModelDetail schema={ {{ field.json_model_schema | tojson }} }
             value={currentItem.{{ field.name }}}
@@ -143,6 +321,11 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
             value={value}
             onValueChange={(nextValue) => {
                 onChange(nextValue);
+                {% for cascade_fk in model.foreign_keys %}
+                {% if cascade_fk.cascade_parent_field == field.name %}
+                setEditValue('{{ cascade_fk.name }}', '');
+                {% endif %}
+                {% endfor %}
                 {% for reference in model.dict_key_reference_meta %}
                 {% if reference.owner_fk == field.name %}
                 setEditValue('{{ reference.field }}', '');
@@ -157,8 +340,18 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
             placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
             searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
             valueLabels={ edit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
+            {% if field.fk_info.cascade_parent_field %}
+            disabled={!watchEdit('{{ field.fk_info.cascade_parent_field }}')}
+            optionsKey={watchEdit('{{ field.fk_info.cascade_parent_field }}')}
+            {% endif %}
             loadOptions={async (query) => {
+                {% if field.fk_info.cascade_parent_field %}
+                const parentId = watchEdit('{{ field.fk_info.cascade_parent_field }}');
+                if (parentId === undefined || parentId === null || parentId === '') return [];
+                const filters = { '{{ field.fk_info.cascade_filter_field }}': parentId, ...(query ? { {{ field.fk_info.label_field }}: query } : {}) };
+                {% else %}
                 const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
+                {% endif %}
                 const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
                 return response.items.map((item: any) => ({
                     label: item.{{ field.fk_info.label_field }} || item.id,
@@ -239,7 +432,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
         {% if field.json_model_schema %}
         <JsonModelEditor schema={ {{ field.json_model_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue} />
         {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
-        <JsonModelDictEditor itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %} />
+        <JsonModelTableEditor collectionKind="dict" itemSchema={ {{ field.json_item_schema | tojson }} } value={value} onChange={onChange} rootValue={editRootValue}{% if field.json_fixed_keys %} fixedKeys={ {{ field.json_fixed_keys | tojson }} }{% endif %}{% if field.json_lock_keys %} lockKeys{% endif %}{% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %} canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} } canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }{% endif %} />
         {% elif field.json_item_kind %}
         <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
         {% elif field.json_item_schema %}
@@ -295,7 +488,7 @@ import { JsonModelDetail } from '../../components/ui/json-model-editor';
 {% if model.page_edit %}
 import { useForm, Controller } from 'react-hook-form';
 import { JsonInput } from '../../components/ui/json-input';
-import { JsonModelEditor, JsonModelArrayEditor, JsonModelDictEditor, JsonModelTableEditor, JsonDynamicTableEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
+import { JsonModelEditor, JsonModelArrayEditor, JsonModelTableEditor, JsonScalarArrayEditor, validateJsonModelValue, validateJsonModelCollectionValue } from '../../components/ui/json-model-editor';
 import { ImageUpload } from '../../components/ui/image-upload';
 import { ImagesUpload } from '../../components/ui/images-upload';
 import { LocationInput } from '../../components/ui/location-input';
@@ -683,6 +876,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
       }
       {% endif %}
       {% endfor %}
+      setActiveTab('detail');
       setIsEditing(true);
     };
 
@@ -1139,6 +1333,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     // renderer data-driven lets a model author arrange fields and cards without
     // owning a generated page implementation.
     const detailLayout = {{ model.detail_layout | default([]) | tojson }} as any[];
+    const editLayout = {{ model.edit_layout | default(model.form_layout) | default([]) | tojson }} as any[];
     const hasDetailLayout = detailLayout.length > 0;
     const rowClasses: Record<number, string> = {
         1: 'grid grid-cols-1 gap-4',
@@ -1155,7 +1350,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const renderDetailField = (fieldName: string): React.ReactNode => {
         switch (fieldName) {
             {% for field in model.fields %}
-            {% if field not in model.json_array_fields and field not in model.json_dict_fields and 'r' in field.permissions %}
+            {% if 'r' in field.permissions %}
             case '{{ field.name }}':
                 return ({{ detail_read_field(field) }});
             {% endif %}
@@ -1168,8 +1363,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const renderDetailEditField = (fieldName: string): React.ReactNode => {
         switch (fieldName) {
             {% for field in model.fields %}
-            {% if field not in model.json_array_fields and field not in model.json_dict_fields and ('u' in field.permissions or 'r' in field.permissions) %}
+            {% if ('u' in field.permissions or 'r' in field.permissions) %}
             case '{{ field.name }}':
+                {% if field.visible_when %}
+                if (!({% for controller, values in field.visible_when.items() %}{{ '' if loop.first else ' && ' }}({{ values | tojson }} as any[]).includes(editRootValue?.['{{ controller }}']){% endfor %})) return null;
+                {% endif %}
                 {% if 'u' in field.permissions %}
                 return hasFieldPerm('{{ field.name }}', 'u')
                     ? ({{ detail_edit_field(field) }})
@@ -1207,7 +1405,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             if (!items.length) return null;
             return (
                 <Card key={key} className={spanClasses[node.span] || ''}>
-                    <CardHeader><CardTitle>{node.title}</CardTitle></CardHeader>
+                    <CardHeader><CardTitle>{String(t(node.title, node.title))}</CardTitle></CardHeader>
                     <CardContent className="space-y-4">
                         {items}
                     </CardContent>
@@ -1240,7 +1438,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
                     <ArrowLeft className="h-4 w-4" />
                 </Button>
-                <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')} {t('common.details')}</h1>
+                <h1 className="text-3xl font-bold tracking-tight">{t('models.{{ model.module_name }}.name')} {% if model.page_edit %}{isEditing ? t('common.edit') : t('common.details')}{% else %}{t('common.details')}{% endif %}</h1>
               </div>
 
               <div className="flex min-w-0 flex-wrap items-center justify-end gap-3" data-page-region="page-controls">
@@ -1274,6 +1472,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% if model.actions %}
                 {% for action_name, action_config in model.actions.items() %}
                 {(() => {
+                    {% if model.page_edit %}if (isEditing) return false;{% endif %}
                     const actionPerms = {{ action_config.get("permissions", "da") | tojson }};
                     const roleChar = userRole[0];
                     if (!actionPerms.includes(roleChar)) return false;
@@ -1365,11 +1564,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
               </div>
             </div>
 
-            {% if model.reverse_m2m or model.reverse_foreign_keys or model.json_array_fields or model.json_dict_fields %}
+            {% if model.reverse_m2m or model.reverse_foreign_keys %}
             <div className="flex gap-1 overflow-x-auto border-b" role="tablist" aria-label={t('common.related_information')}>
                 <Button
                     type="button"
                     role="tab"
+                    {% if model.page_edit %}disabled={isEditing}{% endif %}
                     aria-selected={activeTab === 'detail'}
                     variant="ghost"
                     className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'detail' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
@@ -1377,39 +1577,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 >
                     {t('common.details')}
                 </Button>
-                {% for field in model.json_array_fields %}
-                {hasFieldPerm('{{ field.name }}', 'r') && (
-                <Button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'json-array-{{ field.name }}'}
-                    variant="ghost"
-                    className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'json-array-{{ field.name }}' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
-                    onClick={() => setActiveTab('json-array-{{ field.name }}')}
-                >
-                    {t('{{ field.label_key }}')}
-                </Button>
-                )}
-                {% endfor %}
-                {% for field in model.json_dict_fields %}
-                {hasFieldPerm('{{ field.name }}', 'r') && (
-                <Button
-                    type="button"
-                    role="tab"
-                    aria-selected={activeTab === 'json-dict-{{ field.name }}'}
-                    variant="ghost"
-                    className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'json-dict-{{ field.name }}' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
-                    onClick={() => setActiveTab('json-dict-{{ field.name }}')}
-                >
-                    {t('{{ field.label_key }}')}
-                </Button>
-                )}
-                {% endfor %}
                 {% for rel in model.reverse_m2m %}
                 {% if rel.display %}
                 <Button
                     type="button"
                     role="tab"
+                    {% if model.page_edit %}disabled={isEditing}{% endif %}
                     aria-selected={activeTab === 'reverse-m2m-{{ rel.name }}'}
                     variant="ghost"
                     className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'reverse-m2m-{{ rel.name }}' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
@@ -1424,6 +1597,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 <Button
                     type="button"
                     role="tab"
+                    {% if model.page_edit %}disabled={isEditing}{% endif %}
                     aria-selected={activeTab === 'reverse-fk-{{ rfk.name }}'}
                     variant="ghost"
                     className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'reverse-fk-{{ rfk.name }}' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
@@ -1444,452 +1618,12 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% endif %}
                 data-page-region="detail-grid"
             >
-                {activeTab === 'detail' && !hasDetailLayout && (
-                <Card>
-                    <CardHeader>
-                        <CardTitle>{% if model.page_edit %}{isEditing ? t('common.edit') + ' ' : ''}{% endif %}{t('common.basic_information')}</CardTitle>
-                    </CardHeader>
-                    <CardContent className="space-y-4">
-                        {% if model.page_edit %}{isEditing ? (
-                        <form id="detail-edit-form" className="space-y-4">
-                            {% for field in model.fields %}
-                            {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %}{% if field.visible_when %} && ({% for controller, values in field.visible_when.items() %}{{ '' if loop.first else ' && ' }}({{ values | tojson }} as any[]).includes(watchEdit('{{ controller }}')){% endfor %}){% endif %} && (
-                            <div className="space-y-2">
-                                <Label htmlFor="edit-{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.update_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
-                                {% if field.composite_selector %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <SearchableSelect
-                                            value={value}
-                                            onValueChange={onChange}
-                                            disabled={!watchEdit('{{ field.composite_selector.parent_field }}')}
-                                            optionsKey={watchEdit('{{ field.composite_selector.parent_field }}')}
-                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
-                                            searchPlaceholder={`${t('common.search')}...`}
-                                            loadOptions={async (query) => {
-                                                const parentValue = watchEdit('{{ field.composite_selector.parent_field }}');
-                                                if (parentValue === undefined || parentValue === null || parentValue === '') return [];
-                                                const filters = { '{{ field.composite_selector.filter_field }}': parentValue, ...(query ? { '{{ field.composite_selector.label_field }}': query } : {}) };
-                                                const response = await {{ field.name|replace('_', ' ')|title|replace(' ', '') }}CompositeOptionService.get{{ field.composite_selector.target_model }}s(1, 20, filters);
-                                                return response.items.map((item: any) => ({
-                                                    label: item.{{ field.composite_selector.label_field }} ?? item.{{ field.composite_selector.value_field }},
-                                                    value: item.{{ field.composite_selector.value_field }},
-                                                }));
-                                            }}
-                                        />
-                                    )}
-                                />
-                                {% elif field.ui_type == 'bool' %}
-                                <div className="flex h-10 items-center justify-end rounded-md border px-3">
-                                    <Controller
-                                        control={editControl}
-                                        name="{{ field.name }}"
-                                        defaultValue={ {{ 'true' if field.default else 'false' }} }
-                                        render={({ field: { onChange, value } }) => (
-                                            <Switch checked={value} onCheckedChange={onChange} id="edit-{{ field.name }}" />
-                                        )}
-                                    />
-                                </div>
-                                {% elif field.ui_type == 'image' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <ImageUpload value={value} onChange={onChange} />
-                                    )}
-                                />
-                                {% elif field.ui_type == 'images' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <ImagesUpload id="edit-{{ field.name }}" value={Array.isArray(value) ? value : []} onChange={onChange} />
-                                    )}
-                                />
-                                {% elif field.ui_type == 'file' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <FileUpload
-                                            value={value}
-                                            onChange={onChange}
-                                            allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %}
-                                        />
-                                    )}
-                                />
-                                {% elif field.ui_type == 'video_stream' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <VideoStreamInput value={value} onChange={onChange} protocol="{{ field.stream_protocol }}" />
-                                    )}
-                                />
-                                {% elif field.is_enum and field.is_multi_select %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <SearchableSelect
-                                            value={value || []}
-                                            onValueChange={onChange}
-                                            multiple={true}
-                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
-                                            searchPlaceholder={`${t('common.search')}...`}
-                                            {% if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
-                                            valueLabels={Object.fromEntries({{ field.enum_values | tojson }}.map((v: number) => [String(v), {% if field.name == 'weekdays' %}new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { weekday: 'long' }).format(new Date(2024, 0, v + 1)){% else %}`${v}日`{% endif %}]))}
-                                            {% endif %}
-                                            loadOptions={async () => {{ field.enum_values | tojson }}.map((v: {{ 'number' if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] else 'string' }}) => ({
-                                                label: {% if model.module_name == 'schedule' and field.name == 'weekdays' %}new Intl.DateTimeFormat(i18n.resolvedLanguage || i18n.language, { weekday: 'long' }).format(new Date(2024, 0, v + 1)){% elif model.module_name == 'schedule' and field.name == 'month_days' %}`${v}日`{% else %}t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v){% endif %},
-                                                value: v,
-                                            }))}
-                                        />
-                                    )}
-                                />
-                                {% elif field.is_enum %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => {
-                                        {% if model.module_name == "user" and model.name == "User" and field.name == "role" %}
-                                        const filteredValues = userRole === 'developer'
-                                            ? {{ field.enum_values | tojson }}
-                                            : ({{ field.enum_values | tojson }} as string[]).filter(v => v !== 'developer');
-                                        {% else %}
-                                        const filteredValues = {{ field.enum_values | tojson }};
-                                        {% endif %}
-                                        return (
-                                        <Select onValueChange={onChange} defaultValue={value}>
-                                            <SelectTrigger>
-                                                <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
-                                            </SelectTrigger>
-                                            <SelectContent>
-                                                {filteredValues.map((enumVal: string) => (
-                                                    <SelectItem key={enumVal} value={enumVal}>{t(`models.{{ model.module_name }}.enums.{{ field.name }}.${enumVal}`, enumVal)}</SelectItem>
-                                                ))}
-                                            </SelectContent>
-                                        </Select>
-                                        );
-                                    }}
-                                />
-                                {% elif field.ui_type == 'time' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <TimePicker
-                                            value={value}
-                                            onChange={onChange}
-                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
-                                        />
-                                    )}
-                                />
-                                {% elif field.ui_type == 'location' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    defaultValue={null}
-                                    render={({ field: { onChange, value } }) => (
-                                        <LocationInput value={value} onChange={onChange} />
-                                    )}
-                                />
-                                {% elif field.name in writable_override_field_names %}
-                                <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
-                                    {String(currentItem.{{ field.name }} ?? '-')}
-                                </pre>
-                                {% elif field.ui_type == 'json' %}
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    defaultValue={ {% if field.json_kind == 'array' %}[]{% else %}{}{% endif %} }
-                                    rules={ {
-                                        required: {{ 'true' if field.required and not field.update_optional else 'false' }},
-                                        {% if field.json_model_schema %}validate: (value) => validateJsonModelValue({{ field.json_model_schema | tojson }}, value, editRootValue),{% elif field.json_item_schema %}validate: (value) => validateJsonModelCollectionValue({{ field.json_item_schema | tojson }}, value, editRootValue),{% endif %}
-                                    } }
-                                    render={({ field: { onChange, value } }) => (
-                                        {% if field.json_model_schema %}
-                                        <JsonModelEditor
-                                            schema={ {{ field.json_model_schema | tojson }} }
-                                            value={value}
-                                            onChange={onChange}
-                                            rootValue={editRootValue}
-                                        />
-                                        {% elif field.json_item_schema and field.get('type', '').startswith('Dict[str,') %}
-                                        <JsonModelDictEditor
-                                            itemSchema={ {{ field.json_item_schema | tojson }} }
-                                            value={value}
-                                            onChange={onChange}
-                                            rootValue={editRootValue}
-                                            {% if field.json_fixed_keys %}
-                                            fixedKeys={ {{ field.json_fixed_keys | tojson }} }
-                                            {% endif %}
-                                            {% if field.json_lock_keys %}
-                                            lockKeys
-                                            {% endif %}
-                                        />
-                                        {% elif field.json_item_kind %}
-                                        <JsonScalarArrayEditor itemKind="{{ field.json_item_kind }}" value={value} onChange={onChange} />
-                                        {% elif field.json_item_schema %}
-                                        <JsonModelArrayEditor
-                                            itemSchema={ {{ field.json_item_schema | tojson }} }
-                                            value={value}
-                                            onChange={onChange}
-                                            rootValue={editRootValue}
-                                            {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
-                                            canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
-                                            canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
-                                            {% endif %}
-                                        />
-                                        {% else %}
-                                        <JsonInput
-                                            value={value}
-                                            onChange={onChange}
-                                            jsonKind="{{ field.json_kind or 'object' }}"
-                                            placeholder={ {% if field.json_kind == 'array' %}"[\\n  \\n]"{% else %}"{\\n  \\n}"{% endif %} }
-                                        />
-                                        {% endif %}
-                                    )}
-                                />
-                                {% else %}
-                                <Input
-                                    id="edit-{{ field.name }}"
-                                    {% if field.ui_type == 'int' or field.ui_type == 'float' %}
-                                    type="number"
-                                    {% if field.minimum is not none %}min={ {{ field.minimum }} }{% endif %}
-                                    {% if field.maximum is not none %}max={ {{ field.maximum }} }{% endif %}
-                                    {% elif field.ui_type == 'datetime' %}
-                                    type="datetime-local"
-                                    {% elif field.ui_type == 'date' %}
-                                    type="date"
-                                    {% else %}
-                                    type="text"
-                                    {% endif %}
-                                    {...register('{{ field.name }}', {
-                                        required: {{ 'true' if field.required and not field.update_optional else 'false' }},
-                                        {% if field.minimum is not none %}min: {{ field.minimum }},{% endif %}
-                                        {% if field.maximum is not none %}max: {{ field.maximum }},{% endif %}
-                                    })}
-                                />
-                                {% endif %}
-                            </div>
-                            )}{% endif %}
-                            {% endfor %}
-                            {% for field in model.fields %}
-                            {% if field.fk_info and 'u' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'u') && (
-                            <div className="space-y-2">
-                                <Label>{t('{{ field.label_key }}')}</Label>
-                                <Controller
-                                    control={editControl}
-                                    name="{{ field.name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        <SearchableSelect
-                                            value={value}
-                                            onValueChange={(nextValue) => {
-                                                onChange(nextValue);
-                                                {% for cascade_fk in model.foreign_keys %}
-                                                {% if cascade_fk.cascade_parent_field == field.name %}
-                                                setEditValue('{{ cascade_fk.name }}', '');
-                                                {% endif %}
-                                                {% endfor %}
-                                                {% for dependent_field in model.fields %}
-                                                {% if dependent_field.composite_selector and dependent_field.composite_selector.parent_field == field.name %}
-                                                setEditValue('{{ dependent_field.name }}', '');
-                                                {% endif %}
-                                                {% endfor %}
-                                            }}
-                                            placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`}
-                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ field.fk_info.target_service }}.name')}...`}
-                                            valueLabels={ edit{{ field.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
-                                            {% if field.fk_info.cascade_parent_field %}
-                                            disabled={!watchEdit('{{ field.fk_info.cascade_parent_field }}')}
-                                            optionsKey={watchEdit('{{ field.fk_info.cascade_parent_field }}')}
-                                            {% endif %}
-                                            loadOptions={async (query) => {
-                                                {% if field.fk_info.cascade_parent_field %}
-                                                const parentId = watchEdit('{{ field.fk_info.cascade_parent_field }}');
-                                                if (parentId === undefined || parentId === null || parentId === '') return [];
-                                                const filters = { '{{ field.fk_info.cascade_filter_field }}': parentId, ...(query ? { {{ field.fk_info.label_field }}: query } : {}) };
-                                                {% else %}
-                                                const filters = query ? { {{ field.fk_info.label_field }}: query } : undefined;
-                                                {% endif %}
-                                                const response = await get{{ field.fk_info.target_model }}s(1, 20, filters);
-                                                return response.items.map((item: any) => ({
-                                                    label: item.{{ field.fk_info.label_field }} || item.id,
-                                                    value: item.id
-                                                }));
-                                            }}
-                                        />
-                                    )}
-                                />
-                            </div>
-                            )}{% endif %}
-                            {% endfor %}
-                            {% for m2m in model.m2m_fields %}
-                            <div className="space-y-2">
-                                <Label>{t('models.{{ m2m.target_service }}.plural')}</Label>
-                                <Controller
-                                    control={editControl}
-                                    name="{{ m2m.write_name }}"
-                                    render={({ field: { onChange, value } }) => (
-                                        {% if m2m.editor == 'inline' %}
-                                        <JsonModelArrayEditor
-                                            itemSchema={ {{ m2m.inline_schema | tojson }} }
-                                            value={value}
-                                            onChange={onChange}
-                                            showJsonMode={false}
-                                            foreignKeyLoaders={{ '{{' }}
-                                                {% for field in m2m.inline_schema.fields %}
-                                                {% if field.foreignKey %}
-                                                '{{ field.name }}': async (query) => {
-                                                    const filters = query ? { {{ field.foreignKey.labelField }}: query } : undefined;
-                                                    const response = await {{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}{{ field.name|replace('_', ' ')|title|replace(' ', '') }}InlineFieldService.get{{ field.foreignKey.targetModel }}s(1, 20, filters);
-                                                    return response.items.map((item: any) => ({ label: item.{{ field.foreignKey.labelField }} || item.id, value: item.id }));
-                                                },
-                                                {% endif %}
-                                                {% endfor %}
-                                            {{ '}}' }}
-                                        />
-                                        {% elif m2m.order_field %}
-                                        <LinkTableOrderedSelect
-                                            value={value}
-                                            onValueChange={onChange}
-                                            placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
-                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
-                                            valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
-                                            loadOptions={async (query) => {
-                                                const filters = query ? { {{ m2m.label_field }}: query } : undefined;
-                                                const response = await get{{ m2m.target_model }}s(1, 20, filters);
-                                                return response.items.map((item: any) => ({ label: item.{{ m2m.label_field }} || item.id, value: item.id }));
-                                            }}
-                                        />
-                                        {% else %}
-                                        <SearchableSelect
-                                            value={value}
-                                            onValueChange={onChange}
-                                            multiple={true}
-                                            placeholder={`${t('common.select')} ${t('models.{{ m2m.target_service }}.plural')}`}
-                                            searchPlaceholder={`${t('common.search')} ${t('models.{{ m2m.target_service }}.name')}...`}
-                                            valueLabels={ edit{{ m2m.name|replace('_', ' ')|title|replace(' ', '') }}ValueLabels }
-                                            loadOptions={async (query) => {
-                                                const filters = query ? { {{ m2m.label_field }}: query } : undefined;
-                                                const response = await get{{ m2m.target_model }}s(1, 20, filters);
-                                                return response.items.map((item: any) => ({ label: item.{{ m2m.label_field }} || item.id, value: item.id }));
-                                            }}
-                                        />
-                                        {% endif %}
-                                    )}
-                                />
-                            </div>
-                            {% endfor %}
-                        </form>
-                        ) : ({% endif %}
-                        {% if model.page_edit %}<>{% endif %}
-                        {% for field in model.fields %}
-                        {% if not field.fk_info and field not in model.json_array_fields and field not in model.json_dict_fields and 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
-                        <div className="space-y-1">
-                            <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
-                            <div className="font-medium">
-                                {% if field.ui_type == 'bool' %}
-                                <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
-                                    {currentItem.{{ field.name }} ? 'Yes' : 'No'}
-                                </Badge>
-                                {% elif field.is_enum and field.is_multi_select %}
-                                <div className="flex flex-wrap gap-1">
-                                {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.map((v: string) => (
-                                    <Badge key={v} variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v))}</Badge>
-                                ))}
-                                </div>
-                                {% elif field.is_enum %}
-                                {currentItem.{{ field.name }} != null ? (
-                                    <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${currentItem.{{ field.name }}}`, currentItem.{{ field.name }}))}</Badge>
-                                ) : '-'}
-                                {% elif field.ui_type == 'image' %}
-                                {currentItem.{{ field.name }} ? (
-                                    <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
-                                        <img
-                                            src={currentItem.{{ field.name }}}
-                                            alt="{{ field.name }}"
-                                            className="h-full w-full object-cover"
-                                        />
-                                    </div>
-                                ) : (
-                                    <span className="text-muted-foreground italic">No image</span>
-                                )}
-                                {% elif field.ui_type == 'images' %}
-                                {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.length ? (
-                                    <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-                                        {currentItem.{{ field.name }}.map((url: string, index: number) => (
-                                            <div key={`${url}-${index}`} className="aspect-video overflow-hidden rounded-lg border bg-muted">
-                                                <img src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <span className="text-muted-foreground italic">No images</span>
-                                )}
-                                {% elif field.ui_type == 'file' %}
-                                {currentItem.{{ field.name }} ? (
-                                    <FileUpload
-                                        value={currentItem.{{ field.name }}}
-                                        onChange={() => {}}
-                                        readOnly={true}
-                                        allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %}
-                                    />
-                                ) : (
-                                    <span className="text-muted-foreground italic">No file</span>
-                                )}
-                                {% elif field.ui_type == 'video_stream' %}
-                                {currentItem.{{ field.name }} ? (
-                                    <VideoStreamPlayer
-                                        src={currentItem.{{ field.name }}}
-                                        protocol="{{ field.stream_protocol }}"
-                                        autoPlay={ {{ "true" if field.stream_autoplay else "false" }} }
-                                        muted={ {{ "true" if field.stream_muted else "false" }} }
-                                        controls={ {{ "true" if field.stream_controls else "false" }} }
-                                        reconnect={ {{ "true" if field.stream_reconnect else "false" }} }
-                                        className="max-w-3xl"
-                                    />
-                                ) : (
-                                    <span className="text-muted-foreground italic">{t('video_stream.empty')}</span>
-                                )}
-                                {% elif field.ui_type == 'location' %}
-                                <span className="text-muted-foreground">
-                                    {currentItem.{{ field.name }}?.latitude != null && currentItem.{{ field.name }}?.longitude != null
-                                      ? `${currentItem.{{ field.name }}.latitude}, ${currentItem.{{ field.name }}.longitude}`
-                                      : '-'}
-                                </span>
-                                {% elif field.ui_type == 'json' %}
-                                <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
-                                    {currentItem.{{ field.name }} !== undefined && currentItem.{{ field.name }} !== null
-                                      ? JSON.stringify(currentItem.{{ field.name }}, null, 2)
-                                      : '-'}
-                                </pre>
-                                {% elif field.ui_type == 'datetime' %}
-                                <span className="text-muted-foreground">{formatDateTime(currentItem.{{ field.name }}, timeZone)}</span>
-                                {% elif field.ui_type == 'time' %}
-                                <span className="text-muted-foreground">{formatTime(currentItem.{{ field.name }})}</span>
-                                {% else %}
-                                <span className="block max-w-[250px] truncate" title={String(currentItem.{{ field.name }} ?? '-')}>
-                                {String(currentItem.{{ field.name }} ?? '-')}
-                                </span>
-                                {% endif %}
-                            </div>
-                        </div>
-                        )}{% endif %}
-                        {% endfor %}
-                        {% if model.page_edit %}</>)}{% endif %}
-                    </CardContent>
-                </Card>
-                )}
-
                 {activeTab === 'detail' && hasDetailLayout && (
                     {% if model.page_edit %}
                     isEditing ? (
                         <form id="detail-edit-form" className="space-y-4">
-                            {detailLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`, true))}
+                            {editLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`, true))}
+                            {{ detail_m2m_editors() }}
                         </form>
                     ) : (
                         <>{detailLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`))}</>
@@ -1926,7 +1660,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% endif %}
 
                 {% if model.foreign_keys %}
-                {activeTab === 'detail' && (
+                {activeTab === 'detail' {% if model.page_edit %}&& !isEditing {% endif %}&& (
                 <Card>
                     <CardHeader>
                         <CardTitle>{t('common.related_information')}</CardTitle>
@@ -1984,214 +1718,13 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 )}
                 {% endif %}
 
-                {% for field in model.json_array_fields %}
-                {hasFieldPerm('{{ field.name }}', 'r') && activeTab === 'json-array-{{ field.name }}' && (
-                <Card className="col-span-full">
-                    <CardHeader>
-                        <CardTitle>{t('{{ field.label_key }}')}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        {% if field.name in override_field_names %}
-                        {% if model.page_edit and 'u' in field.permissions %}
-                        {isEditing ? (
-                            {{ detail_edit_field(field) }}
-                        ) : (
-                        {% endif %}
-                        <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-3 font-mono text-sm">
-                            {String(currentItem.{{ field.name }} ?? '-')}
-                        </pre>
-                        {% if model.page_edit and 'u' in field.permissions %}
-                        )}
-                        {% endif %}
-                        {% else %}
-                        {% if model.page_edit and 'u' in field.permissions %}{isEditing && hasFieldPerm('{{ field.name }}', 'u') ? (
-                        <Controller
-                            control={editControl}
-                            name="{{ field.name }}"
-                            defaultValue={[]}
-                            render={({ field: { onChange, value } }) => (
-                                {% if field.json_item_schema %}
-                                    <JsonModelTableEditor
-                                        collectionKind="array"
-                                        itemSchema={ {{ field.json_item_schema | tojson }} }
-                                        value={value}
-                                        onChange={onChange}
-                                        rootValue={editRootValue}
-                                        {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
-                                        canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
-                                        canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
-                                        {% endif %}
-                                    />
-                                {% else %}
-                                    <JsonDynamicTableEditor collectionKind="array" value={value} onChange={onChange} />
-                                {% endif %}
-                            )}
-                        />
-                        ) : ({% endif %}
-                        <div className="overflow-x-auto rounded-md border">
-                            {% if field.json_item_schema and field.json_item_schema.fields %}
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        {% for item_field in field.json_item_schema.fields %}
-                                        <TableHead>{t('{{ item_field.labelKey or item_field.name }}')}</TableHead>
-                                        {% endfor %}
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.length > 0 ? (
-                                        currentItem.{{ field.name }}.map((item: any, index: number) => (
-                                            <TableRow key={index}>
-                                                {% for item_field in field.json_item_schema.fields %}
-                                                <TableCell>
-                                                    {% if item_field.kind == 'bool' %}
-                                                    {item?.{{ item_field.name }} == null ? '-' : (item.{{ item_field.name }} ? t('common.yes') : t('common.no'))}
-                                                    {% elif item_field.kind == 'datetime' %}
-                                                    {item?.{{ item_field.name }} ? formatDateTime(item.{{ item_field.name }}, timeZone) : '-'}
-                                                    {% else %}
-                                                    {typeof item?.{{ item_field.name }} === 'object' ? JSON.stringify(item.{{ item_field.name }}) : String(item?.{{ item_field.name }} ?? '-')}
-                                                    {% endif %}
-                                                </TableCell>
-                                                {% endfor %}
-                                            </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={ {{ field.json_item_schema.fields | length }} } className="h-24 text-center">
-                                                {t('common.no_result')}
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                            {% else %}
-                            {(() => {
-                                const items = Array.isArray(currentItem.{{ field.name }}) ? currentItem.{{ field.name }} : [];
-                                const columns = Array.from(new Set(items.flatMap((item: unknown) =>
-                                    item !== null && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item) : []
-                                )));
-                                return (
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>{columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {items.length > 0 ? items.map((item: any, index: number) => (
-                                                <TableRow key={index}>
-                                                    {columns.map((column) => (
-                                                        <TableCell key={column}>
-                                                            {typeof item?.[column] === 'object' ? JSON.stringify(item[column]) : String(item?.[column] ?? '-')}
-                                                        </TableCell>
-                                                    ))}
-                                                </TableRow>
-                                            )) : (
-                                                <TableRow><TableCell colSpan={Math.max(columns.length, 1)} className="h-24 text-center">{t('common.no_result')}</TableCell></TableRow>
-                                            )}
-                                        </TableBody>
-                                    </Table>
-                                );
-                            })()}
-                            {% endif %}
-                        </div>
-                        {% if model.page_edit and 'u' in field.permissions %})}{% endif %}
-                        {% endif %}
-                    </CardContent>
-                </Card>
-                )}
-                {% endfor %}
 
-                {% for field in model.json_dict_fields %}
-                {hasFieldPerm('{{ field.name }}', 'r') && activeTab === 'json-dict-{{ field.name }}' && (
-                <Card className="col-span-full">
-                    <CardHeader>
-                        <CardTitle>{t('{{ field.label_key }}')}</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                        {% if model.page_edit and 'u' in field.permissions %}{isEditing && hasFieldPerm('{{ field.name }}', 'u') ? (
-                        <Controller
-                            control={editControl}
-                            name="{{ field.name }}"
-                            defaultValue={ {} }
-                            render={({ field: { onChange, value } }) => (
-                                {% if field.json_item_schema %}
-                                    <JsonModelTableEditor
-                                        collectionKind="dict"
-                                        itemSchema={ {{ field.json_item_schema | tojson }} }
-                                        value={value}
-                                        onChange={onChange}
-                                        rootValue={editRootValue}
-                                        {% if field.json_fixed_keys %}
-                                        fixedKeys={ {{ field.json_fixed_keys | tojson }} }
-                                        {% endif %}
-                                        {% if field.json_lock_keys %}
-                                        lockKeys
-                                        {% endif %}
-                                        {% if model.definition_binding_meta and field.name == model.definition_binding_meta.config_field %}
-                                        canAdd={ {{ 'true' if model.definition_binding_meta.key_policy == 'free' else 'false' }} }
-                                        canRemove={ {{ 'false' if model.definition_binding_meta.key_policy == 'definition' else 'true' }} }
-                                        {% endif %}
-                                    />
-                                {% else %}
-                                    <JsonDynamicTableEditor collectionKind="dict" value={value} onChange={onChange} />
-                                {% endif %}
-                            )}
-                        />
-                        ) : ({% endif %}
-                        <div className="overflow-x-auto rounded-md border">
-                            <Table>
-                                <TableHeader>
-                                    <TableRow>
-                                        <TableHead>{t('json_editor.key')}</TableHead>
-                                        {% if field.json_item_schema and field.json_item_schema.fields %}
-                                        {% for item_field in field.json_item_schema.fields %}
-                                        <TableHead>{t('{{ item_field.labelKey or item_field.name }}')}</TableHead>
-                                        {% endfor %}
-                                        {% else %}
-                                        <TableHead>{t('json_editor.object')}</TableHead>
-                                        {% endif %}
-                                    </TableRow>
-                                </TableHeader>
-                                <TableBody>
-                                    {currentItem.{{ field.name }} && typeof currentItem.{{ field.name }} === 'object' && !Array.isArray(currentItem.{{ field.name }}) && Object.keys(currentItem.{{ field.name }}).length > 0 ? (
-                                        Object.entries(currentItem.{{ field.name }} as Record<string, any>).map(([key, item]) => (
-                                            <TableRow key={key}>
-                                                <TableCell className="font-medium">{key}</TableCell>
-                                                {% if field.json_item_schema and field.json_item_schema.fields %}
-                                                {% for item_field in field.json_item_schema.fields %}
-                                                <TableCell>
-                                                    {% if item_field.kind == 'bool' %}
-                                                    {item?.{{ item_field.name }} == null ? '-' : (item.{{ item_field.name }} ? t('common.yes') : t('common.no'))}
-                                                    {% elif item_field.kind == 'datetime' %}
-                                                    {item?.{{ item_field.name }} ? formatDateTime(item.{{ item_field.name }}, timeZone) : '-'}
-                                                    {% else %}
-                                                    {typeof item?.{{ item_field.name }} === 'object' ? JSON.stringify(item.{{ item_field.name }}) : String(item?.{{ item_field.name }} ?? '-')}
-                                                    {% endif %}
-                                                </TableCell>
-                                                {% endfor %}
-                                                {% else %}
-                                                <TableCell>{typeof item === 'object' ? JSON.stringify(item) : String(item ?? '-')}</TableCell>
-                                                {% endif %}
-                                            </TableRow>
-                                        ))
-                                    ) : (
-                                        <TableRow>
-                                            <TableCell colSpan={ {{ (field.json_item_schema.fields | length + 1) if field.json_item_schema and field.json_item_schema.fields else 2 }} } className="h-24 text-center">
-                                                {t('common.no_result')}
-                                            </TableCell>
-                                        </TableRow>
-                                    )}
-                                </TableBody>
-                            </Table>
-                        </div>
-                        {% if model.page_edit and 'u' in field.permissions %})}{% endif %}
-                    </CardContent>
-                </Card>
-                )}
-                {% endfor %}
+
+
 
                 {% if model.m2m_fields %}
                 {% for m2m in model.m2m_fields %}
-                {activeTab === 'detail' && (
+                {activeTab === 'detail' {% if model.page_edit %}&& !isEditing {% endif %}&& (
                 <Card className="col-span-full">
                     <CardHeader>
                         <CardTitle>{t('models.{{ m2m.target_service }}.plural')}</CardTitle>

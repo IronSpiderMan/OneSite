@@ -838,7 +838,8 @@ class Product(SQLModel, table=True):
 | `multi_display` | Adds a selectable multi-item media view alongside the normal collection layout. |
 | `network_device` | Probes a URL field during Read responses and adds an online-status field. |
 | `actions` | Adds permission-controlled custom action buttons. |
-| `ui.detail.layout` | Shared layout for detail views and create/edit fields. |
+| `ui.form.layout` | Shared create/edit field grouping for modal, drawer and page forms; also supplies the detail layout when no detail override is set. |
+| `ui.detail.layout` | Read-only layout override; also supplies the form layout when no form override is set. |
 | `importable` / `exportable` | Enables CSV import/export flows. |
 | `import_key` | Field used for import upsert matching. |
 
@@ -958,6 +959,22 @@ class VendorDevice(SQLModel, table=True):
 
 ### Detail page layout
 
+Choose the form container with `edit_mode`: `modal` (default), `drawer`, or
+`page`. This choice applies to both creation and editing and does not change
+field grouping. `inplace_edit` retains its table-row editing behavior.
+
+Use `ui.form.layout` as the shared create/edit layout. When `ui.detail` is
+omitted, the read-only view inherits these sections and appends readable
+fields such as timestamps. You can still configure `ui.detail.layout`
+separately. Creation omits fields without `c`, editing omits fields without
+`u`, and empty sections are removed. Related selectors remain available in
+both creation and editing. During full-page editing, related tabs and
+independent model actions are disabled or hidden until save/cancel.
+
+Section titles can be literal text or translation keys. Layouts never
+select the editing container automatically; existing model choices remain
+in effect.
+
 Use `ui.detail.layout` to arrange both the read-only detail view and generated
 create/edit fields. A string is a field, an array is a horizontal row, and an
 object with `section`, `title` and `items` is a titled card. Sections can share
@@ -997,7 +1014,10 @@ __onesite__ = {
 Configured fields must be readable fields and may appear once. Fields
 omitted from the layout are appended after the configured content in model
 declaration order, so a layout cannot accidentally hide data. FK relationship
-cards and JSON collection tabs keep their existing detail-page treatment.
+cards retain their detail-page treatment. JSON arrays and dictionaries are
+rendered inline in the configured sections, using structured editors for
+creation and editing and tables for read-only collections. Only related
+records get separate tabs.
 
 Writable fields that do not belong in a read-only detail view are appended to
 the generated editor. JSON submodels use the same `detail.layout` declaration

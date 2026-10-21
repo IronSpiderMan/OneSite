@@ -136,7 +136,7 @@ const Create{{ model.name }}Page: React.FC = () => {
             {submitting ? (
               <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.saving', 'Saving...')}</>
             ) : (
-              <><Save className="mr-2 h-4 w-4" /> {t('common.save')}</>
+              <><Save className="mr-2 h-4 w-4" /> {t('common.create')}</>
             )}
           </Button>
         </div>
@@ -163,7 +163,7 @@ const Create{{ model.name }}Page: React.FC = () => {
               <Input id="{{ field.name }}" type="text" {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.create_optional else 'false' }} })} />
               {% endif %}
               {% elif field.ui_type == 'bool' %}
-              <div className="flex items-center space-x-2">
+              <div className="flex h-10 items-center justify-end rounded-md border px-3">
                 <Controller
                   control={control}
                   name="{{ field.name }}"
@@ -172,9 +172,6 @@ const Create{{ model.name }}Page: React.FC = () => {
                     <Switch checked={value} onCheckedChange={onChange} id="{{ field.name }}" />
                   )}
                 />
-                <Label htmlFor="{{ field.name }}" className="font-normal text-muted-foreground">
-                  {t('{{ field.label_key }}')}
-                </Label>
               </div>
               {% elif field.ui_type == 'image' %}
               <Controller
@@ -515,7 +512,7 @@ const Create{{ model.name }}Page: React.FC = () => {
                   if (!items.length) return null;
                   return (
                     <Card key={key} className={spanClasses[node.span] || ''}>
-                      <CardHeader><CardTitle>{node.title}</CardTitle></CardHeader>
+                      <CardHeader><CardTitle>{String(t(node.title, node.title))}</CardTitle></CardHeader>
                       <CardContent className="space-y-4">{items}</CardContent>
                     </Card>
                   );

@@ -118,7 +118,7 @@ def test_detail_layout_is_emitted_into_the_generated_page():
     assert 'const hasDetailLayout = detailLayout.length > 0;' in rendered
     assert '"title": "Basic information"' in rendered
     assert "renderDetailLayoutNode" in rendered
-    assert "activeTab === 'detail' && !hasDetailLayout" in rendered
+    assert "activeTab === 'detail' && hasDetailLayout" in rendered
     assert "const renderDetailEditField" in rendered
     assert "renderDetailLayoutNode(node, `detail-layout-${index}`, true)" in rendered
     assert "detail_read_field" not in rendered
@@ -157,7 +157,7 @@ def test_page_edit_layout_includes_editable_foreign_keys():
     ).render(model=model)
 
     assert model.detail_layout[0]["items"][1]["field"] == "target_id"
-    assert 'const formLayout = ' not in rendered
+    assert 'const editLayout = ' in rendered
     assert "case 'target_id':" in rendered
     assert 'name="target_id"' in rendered
     assert "getTestLayoutForeignTargets(1, 20, filters)" in rendered
@@ -206,3 +206,44 @@ def test_detail_layout_rejects_unknown_or_duplicate_fields():
             _model()
     finally:
         LayoutRecord.__onesite__["ui"]["detail"]["layout"] = original
+
+
+def test_form_only_layout_drives_detail_and_both_editing_containers():
+    original = LayoutRecord.__onesite__
+    try:
+        LayoutRecord.__onesite__ = {
+            "page_edit": True,
+            "ui": {"form": {"layout": [{
+                "section": "settings", "title": "Settings",
+                "items": [["title", "endpoint"], "is_enabled"],
+            }]}},
+        }
+        model = _model()
+        assert model.detail_layout[0]["items"][0]["section"] == "settings"
+        assert model.create_layout[0] == model.edit_layout[0]
+        env = Environment(loader=FileSystemLoader(
+            Path(__file__).parents[1] / "src/onesite/templates/codegen"
+        ))
+        page = env.get_template("frontend_page_detail.tsx.j2").render(model=model)
+        assert "editLayout.map((node, index)" in page
+        assert "disabled={isEditing}" not in page  # no related tabs on this model
+        model.page_edit = False
+        model.edit_mode = "modal"
+        modal = env.get_template("frontend_page_list.tsx.j2").render(model=model)
+        assert 'const formLayout = (editingId' in modal
+        assert '"title": "Settings"' in modal
+    finally:
+        LayoutRecord.__onesite__ = original
+
+
+def test_edit_layout_excludes_create_only_fields_without_grid_gaps():
+    from onesite.codegen.phases.introspect_models import _form_layout_from_detail_layout
+
+    layout = [{"kind": "row", "columns": 2, "items": [
+        {"kind": "field", "field": "password", "span": 1},
+        {"kind": "field", "field": "title", "span": 1},
+    ]}]
+    assert _form_layout_from_detail_layout(layout, ["title"]) == [{
+        "kind": "row", "columns": 1,
+        "items": [{"kind": "field", "field": "title", "span": 1}],
+    }]
