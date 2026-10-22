@@ -1215,7 +1215,6 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {% endif %}
           <div className="flex items-center gap-2">
             {% if ns.search_field_count > 1 %}
-            <Button variant="outline" size="sm" type="button" onClick={() => setSearchValues({})}>{t('common.clear', 'Clear')}</Button>
             <Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button>
             {% endif %}
             {embedded && hasPermission('c') && (
@@ -1241,7 +1240,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         </div>
         {% endif %}
         {% if ns.search_field_count <= 1 %}
-        <div className="mb-2 flex gap-2"><Button variant="outline" size="sm" onClick={() => setSearchValues({})}>{t('common.clear', 'Clear')}</Button><Button variant="outline" size="sm" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button></div>
+        <div className="mb-2 flex gap-2"><Button variant="outline" size="sm" type="button" onClick={resetSearch}>{t('common.reset', 'Reset')}</Button></div>
         <div className={embedded ? 'flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between' : ''}>
           <div className={embedded ? 'min-w-0 flex-1 sm:max-w-sm' : ''}>
         {% endif %}
