@@ -448,7 +448,7 @@ async def read_{{ model.lower_name }}s(
     sort_by: Optional[str] = None,
     sort_order: Literal["asc", "desc"] = "asc",
     {% for field in model.fields %}
-    {% if field.is_search_field %}
+    {% if (field.is_search_field or field.is_selector_filter) %}
     {% if field.ui_type == 'bool' %}
     {{ field.name }}: Optional[bool] = Query(None, description="Filter by {{ field.name }}"),
     {% elif field.ui_type in ['datetime', 'date'] %}
@@ -508,7 +508,7 @@ async def read_{{ model.lower_name }}s(
         sort_by=sort_by,
         sort_order=sort_order,
         {% for field in model.fields %}
-        {% if field.is_search_field %}
+        {% if (field.is_search_field or field.is_selector_filter) %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}={{ field.name }},
         {% elif field.ui_type in ['datetime', 'date'] %}

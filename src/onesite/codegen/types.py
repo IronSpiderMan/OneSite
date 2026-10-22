@@ -92,6 +92,8 @@ class FieldDefinition:
     enum_translations: dict = field(default_factory=dict)
     filter_default: Any = None
     is_search_field: bool = False
+    # Backend filtering for relationship selectors, independent of list filters.
+    is_selector_filter: bool = False
     fk_info: ForeignKeyInfo | None = None
     # Resolved UI selector for the non-id component of a two-column composite
     # FK, e.g. (a_id, b_name) -> (b.a_id, b.name).

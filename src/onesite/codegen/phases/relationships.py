@@ -1415,6 +1415,18 @@ def phase_resolve_relationships(
     _resolve_fk_labels_and_reverse(models, model_map)
     _resolve_tree_view_leaves(models)
     _resolve_m2m(models, model_map, module_map)
+    # Selectors search by their displayed label, which need not be a list-page
+    # search field. Accept that filter through every backend layer as well.
+    for model in models:
+        label_name = _model_label_field(model)
+        for field in model["fields"]:
+            field["is_selector_filter"] = bool(
+                field.name == label_name
+                and field.ui_type == "str"
+                and not field.is_enum
+                and not field.fk_info
+                and "r" in field.permissions
+            )
     _resolve_import_export_config(models, model_map)
 
     for model in models:

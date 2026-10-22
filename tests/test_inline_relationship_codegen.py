@@ -322,6 +322,40 @@ def test_searchable_foreign_key_is_supported_through_backend_layers():
     assert "InlineB.inline_a_id == inline_a_id" in crud
 
 
+def test_selector_label_search_is_filtered_without_enabling_list_search():
+    from sqlalchemy import select
+    from sqlmodel import Session, col, create_engine
+
+    models = _models()
+    target = models["InlineC"]
+    label = next(field for field in target.fields if field.name == "label")
+    label.is_search_field = False
+    phase_resolve_relationships(list(models.values()))
+    assert label.is_selector_filter
+    assert not label.is_search_field
+
+    for template_name in ("api.py.j2", "service.py.j2", "crud.py.j2"):
+        rendered = _template(template_name).render(model=target)
+        tree = ast.parse(rendered)
+        assert "label: Optional[str]" in rendered
+        if template_name != "crud.py.j2":
+            assert "label=label" in rendered
+            continue
+
+        apply_filters = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "_apply_filters")
+        namespace = {"InlineC": InlineC, "Optional": Optional, "col": col}
+        exec(compile(ast.Module(body=[apply_filters], type_ignores=[]), "<filters>", "exec"), namespace)
+        engine = create_engine("sqlite://")
+        InlineC.__table__.create(engine)
+        with Session(engine) as session:
+            session.add_all([InlineC(label="device0000"), InlineC(label="device0525")])
+            session.commit()
+            statement = namespace["_apply_filters"](select(InlineC), label="DEVICE0000")
+            assert [item.label for item in session.execute(statement).scalars()] == ["device0000"]
+            statement = namespace["_apply_filters"](select(InlineC), label="missing")
+            assert list(session.execute(statement).scalars()) == []
+
+
 def test_non_standalone_model_keeps_service_but_skips_pages(monkeypatch, tmp_path):
     b = _models()["InlineB"]
     generated_templates = []

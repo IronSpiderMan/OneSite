@@ -194,7 +194,7 @@ class {{ model.name }}Service:
         sort_by: Optional[str] = None,
         sort_order: str = "asc",
         {% for field in model.fields %}
-        {% if field.is_search_field %}
+        {% if (field.is_search_field or field.is_selector_filter) %}
         {% if field.ui_type == 'bool' %}
         {{ field.name }}: Optional[bool] = None,
         {% elif field.ui_type in ['datetime', 'date'] %}
@@ -232,7 +232,7 @@ class {{ model.name }}Service:
         total = await crud.count(
             session,
             {% for field in model.fields %}
-            {% if field.is_search_field %}
+            {% if (field.is_search_field or field.is_selector_filter) %}
             {% if field.ui_type == 'bool' %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type in ['datetime', 'date'] %}
@@ -267,7 +267,7 @@ class {{ model.name }}Service:
             sort_by=sort_by,
             sort_order=sort_order,
             {% for field in model.fields %}
-            {% if field.is_search_field %}
+            {% if (field.is_search_field or field.is_selector_filter) %}
             {% if field.ui_type == 'bool' %}
             {{ field.name }}={{ field.name }},
             {% elif field.ui_type in ['datetime', 'date'] %}
@@ -836,7 +836,7 @@ class {{ model.name }}Service:
             for key, value in (filters or {}).items()
             if key in {
                 {% for field in model.fields %}
-                {% if field.is_search_field %}
+                {% if (field.is_search_field or field.is_selector_filter) %}
                 {% if field.ui_type in ['datetime', 'date'] %}"{{ field.name }}_from", "{{ field.name }}_to",
                 {% else %}"{{ field.name }}",
                 {% endif %}
@@ -852,13 +852,13 @@ class {{ model.name }}Service:
             }
         }
         {% for field in model.fields %}
-        {% if field.is_search_field and field.ui_type in ['datetime', 'date'] %}
+        {% if (field.is_search_field or field.is_selector_filter) and field.ui_type in ['datetime', 'date'] %}
         for filter_name in ("{{ field.name }}_from", "{{ field.name }}_to"):
             value = export_filters.get(filter_name)
             if isinstance(value, str) and value:
                 export_filters[filter_name] = {{ "date" if field.ui_type == "date" else "datetime" }}.fromisoformat(value.replace("Z", "+00:00"))
         {% endif %}
-        {% if field.is_search_field and field.ui_type == 'time' %}
+        {% if (field.is_search_field or field.is_selector_filter) and field.ui_type == 'time' %}
         value = export_filters.get("{{ field.name }}")
         if isinstance(value, str) and value:
             export_filters["{{ field.name }}"] = time.fromisoformat(value)

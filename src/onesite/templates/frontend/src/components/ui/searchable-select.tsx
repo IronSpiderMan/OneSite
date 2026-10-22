@@ -9,6 +9,7 @@ import {
   CommandGroup,
   CommandInput,
   CommandItem,
+  CommandList,
 } from "./command"
 import {
   Popover,
@@ -68,7 +69,7 @@ export function SearchableSelect({
   
   // Initial load or when opened
   React.useEffect(() => {
-    if (open && options.length === 0) {
+    if (open) {
       handleSearch("")
     }
   }, [open])
@@ -77,6 +78,7 @@ export function SearchableSelect({
   const handleSearch = async (query: string) => {
     const current = ++requestId.current
     setLoading(true)
+    setOptions([])
     await new Promise(resolve => setTimeout(resolve, debounceMs))
     if (current !== requestId.current) return
     try {
@@ -207,16 +209,23 @@ export function SearchableSelect({
           {!hasValue && <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />}
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-0" align="start">
-        <Command shouldFilter={false}>
+      <PopoverContent className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] overflow-hidden p-0" align="start" collisionPadding={8}>
+        <Command
+          shouldFilter={false}
+          className="h-auto"
+          style={{ maxHeight: "min(24rem, var(--radix-popover-content-available-height))" }}
+        >
+          <div className="shrink-0">
           <CommandInput 
             placeholder={searchPlaceholder} 
             onValueChange={(val) => handleSearch(val)} 
           />
+          </div>
+          <CommandList className="min-h-0 flex-1 overscroll-contain">
           <CommandEmpty>
             {loading ? <Loader2 className="h-4 w-4 animate-spin mx-auto" /> : emptyText}
           </CommandEmpty>
-          <CommandGroup className="max-h-[min(20rem,calc(100dvh-8rem))] overflow-y-auto overscroll-contain">
+          <CommandGroup>
             {options.map((option) => {
                 const isSelected = multiple 
                     ? Array.isArray(value) && value.some(v => String(v) === String(option.value))
@@ -244,6 +253,7 @@ export function SearchableSelect({
                 )
             })}
           </CommandGroup>
+          </CommandList>
         </Command>
       </PopoverContent>
     </Popover>

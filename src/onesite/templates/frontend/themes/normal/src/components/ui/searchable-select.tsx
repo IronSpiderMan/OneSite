@@ -43,11 +43,15 @@ export function SearchableSelect({
   const search = React.useCallback(async (query: string) => {
     const current = ++requestId.current
     setLoading(true)
+    setOptions([])
     await new Promise(resolve => setTimeout(resolve, debounceMs))
     if (current !== requestId.current) return
     try {
       const result = await loadOptions(query)
       if (current === requestId.current) setOptions(result)
+    } catch (error) {
+      console.error("Failed to load options:", error)
+      if (current === requestId.current) setOptions([])
     } finally {
       if (current === requestId.current) setLoading(false)
     }
@@ -72,7 +76,7 @@ export function SearchableSelect({
       value={value === '' ? undefined : value as any}
       placeholder={placeholder}
       filterOption={false}
-      onOpenChange={(open) => { if (open && options.length === 0) void search('') }}
+      onOpenChange={(open) => { if (open) void search('') }}
       onSearch={(query) => void search(query)}
       onChange={(next, option: any) => {
         onValueChange((next ?? (multiple ? [] : '')) as any)
