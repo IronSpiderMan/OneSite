@@ -1475,6 +1475,50 @@ const DashboardPage: React.FC = () => {
                     isOpen={isEditModalOpen}
                     onClose={() => setEditModalOpen(false)}
                     title={t('dashboard.edit_task', 'Edit Task')}
+                    footer={(
+                        <div className="flex flex-wrap justify-end gap-2">
+                            <Button variant="outline" onClick={() => setEditModalOpen(false)}>
+                                {t('common.cancel', 'Cancel')}
+                            </Button>
+                            <Button
+                                onClick={() => {
+                                    const descInput = document.getElementById('description') as HTMLInputElement;
+                                    const params: Record<string, string | number | boolean | string[]> = {};
+                                    for (const [key, param] of Object.entries(editingTask.params || {})) {
+                                        const el = document.getElementById(`param-${key}`) as HTMLInputElement;
+                                        if (el) {
+                                            if (param.type === 'bool') {
+                                                params[key] = el.checked;
+                                            } else if (param.type === 'number') {
+                                                params[key] = parseFloat(el.value) || 0;
+                                            } else if (param.type === 'multi_select') {
+                                                params[key] = el.value.split(',').map(s => s.trim()).filter(Boolean);
+                                            } else {
+                                                params[key] = el.value;
+                                            }
+                                        }
+                                    }
+                                    let interval = 0;
+                                    let cron = '';
+                                    if (scheduleMode === 'interval') {
+                                        const multipliers: Record<string, number> = { minutes: 60, hours: 3600, days: 86400 };
+                                        interval = intervalValue * (multipliers[intervalUnit] || 60);
+                                    } else {
+                                        cron = cronTimes.length > 0 ? timesToCron(cronTimes) : '* * * * *';
+                                    }
+                                    updateTask(editingTask.name, {
+                                        cron,
+                                        interval,
+                                        description: descInput.value,
+                                        params,
+                                    });
+                                    toast.success(t('dashboard.task_updated', { name: editingTask.name }));
+                                }}
+                            >
+                                {t('common.save', 'Save')}
+                            </Button>
+                        </div>
+                    )}
                 >
                     <div className="space-y-4">
                         <div>
@@ -1613,48 +1657,7 @@ const DashboardPage: React.FC = () => {
                                 </div>
                             </div>
                         )}
-                        <div className="flex justify-end gap-2 pt-4">
-                            <Button variant="outline" onClick={() => setEditModalOpen(false)}>
-                                {t('common.cancel', 'Cancel')}
-                            </Button>
-                            <Button
-                                onClick={() => {
-                                    const descInput = document.getElementById('description') as HTMLInputElement;
-                                    const params: Record<string, string | number | boolean | string[]> = {};
-                                    for (const [key, param] of Object.entries(editingTask.params || {})) {
-                                        const el = document.getElementById(`param-${key}`) as HTMLInputElement;
-                                        if (el) {
-                                            if (param.type === 'bool') {
-                                                params[key] = el.checked;
-                                            } else if (param.type === 'number') {
-                                                params[key] = parseFloat(el.value) || 0;
-                                            } else if (param.type === 'multi_select') {
-                                                params[key] = el.value.split(',').map(s => s.trim()).filter(Boolean);
-                                            } else {
-                                                params[key] = el.value;
-                                            }
-                                        }
-                                    }
-                                    let interval = 0;
-                                    let cron = '';
-                                    if (scheduleMode === 'interval') {
-                                        const multipliers: Record<string, number> = { minutes: 60, hours: 3600, days: 86400 };
-                                        interval = intervalValue * (multipliers[intervalUnit] || 60);
-                                    } else {
-                                        cron = cronTimes.length > 0 ? timesToCron(cronTimes) : '* * * * *';
-                                    }
-                                    updateTask(editingTask.name, {
-                                        cron,
-                                        interval,
-                                        description: descInput.value,
-                                        params,
-                                    });
-                                    toast.success(t('dashboard.task_updated', { name: editingTask.name }));
-                                }}
-                            >
-                                {t('common.save', 'Save')}
-                            </Button>
-                        </div>
+
                     </div>
                 </Modal>
             )}
