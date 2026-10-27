@@ -957,8 +957,7 @@ const DashboardPage: React.FC = () => {
                                     </div>
                                     {spec.filters.length > 0 && (
                                         <div className="flex max-w-full flex-wrap justify-end gap-2">
-                                            <Button variant="outline" size="sm" onClick={() => setVisualizationFilters(current => ({ ...current, [spec.key]: {} }))}>{t('common.clear', 'Clear')}</Button>
-                                            <Button variant="outline" size="sm" onClick={() => setVisualizationFilters(current => ({ ...current, [spec.key]: visualizationFilterDefaults(spec) }))}>{t('common.reset', 'Reset')}</Button>
+                                            <Button variant="outline" size="sm" onClick={() => setVisualizationFilters(current => ({ ...current, [spec.key]: visualizationFilterDefaults(spec) }))}>{t('common.reset_filters', 'Reset filters')}</Button>
                                             {spec.filters.map((filter) => {
                                                 const available = options[filter.key] || [];
                                                 const optionLabel = (option: { label: string; value: any }) => filter.option_i18n_key
@@ -1178,8 +1177,7 @@ const DashboardPage: React.FC = () => {
                                 return filters.length > 0 ? (
                                     <div className="relative mx-5 mb-2 rounded-xl border border-border/40 bg-muted/25 p-2.5 sm:mx-6">
                                         <div className="flex min-w-0 flex-wrap items-center gap-2">
-                                            <Button variant="outline" size="sm" onClick={() => { setFilterValues(current => ({ ...current, [chart.moduleName]: {} })); setFilterLabels(current => ({ ...current, [chart.moduleName]: {} })); }}>{t('common.clear', 'Clear')}</Button>
-                                            <Button variant="outline" size="sm" onClick={() => { setFilterValues(current => ({ ...current, [chart.moduleName]: (getChartFilterDefaults() as Record<string, Record<string, string>>)[chart.moduleName] || {} })); setFilterLabels(current => ({ ...current, [chart.moduleName]: {} })); }}>{t('common.reset', 'Reset')}</Button>
+                                            <Button variant="outline" size="sm" onClick={() => { setFilterValues(current => ({ ...current, [chart.moduleName]: (getChartFilterDefaults() as Record<string, Record<string, string>>)[chart.moduleName] || {} })); setFilterLabels(current => ({ ...current, [chart.moduleName]: {} })); }}>{t('common.reset_filters', 'Reset filters')}</Button>
                                             {filters.map((f) => (
                                                 <div key={f.key} className="w-40">
                                                     <SearchableSelect
