@@ -53,6 +53,7 @@ import { Modal } from '../../components/ui/modal';
 {% endif %}
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
+import { FieldColor } from '../../components/ui/field-color';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ImageUpload } from '../../components/ui/image-upload';
@@ -945,7 +946,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% for field in model.fields %}
       {% if 'r' in field.permissions %}
       case '{{ field.name }}':
-        {% if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
+        {% if (field.color or field.display_as_badge) and field.ui_type not in ['json', 'image', 'images', 'file', 'video_stream', 'location'] %}
+        {% set color_record = 'item' %}
+        return ({% include 'frontend_colored_value.tsx.j2' %});
+        {% elif model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
         return Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length
           ? <div className="flex flex-wrap gap-1">{item.{{ field.name }}.map((label: string, index: number) => <Badge key={`${label}-${index}`} variant="secondary">{label}</Badge>)}</div>
           : <span className="text-muted-foreground">-</span>;

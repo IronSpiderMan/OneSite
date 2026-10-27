@@ -1,0 +1,17 @@
+<FieldColor config={ {{ field.color | tojson }} } field="{{ field.name }}" record={ {{ color_record }} as unknown as Record<string, unknown>} canRead={(name) => hasFieldPerm(name, 'r')} badge={ {{ 'true' if field.display_as_badge or field.is_enum or field.ui_type == 'bool' else 'false' }} }>
+{% if field.is_enum and field.is_multi_select %}
+{Array.isArray({{ color_record }}.{{ field.name }}) ? {{ color_record }}.{{ field.name }}.map((value: string) => String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${value}`, value))).join(', ') : '-'}
+{% elif field.is_enum %}
+{ {{ color_record }}.{{ field.name }} == null ? '-' : String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${ {{ color_record }}.{{ field.name }}}`, {{ color_record }}.{{ field.name }}))}
+{% elif field.fk_info %}
+{String({{ color_record }}.{{ field.name }}_label ?? {{ color_record }}.{{ field.name }} ?? '-')}
+{% elif field.ui_type == 'bool' %}
+{ {{ color_record }}.{{ field.name }} == null ? '-' : {{ color_record }}.{{ field.name }} ? t('common.yes', 'Yes') : t('common.no', 'No')}
+{% elif field.ui_type == 'datetime' %}
+{formatDateTime({{ color_record }}.{{ field.name }}, timeZone)}
+{% elif field.ui_type == 'time' %}
+{formatTime({{ color_record }}.{{ field.name }})}
+{% else %}
+{String({{ color_record }}.{{ field.name }} ?? '-')}
+{% endif %}
+</FieldColor>

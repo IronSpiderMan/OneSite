@@ -179,7 +179,9 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
 <div className="space-y-1">
     <Label className="text-muted-foreground">{t('{{ field.label_key }}')}</Label>
     <div className="font-medium">
-        {% if field.fk_info %}
+        {% if (field.color or field.display_as_badge) and field.ui_type not in ['json', 'image', 'images', 'file', 'video_stream', 'location'] %}
+        {% set color_record = 'currentItem' %}{% include 'frontend_colored_value.tsx.j2' %}
+        {% elif field.fk_info %}
         <span className="block max-w-[250px] truncate" title={String(currentItem.{{ field.name }}_label ?? currentItem.{{ field.name }} ?? '-')}>
             {String(currentItem.{{ field.name }}_label ?? currentItem.{{ field.name }} ?? '-')}
         </span>
@@ -457,6 +459,7 @@ import { use{{ model.name }}Store } from '../../stores/use{{ model.name }}Store'
 import { Button } from '../../components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '../../components/ui/card';
 import { Badge } from '../../components/ui/badge';
+import { FieldColor } from '../../components/ui/field-color';
 import { Label } from '../../components/ui/label';
 import { formatDateTime, formatTime, getUserTimeZone } from '../../lib/datetime';
 import { Separator } from '../../components/ui/separator';

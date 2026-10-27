@@ -643,6 +643,36 @@ class Product(SQLModel, table=True):
 
 Field types, requiredness, defaults, enums and unique constraints become API validation and form controls. Fields named like `image`, `avatar`, `photo`, `*_image` use the image uploader; `file`, `attachment`, `*_file` use the file uploader. Override detection with `site_props.component`: `image`, `images`, `file`, `textarea`, `json` or `location`. Use `images` with a JSON-backed `list[str]` field to upload multiple images.
 
+Field display colors can be configured with `site_props.color`. A fixed color uses
+`"color": "blue"`; conditional colors use ordered rules:
+
+```python
+status: str = Field(sa_column_kwargs={"info": {"site_props": {
+    "component": "badge",  # optional; enum and boolean fields already use badges
+    "color": {
+        "rules": [
+            {"when": {"eq": "ACTIVE"}, "color": "red"},
+            {"when": {"eq": "RECOVERED"}, "color": "green"},
+        ],
+        "default": "gray",
+    },
+}}})
+```
+
+Presets: `gray`, `red`, `orange`, `amber`, `yellow`, `lime`, `green`,
+`emerald`, `teal`, `cyan`, `sky`, `blue`, `indigo`, `violet`, `purple`,
+`pink`, `rose`. Each includes light and dark text, background and border colors.
+Colors apply to scalar fields in tables, grid cards and detail pages; media,
+location and JSON components keep their own rendering.
+
+Conditions compare raw values with strict equality. Supported operators are
+`eq`, `ne`, `in` (a list), and numeric `gt`, `gte`, `lt`, `lte`. Each condition
+has exactly one operator. The first matching rule wins. Add `"field": "status"`
+to a condition to color another field using the record's status. Missing or
+unreadable condition fields are skipped. Unmatched rules use `default`; without
+it, text keeps its normal color and badges use neutral styling. Invalid color
+names, field references and operands fail during `site sync`.
+
 For a browser-assisted latitude/longitude field, use the bundled `Location`
 value object with a JSON column and `component: "location"`:
 

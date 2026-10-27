@@ -1,4 +1,6 @@
-                        {% if model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
+                        {% if (field.color or field.display_as_badge) and field.ui_type not in ['json', 'image', 'images', 'file', 'video_stream', 'location'] %}
+{% set color_record = 'item' %}{% include 'frontend_colored_value.tsx.j2' %}
+{% elif model.module_name == 'schedule' and field.name in ['weekdays', 'month_days'] %}
                         <div className="flex max-w-[14rem] flex-wrap gap-1">
                           {Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length
                             ? item.{{ field.name }}.map((label: string, index: number) => <Badge key={`${label}-${index}`} variant="secondary">{label}</Badge>)

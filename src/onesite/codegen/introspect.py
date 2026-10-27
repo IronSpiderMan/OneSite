@@ -14,6 +14,7 @@ from sqlmodel import SQLModel
 
 from onesite.config import normalize_onesite_config
 
+from .metadata.colors import normalize_color
 from .filter_defaults import validate_filter_default
 from .naming import to_snake as _to_snake
 from .types import FieldDefinition, ForeignKeyInfo, ModelIntrospectResult
@@ -653,6 +654,8 @@ def get_model_fields(
         fields.append(
             FieldDefinition(
                 name=name,
+                color=normalize_color(site_props.get("color"), field_name=name, field_names=set(model_cls.model_fields), location=f"{model_cls.__name__}.{name}"),
+                display_as_badge=site_props.get("component") == "badge",
                 type=type_str,
                 ui_type=ui_type,
                 json_kind=json_kind,

@@ -75,6 +75,8 @@ class FieldDefinition:
     json_lock_keys: bool = False
     visible_when: dict[str, list[Any]] | None = None
     required_when: dict[str, list[Any]] | None = None
+    color: str | dict | None = None
+    display_as_badge: bool = False
     clear_when_hidden: bool = False
     py_imports: list[str] = field(default_factory=list)
     permissions: str = "cru"
