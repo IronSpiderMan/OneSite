@@ -117,3 +117,19 @@ def test_json_submodel_emits_and_uses_its_own_form_layout():
     ).render(model=model)
     assert "import { JsonModelDetail }" in detail_page
     assert "<JsonModelDetail schema=" in detail_page
+
+
+def test_default_forms_do_not_inherit_the_automatic_detail_section():
+    class DefaultFormRecord(SQLModel, table=True):
+        __tablename__ = "test_default_form_record"
+        id: Optional[int] = Field(default=None, primary_key=True)
+        title: str
+
+    result = get_model_fields(DefaultFormRecord, "default_form_record")
+    model = _build_model_dict("DefaultFormRecord", "default_form_record", "default_form_record", result)
+
+    assert model.detail_layout[0]["items"][0]["title"] == "common.basic_information"
+    for layout in (model.form_layout, model.create_layout, model.edit_layout):
+        assert layout == [{"kind": "row", "columns": 1, "items": [
+            {"kind": "field", "field": "title", "span": 1},
+        ]}]

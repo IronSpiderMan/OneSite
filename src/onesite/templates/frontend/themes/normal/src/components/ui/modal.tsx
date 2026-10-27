@@ -17,7 +17,7 @@ export const Modal: React.FC<ModalProps> = ({ isOpen, onClose, title, children, 
     title={title}
     footer={footer ?? null}
     destroyOnHidden
-    width={672}
+    width={640}
     styles={{ body: { maxHeight: 'calc(100dvh - 16rem)', overflowY: 'auto', overscrollBehavior: 'contain' } }}
     className={className}
   >

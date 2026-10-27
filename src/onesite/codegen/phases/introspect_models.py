@@ -343,6 +343,7 @@ def _build_model_dict(
         detail_layout = _form_layout_from_detail_layout(
             configured_form_layout, detail_layout_fields
         )
+    has_configured_layout = bool(detail_layout)
     if not detail_layout:
         detail_layout = [{
             "kind": "row", "columns": 1, "items": [{
@@ -351,8 +352,10 @@ def _build_model_dict(
                 "items": _form_layout_from_detail_layout([], detail_auto_fields),
             }],
         }] if detail_auto_fields else []
+    # The detail page needs a default card, but forms need no heading for a
+    # single automatic group. Preserve sections only when explicitly configured.
     form_layout = configured_form_layout or _form_layout_from_detail_layout(
-        detail_layout, form_fields
+        detail_layout if has_configured_layout else [], form_fields
     )
     edit_layout = _form_layout_from_detail_layout(
         form_layout, [field.name for field in result.fields if "u" in field.permissions]
