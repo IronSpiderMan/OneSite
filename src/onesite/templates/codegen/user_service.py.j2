@@ -27,6 +27,10 @@ class UserService:
         source: str = "detail", base_data: dict | None = None,
     ) -> UserRead:
         data = dict(base_data) if base_data is not None else obj.model_dump()
+        {% if model.foreign_keys %}
+        if base_data is None:
+            data = await crud.enrich_with_fk_labels(session, obj)
+        {% endif %}
         data = await resolve_read_data(
             obj, data,
             ReadContext(session=session, current_user=current_user, source=source),

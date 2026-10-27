@@ -184,6 +184,11 @@ async def get_with_fk_labels(
     if item is None:
         return None
 
+    return await enrich_with_fk_labels(session, item)
+
+
+async def enrich_with_fk_labels(session: AsyncSession, item: User) -> Dict[str, Any]:
+    """Enrich an existing user, including mutation responses, with FK labels."""
     item_dict = item.model_dump()
     {% for fk in model.foreign_keys %}
     fk_id = getattr(item, "{{ fk.name }}", None)

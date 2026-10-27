@@ -87,3 +87,50 @@ def test_single_item_service_enriches_foreign_key_labels():
     assert "async def get_with_fk_labels(" in user_crud
     assert 'item_dict["group_id_label"] = None' in user_crud
     assert "obj = await crud.get_with_fk_labels(session, id)" in user_service
+
+    # Execute the generated response builders: updates must resolve the new FK,
+    # null assignments must clear labels, and enriched list data needs no lookup.
+    import ast
+    import asyncio
+    from types import SimpleNamespace
+    from unittest.mock import AsyncMock
+
+    for source, class_name, schema_name, helper_name, batch in (
+        (service, "NullableFkMemberService", "NullableFkMemberRead", "_enrich_with_fk_labels", True),
+        (user_service, "UserService", "UserRead", "enrich_with_fk_labels", False),
+    ):
+        from textwrap import dedent
+
+        builder_source = source.split("    async def to_read(", 1)[1].split("    async def ", 1)[0]
+        builder = ast.parse(dedent("    async def to_read(" + builder_source)).body[0]
+        module = ast.Module(body=[builder], type_ignores=[])
+        async def enrich(session, value):
+            obj = value[0] if batch else value
+            data = obj.model_dump()
+            data["group_id_label"] = {2: "New department"}.get(data["group_id"])
+            return [data] if batch else data
+
+        helper = AsyncMock(side_effect=enrich)
+        async def resolve(obj, data, context, **kwargs):
+            return data
+
+        scope = {
+            "Any": object,
+            "crud": SimpleNamespace(**{helper_name: helper}),
+            "resolve_read_data": resolve,
+            "ReadContext": lambda **kwargs: kwargs,
+            schema_name: SimpleNamespace(model_validate=lambda data: data),
+            "filter_read_data": lambda data, *args: data,
+        }
+        exec("from __future__ import annotations\n" + ast.unparse(module), scope)
+        async def check():
+            for fk_id, label in ((2, "New department"), (None, None)):
+                obj = SimpleNamespace(model_dump=lambda: {"id": 1, "group_id": fk_id})
+                result = await scope["to_read"](None, obj, None, source="update")
+                assert result["group_id_label"] == label
+            calls = helper.await_count
+            existing = {"id": 1, "group_id": 2, "group_id_label": "New department"}
+            result = await scope["to_read"](None, obj, None, base_data=existing)
+            assert result == existing
+            assert helper.await_count == calls
+        asyncio.run(check())

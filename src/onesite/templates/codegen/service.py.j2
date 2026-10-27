@@ -130,6 +130,10 @@ class {{ model.name }}Service:
     ) -> {{ model.name }}Read:
         """Build a validated Read response without mutating the ORM object."""
         data = dict(base_data) if base_data is not None else obj.model_dump()
+        {% if model.foreign_keys %}
+        if base_data is None:
+            data = (await crud._enrich_with_fk_labels(session, [obj]))[0]
+        {% endif %}
         {% if model.uses_composite_identity %}
         data["id"] = crud.get_identity(obj)
         {% endif %}
