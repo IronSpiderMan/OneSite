@@ -196,6 +196,7 @@ async def handle_import_{{ model.module_name }}(payload: dict) -> None:
     dry_run = bool(payload.get("dry_run", False))
     current_role = str(payload.get("current_role", "developer") or "developer")
     scoped_owner_id = payload.get("scoped_owner_id")
+    fixed_fields = payload.get("fixed_fields") or {}
     if not task_id:
         logger.warning("No task_id in import payload for {{ model.name }}")
         return
@@ -205,6 +206,7 @@ async def handle_import_{{ model.module_name }}(payload: dict) -> None:
         task_id,
         current_role=current_role,
         scoped_owner_id=scoped_owner_id,
+        fixed_fields=fixed_fields,
     )
     await mark_running(task_id, "reading_import_file")
     try:
@@ -215,6 +217,8 @@ async def handle_import_{{ model.module_name }}(payload: dict) -> None:
         from app.custom_io.{{ model.module_name }} import import_{{ model.module_name }}
 
         await context.set_progress(10, "running_custom_import")
+        if fixed_fields and not _supports_context(import_{{ model.module_name }}):
+            raise ValueError("Scoped custom imports require a context argument and must apply context.fixed_fields")
         kwargs = {"context": context} if _supports_context(import_{{ model.module_name }}) else {}
         result = await _invoke_hook(import_{{ model.module_name }}, uploaded_file, **kwargs)
         {% else %}
@@ -232,6 +236,7 @@ async def handle_import_{{ model.module_name }}(payload: dict) -> None:
                 dry_run=dry_run,
                 current_role=current_role,
                 scoped_owner_id=scoped_owner_id,
+                fixed_fields=fixed_fields,
                 progress_callback=context.set_progress,
             )
         {% endif %}

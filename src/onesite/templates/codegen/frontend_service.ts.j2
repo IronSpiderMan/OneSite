@@ -284,12 +284,12 @@ export interface ImportTask {
     status: TaskCenterTask['status'];
 }
 
-export const queueImport{{ model.name }}s = async (file: File): Promise<TaskCenterTask> => {
+export const queueImport{{ model.name }}s = async (file: File, fixedFields: Record<string, any> = {}): Promise<TaskCenterTask> => {
     const formData = new FormData();
     formData.append('file', file);
     const response = await request.post<TaskCenterTask>(`${API_URL}/import`, formData, {
         headers: { 'Content-Type': 'multipart/form-data' },
-        params: { background: true },
+        params: { background: true, fixed_fields: JSON.stringify(fixedFields) },
     });
     return response.data;
 };

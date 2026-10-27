@@ -292,3 +292,22 @@ def test_standard_export_carries_role_and_filters_scalar_columns_by_read_permiss
     assert '"admin_note": {"admin": "r", "developer": "r", "user": ""}' in service
     assert 'if "r" in permissions.get(role, "")' in service
     assert 'if "admin_note" in readable_export_columns' in service
+
+
+def test_embedded_import_export_preserves_scope_and_passes_fixed_fields():
+    model = _models()["CsvItem"]
+    page = _template("frontend_page_list.tsx.j2").render(model=model)
+    embedded_actions = page.split('data-page-region="embedded-toolbar"', 1)[1].split("} : (<>", 1)[0]
+    assert "onClick={handleImportClick}" in embedded_actions
+    assert "onClick={handleExport}" in embedded_actions
+    assert "hasPermission('c') && hasPermission('u')" in embedded_actions
+    assert "hasPermission('r')" in embedded_actions
+    assert "...scopeFilters }" in page
+    assert "queueImportCsvItems(importingFile, fixedFields)" in page
+    api = _template("api.py.j2").render(model=model)
+    assert '"category_id":' in api.split("allowed_fixed_fields =", 1)[1]
+    assert 'fixed_fields=import_fixed_fields' in api
+    handler = _template("export_handler.py.j2").render(model=model)
+    assert 'fixed_fields=fixed_fields' in handler
+    ast.parse(api)
+    ast.parse(handler)

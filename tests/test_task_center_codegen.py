@@ -435,6 +435,19 @@ def test_import_codegen_enforces_write_permissions_owner_scope_and_field_roles(
                 assert cross_owner["success"] == 0, cross_owner
                 assert cross_owner["failed"] == 1, cross_owner
 
+            async with AsyncSession(engine, expire_on_commit=False) as session:
+                scoped = await service.import_from_csv(
+                    session, task_id="embedded-scope", user_id=101,
+                    file=csv_upload("sku,name,owner_id\\nforeign-sku,Wrong,101\\nscoped-new,Scoped,invalid\\n"),
+                    current_role="developer", fixed_fields={"owner_id": 101},
+                )
+                assert scoped["failed"] == 1, scoped
+                assert scoped["created"] == 1, scoped
+                created = (await session.exec(select(OwnedImportItem).where(
+                    OwnedImportItem.sku == "scoped-new"
+                ))).one()
+                assert created.owner_id == 101
+
             # The key is needed to locate an update but is not itself writable
             # for this role.  It must be consumed for lookup and then omitted
             # from the update payload without rejecting the row.

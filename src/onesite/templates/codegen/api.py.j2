@@ -1324,11 +1324,33 @@ async def import_{{ model.lower_name }}s(
     session: AsyncSession = Depends(db.get_session),
     current_user: User = Depends(deps.get_current_user),
     file: UploadFile = File(...),
+    fixed_fields: str = Query("{}", description="Fixed field values for a scoped import"),
     dry_run: bool = Query(False, description="Validate without importing"),
     background: bool = Query({{ 'True' if model.custom_importable else 'False' }}, description="Queue a trackable background import"),
 ) -> Any:
     """Import immediately for compatibility, or queue a trackable background job."""
     current_role = _check_{{ model.module_name }}_import_permissions(current_user)
+    try:
+        import_fixed_fields = json.loads(fixed_fields)
+        if not isinstance(import_fixed_fields, dict):
+            raise ValueError("Expected an object")
+        allowed_fixed_fields = {
+            {% for field in model.fields %}
+            {% if field.fk_info %}
+            "{{ field.name }}": {{ field.role_permissions | tojson }},
+            {% endif %}
+            {% endfor %}
+        }
+        for name in import_fixed_fields:
+            permissions = allowed_fixed_fields.get(name, {}).get(current_role, "")
+            if "c" not in permissions or "u" not in permissions:
+                raise ValueError(f"Field '{name}' cannot be fixed for import")
+        # Validate and normalize identifiers using the generated update schema.
+        import_fixed_fields = {{ model.name }}Update(**import_fixed_fields).model_dump(
+            include=set(import_fixed_fields), exclude_unset=True, mode="json",
+        )
+    except (ValueError, TypeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     scoped_owner_id = None
     {% if model.owner_field %}
     user_level = deps.ROLE_HIERARCHY.get(current_role, 0)
@@ -1347,6 +1369,7 @@ async def import_{{ model.lower_name }}s(
                 dry_run=dry_run,
                 current_role=current_role,
                 scoped_owner_id=scoped_owner_id,
+                fixed_fields=import_fixed_fields,
             )
         except Exception:
             raise
@@ -1411,6 +1434,7 @@ async def import_{{ model.lower_name }}s(
                 "dry_run": dry_run,
                 "current_role": current_role,
                 "scoped_owner_id": scoped_owner_id,
+                "fixed_fields": import_fixed_fields,
             }
         )
     except Exception as exc:

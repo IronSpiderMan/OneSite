@@ -1046,6 +1046,7 @@ class {{ model.name }}Service:
         dry_run: bool = False,
         current_role: str = "developer",
         scoped_owner_id: Any = None,
+        fixed_fields: dict | None = None,
         ws_manager = None,
         progress_callback = None,
     ) -> dict:
@@ -1205,6 +1206,11 @@ class {{ model.name }}Service:
                 ):
                     raise ValueError("Record is not available for import")
                 {% endif %}
+                if existing is not None and any(
+                    getattr(existing, name, None) != value
+                    for name, value in (fixed_fields or {}).items()
+                ):
+                    raise ValueError("Record is outside the import scope")
                 is_update = existing is not None
                 required_permission = "u" if is_update else "c"
 
@@ -1212,7 +1218,7 @@ class {{ model.name }}Service:
                 # Enforce the requesting role again for the concrete row operation.
                 obj_data = {}
                 {% for column in model.import_fields %}
-                if "{{ column.column_name }}" in row:
+                if "{{ column.column_name }}" in row and "{{ column.field.name }}" not in (fixed_fields or {}):
                     value = row["{{ column.column_name }}"]
                     permissions = import_column_permissions["{{ column.column_name }}"].get(role, "")
                     if (
@@ -1240,6 +1246,8 @@ class {{ model.name }}Service:
                             value,
                         )
                 {% endfor %}
+
+                obj_data.update(fixed_fields or {})
 
                 {% if model.owner_field %}
                 if scoped_owner_id is not None:

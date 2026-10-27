@@ -435,7 +435,8 @@ def test_embedded_page_with_one_search_field_keeps_create_action():
 
     assert "{embedded && (" in embedded
     assert "hasPermission('c')" in embedded
-    assert "className={embedded ? 'rounded-md border bg-card p-4" in embedded
+    assert 'data-page-region="embedded-toolbar"' in embedded
+    assert "!Object.prototype.hasOwnProperty.call(scopeFilters" in embedded
 
 
 def test_standalone_embedded_model_generates_both_page_variants(monkeypatch, tmp_path):

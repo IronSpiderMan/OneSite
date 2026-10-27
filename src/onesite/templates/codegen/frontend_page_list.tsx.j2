@@ -609,7 +609,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       setIsExporting(true);
       const task = await export{{ model.name }}s(
         i18n.resolvedLanguage || i18n.language,
-        {% if model.is_tree %}treeSearchFiltersRef.current{% else %}use{{ model.name }}Store.getState().filters{% endif %},
+        { ...{% if model.is_tree %}treeSearchFiltersRef.current{% else %}use{{ model.name }}Store.getState().filters{% endif %}, ...scopeFilters },
       );
       toast.success(t('common.export_started', 'Export started, you will be notified when complete'){% if model.export_task_center_visible is not false %}, {
         action: {
@@ -639,7 +639,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
     try {
       setIsImporting(true);
-      const task = await queueImport{{ model.name }}s(importingFile);
+      const task = await queueImport{{ model.name }}s(importingFile, fixedFields);
       toast.success(t('common.import_started', 'Import started, you will be notified when complete'){% if model.import_task_center_visible is not false %}, {
         action: {
           label: t('task_center.view_progress', 'View progress'),
@@ -1130,34 +1130,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
              )}
           </div>
           {% endif %}
-          {% if model.importable or model.exportable %}
-          <div className="flex items-center gap-2">
-            {% if model.importable %}
-            {hasPermission('c') && hasPermission('u') && (
-              <Button variant="outline" onClick={handleImportClick}>
-                <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
-              </Button>
-            )}
-            {% endif %}
-            {% if model.exportable %}
-            {hasPermission('r') && (
-              <Button variant="outline" onClick={handleExport} disabled={isExporting}>
-                {isExporting ? (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                ) : (
-                  <Download className="mr-2 h-4 w-4" />
-                )}
-                {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
-              </Button>
-            )}
-            {% endif %}
-            {% if model.importable and not model.exportable and not model.custom_importable %}
-            <Button variant="outline" onClick={handleDownloadTemplate}>
-              <Download className="mr-2 h-4 w-4" /> {t('common.template', 'Template')}
-            </Button>
-            {% endif %}
-          </div>
-          {% endif %}
+          {% include 'frontend_list_io_actions.tsx.j2' %}
           {selectedIds.length > 0 && hasPermission('d') && (
             <Button variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
               <Trash className="mr-2 h-4 w-4" /> {t('common.bulk_delete', 'Delete')} ({selectedIds.length})
@@ -1206,6 +1179,49 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% set ns.search_field_count = ns.search_field_count + 1 %}
       {% endif %}
       {% endfor %}
+      {embedded ? (
+        <div className="flex flex-col gap-3 pb-1" data-page-region="embedded-toolbar">
+          <div className="flex flex-col gap-3 xl:flex-row xl:items-end xl:justify-between">
+            <div className="flex min-w-0 flex-1 flex-wrap items-end gap-3">
+              {% for field in model.fields if field.is_search_field and (field.ui_type in ['bool', 'str', 'datetime', 'date', 'time'] or field.is_enum or field.fk_info) %}
+              {hasFieldPerm('{{ field.name }}', 'r') && !Object.prototype.hasOwnProperty.call(scopeFilters, '{{ field.name }}') && (
+                <div className="w-full sm:w-64">
+                  {% include 'frontend_list_filter_control.tsx.j2' %}
+                </div>
+              )}
+              {% endfor %}
+              {% if ns.search_field_count %}
+              <Button variant="ghost" size="sm" type="button" onClick={resetSearch}>
+                {t('common.reset', 'Reset')}
+              </Button>
+              {% endif %}
+            </div>
+            <div className="flex shrink-0 flex-wrap items-center gap-2">
+              {% include 'frontend_list_io_actions.tsx.j2' %}
+              {selectedIds.length > 0 && hasPermission('d') && (
+                <Button size="sm" variant="destructive" onClick={() => setBulkDeleteOpen(true)}>
+                  <Trash className="mr-2 h-4 w-4" /> {t('common.bulk_delete', 'Delete')} ({selectedIds.length})
+                </Button>
+              )}
+              {% if model.has_embedded_page %}
+              {allowAttachExisting && relationField && hasPermission('r') && hasPermission('u') && hasFieldPerm(relationField, 'u') && (
+                <Button variant="outline" size="sm" onClick={() => {
+                  setAttachExistingIds([]);
+                  setAttachExistingOpen(true);
+                }}>
+                  <Plus className="mr-2 h-4 w-4" /> {t('common.add_existing', 'Add existing')}
+                </Button>
+              )}
+              {% endif %}
+              {hasPermission('c') && (
+                <Button size="sm" onClick={handleCreate}>
+                  <Plus className="mr-2 h-4 w-4" /> {t('common.create')} {t('models.{{ model.module_name }}.name')}
+                </Button>
+              )}
+            </div>
+          </div>
+        </div>
+      ) : (<>
       {% if ns.search_field_count %}
       <div className={% if ns.search_field_count > 1 %}"rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40"{% else %}{embedded ? 'rounded-md border bg-card p-4 border-l-[3px] border-l-accent/40' : 'w-full max-w-sm'}{% endif %}>
         {% if ns.search_field_count > 1 %}
@@ -1309,6 +1325,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         {% endif %}
       </div>
       {% endif %}
+      </>)}
 
 {% if not model.is_tree %}
       {% if model.multi_display %}

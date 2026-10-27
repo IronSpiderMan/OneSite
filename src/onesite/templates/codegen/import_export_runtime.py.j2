@@ -136,6 +136,7 @@ class ImportExportContext:
     task_id: str
     current_role: str | None = None
     scoped_owner_id: Any = None
+    fixed_fields: dict | None = None
 
     async def set_progress(
         self,

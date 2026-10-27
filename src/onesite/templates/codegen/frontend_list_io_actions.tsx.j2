@@ -1,0 +1,28 @@
+          {% if model.importable or model.exportable %}
+          <div className="flex flex-wrap items-center gap-2">
+            {% if model.importable %}
+            {hasPermission('c') && hasPermission('u') && (
+              <Button size={embedded ? 'sm' : 'default'} variant="outline" onClick={handleImportClick}>
+                <Upload className="mr-2 h-4 w-4" /> {t('common.import', 'Import')}
+              </Button>
+            )}
+            {% endif %}
+            {% if model.exportable %}
+            {hasPermission('r') && (
+              <Button size={embedded ? 'sm' : 'default'} variant="outline" onClick={handleExport} disabled={isExporting}>
+                {isExporting ? (
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                ) : (
+                  <Download className="mr-2 h-4 w-4" />
+                )}
+                {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
+              </Button>
+            )}
+            {% endif %}
+            {% if model.importable and not model.exportable and not model.custom_importable %}
+            <Button size={embedded ? 'sm' : 'default'} variant="outline" onClick={handleDownloadTemplate}>
+              <Download className="mr-2 h-4 w-4" /> {t('common.template', 'Template')}
+            </Button>
+            {% endif %}
+          </div>
+          {% endif %}

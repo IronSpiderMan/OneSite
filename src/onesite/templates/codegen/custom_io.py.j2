@@ -3,6 +3,10 @@
 This file is created once and is never overwritten by ``site sync``.  Keep
 business-specific parsing and export logic here; OneSite handles background
 execution, upload persistence, download URLs, and WebSocket notifications.
+
+For embedded imports, accept an optional ``context`` argument and apply
+``context.fixed_fields`` to every imported record. Reject updates to records
+outside that scope. Embedded exports must honor the supplied ``filters``.
 """
 
 from pathlib import Path
