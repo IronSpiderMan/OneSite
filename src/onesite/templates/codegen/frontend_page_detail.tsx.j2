@@ -1426,14 +1426,14 @@ const {{ model.name }}DetailPage: React.FC = () => {
     return (
         <div
             {% if model.has_embedded_reverse %}
-            className={`{{ page_shell_class | default('space-y-6') }} ${isEmbeddedTab ? '!flex !h-full !min-h-0 !flex-col !gap-4 !space-y-0' : ''}`}
+            className={`{{ page_shell_class | default('space-y-6') }} ${isEmbeddedTab ? '!flex !h-full !min-h-0 !flex-col' : ''}`}
             {% else %}
             className="{{ page_shell_class | default('space-y-6') }}"
             {% endif %}
             data-codegen-theme="{{ codegen_theme | default('normal') }}"
             data-page-kind="detail"
         >
-            <div className="flex flex-wrap items-center justify-between gap-3" data-page-region="page-header">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3" data-page-region="page-header">
               <div className="flex min-w-0 items-center space-x-4">
                 <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
                     <ArrowLeft className="h-4 w-4" />
@@ -1565,7 +1565,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
             </div>
 
             {% if model.reverse_m2m or model.reverse_foreign_keys %}
-            <div className="flex gap-1 overflow-x-auto border-b" role="tablist" aria-label={t('common.related_information')}>
+            <div className="flex shrink-0 gap-1 overflow-x-auto border-b" role="tablist" aria-label={t('common.related_information')}>
                 <Button
                     type="button"
                     role="tab"
