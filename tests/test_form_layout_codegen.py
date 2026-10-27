@@ -70,7 +70,9 @@ def test_modal_form_uses_its_own_ui_form_layout():
     assert 'const formLayout = ' in rendered
     assert '"title": "Connection"' in rendered
     assert "renderModalFormLayoutNode" in rendered
-    assert "'title': ((!editingId" in rendered
+    assert "'title': (!(embedded && relationField === 'title'" in rendered
+    assert "&& (!editingId ? hasFieldPerm('title', 'c')" in rendered
+    assert "const payload = writablePayload({ ...values, ...fixedFields }" in rendered
     assert "'title': ({(!editingId" not in rendered
     assert "const [isSaving, setIsSaving] = useState(false);" in rendered
     assert '<Button type="submit" disabled={isSaving}>' in rendered
