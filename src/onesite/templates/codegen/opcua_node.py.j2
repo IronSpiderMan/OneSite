@@ -70,7 +70,7 @@ class OpcuaNode(SQLModel, table=True):
     is_enabled: bool = True
     collection_mode: OpcuaCollectionMode = Field(default=OpcuaCollectionMode.subscribe)
     sampling_interval_ms: Optional[float] = Field(
-        default=None,
+        default=1000,
         ge=0,
         sa_column_kwargs={
             "info": {
@@ -81,7 +81,7 @@ class OpcuaNode(SQLModel, table=True):
         },
     )
     polling_interval_seconds: Optional[float] = Field(
-        default=None,
+        default=1,
         gt=0,
         sa_column_kwargs={
             "info": {

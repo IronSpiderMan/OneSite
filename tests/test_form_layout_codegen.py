@@ -133,3 +133,17 @@ def test_default_forms_do_not_inherit_the_automatic_detail_section():
         assert layout == [{"kind": "row", "columns": 1, "items": [
             {"kind": "field", "field": "title", "span": 1},
         ]}]
+
+
+def test_list_modal_respects_field_visibility_conditions():
+    model = _model()
+    field = next(field for field in model.fields if field.name == "endpoint")
+    field.visible_when = {"is_enabled": [True]}
+    template_dir = Path(__file__).parents[1] / "src" / "onesite" / "templates" / "codegen"
+    rendered = Environment(loader=FileSystemLoader(template_dir)).get_template(
+        "frontend_page_list.tsx.j2"
+    ).render(model=model)
+    endpoint_expression = next(
+        line for line in rendered.splitlines() if "'endpoint': (!(embedded" in line
+    )
+    assert "&& ([true] as any[]).includes(rootValue?.['is_enabled'])" in endpoint_expression

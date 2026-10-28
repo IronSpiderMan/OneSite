@@ -2249,7 +2249,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 max-h-[calc(100dvh-12rem)] flex-col">
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-1 pb-1">
           {% macro modal_form_field(field, as_expression=false) -%}
-          {% if not as_expression %}{{ '{' }}{% endif %}!(embedded && relationField === '{{ field.name }}' && fixedFields['{{ field.name }}'] !== undefined) && (!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
+          {% if not as_expression %}{{ '{' }}{% endif %}!(embedded && relationField === '{{ field.name }}' && fixedFields['{{ field.name }}'] !== undefined) && (!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %}{% if field.visible_when %}{% for controller, values in field.visible_when.items() %} && ({{ values | tojson }} as any[]).includes(rootValue?.['{{ controller }}']){% endfor %}{% endif %} && (
           <div className="space-y-2">
             <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{((!editingId && {{ 'true' if field.required and not field.create_optional else 'false' }}) || (Boolean(editingId) && {{ 'true' if field.required and not field.update_optional else 'false' }})) && <span className="text-destructive"> *</span>}</Label>
             {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
