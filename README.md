@@ -4,6 +4,10 @@
 
 OneSite is a model-driven CLI that generates an admin-style full-stack application from SQLModel definitions. `app/models/` is the source of truth; `site sync` generates FastAPI schemas, CRUD, services and REST endpoints, plus React/Vite pages, API clients, navigation, translations and theme assets under `generated/`.
 
+Enable `plugins=["opcua"]` to generate OPC UA Server, Node and A&C configuration,
+with address-space browsing and bulk addition on the server detail page.
+See the [OPC UA plugin guide](docs/opcua-plugin.md).
+
 ## Requirements and installation
 
 - Python 3.10+

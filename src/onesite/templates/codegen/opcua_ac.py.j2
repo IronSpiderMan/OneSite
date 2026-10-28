@@ -1,0 +1,82 @@
+"""Native OPC UA condition configuration, independent of project alarm rules."""
+
+from typing import Optional
+from onesite.config import OneSiteConfig
+from sqlmodel import SQLModel, Field
+from sqlalchemy import UniqueConstraint
+
+
+class OpcuaAc(SQLModel, table=True):
+    __tablename__ = "opcua_ac"
+    __table_args__ = (
+        UniqueConstraint(
+            "opcua_server_id", "event_notifier_nodeid", "condition_id", name="uq_opcua_ac_condition"
+        ),
+        UniqueConstraint("opcua_server_id", "title", name="uq_opcua_ac_title"),
+    )
+    __onesite__ = OneSiteConfig(
+        icon="Radio",
+        standalone=False,
+        permissions={"user": "", "admin": "r", "developer": "crud"},
+        visible=[],
+        importable=True,
+        exportable=True,
+        import_key="title",
+        track=["c", "u", "d", "bulk_delete"],
+        union_key=["opcua_server_id", "event_notifier_nodeid", "condition_id"],
+        translations={
+            "zh": {
+                "name": "OPCUA A&C",
+                "fields": {
+                    "title": "名称",
+                    "description": "描述",
+                    "opcua_server_id": "OPCUA 服务",
+                    "event_notifier_nodeid": "事件订阅入口",
+                    "condition_id": "条件标识 ConditionId",
+                    "is_enabled": "启用",
+                },
+            }
+        },
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    title: str = Field(min_length=1)
+    description: Optional[str] = None
+    opcua_server_id: int = Field(
+        foreign_key="opcua_server.id",
+        index=True,
+        sa_column_kwargs={
+            "info": {
+                "site_props": {
+                    "reverse": {
+                        "editor": "embedded",
+                        "allow_existing": False,
+                        "on_remove": "delete",
+                    }
+                }
+            }
+        },
+    )
+    event_notifier_nodeid: str = Field(
+        default="i=2253", description="支持事件订阅的 Server、设备或区域对象"
+    )
+    condition_id: str = Field(description="具体告警条件的 NodeId，推荐 nsu=命名空间URI;s=标识")
+    is_enabled: bool = True
+
+    def _validate(self, changes):
+        from fastapi import HTTPException
+        from app.core.opcua import validate_nodeid
+
+        title = changes.get("title", self.title)
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("名称不能为空")
+        try:
+            validate_nodeid(changes.get("event_notifier_nodeid", self.event_notifier_nodeid))
+            validate_nodeid(changes.get("condition_id", self.condition_id))
+        except (ValueError, TypeError):
+            raise HTTPException(422, "事件订阅入口和条件标识必须为有效的 OPC UA NodeId")
+
+    def on_before_create(self):
+        self._validate({})
+
+    def on_before_update(self, changes):
+        self._validate(changes)

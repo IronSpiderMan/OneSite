@@ -4,6 +4,9 @@
 
 OneSite 是一个模型驱动的全栈代码生成 CLI。开发者维护 `app/models/` 中的 SQLModel；执行 `site sync` 后，在 `generated/` 中自动生成 FastAPI 的 Schema、CRUD、Service、REST API，以及 React/Vite 的页面、服务、菜单、国际化和主题资源。
 
+OPC UA 接入可启用 `plugins=["opcua"]`：生成 Server、Node、A&C 配置，
+并在 Server 详情页提供节点浏览和批量添加。参见 [OPC UA 插件](docs/opcua-plugin.md)。
+
 ## 安装与快速开始
 
 要求 Python 3.10+；生成前端还需要 Node.js/npm；容器部署可选 Docker 或 Podman。

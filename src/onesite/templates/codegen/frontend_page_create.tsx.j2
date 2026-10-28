@@ -160,7 +160,7 @@ const Create{{ model.name }}Page: React.FC = () => {
                 <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
               )} />
               {% else %}
-              <Input id="{{ field.name }}" type="text" {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.create_optional else 'false' }} })} />
+              <Input id="{{ field.name }}" type="{% if model.opcua_browse and field.name == 'password' %}password{% else %}text{% endif %}" {% if model.opcua_browse and field.name == 'password' %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.create_optional else 'false' }} })} />
               {% endif %}
               {% elif field.ui_type == 'bool' %}
               <div className="flex h-10 items-center justify-end rounded-md border px-3">
@@ -453,6 +453,8 @@ const Create{{ model.name }}Page: React.FC = () => {
                 {% if field.default_factory == 'date' %}
                 defaultValue={new Date().toLocaleDateString('en-CA')}
                 {% endif %}
+                {% elif model.opcua_browse and field.name == 'password' %}
+                type="password" autoComplete="new-password"
                 {% else %}
                 type="text"
                 {% endif %}

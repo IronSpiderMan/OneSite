@@ -1,0 +1,32 @@
+"""Browse saved OPC UA connections with the server model's read permissions."""
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlmodel.ext.asyncio.session import AsyncSession
+from app.core import db, deps
+from app.core.access import require_owned_record
+from app.core.opcua import browse, validate_nodeid
+from app.models.{{ model.source_module }} import {{ model.name }}
+
+router = APIRouter(dependencies=[Depends(deps.model_access({{ model.role_permissions | tojson }}))])
+
+
+@router.get("/{server_id}/browse")
+async def browse_server(
+    server_id: int,
+    nodeid: str = Query("i=84", max_length=4096),
+    session: AsyncSession = Depends(db.get_session),
+):
+    await require_owned_record(session, {{ model.module_name | tojson }}, server_id)
+    server = await session.get({{ model.name }}, server_id)
+    if server is None:
+        raise HTTPException(404, "OPC UA 服务不存在")
+    try:
+        validate_nodeid(nodeid)
+    except (ValueError, TypeError):
+        raise HTTPException(422, "无效的 OPC UA NodeId") from None
+    try:
+        return await asyncio.wait_for(browse(server, nodeid), timeout=30)
+    except Exception:
+        # Never include credentials, paths or remote diagnostics in an API error.
+        raise HTTPException(502, "浏览失败：请检查服务器连接、认证、证书及节点访问权限") from None

@@ -1590,7 +1590,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
                         )} />
                         {% else %}
-                        <Input type="text" {...register('{{ field.name }}')} />
+                        <Input type="{% if model.opcua_browse and field.name == 'password' %}password{% else %}text{% endif %}" {% if model.opcua_browse and field.name == 'password' %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}')} />
                         {% endif %}
                         {% elif field.ui_type == 'bool' %}
                         <Controller
@@ -2265,7 +2265,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
             )} />
             {% else %}
-            <Input id="{{ field.name }}" type="text" {...register('{{ field.name }}')} />
+            <Input id="{{ field.name }}" type="{% if model.opcua_browse and field.name == 'password' %}password{% else %}text{% endif %}" {% if model.opcua_browse and field.name == 'password' %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}')} />
             {% endif %}
             {% elif field.ui_type == 'bool' %}
             <div className="flex items-center space-x-2">

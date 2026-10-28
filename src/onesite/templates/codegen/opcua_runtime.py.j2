@@ -1,0 +1,162 @@
+"""OPC UA profile helpers and on-demand address-space browsing."""
+
+import base64
+import math
+import re
+from pathlib import Path
+from uuid import UUID
+
+from app.core.config import settings
+
+_NODE_ID = re.compile(r"(?:(?:ns=(\d+)|nsu=(.+));)?([isgb])=(.*)")
+
+
+def validate_nodeid(value):
+    """Validate both indexed NodeIds and namespace-URI addresses."""
+    match = _NODE_ID.fullmatch(value) if isinstance(value, str) else None
+    if not match or (match[1] and int(match[1]) > 65535) or not match[4]:
+        raise ValueError("无效的 OPC UA NodeId")
+    namespace, uri, kind, identifier = match.groups()
+    if kind == "i":
+        if not identifier.isascii() or not identifier.isdigit() or int(identifier) > 4294967295:
+            raise ValueError("无效的数字 NodeId")
+        if int(identifier) == 0 and not uri and int(namespace or 0) == 0:
+            raise ValueError("不能使用空 NodeId")
+    elif kind == "g":
+        UUID(identifier)
+    elif kind == "b":
+        base64.b64decode(identifier, validate=True)
+    return match
+
+
+def certificate_path(value):
+    """Resolve uploaded files without permitting traversal out of their storage."""
+    if not isinstance(value, str) or not value:
+        raise ValueError("缺少证书路径")
+    for prefix, root in (
+        ("/uploads/", settings.UPLOAD_DIR),
+        ("/private-uploads/", settings.PRIVATE_UPLOAD_DIR),
+    ):
+        if value.startswith(prefix):
+            name = value[len(prefix) :]
+            if not name or Path(name).name != name or name in (".", "..") or "\\" in name:
+                raise ValueError("无效的证书路径")
+            path = (Path(root) / name).resolve()
+            if path.parent != Path(root).resolve():
+                raise ValueError("无效的证书路径")
+            return str(path)
+    if "://" in value or ".." in Path(value).parts:
+        raise ValueError("证书必须是本地文件")
+    return value
+
+
+async def create_client(server):
+    from asyncua import Client, ua
+    from asyncua.crypto.security_policies import SecurityPolicyBasic256Sha256
+
+    timeout = server.request_timeout_seconds
+    if not isinstance(timeout, (int, float)) or not math.isfinite(timeout) or timeout <= 0:
+        raise ValueError("请求超时无效")
+    client = Client(server.endpoint, timeout=timeout)
+    if server.auth_type == "username":
+        client.set_user(server.username)
+        client.set_password(server.password or "")
+    elif server.auth_type != "anonymous":
+        raise ValueError("不支持的用户认证方式")
+    if server.app_uri:
+        client.application_uri = server.app_uri
+    if server.security_policy == "None":
+        if server.security_mode != "None":
+            raise ValueError("安全策略和模式不匹配")
+    else:
+        if server.security_policy != "Basic256Sha256" or server.security_mode not in (
+            "Sign",
+            "SignAndEncrypt",
+        ):
+            raise ValueError("不支持的安全策略和模式")
+        if not server.app_uri:
+            from cryptography import x509
+
+            data = Path(certificate_path(server.cert_path)).read_bytes()
+            cert = (
+                x509.load_pem_x509_certificate(data)
+                if b"-----BEGIN" in data
+                else x509.load_der_x509_certificate(data)
+            )
+            try:
+                uris = cert.extensions.get_extension_for_class(
+                    x509.SubjectAlternativeName
+                ).value.get_values_for_type(x509.UniformResourceIdentifier)
+                if uris:
+                    client.application_uri = uris[0]
+            except x509.ExtensionNotFound:
+                pass
+        await client.set_security(
+            SecurityPolicyBasic256Sha256,
+            certificate=certificate_path(server.cert_path),
+            private_key=certificate_path(server.key_path),
+            server_certificate=certificate_path(server.server_cert_path),
+            mode=getattr(ua.MessageSecurityMode, server.security_mode),
+        )
+    return client
+
+
+async def is_condition(client, type_id, cache):
+    from asyncua import ua
+
+    visited = set()
+    while type_id and type_id not in visited:
+        if type_id in cache:
+            result = cache[type_id]
+            break
+        visited.add(type_id)
+        if type_id == "i=2782":
+            result = True
+            break
+        parents = await client.get_node(type_id).get_references(
+            refs=ua.ObjectIds.HasSubtype,
+            direction=ua.BrowseDirection.Inverse,
+        )
+        type_id = parents[0].NodeId.to_string() if parents else None
+    else:
+        result = False
+    for item in visited:
+        cache[item] = result
+    return result
+
+
+async def browse(server, nodeid):
+    from asyncua import ua
+
+    match = validate_nodeid(nodeid)
+    client = await create_client(server)
+    async with client:
+        namespaces = await client.get_namespace_array()
+        if match[2]:
+            nodeid = f"ns={namespaces.index(match[2])};{match[3]}={match[4]}"
+        refs = await client.get_node(nodeid).get_children_descriptions()
+        cache, items = {}, {}
+        for ref in refs:
+            if getattr(ref.NodeId, "ServerIndex", 0):
+                continue
+            namespace_index = ref.NodeId.NamespaceIndex
+            if getattr(ref.NodeId, "NamespaceUri", None):
+                namespace_index = namespaces.index(ref.NodeId.NamespaceUri)
+            nid = ua.NodeId(ref.NodeId.Identifier, namespace_index, ref.NodeId.NodeIdType)
+            raw = nid.to_string()
+            stable = (
+                f"nsu={namespaces[nid.NamespaceIndex]};{raw.split(';', 1)[-1]}"
+                if nid.NamespaceIndex
+                else raw
+            )
+            condition = ref.NodeClass == ua.NodeClass.Object and await is_condition(
+                client, ref.TypeDefinition.to_string(), cache
+            )
+            items[raw] = dict(
+                nodeid=raw,
+                stable_nodeid=stable,
+                title=ref.DisplayName.Text or ref.BrowseName.Name or raw,
+                node_class=ref.NodeClass.name,
+                is_condition=condition,
+            )
+        return {"items": list(items.values())}

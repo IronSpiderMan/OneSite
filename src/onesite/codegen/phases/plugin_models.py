@@ -13,6 +13,11 @@ from ..render import generate_file
 
 _PLUGIN_MODEL_TEMPLATES = {
     "site_logger": (("app_log.py.j2", "app_log.py"),),
+    "opcua": (
+        ("opcua_server.py.j2", "opcua_server.py"),
+        ("opcua_node.py.j2", "opcua_node.py"),
+        ("opcua_ac.py.j2", "opcua_ac.py"),
+    ),
     "device_timeseries": (
         ("device_model.py.j2", "device_model.py"),
         ("device_model_field.py.j2", "device_model_field.py"),

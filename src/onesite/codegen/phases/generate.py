@@ -781,6 +781,8 @@ def phase_generate_per_model(
 
     Returns the sorted list of API-visible models for use in routing & navigation.
     """
+    from .opcua import generate_opcua
+    generate_opcua(models, site_config, cwd, backend_path)
     model_lookup = _build_model_lookup(models)
     is_postgresql = site_config.get("database_url", "").startswith("postgresql")
     theme_name = resolve_theme(site_config)[0]["id"]
@@ -1181,6 +1183,7 @@ def phase_generate_aggregated(
         custom_api_modules=custom_api_modules,
         reports_enabled=model_reports_enabled,
         schedule_enabled=bool(site_config.get("schedule", {}).get("enabled")),
+        opcua_enabled="opcua" in site_config.get("plugins", []),
     )
 
     if site_config.get("schedule", {}).get("enabled"):

@@ -1,0 +1,120 @@
+"""Configured OPC UA data points; collection is supplied by the host project."""
+
+from enum import Enum
+from typing import Optional
+import math
+
+from onesite.config import OneSiteConfig
+from sqlalchemy import UniqueConstraint
+from sqlmodel import Field, SQLModel
+
+
+class OpcuaCollectionMode(str, Enum):
+    subscribe = "subscribe"
+    poll = "poll"
+    manual = "manual"
+    __i18n__ = {"zh": {"subscribe": "订阅", "poll": "轮询", "manual": "手动"}}
+
+
+class OpcuaNode(SQLModel, table=True):
+    __tablename__ = "opcua_node"
+    __table_args__ = (
+        UniqueConstraint("opcua_server_id", "nodeid", name="uq_opcua_node_address"),
+        UniqueConstraint("opcua_server_id", "title", name="uq_opcua_node_title"),
+    )
+    __onesite__ = OneSiteConfig(
+        icon="CircleDot",
+        standalone=False,
+        visible=[],
+        permissions={"user": "", "admin": "r", "developer": "crud"},
+        importable=True,
+        exportable=True,
+        import_key="title",
+        union_key=["opcua_server_id", "nodeid"],
+        track=["c", "u", "d", "bulk_delete"],
+        translations={
+            "zh": {
+                "name": "OPCUA 点位",
+                "fields": {
+                    "title": "名称",
+                    "description": "描述",
+                    "nodeid": "NodeId",
+                    "opcua_server_id": "OPCUA 服务",
+                    "is_enabled": "启用",
+                    "collection_mode": "采集模式",
+                    "sampling_interval_ms": "采样间隔（毫秒）",
+                    "polling_interval_seconds": "轮询间隔（秒）",
+                },
+            }
+        },
+    )
+    id: Optional[int] = Field(default=None, primary_key=True)
+    opcua_server_id: int = Field(
+        foreign_key="opcua_server.id",
+        index=True,
+        sa_column_kwargs={
+            "info": {
+                "site_props": {
+                    "reverse": {
+                        "editor": "embedded",
+                        "allow_existing": False,
+                        "on_remove": "delete",
+                    }
+                }
+            }
+        },
+    )
+    title: str = Field(min_length=1)
+    description: Optional[str] = None
+    nodeid: str
+    is_enabled: bool = True
+    collection_mode: OpcuaCollectionMode = Field(default=OpcuaCollectionMode.subscribe)
+    sampling_interval_ms: Optional[float] = Field(
+        default=None,
+        ge=0,
+        sa_column_kwargs={
+            "info": {
+                "site_props": {
+                    "visible_when": {"collection_mode": ["subscribe"]},
+                }
+            }
+        },
+    )
+    polling_interval_seconds: Optional[float] = Field(
+        default=None,
+        gt=0,
+        sa_column_kwargs={
+            "info": {
+                "site_props": {
+                    "visible_when": {"collection_mode": ["poll"]},
+                }
+            }
+        },
+    )
+
+    def _validate(self, changes):
+        from app.core.opcua import validate_nodeid
+
+        validate_nodeid(changes.get("nodeid", self.nodeid))
+        title = changes.get("title", self.title)
+        if not isinstance(title, str) or not title.strip():
+            raise ValueError("名称不能为空")
+        if changes.get("collection_mode", self.collection_mode) not in tuple(OpcuaCollectionMode):
+            raise ValueError("不支持的采集模式")
+        for name, allow_zero in (
+            ("sampling_interval_ms", True),
+            ("polling_interval_seconds", False),
+        ):
+            value = changes.get(name, getattr(self, name))
+            if value is not None and (
+                not isinstance(value, (int, float))
+                or not math.isfinite(value)
+                or (value < 0 if allow_zero else value <= 0)
+            ):
+                raise ValueError(f"{name} 的数值无效")
+
+    def on_before_create(self):
+        self._validate({})
+
+    def on_before_update(self, changes):
+        self._validate(changes)
