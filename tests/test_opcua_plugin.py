@@ -72,6 +72,37 @@ def test_models_detail_browser_and_plugin_lifecycle(tmp_path):
     assert not (backend / "app/models/opcua_server.py").exists()
 
 
+def test_interval_defaults_reach_create_forms(tmp_path):
+    _, models = generate(tmp_path)
+    expected = {
+        "OpcuaServer": {
+            "request_timeout_seconds": 10,
+            "reconnect_interval_seconds": 5,
+            "publishing_interval_ms": 1000,
+        },
+        "OpcuaNode": {
+            "sampling_interval_ms": 1000,
+            "polling_interval_seconds": 1,
+        },
+    }
+    for model_name, defaults in expected.items():
+        model = models[model_name]
+        fields = {field["name"]: field for field in model["fields"]}
+        for name, value in defaults.items():
+            assert fields[name]["default"] == value
+        for theme in ("normal", "arco", "industrial", "neuron"):
+            env = create_template_environment(theme)
+            for template in ("frontend_page_create.tsx.j2", "frontend_page_list.tsx.j2"):
+                page = env.get_template(template).render(model=model)
+                assert "defaultValues:" in page
+                for name, value in defaults.items():
+                    assert f"{name}: {value}," in page
+                if template == "frontend_page_list.tsx.j2" and not model["page_edit"]:
+                    # Opening another create form resets previous edits to defaults.
+                    assert "setEditingId(null);" in page
+                    assert "reset();" in page
+
+
 def test_project_can_override_plugin_model(tmp_path):
     source = tmp_path / "app/models/opcua_node.py"
     source.parent.mkdir(parents=True)

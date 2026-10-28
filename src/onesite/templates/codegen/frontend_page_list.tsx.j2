@@ -395,7 +395,15 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   {% endfor %}
   {% endif %}
 
-  const { register, handleSubmit, reset, setValue, control, watch } = useForm();
+  const { register, handleSubmit, reset, setValue, control, watch } = useForm({
+    defaultValues: {
+    {% for field in model.fields %}
+    {% if field.ui_type in ['int', 'float'] and field.default is number and not field.fk_info %}
+      {{ field.name }}: {{ field.default | tojson }},
+    {% endif %}
+    {% endfor %}
+    } as Record<string, any>,
+  });
   const rootValue = watch();
 
   {% if model.refresh_interval %}

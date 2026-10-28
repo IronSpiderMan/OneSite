@@ -20,6 +20,21 @@ developer 显示。项目可以在 `app/models/opcua_server.py`、`opcua_node.py
 `opcua_ac.py` 提供同名模型覆盖默认配置；Browse 要求保留模型名称、资源名称、
 整数主键和所需连接字段，缺少字段时生成会给出错误。
 
+## 默认运行参数
+
+新建表单和后端模型使用以下默认值，可按设备负载和时效要求调整：
+
+| 资源 | 参数 | 默认值 |
+| --- | --- | --- |
+| Server | 请求超时 `request_timeout_seconds` | 10 秒 |
+| Server | 重连间隔 `reconnect_interval_seconds` | 5 秒 |
+| Server | 订阅发布间隔 `publishing_interval_ms` | 1000 毫秒 |
+| Node | 采样间隔 `sampling_interval_ms` | 1000 毫秒 |
+| Node | 轮询间隔 `polling_interval_seconds` | 1 秒 |
+
+Node 默认使用订阅模式。采样间隔允许设为 0；其余间隔和超时必须大于 0。
+默认值应用于新建记录，不覆盖已有记录或项目自定义模型中的默认值。
+
 ## Browse
 
 Server 详情页的“浏览节点”按钮使用保存的连接配置访问服务器，提供：
