@@ -784,17 +784,11 @@ def sync_backend_assets(cwd: Path, backend_path: Path, site_config: Dict[str, An
         if callbacks:
             _sync_kafka_callbacks(cwd, backend_path, callbacks)
 
-    for name in ["logger.py", "security.py", "deps.py", "tablenames.py", "model_hooks.py"]:
+    for name in ["logger.py", "security.py", "deps.py", "tablenames.py", "model_hooks.py", "ttl_set.py"]:
         src = template_backend_root / "app" / "core" / name
         dst = backend_path / "app" / "core" / name
         if src.exists():
             copy_file_with_status(src, dst)
-
-    if "ttl_set" in site_config.get("plugins", []):
-        ttl_src = template_backend_root / "app" / "core" / "ttl_set.py"
-        ttl_dst = backend_path / "app" / "core" / "ttl_set.py"
-        if ttl_src.exists():
-            copy_file_with_status(ttl_src, ttl_dst)
 
     if "site_logger" in site_config.get("plugins", []):
         sl_src = template_backend_root / "app" / "core" / "site_logger.py"
