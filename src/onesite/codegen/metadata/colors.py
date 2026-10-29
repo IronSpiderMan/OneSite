@@ -80,3 +80,33 @@ def normalize_color(value, *, field_name, field_names, location, config_key="col
             {"when": {"field": target, op: expected}, "color": color(rule["color"])}
         )
     return result
+
+
+def enum_color_config(enum_cls, *, field_name):
+    """Compile shared Enum value colors into the existing field rule format."""
+    props = getattr(enum_cls, "__onesite__", None)
+    if props is None:
+        return None
+    location = f"{enum_cls.__name__}.__onesite__.color"
+    if not isinstance(props, dict):
+        raise ValueError(f"{enum_cls.__name__}.__onesite__ must be an object")
+    mapping = props.get("color")
+    if mapping is None:
+        return None
+    if not isinstance(mapping, dict):
+        raise ValueError(f"{location} must map enum values to preset colors")
+    members = list(enum_cls)
+    rules = []
+    for value, color in mapping.items():
+        # Preserve integer/string identity instead of coercing mapping keys.
+        member = next(
+            (item for item in members
+             if type(item.value) is type(value) and item.value == value),
+            None,
+        )
+        if member is None:
+            raise ValueError(f"{location} references unknown enum value {value!r}")
+        if not isinstance(color, str) or color not in PRESET_COLORS:
+            raise ValueError(f"{location} must use a preset color, got {color!r}")
+        rules.append({"when": {"field": field_name, "eq": member.value}, "color": color})
+    return {"rules": rules} if rules else None

@@ -76,6 +76,7 @@ class FieldDefinition:
     visible_when: dict[str, list[Any]] | None = None
     required_when: dict[str, list[Any]] | None = None
     color: str | dict | None = None
+    color_each_value: bool = False
     display_as_badge: bool = False
     clear_when_hidden: bool = False
     py_imports: list[str] = field(default_factory=list)

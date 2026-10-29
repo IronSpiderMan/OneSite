@@ -14,7 +14,7 @@ from sqlmodel import SQLModel
 
 from onesite.config import normalize_onesite_config
 
-from .metadata.colors import normalize_color
+from .metadata.colors import enum_color_config, normalize_color
 from .filter_defaults import validate_filter_default
 from .naming import to_snake as _to_snake
 from .types import FieldDefinition, ForeignKeyInfo, ModelIntrospectResult
@@ -351,6 +351,7 @@ def get_model_fields(
         _inner, is_optional = _unwrap_optional(type_annotation)
 
         is_enum = False
+        enum_cls = None
         is_multi_select = False
         enum_values: List[Any] = []
         json_kind = None
@@ -361,6 +362,7 @@ def get_model_fields(
 
         if inspect.isclass(_inner) and issubclass(_inner, (str, int)) and hasattr(_inner, "__members__"):
             is_enum = True
+            enum_cls = _inner
             enum_values = [e.value for e in _inner]
             type_str = "str"
 
@@ -391,6 +393,7 @@ def get_model_fields(
                 if inspect.isclass(item_type) and issubclass(item_type, (str, int)) and hasattr(item_type, "__members__"):
                     # List[Enum] → multi-select enum
                     is_enum = True
+                    enum_cls = item_type
                     is_multi_select = True
                     enum_values = [e.value for e in item_type]
                     type_str = "List[int]" if issubclass(item_type, int) else "List[str]"
@@ -651,10 +654,20 @@ def get_model_fields(
         ):
             raise ValueError(f"{model_cls.__name__}.{name}.filter_default requires a supported search field")
 
+        enum_color = enum_color_config(enum_cls, field_name=name) if enum_cls else None
+        inherits_enum_color = "color" not in site_props and enum_color is not None
+        field_color = (
+            normalize_color(site_props["color"], field_name=name,
+                            field_names=set(model_cls.model_fields),
+                            location=f"{model_cls.__name__}.{name}")
+            if "color" in site_props else enum_color
+        )
+
         fields.append(
             FieldDefinition(
                 name=name,
-                color=normalize_color(site_props.get("color"), field_name=name, field_names=set(model_cls.model_fields), location=f"{model_cls.__name__}.{name}"),
+                color=field_color,
+                color_each_value=inherits_enum_color and is_multi_select,
                 display_as_badge=site_props.get("component") == "badge",
                 type=type_str,
                 ui_type=ui_type,

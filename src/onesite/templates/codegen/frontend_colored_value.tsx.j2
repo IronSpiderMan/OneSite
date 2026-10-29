@@ -1,7 +1,14 @@
-<FieldColor config={ {{ field.color | tojson }} } field="{{ field.name }}" record={ {{ color_record }} as unknown as Record<string, unknown>} canRead={(name) => hasFieldPerm(name, 'r')} badge={ {{ 'true' if field.display_as_badge or field.is_enum or field.ui_type == 'bool' else 'false' }} }>
 {% if field.is_enum and field.is_multi_select %}
-{Array.isArray({{ color_record }}.{{ field.name }}) ? {{ color_record }}.{{ field.name }}.map((value: string) => String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${value}`, value))).join(', ') : '-'}
-{% elif field.is_enum %}
+<div className="flex flex-wrap gap-1">
+{Array.isArray({{ color_record }}.{{ field.name }}) && {{ color_record }}.{{ field.name }}.length ? {{ color_record }}.{{ field.name }}.map((value: string | number, index: number) => (
+  <FieldColor key={`${value}-${index}`} config={ {{ field.color | tojson }} } field="{{ field.name }}" record={ {% if field.color_each_value %}{ ...({{ color_record }} as unknown as Record<string, unknown>), "{{ field.name }}": value }{% else %}{{ color_record }} as unknown as Record<string, unknown>{% endif %} } canRead={(name) => hasFieldPerm(name, 'r')} badge>
+    {String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${value}`, String(value)))}
+  </FieldColor>
+)) : '-'}
+</div>
+{% else %}
+<FieldColor config={ {{ field.color | tojson }} } field="{{ field.name }}" record={ {{ color_record }} as unknown as Record<string, unknown>} canRead={(name) => hasFieldPerm(name, 'r')} badge={ {{ 'true' if field.display_as_badge or field.is_enum or field.ui_type == 'bool' else 'false' }} }>
+{% if field.is_enum %}
 { {{ color_record }}.{{ field.name }} == null ? '-' : String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${ {{ color_record }}.{{ field.name }}}`, {{ color_record }}.{{ field.name }}))}
 {% elif field.fk_info %}
 {String({{ color_record }}.{{ field.name }}_label ?? {{ color_record }}.{{ field.name }} ?? '-')}
@@ -15,3 +22,5 @@
 {String({{ color_record }}.{{ field.name }} ?? '-')}
 {% endif %}
 </FieldColor>
+
+{% endif %}

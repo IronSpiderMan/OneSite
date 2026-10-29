@@ -678,6 +678,34 @@ it, text keeps its normal color and badges use neutral styling. Invalid color
 names, field references and operands fail during `site sync`.
 
 
+Enum classes can provide shared default colors for every model field using that
+Enum. Keys are raw enum values (integer keys for integer enums):
+
+```python
+from enum import Enum
+
+class AlarmStatus(str, Enum):
+    ACTIVE = "active"
+    RECOVERED = "recovered"
+    CLOSED = "closed"
+
+    __onesite__ = {
+        "color": {"active": "red", "recovered": "green", "closed": "gray"},
+    }
+
+# Every model can reuse these colors without Field configuration:
+status: AlarmStatus
+```
+
+This also works with `Optional[AlarmStatus]` and `list[AlarmStatus]`. Multi-select
+values render as separate colored badges in tables, grid cards and detail views.
+Unmapped values use neutral styling. An explicit field `site_props.color`
+completely replaces the Enum defaults; `"color": None` disables inheritance.
+Field conditional rules still evaluate the original record, including for
+multi-select fields. Enum colors only map values to presets; conditions based on
+other fields belong in field configuration. Invalid Enum values and color names
+fail during `site sync`. Enum colors and model row backgrounds are independent.
+
 Model-level `row_color` sets the background of each data row on the paginated
 list table, independently of field colors:
 

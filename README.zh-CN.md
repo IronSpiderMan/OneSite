@@ -843,3 +843,30 @@ __onesite__ = {
 按顺序首次匹配生效；不可读或缺失的条件字段会被跳过。
 适配浅色、深色和悬停状态，与字段颜色独立，仅作用于分页列表表格的数据行。
 修改后执行 `site sync`。
+
+### Enum 共享颜色
+
+在 Enum 类上声明 `__onesite__["color"]`，所有使用它的模型字段自动继承：
+
+```python
+from enum import Enum
+
+class AlarmStatus(str, Enum):
+    ACTIVE = "active"
+    RECOVERED = "recovered"
+    CLOSED = "closed"
+
+    __onesite__ = {
+        "color": {"active": "red", "recovered": "green", "closed": "gray"},
+    }
+
+# 在模型中直接引用，不必重复配置 Field：
+status: AlarmStatus
+```
+
+映射 key 是枚举实际值；整数枚举使用整数 key。支持可空枚举和 `list[Enum]`，
+多选枚举在列表、卡片和详情中逐项显示彩色徽章，未配置颜色的值使用中性样式。
+字段显式设置 `site_props.color` 时完整覆盖 Enum 默认配置，设置 `"color": None`
+可禁用继承。字段条件规则仍根据原始记录判断，包括多选字段。
+Enum 仅配置值到预设色的映射，跨字段条件放在字段配置中；与模型 `row_color` 独立。
+无效枚举值或颜色名称在 `site sync` 时直接报错。修改后执行 `site sync`。
