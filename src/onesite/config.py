@@ -638,6 +638,7 @@ class OneSiteConfig(_ConfigModel):
     standalone: bool = True
     page_edit: bool = False
     edit_mode: EditMode | None = None
+    row_color: str | dict[str, Any] | None = None
     list_mode: ListMode = ListMode.LIST
     multi_display: MultiDisplayConfig | None = None
     refresh_interval: int = 0

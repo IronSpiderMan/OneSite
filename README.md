@@ -677,6 +677,28 @@ unreadable condition fields are skipped. Unmatched rules use `default`; without
 it, text keeps its normal color and badges use neutral styling. Invalid color
 names, field references and operands fail during `site sync`.
 
+
+Model-level `row_color` sets the background of each data row on the paginated
+list table, independently of field colors:
+
+```python
+__onesite__ = {
+    "row_color": {
+        "rules": [
+            {"when": {"field": "status", "eq": "ACTIVE"}, "color": "red"},
+            {"when": {"field": "score", "gte": 80}, "color": "green"},
+        ],
+        "default": "gray",  # optional; omit to keep unmatched rows unchanged
+    },
+}
+```
+
+It accepts the same presets and operators as field colors, or a fixed preset
+such as `"row_color": "blue"`. Model rules must explicitly include `field`.
+The first matching rule wins; missing or unreadable fields are skipped.
+Row backgrounds support light/dark modes and hover states. This setting applies
+to list table rows, not grid cards or detail views. Run `site sync` after changes.
+
 For a browser-assisted latitude/longitude field, use the bundled `Location`
 value object with a JSON column and `component: "location"`:
 

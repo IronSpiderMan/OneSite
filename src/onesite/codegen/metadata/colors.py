@@ -23,9 +23,9 @@ PRESET_COLORS = (
 )
 
 
-def normalize_color(value, *, field_name, field_names, location):
+def normalize_color(value, *, field_name, field_names, location, config_key="color"):
     def fail(message):
-        raise ValueError(f"{location}.color {message}")
+        raise ValueError(f"{location}.{config_key} {message}")
 
     def color(name):
         if not isinstance(name, str) or name not in PRESET_COLORS:

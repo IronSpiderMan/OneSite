@@ -821,3 +821,25 @@ pip、setuptools、wheel，同时增加超时和重试次数，以适应较慢�
 ```
 
 更多设计背景请阅读 [设计原则](docs/design-principles.md)，并参考 `examples/`。
+
+### 分页列表行颜色
+
+在模型的 `__onesite__` 中配置 `row_color`，可根据字段值设置整行背景色：
+
+```python
+__onesite__ = {
+    "row_color": {
+        "rules": [
+            {"when": {"field": "status", "eq": "ACTIVE"}, "color": "red"},
+            {"when": {"field": "score", "gte": 80}, "color": "green"},
+        ],
+        "default": "gray",  # 可省略，未匹配时保留原背景
+    },
+}
+```
+
+也支持固定颜色，例如 `"row_color": "blue"`。支持与字段颜色相同的 17 种预设色，
+以及 `eq / ne / in / gt / gte / lt / lte` 运算符。模型级规则必须明确指定 `field`，
+按顺序首次匹配生效；不可读或缺失的条件字段会被跳过。
+适配浅色、深色和悬停状态，与字段颜色独立，仅作用于分页列表表格的数据行。
+修改后执行 `site sync`。

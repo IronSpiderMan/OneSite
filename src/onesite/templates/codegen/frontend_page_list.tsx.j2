@@ -53,7 +53,7 @@ import { Modal } from '../../components/ui/modal';
 {% endif %}
 import { Label } from '../../components/ui/label';
 import { Badge } from '../../components/ui/badge';
-import { FieldColor } from '../../components/ui/field-color';
+import { FieldColor{% if model.site_props.row_color %}, resolveRowColorClass{% endif %} } from '../../components/ui/field-color';
 import { Switch } from '../../components/ui/switch';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../components/ui/select';
 import { ImageUpload } from '../../components/ui/image-upload';
@@ -1570,7 +1570,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 </TableRow>
             ) : (
                 data.map((item) => (
-                <TableRow key={item.id}>
+                <TableRow key={item.id}{% if model.site_props.row_color %} className={resolveRowColorClass({{ model.site_props.row_color | tojson }}, item as unknown as Record<string, unknown>, (name) => hasFieldPerm(name, 'r'))}{% endif %}>
                     <TableCell>
                       <input
                         type="checkbox"

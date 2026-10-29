@@ -832,6 +832,14 @@ def get_model_fields(
                     f"'{timescaledb_time_field}' must be a datetime field"
                 )
 
+    model_site_props["row_color"] = normalize_color(
+        model_site_props.get("row_color"),
+        field_name=None,  # Model rules must explicitly name their condition field.
+        field_names={field.name for field in fields},
+        location=model_cls.__name__,
+        config_key="row_color",
+    )
+
     model_site_props["dashboard_metrics"] = _normalize_dashboard_metrics(
         model_site_props.get("dashboard_metrics"),
         model_name=model_cls.__name__,
