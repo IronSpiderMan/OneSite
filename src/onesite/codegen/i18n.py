@@ -11,6 +11,7 @@ def generate_locale_files(
     navigation_groups: List[Dict[str, Any]] | None = None,
     frontend_features: List[Dict[str, Any]] | None = None,
     tools: List[Dict[str, Any]] | None = None,
+    scheduled_tasks: List[Dict[str, Any]] | None = None,
 ):
 
     zh_field_defaults: Dict[str, str] = {
@@ -1297,6 +1298,16 @@ def generate_locale_files(
                 **tool.get("translations", {}).get(language, {}),
             }
             for tool in tools or []
+        }
+        locale["scheduled_task_definitions"] = {
+            task["name"]: {
+                "title": task["title"],
+                "description": task.get("description", ""),
+                "inputs": tool_fields(task.get("inputs", []), language),
+                "result": tool_fields(task.get("result", {}).get("fields", []), language),
+                **task.get("translations", {}).get(language, {}),
+            }
+            for task in scheduled_tasks or []
         }
 
     write_file_with_status(locale_dir / "en.json", json.dumps(en_translations, indent=2))

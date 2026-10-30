@@ -558,9 +558,10 @@ def validate_scheduled_tasks_config(config: Dict[str, Any]) -> None:
             or handler == "__init__"
         ):
             raise SiteConfigError(f"{field}.handler must be a valid Python identifier.")
-        if handler in seen_handlers:
-            raise SiteConfigError(f"{field}.handler duplicates handler {handler!r}.")
-        seen_handlers.add(handler)
+        if not task.get("class_path"):
+            if handler in seen_handlers:
+                raise SiteConfigError(f"{field}.handler duplicates handler {handler!r}.")
+            seen_handlers.add(handler)
 
         task.setdefault("title", name.replace("_", " ").title())
         task.setdefault("description", "")

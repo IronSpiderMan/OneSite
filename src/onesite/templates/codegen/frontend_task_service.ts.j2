@@ -1,7 +1,15 @@
 import request from '../utils/request';
+import type { ToolFieldDefinition } from '../components/tools/ToolFields';
 
 export interface Task {
   name: string;
+  title?: string;
+  source_description?: string;
+  class_path?: string;
+  inputs?: ToolFieldDefinition[];
+  defaults?: Record<string, unknown>;
+  input_overrides?: Record<string, unknown>;
+  configuration_error?: string | null;
   func: string;
   cron: string;
   interval: number;  // 0 means cron task, >0 means interval in seconds
@@ -32,7 +40,7 @@ export interface TaskUpdate {
   interval?: number;
   description?: string;
   enabled?: boolean;
-  params?: Record<string, string | number | boolean | string[]>;
+  params?: Record<string, unknown>;
 }
 
 export async function getTasks(): Promise<Task[]> {

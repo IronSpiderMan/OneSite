@@ -1700,11 +1700,12 @@ def phase_generate_aggregated(
             frontend_path / "src" / "stores" / "useTaskStore.ts",
         )
 
-    if tools:
+    if tools or scheduled_tasks:
         generate_file(
             "frontend_tool_fields.tsx.j2", {},
             frontend_path / "src" / "components" / "tools" / "ToolFields.tsx",
         )
+    if tools:
         generate_file(
             "frontend_tool_service.ts.j2",
             {},
@@ -1724,6 +1725,7 @@ def phase_generate_aggregated(
         navigation_groups,
         frontend_features,
         tools,
+        scheduled_tasks,
     )
 
     # ── Background task handlers __init__.py ──

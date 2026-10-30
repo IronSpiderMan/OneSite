@@ -76,9 +76,11 @@ interface FieldProps {
   t: TFunction;
   prefix: string;
   id: string;
+  inherited?: boolean;
+  canUseDefault?: boolean;
 }
 
-const TypedField: React.FC<FieldProps> = ({ field, value, onChange, t, prefix, id }) => {
+const TypedField: React.FC<FieldProps> = ({ field, value, onChange, t, prefix, id, inherited, canUseDefault }) => {
   const label = t(`${prefix}.label`, field.label);
   const help = t(`${prefix}.help`, field.help || '');
   const placeholder = t(`${prefix}.placeholder`, field.placeholder || '');
@@ -124,16 +126,20 @@ const TypedField: React.FC<FieldProps> = ({ field, value, onChange, t, prefix, i
   }
   return <div className={`space-y-2 ${field.fields || field.item || ['text', 'json', 'file', 'files'].includes(field.type) ? 'sm:col-span-2' : ''}`}>
     <div className="flex items-center justify-between gap-2"><Label htmlFor={id}>{label}{field.required && <span className="ml-1 text-destructive">*</span>}</Label><div className="flex gap-2">
-      {!field.required && value === undefined && <span className="text-xs text-muted-foreground">{t('tools.uses_default', 'Uses default')}</span>}
+      {(inherited || (!field.required && value === undefined)) && <span className="text-xs text-muted-foreground">{t('tools.uses_default', 'Uses default')}</span>}
       {field.nullable && value !== null && <button type="button" className="text-xs text-muted-foreground underline" onClick={() => onChange(null)}>{t('tools.use_null', 'Use null')}</button>}
-      {!field.required && value !== undefined && <button type="button" className="text-xs text-muted-foreground underline" onClick={() => onChange(undefined)}>{t('tools.use_default', 'Use default')}</button>}
+      {(!field.required || canUseDefault) && !inherited && value !== undefined && <button type="button" className="text-xs text-muted-foreground underline" onClick={() => onChange(undefined)}>{t('tools.use_default', 'Use default')}</button>}
     </div></div>
     {control}
     {help && <p className="text-xs text-muted-foreground">{help}</p>}
   </div>;
 };
 
-export const TypedToolFields: React.FC<{ fields: ToolFieldDefinition[]; values: Record<string, unknown>; onChange: (values: Record<string, unknown>) => void; t: TFunction; prefix: string; id: string }> = ({ fields, values, onChange, t, prefix, id }) => <div className="grid gap-4 sm:grid-cols-2">{fields.map((field) => <TypedField key={field.name} field={field} value={values[field.name]} onChange={(value) => onChange({ ...values, [field.name]: value })} t={t} prefix={`${prefix}.${field.name}`} id={`${id}-${field.name}`} />)}</div>;
+export const TypedToolFields: React.FC<{ fields: ToolFieldDefinition[]; values: Record<string, unknown>; onChange: (values: Record<string, unknown>) => void; t: TFunction; prefix: string; id: string; defaults?: Record<string, unknown> }> = ({ fields, values, onChange, t, prefix, id, defaults }) => <div className="grid gap-4 sm:grid-cols-2">{fields.map((field) => {
+  const inherited = defaults !== undefined && values[field.name] === undefined;
+  const fallback = defaults && Object.prototype.hasOwnProperty.call(defaults, field.name) ? defaults[field.name] : fieldDefault(field);
+  return <TypedField key={field.name} field={field} value={inherited ? fallback : values[field.name]} inherited={inherited} canUseDefault={defaults !== undefined && Object.prototype.hasOwnProperty.call(defaults, field.name)} onChange={(value) => onChange({ ...values, [field.name]: value })} t={t} prefix={`${prefix}.${field.name}`} id={`${id}-${field.name}`} />;
+})}</div>;
 
 const ResultValue: React.FC<{ value: unknown; fields?: ToolFieldDefinition[]; field?: ToolFieldDefinition; prefix: string; t: TFunction }> = ({ value, fields, field, prefix, t }) => {
   if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;

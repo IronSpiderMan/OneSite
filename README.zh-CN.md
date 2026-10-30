@@ -363,6 +363,11 @@ __onesite__ = {
 嵌套字段和文件上传。参见 [Python 类工具说明](docs/tools.md) 和
 [完整示例](examples/typed_tools)。原有 `Tool(...)` 配置继续兼容。
 
+定时任务同样支持 `BaseScheduledTask` 和 Pydantic 输入输出模型，通过
+`SiteConfig(scheduled_tasks=[MyTask])` 注册；APScheduler 继续负责触发，后台队列
+负责执行。参见 [Python 类定时任务说明](docs/scheduled-tasks.md) 和
+[完整示例](examples/typed_tasks)，旧的 `ScheduledTask(...)` 写法继续兼容。
+
 配置任一导入、导出、项目工具或定时任务后，`site sync` 会自动生成统一的
 “任务中心”页面。页面展示提交到进程内任务队列的导入、导出、工具和定时任务，
 支持按类型、任务名称和状态筛选，并展示进度、时间、结果、错误及下载地址。

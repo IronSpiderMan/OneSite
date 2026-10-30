@@ -23,6 +23,8 @@ class BackgroundExecution(SQLModel, table=True):
     progress: int = Field(default=0)
     message: Optional[str] = None
     inputs_json: str = Field(default="{}")
+    # Private validated input snapshot for scheduled-task restart recovery.
+    payload_json: Optional[str] = Field(default=None, exclude=True)
     result_json: Optional[str] = None
     download_url: Optional[str] = None
     error: Optional[str] = None

@@ -6,6 +6,7 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from pydantic import BaseModel, ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlmodel import select
 
@@ -13,6 +14,7 @@ from app.core.background_execution import BackgroundExecution
 from app.core.db import engine
 from app.core.scheduled_task_bindings import (
     SCHEDULED_TASK_HANDLERS,
+    SCHEDULED_TASK_CLASSES,
     SCHEDULED_TASKS_BY_NAME,
 )
 from app.core.scheduled_task_runtime import (
@@ -22,6 +24,7 @@ from app.core.scheduled_task_runtime import (
     scheduled_download_url,
 )
 from app.core.task_queue import task_queue
+from app.core.execution_types import validation_values
 from app.core.ws import manager
 from app.models.user import User
 
@@ -70,7 +73,8 @@ async def execute_scheduled_task(payload: dict) -> None:
             return
         task = SCHEDULED_TASKS_BY_NAME.get(task_name)
         handler = SCHEDULED_TASK_HANDLERS.get(task_name)
-        if task is None or handler is None:
+        task_class = SCHEDULED_TASK_CLASSES.get(task_name)
+        if task is None or (handler is None and task_class is None):
             execution.status = "failed"
             execution.error = "Scheduled task handler is not registered"
             execution.completed_at = datetime.now(timezone.utc)
@@ -99,14 +103,23 @@ async def execute_scheduled_task(payload: dict) -> None:
             session=session,
         )
         try:
-            kwargs = dict(payload.get("params", {}))
-            if "context" in inspect.signature(handler).parameters:
-                kwargs["context"] = context
-            value = await asyncio.wait_for(
-                handler(**kwargs),
-                timeout=task.get("timeout_seconds", 600),
-            )
-            result = normalize_scheduled_result(value)
+            if execution.trigger == "manual":
+                role = getattr(getattr(current_user, "role", None), "value", None)
+                if current_user is None or not current_user.is_active or role not in task["manual_permissions"]:
+                    raise PermissionError("Manual execution permission was revoked")
+            if task_class is not None:
+                inputs = task_class.inputs.model_validate_json(json.dumps(payload.get("params", {})))
+                value = await asyncio.wait_for(
+                    task_class().run(inputs=inputs, context=context), timeout=task.get("timeout_seconds", 600),
+                )
+                output = task_class.result.model_validate(validation_values(value) if isinstance(value, BaseModel) else value)
+                result = normalize_scheduled_result(output.model_dump(mode="json", by_alias=True))
+            else:
+                kwargs = dict(payload.get("params", {}))
+                if "context" in inspect.signature(handler).parameters:
+                    kwargs["context"] = context
+                value = await asyncio.wait_for(handler(**kwargs), timeout=task.get("timeout_seconds", 600))
+                result = normalize_scheduled_result(value)
             execution.status = "succeeded"
             execution.progress = 100
             execution.message = result.message
@@ -118,10 +131,20 @@ async def execute_scheduled_task(payload: dict) -> None:
             execution.download_url = scheduled_download_url(
                 execution.id, result.download_path
             )
+            if task_class is not None and task.get("result_ui", {}).get("renderer") == "download":
+                output_file = result.data.get(task["result_ui"]["field"])
+                execution.download_url = output_file.get("download_url") if isinstance(output_file, dict) else None
         except asyncio.TimeoutError:
             execution.status = "failed"
             execution.error = "Scheduled task timed out"
             logger.exception("Scheduled task %s timed out", task_name)
+        except ValidationError:
+            execution.status = "failed"
+            execution.error = "Scheduled task input or result validation failed"
+            logger.exception("Scheduled task %s violated its data model", task_name)
+        except PermissionError:
+            execution.status = "failed"
+            execution.error = "Permission denied"
         except Exception:
             execution.status = "failed"
             execution.error = "Scheduled task failed"

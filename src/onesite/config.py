@@ -16,6 +16,7 @@ from urllib.parse import quote, urlencode
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
 
 from onesite_runtime.tools import BaseTool
+from onesite_runtime.tasks import BaseScheduledTask
 
 
 Role = Literal["user", "admin", "developer"]
@@ -768,7 +769,7 @@ class SiteConfig(_ConfigModel):
     providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
     tools: list[Tool | type[BaseTool]] = Field(default_factory=list)
-    scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
+    scheduled_tasks: list[ScheduledTask | type[BaseScheduledTask]] = Field(default_factory=list)
     schedule: ScheduleConfig | None = None
     task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)
     public_dashboard: PublicDashboardConfig = Field(default_factory=PublicDashboardConfig)
@@ -782,6 +783,17 @@ class SiteConfig(_ConfigModel):
                 mode=info.mode, exclude_none=info.exclude_none, exclude_unset=info.exclude_unset,
             )
             for tool in tools
+        ]
+
+    @field_serializer("scheduled_tasks")
+    def serialize_scheduled_tasks(self, tasks: list, info: Any) -> list[dict[str, Any]]:
+        from .codegen.scheduled_tasks import compile_scheduled_task
+
+        return [
+            compile_scheduled_task(task) if isinstance(task, type) else task.model_dump(
+                mode=info.mode, exclude_none=info.exclude_none, exclude_unset=info.exclude_unset,
+            )
+            for task in tasks
         ]
 
 

@@ -446,6 +446,39 @@ def _sync_kafka_callbacks(
     )
 
 
+def _sync_execution_runtime(backend_path: Path, source_tree: Path) -> None:
+    """Install standalone shared types and rewrite the public source imports."""
+    runtime_root = Path(__file__).resolve().parents[2] / "onesite_runtime"
+    modules = {
+        "execution_types": "execution_types",
+        "tools": "tool_types",
+        "tasks": "scheduled_task_types",
+    }
+    for public, local in modules.items():
+        copy_file_with_status(
+            runtime_root / f"{public}.py", backend_path / "app" / "core" / f"{local}.py",
+        )
+    for target in source_tree.rglob("*.py"):
+        source = target.read_text(encoding="utf-8")
+        for public, local in modules.items():
+            source = source.replace(
+                f"from onesite_runtime.{public} import", f"from app.core.{local} import",
+            ).replace(f"import onesite_runtime.{public} as ", f"import app.core.{local} as ")
+        for node in ast.walk(ast.parse(source)):
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module]
+            elif isinstance(node, ast.Import):
+                names = [alias.name for alias in node.names]
+            else:
+                continue
+            if any(name and name.split(".")[0] in {"onesite", "onesite_runtime"} for name in names):
+                raise SiteConfigError(
+                    f"{target}: use 'from onesite_runtime.tools import ...', "
+                    "'from onesite_runtime.tasks import ...', or an aliased module import"
+                )
+        write_file_with_status(target, source)
+
+
 def _sync_tools(cwd: Path, backend_path: Path, tools: List[Dict[str, Any]]) -> None:
     """Scaffold developer-owned tool handlers and mirror them into backend."""
     source_tools = get_project_paths(cwd).tools
@@ -475,24 +508,7 @@ def _sync_tools(cwd: Path, backend_path: Path, tools: List[Dict[str, Any]]) -> N
         )
 
     _mirror_python_tree(source_tools, target_tools)
-    if tools:
-        runtime = Path(__file__).resolve().parents[2] / "onesite_runtime" / "tools.py"
-        copy_file_with_status(runtime, backend_path / "app" / "core" / "tool_types.py")
-        for target in target_tools.rglob("*.py"):
-            source = target.read_text(encoding="utf-8")
-            source = source.replace("from onesite_runtime.tools import", "from app.core.tool_types import")
-            source = source.replace("import onesite_runtime.tools as ", "import app.core.tool_types as ")
-            imports = [node for node in ast.walk(ast.parse(source)) if isinstance(node, (ast.Import, ast.ImportFrom))]
-            if any(
-                node.module and node.module.split(".")[0] in {"onesite", "onesite_runtime"}
-                if isinstance(node, ast.ImportFrom) else
-                any(alias.name.split(".")[0] in {"onesite", "onesite_runtime"} for alias in node.names)
-                for node in imports
-            ):
-                raise SiteConfigError(
-                    f"{target}: use 'from onesite_runtime.tools import ...' or an aliased module import"
-                )
-            write_file_with_status(target, source)
+    _sync_execution_runtime(backend_path, target_tools)
 
 
 def _strip_legacy_task_registration(file_path: Path) -> None:
@@ -565,6 +581,14 @@ def _sync_scheduled_tasks(
     _ensure_init_py(source_tasks)
 
     for task in tasks:
+        if task.get("class_path"):
+            module, _, class_name = task["class_path"].partition(":")
+            if not module.startswith("app.tasks.") or not all(part.isidentifier() for part in module.split(".")) or not class_name.isidentifier():
+                raise SiteConfigError(f"Invalid scheduled task class_path: {task['class_path']!r}")
+            source = cwd.joinpath(*module.split(".")).with_suffix(".py")
+            if not source.is_file() and not cwd.joinpath(*module.split("."), "__init__.py").is_file():
+                raise SiteConfigError(f"Scheduled task source does not exist: {source}")
+            continue
         handler_name = task["handler"]
         source_file = source_tasks / f"{handler_name}.py"
         legacy_file = target_tasks / f"{handler_name}.py"
@@ -585,6 +609,7 @@ def _sync_scheduled_tasks(
         )
 
     _mirror_python_tree(source_tasks, target_tasks)
+    _sync_execution_runtime(backend_path, target_tasks)
 
 
 def sync_frontend_assets(cwd: Path, site_config: Dict[str, Any]):

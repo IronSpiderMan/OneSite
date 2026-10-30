@@ -10,7 +10,7 @@ from sqlalchemy.engine import make_url
 from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy import text, Index
+from sqlalchemy import text, Index, inspect
 from app.core.config import settings
 
 P = ParamSpec("P")
@@ -104,6 +104,16 @@ async def init_db():
         versioned = await conn.run_sync(check_startup_revision)
         if not versioned:
             await conn.run_sync(SQLModel.metadata.create_all)
+        {% if background_execution_enabled %}
+        # Additive runtime schema upgrade for existing unversioned projects.
+        # Versioned databases receive this column through their Alembic migration.
+        if not versioned:
+            columns = await conn.run_sync(lambda connection: {
+                column["name"] for column in inspect(connection).get_columns("onesite_background_execution")
+            })
+            if "payload_json" not in columns:
+                await conn.execute(text("ALTER TABLE onesite_background_execution ADD COLUMN payload_json TEXT"))
+        {% endif %}
         {% for index in generated_indexes %}
         await conn.execute(text({{ index.sql_literal }}))
         {% endfor %}

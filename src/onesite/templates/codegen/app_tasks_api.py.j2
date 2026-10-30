@@ -1,7 +1,8 @@
+import json
 from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -16,7 +17,7 @@ router = APIRouter()
 
 class TaskUpdate(BaseModel):
     cron: str | None = None
-    interval: int | None = None
+    interval: int | None = Field(default=None, ge=0, strict=True)
     description: str | None = None
     enabled: bool | None = None
     params: dict[str, Any] | None = None
@@ -24,6 +25,11 @@ class TaskUpdate(BaseModel):
 
 def _role_name(user: User) -> str:
     return getattr(user.role, "value", str(user.role))
+
+
+def _invalid_configuration(exc: ValueError) -> HTTPException:
+    detail = json.loads(exc.json(include_url=False, include_context=False, include_input=False)) if isinstance(exc, ValidationError) else str(exc)
+    return HTTPException(status_code=422, detail=detail)
 
 
 def _assert_manage_allowed(task: dict, user: User) -> None:
@@ -125,7 +131,10 @@ async def run_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
     _assert_manage_allowed(task, current_user)
-    execution = await task_registry.run(name, requested_by=current_user.id)
+    try:
+        execution = await task_registry.run(name, requested_by=current_user.id)
+    except ValueError as exc:
+        raise _invalid_configuration(exc) from exc
     return execution_to_dict(execution)
 
 
@@ -138,7 +147,10 @@ def enable_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
     _assert_manage_allowed(task, current_user)
-    task_registry.enable(name)
+    try:
+        task_registry.enable(name)
+    except ValueError as exc:
+        raise _invalid_configuration(exc) from exc
     return {"status": "ok", "message": f"Task '{name}' enabled"}
 
 
@@ -165,14 +177,8 @@ def update_task(
     if not task:
         raise HTTPException(status_code=404, detail=f"Task '{name}' not found")
     _assert_manage_allowed(task, current_user)
-    if config.interval is not None and config.interval > 0:
-        task_registry.update_interval(name, config.interval)
-    elif config.cron is not None:
-        task_registry.update_cron(name, config.cron)
-    if config.description is not None:
-        task_registry.update_description(name, config.description)
-    if config.enabled is not None:
-        task_registry.enable(name) if config.enabled else task_registry.disable(name)
-    if config.params is not None:
-        task_registry.update_params(name, config.params)
+    try:
+        task_registry.update(name, config.model_dump(exclude_unset=True))
+    except ValueError as exc:
+        raise _invalid_configuration(exc) from exc
     return {"status": "ok", "message": f"Task '{name}' updated"}

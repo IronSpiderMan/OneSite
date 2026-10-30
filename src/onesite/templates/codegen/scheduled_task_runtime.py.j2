@@ -16,6 +16,9 @@ from app.core.config import settings
 from app.core.db import engine
 from app.core.task_queue import task_queue
 from app.core.ws import manager
+from app.core.execution_types import OutputFile, input_values
+
+_enqueue_locks: dict[str, asyncio.Lock] = {}
 
 
 @dataclass
@@ -44,6 +47,14 @@ class ScheduledTaskContext:
         if not safe_name:
             raise ValueError("Output filename cannot be empty")
         return self.output_dir / safe_name
+
+    def output_file(self, path: str | Path, *, content_type: str | None = None) -> OutputFile:
+        return OutputFile(
+            name=Path(path).name,
+            download_url=scheduled_download_url(self.execution_id, path),
+            size=Path(path).stat().st_size,
+            content_type=content_type,
+        )
 
     async def run_sync(self, function: Callable[..., Any], *args, **kwargs) -> Any:
         return await asyncio.to_thread(function, *args, **kwargs)
@@ -81,7 +92,30 @@ def execution_to_dict(execution: BackgroundExecution) -> dict:
     }
 
 
+def validate_scheduled_inputs(task: dict, params: dict) -> tuple[dict, dict]:
+    from app.core.scheduled_task_bindings import SCHEDULED_TASK_CLASSES
+
+    task_class = SCHEDULED_TASK_CLASSES.get(task["name"])
+    if task_class is None:
+        return params, params
+    validated = task_class.inputs.model_validate_json(json.dumps(params))
+    return input_values(validated), validated.model_dump(mode="json", by_alias=True)
+
+
 async def enqueue_scheduled_task(
+    task: dict,
+    *,
+    params: dict,
+    trigger: str,
+    requested_by: int | None,
+) -> BackgroundExecution:
+    # APScheduler's max_instances applies to its short enqueue callback.
+    # Serialize check/create here to cover the actual queued/running work.
+    async with _enqueue_locks.setdefault(task["name"], asyncio.Lock()):
+        return await _enqueue(task, params=params, trigger=trigger, requested_by=requested_by)
+
+
+async def _enqueue(
     task: dict,
     *,
     params: dict,
@@ -99,13 +133,15 @@ async def enqueue_scheduled_task(
             if existing is not None:
                 return existing
 
+        parsed, public_inputs = validate_scheduled_inputs(task, params)
         execution = BackgroundExecution(
             id=str(uuid.uuid4()),
             kind="scheduled_task",
             name=task["name"],
             trigger=trigger,
             requested_by=requested_by,
-            inputs_json=json.dumps(params, ensure_ascii=False, default=str),
+            inputs_json=json.dumps(public_inputs, ensure_ascii=False, default=str),
+            payload_json=json.dumps(parsed, ensure_ascii=False, default=str),
         )
         session.add(execution)
         await session.commit()
@@ -114,7 +150,7 @@ async def enqueue_scheduled_task(
             {
                 "execution_id": execution.id,
                 "task_name": task["name"],
-                "params": params,
+                "params": parsed,
             },
         )
         return execution
@@ -157,7 +193,7 @@ async def recover_scheduled_executions() -> None:
             BackgroundExecution.kind == "scheduled_task",
             BackgroundExecution.status.in_(["queued", "running"]),
         )
-        executions = (await session.exec(statement)).all()
+        executions = (await session.exec(statement.order_by(BackgroundExecution.created_at, BackgroundExecution.id))).all()
         for execution in executions:
             if execution.status == "running":
                 execution.status = "failed"
@@ -176,7 +212,7 @@ async def recover_scheduled_executions() -> None:
                 {
                     "execution_id": execution.id,
                     "task_name": execution.name,
-                    "params": json.loads(execution.inputs_json or "{}"),
+                    "params": json.loads(execution.payload_json or execution.inputs_json or "{}"),
                 },
             )
         if executions:

@@ -510,6 +510,12 @@ translations, and deterministic mock data.
 
 ### Scheduled tasks
 
+Declare `BaseScheduledTask` subclasses with Pydantic input/result models and
+register them with `SiteConfig(scheduled_tasks=[MyTask])`. APScheduler continues
+to handle triggers, while the shared background queue executes each task.
+See the [class task guide](docs/scheduled-tasks.md) and
+[runnable example](examples/typed_tasks). Existing `ScheduledTask(...)` declarations remain supported.
+
 Scheduled tasks use the same developer-owned source and background execution
 model. A scheduler trigger creates an execution record and publishes work to
 the task queue; it does not run business code inside the scheduler callback.

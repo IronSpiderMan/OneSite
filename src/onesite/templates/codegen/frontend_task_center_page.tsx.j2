@@ -23,6 +23,9 @@ import {
   TableRow,
 } from '../components/ui/table';
 import { formatDateTime, getUserTimeZone } from '../lib/datetime';
+{% if tools or scheduled_tasks %}
+import { ToolResultView, type ToolFieldDefinition } from '../components/tools/ToolFields';
+{% endif %}
 import {
   getTaskCenterTask,
   listTaskCenterTasks,
@@ -33,6 +36,16 @@ import {
 
 const ALL = '__all__';
 const POLL_INTERVAL_MS = 3000;
+{% if tools or scheduled_tasks %}
+const RESULT_DEFINITIONS: Record<string, { fields: ToolFieldDefinition[]; ui?: { renderer?: string; field?: string | null }; prefix: string }> = {
+{% for tool in tools %}{% if tool.class_path is defined %}
+  {{ ('tool:' ~ tool.name) | tojson }}: { fields: {{ tool.result.fields | tojson }}, ui: {{ tool.result_ui | tojson }}, prefix: {{ ('tool_definitions.' ~ tool.name ~ '.result') | tojson }} },
+{% endif %}{% endfor %}
+{% for task in scheduled_tasks %}{% if task.class_path is defined %}
+  {{ ('scheduled_task:' ~ task.name) | tojson }}: { fields: {{ task.result.fields | tojson }}, ui: {{ task.result_ui | tojson }}, prefix: {{ ('scheduled_task_definitions.' ~ task.name ~ '.result') | tojson }} },
+{% endif %}{% endfor %}
+};
+{% endif %}
 
 const MODEL_LABEL_KEYS: Record<string, string> = {
 {% for model in io_models %}
@@ -134,7 +147,8 @@ const TaskCenterPage: React.FC = () => {
     (task: Pick<TaskCenterTask, 'kind' | 'name'>) => {
       const key = task.kind === 'import' || task.kind === 'export'
         ? MODEL_LABEL_KEYS[task.name]
-        : task.kind === 'tool' ? `tool_definitions.${task.name}.title` : undefined;
+        : task.kind === 'tool' ? `tool_definitions.${task.name}.title`
+        : task.kind === 'scheduled_task' ? `scheduled_task_definitions.${task.name}.title` : undefined;
       return key ? t(key, task.name) : task.name;
     },
     [t],
@@ -710,6 +724,15 @@ const TaskCenterPage: React.FC = () => {
               </div>
             ) : null}
 
+{% if tools or scheduled_tasks %}
+            {selectedTask.result != null && (selectedTask.kind === 'tool' || selectedTask.kind === 'scheduled_task') && (
+              <div className="rounded-md border p-3">
+                {RESULT_DEFINITIONS[`${selectedTask.kind}:${selectedTask.name}`]
+                  ? <ToolResultView value={selectedTask.result} {...RESULT_DEFINITIONS[`${selectedTask.kind}:${selectedTask.name}`]} t={t} />
+                  : <pre className="overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(selectedTask.result, null, 2)}</pre>}
+              </div>
+            )}
+{% endif %}
             {selectedTask.download_url ? (
               <div className="flex justify-end">
                 <Button

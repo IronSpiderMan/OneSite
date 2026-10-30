@@ -22,16 +22,19 @@ from onesite_runtime.tools import (
 from .metadata.fields import _get_field_site_props, _unwrap_optional
 
 
-class _ToolMetadata(BaseModel):
+class ExecutableMetadata(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     name: str = Field(min_length=1)
     title: str = Field(min_length=1)
     description: str = ""
-    permissions: list[Role] = Field(min_length=1)
     execution: ExecutionOptions
     result_ui: ResultUI
     translations: dict[str, ToolTranslation]
+
+
+class _ToolMetadata(ExecutableMetadata):
+    permissions: list[Role] = Field(min_length=1)
 
 
 def _translations(model: type[BaseModel]) -> dict[str, Any]:
@@ -224,27 +227,50 @@ def _validate_models(annotation: Any, prefix: str, seen: tuple[type, ...] = ()) 
             _validate_models(argument, prefix, seen)
 
 
-def compile_tool(tool: type[BaseTool]) -> dict[str, Any]:
-    """Preserve import bindings separately from JSON schema/UI descriptions."""
-    prefix = f"Tool {tool.__name__}"
-    if tool is BaseTool or inspect.isabstract(tool):
+def declaration_metadata(
+    declaration: type,
+    metadata_model: type[ExecutableMetadata],
+    *,
+    namespace: str,
+    label: str,
+) -> dict[str, Any]:
+    """Validate the common class declaration and preserve an import binding."""
+    prefix = f"{label} {declaration.__name__}"
+    if inspect.isabstract(declaration):
         raise ValueError(f"{prefix}: implement async run(inputs, context)")
-    if not tool.__module__.startswith("app.tools.") or tool.__qualname__ != tool.__name__:
-        raise ValueError(f"{prefix}: declare a top-level class in app/tools/*.py")
-    if not inspect.iscoroutinefunction(tool.run):
+    if (
+        not declaration.__module__.startswith(f"app.{namespace}.")
+        or declaration.__qualname__ != declaration.__name__
+    ):
+        raise ValueError(f"{prefix}: declare a top-level class in app/{namespace}/*.py")
+    if not inspect.iscoroutinefunction(declaration.run):
         raise ValueError(f"{prefix}.run must be async")
     try:
-        inspect.signature(tool).bind()
-        inspect.signature(tool.run).bind(None, inputs=None, context=None)
+        inspect.signature(declaration).bind()
+        inspect.signature(declaration.run).bind(None, inputs=None, context=None)
     except TypeError as exc:
         raise ValueError(
             f"{prefix}: use a no-argument constructor and run(self, inputs, context): {exc}"
         ) from exc
-    metadata = _ToolMetadata(
-        **{name: getattr(tool, name, None) for name in _ToolMetadata.model_fields}
+    metadata = metadata_model(
+        **{name: getattr(declaration, name, None) for name in metadata_model.model_fields}
     ).model_dump(mode="json", exclude_none=True)
+    name = metadata["name"]
+    if not name.isidentifier() or keyword.iskeyword(name) or name == "__init__":
+        raise ValueError(f"{prefix}.name must be a valid Python identifier")
     if not metadata["title"].strip():
         raise ValueError(f"{prefix}.title must not be blank")
+    return {
+        **metadata,
+        "handler": name,
+        "class_path": f"{declaration.__module__}:{declaration.__name__}",
+    }
+
+
+def compile_models(
+    tool: type, ui: dict, *, prefix: str, allow_uploads: bool = True
+) -> dict[str, Any]:
+    """Compile input/output contracts shared by tools and scheduled tasks."""
     for key in ("inputs", "result"):
         model = getattr(tool, key, None)
         if not inspect.isclass(model) or not issubclass(model, BaseModel):
@@ -264,6 +290,10 @@ def compile_tool(tool: type[BaseTool]) -> dict[str, Any]:
             else (annotation, False)
         )
         if inspect.isclass(item) and issubclass(item, InputFile):
+            if not allow_uploads:
+                raise ValueError(
+                    f"{prefix}.inputs.{name}: scheduled tasks use durable resource IDs instead of InputFile uploads"
+                )
             props = _get_field_site_props(field)
             node.pop("fields", None)
             node.pop("item", None)
@@ -279,7 +309,6 @@ def compile_tool(tool: type[BaseTool]) -> dict[str, Any]:
     if _contains_file(tool.result):
         raise ValueError(f"{prefix}.result: use OutputFile for results, not InputFile")
     fields = _fields(tool.result, mode="serialization")
-    ui = metadata["result_ui"]
     selected = next((node for node in fields if node["name"] == ui.get("field")), None)
     if ui["renderer"] in ("text", "table", "download"):
         if selected is None:
@@ -303,15 +332,17 @@ def compile_tool(tool: type[BaseTool]) -> dict[str, Any]:
                 raise ValueError(
                     f"{prefix}.result_ui.field must be an OutputFile for download rendering"
                 )
-    name = metadata["name"]
-    if not name.isidentifier() or keyword.iskeyword(name) or name == "__init__":
-        raise ValueError(f"{prefix}.name must be a valid Python identifier")
     return {
-        **metadata,
-        "handler": name,
-        "class_path": f"{tool.__module__}:{tool.__name__}",
         "inputs": inputs,
         "input_schema": tool.inputs.model_json_schema(),
         "result_schema": tool.result.model_json_schema(mode="serialization"),
         "result": {"type": "json", "fields": fields},
+    }
+
+
+def compile_tool(tool: type[BaseTool]) -> dict[str, Any]:
+    metadata = declaration_metadata(tool, _ToolMetadata, namespace="tools", label="Tool")
+    return {
+        **metadata,
+        **compile_models(tool, metadata["result_ui"], prefix=f"Tool {tool.__name__}"),
     }

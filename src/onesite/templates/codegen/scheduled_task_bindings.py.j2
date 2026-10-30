@@ -4,7 +4,11 @@ import json
 
 from app.core.scheduler import task_registry
 {% for task in tasks %}
+{% if task.class_path is defined %}
+from {{ task.class_path.split(':')[0] }} import {{ task.class_path.split(':')[1] }} as _task_{{ loop.index }}
+{% else %}
 from app.tasks.{{ task.handler }} import {{ task.handler }}
+{% endif %}
 {% endfor %}
 
 SCHEDULED_TASK_DEFINITIONS = json.loads({{ tasks_json | tojson }})
@@ -13,7 +17,17 @@ SCHEDULED_TASKS_BY_NAME = {
 }
 SCHEDULED_TASK_HANDLERS = {
 {% for task in tasks %}
+{% if task.class_path is not defined %}
     "{{ task.name }}": {{ task.handler }},
+{% endif %}
+{% endfor %}
+}
+
+SCHEDULED_TASK_CLASSES = {
+{% for task in tasks %}
+{% if task.class_path is defined %}
+    "{{ task.name }}": _task_{{ loop.index }},
+{% endif %}
 {% endfor %}
 }
 
@@ -26,6 +40,6 @@ def register_scheduled_tasks() -> None:
         return
     for task in SCHEDULED_TASK_DEFINITIONS:
         config = dict(task)
-        config["func"] = f"app.tasks.{task['handler']}:{task['handler']}"
+        config["func"] = task.get("class_path", f"app.tasks.{task['handler']}:{task['handler']}")
         task_registry.register(config)
     _registered = True
