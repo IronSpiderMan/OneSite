@@ -1,13 +1,14 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, CheckCircle2, CircleDotDashed, Clock3, Download, FileUp, Info, Loader2, Play, Sparkles, Wrench } from 'lucide-react';
+import { AlertCircle, CheckCircle2, Clock3, Download, FileUp, Info, Loader2, Play, Search, ArrowRight, Wrench } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import type { TFunction } from 'i18next';
 import { useTranslation } from 'react-i18next';
 import { toast } from 'sonner';
 
-import { Button } from './ui/button';
-import { Input } from './ui/input';
-import { Label } from './ui/label';
-import { Textarea } from './ui/textarea';
+import { Button } from '../components/ui/button';
+import { Input } from '../components/ui/input';
+import { Label } from '../components/ui/label';
+import { Textarea } from '../components/ui/textarea';
 import { executeTool, getToolExecution, ToolExecution } from '../services/tools';
 
 interface ToolInput {
@@ -65,15 +66,17 @@ const selectedFilesLabel = (value: unknown, multiple: boolean, t: TFunction) => 
 
 const ToolExecutionPanel: React.FC<{ execution: ToolExecution; t: TFunction }> = ({ execution, t }) => {
   const { label, surface, Icon } = executionStyle(execution.status);
+  const progress = Number.isFinite(execution.progress) ? Math.min(100, Math.max(0, execution.progress)) : 0;
   return (
     <div aria-live="polite" className={`space-y-3 rounded-xl border p-4 ${surface}`}>
       <div className="flex items-center justify-between gap-3 text-sm">
         <span className={`flex items-center gap-2 font-medium ${label}`}><Icon className="h-4 w-4" />{t(`tools.status.${execution.status}`, execution.status)}</span>
-        <span className="font-mono text-xs text-muted-foreground">{execution.progress}%</span>
+        <span className="font-mono text-xs text-muted-foreground">{progress}%</span>
       </div>
-      <div className="h-1.5 overflow-hidden rounded-full bg-background/80"><div className="h-full rounded-full bg-primary transition-all duration-500" style={ { width: `${execution.progress}%` } } /></div>
+      <div role="progressbar" aria-label={t('tools.progress', 'Execution progress')} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-1.5 overflow-hidden rounded-full bg-background/80"><div className="h-full rounded-full bg-primary transition-all duration-500" style={ { width: `${progress}%` } } /></div>
+      {execution.message && <p className="break-words text-sm text-muted-foreground">{execution.message}</p>}
       {execution.error && <p className="rounded-md bg-background/60 p-2.5 text-sm text-destructive">{execution.error}</p>}
-      {execution.result != null && <pre className="max-h-64 overflow-auto rounded-lg border bg-background/75 p-3 whitespace-pre-wrap text-xs leading-5 text-foreground">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>}
+      {execution.result != null && <pre className="max-h-64 overflow-auto rounded-lg border bg-background/75 p-3 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>}
       {execution.download_url && <Button className="bg-background/70" type="button" variant="outline" onClick={() => window.open(execution.download_url!, '_blank')}><Download className="mr-2 h-4 w-4" />{t('tools.download', 'Download result')}</Button>}
     </div>
   );
@@ -141,24 +144,25 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
   };
 
   return (
-    <form onSubmit={submit} className="group relative overflow-hidden rounded-xl border bg-background p-5 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md focus-within:border-primary/40 focus-within:shadow-md space-y-5">
-      <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-gradient-to-r from-transparent via-primary/45 to-transparent opacity-0 transition-opacity duration-200 group-hover:opacity-100" />
+    <form onSubmit={submit} className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card text-card-foreground shadow-sm transition-colors focus-within:border-primary/40">
+      <div className="flex flex-1 flex-col gap-6 p-5 sm:p-6">
       <div className="flex items-start gap-3.5">
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-primary/15 bg-primary/10 text-primary shadow-sm"><Wrench className="h-5 w-5" /></div>
         <div className="min-w-0 flex-1 pt-0.5">
-          <div className="flex items-start justify-between gap-3"><h3 className="font-semibold leading-5 tracking-tight">{tool.title}</h3><span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{tool.inputs.length} {t('tools.inputs', 'inputs')}</span></div>
+          <div className="flex items-start justify-between gap-3"><h2 className="break-words text-base font-semibold leading-6 tracking-tight">{tool.title}</h2><span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[11px] font-medium text-muted-foreground">{tool.inputs.length} {t('tools.inputs', 'inputs')}</span></div>
           {tool.description && <p className="mt-1.5 text-sm leading-5 text-muted-foreground">{tool.description}</p>}
         </div>
       </div>
 
-      <div className="grid gap-4 border-y border-border/60 py-5 md:grid-cols-2">
+      {tool.inputs.length > 0 && <div className="grid gap-5 sm:grid-cols-2">
         {tool.inputs.map((input) => (
-          <div key={input.name} className={input.type === 'text' || input.type === 'json' || input.type === 'files' ? 'md:col-span-2 space-y-2' : 'space-y-2'}>
-            <Label className="text-xs font-medium uppercase tracking-wide text-muted-foreground" htmlFor={`${tool.name}-${input.name}`}>
-              {input.label}{input.required && <span className="text-destructive"> *</span>}
+          <div key={input.name} className={input.type === 'text' || input.type === 'json' || input.type === 'files' || input.type === 'file' ? 'sm:col-span-2 space-y-2' : 'space-y-2'}>
+            <Label className="text-sm font-medium" htmlFor={`${tool.name}-${input.name}`}>
+              {input.label || input.name}{input.required && <span className="text-destructive"> *</span>}
             </Label>
             {input.type === 'text' || input.type === 'json' ? (
               <Textarea
+                className={input.type === 'json' ? 'min-h-28 font-mono text-xs' : 'min-h-28'}
                 id={`${tool.name}-${input.name}`}
                 required={input.required}
                 placeholder={input.placeholder}
@@ -189,7 +193,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
               </select>
             ) : input.type === 'bool' ? (
               <label className="flex h-10 items-center gap-2 rounded-md border border-input bg-muted/20 px-3 text-sm transition-colors hover:bg-muted/40">
-                <input className="h-4 w-4 accent-primary" type="checkbox" checked={Boolean(values[input.name])} onChange={(event) => setValue(input.name, event.target.checked)} />
+                <input id={`${tool.name}-${input.name}`} className="h-4 w-4 accent-primary" type="checkbox" checked={Boolean(values[input.name])} onChange={(event) => setValue(input.name, event.target.checked)} />
                 <span className="text-sm text-muted-foreground">{input.help || input.label}</span>
               </label>
             ) : input.type === 'file' || input.type === 'files' ? (
@@ -204,7 +208,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
                   accept={(input.accept || []).join(',') || undefined}
                   onChange={(event) => setValue(input.name, input.type === 'files' ? Array.from(event.target.files || []) : event.target.files?.[0] || null)}
                 />
-                <p className="mt-2 truncate text-xs text-muted-foreground">{selectedFilesLabel(values[input.name], input.type === 'files', t)}</p>
+                <p className="mt-2 break-all text-xs text-muted-foreground">{selectedFilesLabel(values[input.name], input.type === 'files', t)}</p>
               </div>
             ) : (
               <Input
@@ -222,37 +226,64 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
             {input.help && input.type !== 'bool' && <p className="flex items-center gap-1.5 text-xs leading-4 text-muted-foreground"><Info className="h-3.5 w-3.5 shrink-0" />{input.help}</p>}
           </div>
         ))}
-      </div>
-
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <Button className="min-w-28 shadow-sm" type="submit" disabled={submitting || (!!execution && !TERMINAL.has(execution.status))}>
-          {submitting || (!!execution && !TERMINAL.has(execution.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-          {t('tools.execute', 'Execute')}
-        </Button>
-        {execution && <span className="max-w-full text-sm text-muted-foreground">{execution.message || execution.status}</span>}
-      </div>
+      </div>}
 
       {execution && <ToolExecutionPanel execution={execution} t={t} />}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-5 py-4 sm:px-6">
+        <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
+          <Clock3 className="h-3.5 w-3.5 shrink-0" />{t('tools.background', 'Runs in the background')}
+        </span>
+        <Button className="min-w-28" type="submit" disabled={submitting || (!!execution && !TERMINAL.has(execution.status))}>
+          {submitting || (!!execution && !TERMINAL.has(execution.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
+          {submitting || (!!execution && !TERMINAL.has(execution.status)) ? t('tools.status.running', 'Running') : t('tools.execute', 'Execute')}
+        </Button>
+      </div>
     </form>
   );
 };
 
-export const DashboardTools: React.FC = () => {
+const ToolsPage: React.FC = () => {
   const { t } = useTranslation();
+  const [search, setSearch] = useState('');
   const role = localStorage.getItem('user_role') || 'user';
   const tools = useMemo(() => TOOL_DEFINITIONS.filter((tool) => tool.permissions.includes(role)), [role]);
-  if (tools.length === 0) return null;
+  const query = search.trim().toLocaleLowerCase();
+  const matchingTools = tools.filter((tool) => `${tool.title} ${tool.description || ''} ${tool.name}`.toLocaleLowerCase().includes(query));
   return (
-    <section className="overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm">
-      <div className="relative flex flex-col gap-3 overflow-hidden border-b bg-gradient-to-r from-primary/[0.09] via-primary/[0.03] to-transparent px-5 py-5 sm:flex-row sm:items-center sm:justify-between sm:px-6">
-        <Sparkles className="pointer-events-none absolute -right-3 -top-3 h-20 w-20 text-primary/[0.08]" />
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm ring-4 ring-primary/10"><Wrench className="h-5 w-5" /></div>
-          <div><h2 className="text-lg font-semibold tracking-tight">{t('tools.title', 'Tools')}</h2><p className="text-sm text-muted-foreground">{t('tools.subtitle', 'Run workspace utilities and track their progress')}</p></div>
+    <div className="mx-auto w-full max-w-[1600px] space-y-6">
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <div className="flex items-center gap-3">
+            <h1 className="text-3xl font-bold tracking-tight">{t('tools.title', 'Tools')}</h1>
+            <span className="rounded-full border bg-muted/50 px-2.5 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{tools.length} {t('tools.available', 'available')}</span>
+          </div>
+          <p className="mt-2 text-sm text-muted-foreground">{t('tools.subtitle', 'Run workspace utilities and track their progress')}</p>
         </div>
-        <span className="z-10 flex w-fit items-center gap-1.5 rounded-full border bg-background/80 px-2.5 py-1 text-xs font-medium text-muted-foreground"><CircleDotDashed className="h-3.5 w-3.5 text-primary" />{tools.length} {t('tools.available', 'available')}</span>
+        <Link to="/task-center" className="inline-flex h-10 shrink-0 items-center justify-center self-start rounded-md border border-input bg-background px-4 py-2 text-sm font-medium transition-colors hover:bg-accent/50 hover:text-accent-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2">
+          {t('menu.task_center', 'Task Center')}<ArrowRight className="ml-2 h-4 w-4" />
+        </Link>
       </div>
-      <div className="grid gap-5 p-5 sm:p-6 xl:grid-cols-2">{tools.map((tool) => <ToolCard key={tool.name} tool={tool} />)}</div>
-    </section>
+
+      {tools.length > 0 && <div className="flex flex-col gap-3 rounded-xl border bg-card p-4 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex items-center gap-2 text-sm text-muted-foreground"><Wrench className="h-4 w-4 text-primary" />{t('tools.choose', 'Choose a tool to get started')}</div>
+        <div className="relative w-full sm:max-w-xs">
+          <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+          <Input type="search" className="pl-9" aria-label={t('tools.search', 'Search tools')} placeholder={t('tools.search', 'Search tools')} value={search} onChange={(event) => setSearch(event.target.value)} />
+        </div>
+      </div>}
+
+      <div className="grid items-start gap-5 xl:grid-cols-2">
+        {tools.map((tool) => <div key={tool.name} className={matchingTools.includes(tool) ? 'min-w-0' : 'hidden'}><ToolCard tool={tool} /></div>)}
+      </div>
+      {matchingTools.length === 0 && <div role="status" className="flex flex-col items-center rounded-xl border border-dashed bg-card px-6 py-16 text-center">
+        <div className="mb-4 rounded-full bg-muted p-4"><Wrench className="h-6 w-6 text-muted-foreground" /></div>
+        <h2 className="font-semibold">{tools.length === 0 ? t('tools.empty', 'No tools available') : t('tools.no_matches', 'No matching tools')}</h2>
+        <p className="mt-2 max-w-sm text-sm text-muted-foreground">{tools.length === 0 ? t('tools.empty_hint', 'Tools available to your role will appear here.') : t('tools.search_hint', 'Try a different name or keyword.')}</p>
+        {search && <Button variant="outline" className="mt-5" onClick={() => setSearch('')}>{t('tools.clear_search', 'Clear search')}</Button>}
+      </div>}
+    </div>
   );
 };
+
+export default ToolsPage;

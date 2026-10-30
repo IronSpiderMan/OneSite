@@ -130,52 +130,35 @@ def test_generated_python_tool_modules_compile():
         compile(rendered, template_name, "exec")
 
 
-def test_dashboard_renders_tool_region():
+def test_dashboard_does_not_embed_tools():
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
     rendered = env.get_template("dashboard_page.tsx.j2").render(
-        models=[],
-        scheduled_tasks=[],
-        site_logger=False,
-        show_dashboard_announcement=False,
-        tools=_tools(),
+        models=[], scheduled_tasks=[], site_logger=False,
+        show_dashboard_announcement=False, tools=_tools(),
     )
-    assert "import { DashboardTools }" in rendered
-    assert "<DashboardTools />" in rendered
+    assert "DashboardTools" not in rendered
 
 
-def test_dashboard_tools_are_rendered_after_scheduled_tasks():
+def test_tools_page_renders_standalone_layout_and_tool_forms():
     env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
-    rendered = env.get_template("dashboard_page.tsx.j2").render(
-        models=[],
-        scheduled_tasks=[{"name": "daily_summary"}],
-        site_logger=False,
-        show_dashboard_announcement=False,
-        tools=_tools(),
-    )
-
-    scheduled_tasks_position = rendered.index("{/* Scheduled Tasks Section */}")
-    edit_modal_position = rendered.index("{/* Edit Task Modal */}")
-    tools_position = rendered.index("<DashboardTools />")
-
-    assert scheduled_tasks_position < tools_position < edit_modal_position
-
-
-def test_dashboard_tools_use_one_section_card_with_tool_items():
-    env = Environment(loader=FileSystemLoader(TEMPLATE_DIR))
-    rendered = env.get_template("frontend_dashboard_tools.tsx.j2").render(
+    rendered = env.get_template("frontend_tools_page.tsx.j2").render(
         tools=_tools()
     )
 
-    assert '<section className="overflow-hidden rounded-2xl border bg-card text-card-foreground shadow-sm">' in rendered
+    assert '<h1 className="text-3xl font-bold tracking-tight">' in rendered
+    assert '<Link to="/task-center"' in rendered
+    assert 'type="search"' in rendered
+    assert "tools.no_matches" in rendered
+    assert 'role="progressbar"' in rendered
     assert "t('tools.subtitle', 'Run workspace utilities and track their progress')" in rendered
-    assert '<form onSubmit={submit} className="group relative overflow-hidden rounded-xl border bg-background p-5 shadow-sm' in rendered
+    assert '<form onSubmit={submit} className="flex min-w-0 flex-col overflow-hidden rounded-xl border bg-card' in rendered
     assert 'const executionStyle = (status: string)' in rendered
     assert 'const ToolExecutionPanel: React.FC' in rendered
     assert "t('tools.files_selected', '{{count}} files selected'" in rendered
     assert 'className="rounded-xl border bg-card p-6 shadow-sm space-y-5"' not in rendered
 
 
-def test_dashboard_tools_locale_keys_are_generated(tmp_path):
+def test_tools_locale_keys_are_generated(tmp_path):
     generate_locale_files([], tmp_path)
 
     en = json.loads((tmp_path / "en.json").read_text(encoding="utf-8"))
@@ -212,12 +195,15 @@ def test_site_sync_generates_complete_tool_feature(tmp_path, monkeypatch):
     assert (generated_backend / "core" / "background_execution.py").exists()
     assert (generated_backend / "core" / "background_execution_cleanup.py").exists()
     assert (generated_backend / "api" / "endpoints" / "task_center.py").exists()
-    assert (generated_frontend / "components" / "dashboard-tools.tsx").exists()
+    assert (generated_frontend / "pages" / "Tools.tsx").exists()
     assert (generated_frontend / "services" / "tools.ts").exists()
     assert (generated_frontend / "pages" / "TaskCenter.tsx").exists()
     routes = (generated_frontend / "Routes.tsx").read_text(encoding="utf-8")
+    assert "path: '/tools'" in routes
+    assert "DashboardTools" not in (generated_frontend / "pages" / "Dashboard.tsx").read_text()
     assert "path: '/task-center'" in routes
     menu = (generated_frontend / "Menu.tsx").read_text(encoding="utf-8")
+    assert 'key: "/tools"' in menu
     assert 'key: "/task-center"' in menu
     main = (generated_backend / "main.py").read_text(encoding="utf-8")
     assert "await cleanup_expired_background_executions()" in main
@@ -256,3 +242,18 @@ def test_hidden_tool_is_excluded_from_task_center_api_and_filters(tmp_path, monk
     ).read_text(encoding="utf-8")
     assert '"kind": "tool", "name": "internal_cleanup"' in api
     assert "internal_cleanup" not in page
+
+
+def test_typed_tool_config_has_no_dashboard_placement():
+    from onesite.config import SiteConfig, Tool, ToolInput, ToolResult
+
+    config = SiteConfig(tools=[Tool(
+        name="uppercase",
+        inputs=[ToolInput(name="text", type="text", required=True)],
+        result=ToolResult(type="text"),
+    )])
+    data = config.model_dump(mode="json", exclude_none=True)
+    validate_tools_config(data)
+    assert isinstance(config.tools[0], Tool)
+    assert data["tools"][0]["handler"] == "uppercase"
+    assert "placement" not in data["tools"][0]

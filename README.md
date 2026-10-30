@@ -304,9 +304,9 @@ The same handler may be bound to multiple topics. For production deployments,
 override MQTT credentials through `MQTT_URL`, `MQTT_USERNAME`,
 `MQTT_PASSWORD`, and `MQTT_CLIENT_ID` rather than committing secrets.
 
-### Dashboard tools
+### Project tools
 
-Project tools add configuration-driven forms to the Dashboard and execute the
+Project tools add configuration-driven forms to the Tools page (`/tools`) and execute the
 developer implementation in the background:
 
 ```json
@@ -342,6 +342,28 @@ developer implementation in the background:
   ]
 }
 ```
+
+For typed Python configuration in `site_config.py`, use `Tool`:
+
+```python
+from onesite.config import SiteConfig, Tool, ToolInput, ToolResult
+
+config = SiteConfig(
+    tools=[
+        Tool(
+            name="uppercase",
+            title="Uppercase text",
+            inputs=[ToolInput(name="text", type="text", required=True)],
+            result=ToolResult(type="text"),
+        ),
+    ],
+)
+```
+
+`Tool` replaces the former `DashboardTool` class. Update existing imports and
+constructors to `Tool` and remove `placement="dashboard"`. The Tools navigation
+entry appears automatically; use `NavBuiltin.tools()` to set its position in
+custom navigation.
 
 On the first `site sync`, OneSite scaffolds `app/tools/merge_reports.py` and
 mirrors it to `generated/backend/app/tools/merge_reports.py`. Only edit the
@@ -1242,7 +1264,7 @@ updates the existing row; otherwise a new row is created. Set field-level
 `site_props` `importable=False` or `exportable=False` to exclude a field even
 when it appears in a model-level field list.
 
-When imports, exports, dashboard tools, or scheduled tasks are configured,
+When imports, exports, project tools, or scheduled tasks are configured,
 `site sync` also generates a unified **Task Center** page. It lists imports,
 exports, tool executions, and scheduled-task executions submitted to the
 in-process task queue, with kind/name/status filters, progress, timestamps,
@@ -1518,7 +1540,7 @@ project/
 │   ├── models/                # SQLModel source of truth
 │   ├── integrations/
 │   │   └── mqtt/              # MQTT handler implementations
-│   ├── tools/                  # Dashboard tool implementations
+│   ├── tools/                  # Project tool implementations
 │   ├── tasks/                  # scheduled task implementations
 │   ├── frontend/
 │   │   ├── features/           # custom frontend feature source

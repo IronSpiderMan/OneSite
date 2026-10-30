@@ -550,6 +550,7 @@ def _builtin_menu_node(
     external_resources_enabled: bool = False,
     import_export_enabled: bool = False,
     import_export_role_visible: dict[str, bool] | None = None,
+    tools_role_visible: dict[str, bool] | None = None,
 ) -> dict[str, Any] | None:
     builtins = {
         "dashboard": {
@@ -570,6 +571,12 @@ def _builtin_menu_node(
             "label": "menu.external_resources",
             "visible": {"user": False, "admin": True, "developer": True},
         },
+        "tools": {
+            "key": "/tools",
+            "icon": "Wrench",
+            "label": "menu.tools",
+            "visible": tools_role_visible or {},
+        },
         "task-center": {
             "key": "/task-center",
             "icon": "ArrowRightLeft",
@@ -578,6 +585,8 @@ def _builtin_menu_node(
             or {"user": False, "admin": False, "developer": False},
         },
     }
+    if key == "tools" and not tools_role_visible:
+        return None
     if key == "reports" and not reports_enabled:
         return None
     if key == "external-resources" and not external_resources_enabled:
@@ -598,6 +607,7 @@ def _build_navigation(
     external_resources_enabled: bool = False,
     import_export_enabled: bool = False,
     import_export_role_visible: dict[str, bool] | None = None,
+    tools_role_visible: dict[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the generated menu tree from ``site_config.navigation``.
 
@@ -668,6 +678,7 @@ def _build_navigation(
                 external_resources_enabled=external_resources_enabled,
                 import_export_enabled=import_export_enabled,
                 import_export_role_visible=import_export_role_visible,
+                tools_role_visible=tools_role_visible,
             )
 
         children = [
@@ -697,6 +708,7 @@ def _build_navigation(
                 external_resources_enabled=external_resources_enabled,
                 import_export_enabled=import_export_enabled,
                 import_export_role_visible=import_export_role_visible,
+                tools_role_visible=tools_role_visible,
             )
         ]
         default_nodes.extend(_model_menu_node(model) for model in model_by_module.values())
@@ -705,7 +717,7 @@ def _build_navigation(
             for route in custom_routes
             if route.get("menu") is not None
         )
-        for key in ("reports", "external-resources", "task-center"):
+        for key in ("tools", "reports", "external-resources", "task-center"):
             node = _builtin_menu_node(
                 key,
                 reports_enabled=reports_enabled,
@@ -713,6 +725,7 @@ def _build_navigation(
                 external_resources_enabled=external_resources_enabled,
                 import_export_enabled=import_export_enabled,
                 import_export_role_visible=import_export_role_visible,
+                tools_role_visible=tools_role_visible,
             )
             if node is not None:
                 default_nodes.append(node)
@@ -766,8 +779,15 @@ def _build_navigation(
                 external_resources_enabled=external_resources_enabled,
                 import_export_enabled=True,
                 import_export_role_visible=import_export_role_visible,
+                tools_role_visible=tools_role_visible,
             )
         )
+    if tools_role_visible and "tools" not in declared_builtins:
+        declared_nodes.append(_builtin_menu_node(
+            "tools", reports_enabled=reports_enabled,
+            reports_role_visible=reports_role_visible,
+            tools_role_visible=tools_role_visible,
+        ))
     return declared_nodes
 
 
@@ -1425,6 +1445,8 @@ def phase_generate_aggregated(
         generated_route_paths["builtin.reports"] = "/reports"
     if external_resources_enabled:
         generated_route_paths["builtin.external-resources"] = "/external-resources"
+    if tools:
+        generated_route_paths["builtin.tools"] = "/tools"
     if background_tasks_enabled:
         generated_route_paths["builtin.task-center"] = "/task-center"
     for model in frontend_models:
@@ -1507,6 +1529,8 @@ def phase_generate_aggregated(
         external_resources_enabled=external_resources_enabled,
         import_export_enabled=background_tasks_enabled,
         import_export_role_visible=import_export_role_visible,
+        tools_role_visible={role: any(role in tool["permissions"] for tool in tools)
+                            for role in ("user", "admin", "developer")} if tools else None,
     )
     if site_config.get("agents"):
         navigation.append({
@@ -1563,6 +1587,7 @@ def phase_generate_aggregated(
             "import_export_enabled": background_tasks_enabled,
             "public_dashboard": public_dashboard,
             "agents_enabled": bool(site_config.get("agents")),
+            "tools_enabled": bool(tools),
         },
         frontend_path / "src" / "Routes.tsx",
     )
@@ -1682,9 +1707,9 @@ def phase_generate_aggregated(
             frontend_path / "src" / "services" / "tools.ts",
         )
         generate_file(
-            "frontend_dashboard_tools.tsx.j2",
+            "frontend_tools_page.tsx.j2",
             {"tools": tools},
-            frontend_path / "src" / "components" / "dashboard-tools.tsx",
+            frontend_path / "src" / "pages" / "Tools.tsx",
         )
 
     # ── Locale files ──

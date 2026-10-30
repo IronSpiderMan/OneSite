@@ -358,7 +358,7 @@ __onesite__ = {
 否则创建新记录。字段的 `site_props` 可设置 `importable=False` 或
 `exportable=False`，即使模型级 `fields` 包含该字段也会排除。
 
-配置任一导入、导出、仪表盘工具或定时任务后，`site sync` 会自动生成统一的
+配置任一导入、导出、项目工具或定时任务后，`site sync` 会自动生成统一的
 “任务中心”页面。页面展示提交到进程内任务队列的导入、导出、工具和定时任务，
 支持按类型、任务名称和状态筛选，并展示进度、时间、结果、错误及下载地址。
 用户主动发起的任务按当前登录用户隔离；定时任务按照其手动执行权限展示。
@@ -870,3 +870,28 @@ status: AlarmStatus
 可禁用继承。字段条件规则仍根据原始记录判断，包括多选字段。
 Enum 仅配置值到预设色的映射，跨字段条件放在字段配置中；与模型 `row_color` 独立。
 无效枚举值或颜色名称在 `site sync` 时直接报错。修改后执行 `site sync`。
+
+
+### 项目工具配置
+
+在 `site_config.py` 中使用 `Tool` 配置独立工具页面（`/tools`）：
+
+```python
+from onesite.config import SiteConfig, Tool, ToolInput, ToolResult
+
+config = SiteConfig(
+    tools=[
+        Tool(
+            name="uppercase",
+            title="文本转大写",
+            inputs=[ToolInput(name="text", type="text", required=True)],
+            result=ToolResult(type="text"),
+        ),
+    ],
+)
+```
+
+原有 `DashboardTool` 的导入和构造调用改为 `Tool`，并移除
+`placement="dashboard"`。配置工具后自动生成“工具”导航项；可以通过
+`NavBuiltin.tools()` 指定其在自定义导航中的位置。
+执行 `site sync` 后，在 `app/tools/uppercase.py` 中实现同名异步处理函数。

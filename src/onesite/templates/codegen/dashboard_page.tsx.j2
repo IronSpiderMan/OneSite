@@ -18,9 +18,6 @@ import {
     VisualizationData, VisualizationOptions, VisualizationSpec,
 } from '../services/visualizations';
 {% endif %}
-{% if tools %}
-import { DashboardTools } from '../components/dashboard-tools';
-{% endif %}
 {% if site_logger %}
 import { getAppLogs } from '../services/app_log';
 import { buildNotificationWsUrl } from '../services/notification-center';
@@ -1460,10 +1457,6 @@ const DashboardPage: React.FC = () => {
                     </div>
                 )}
             </div>
-            {% endif %}
-
-            {% if tools %}
-            <DashboardTools />
             {% endif %}
 
             {% if scheduled_tasks %}

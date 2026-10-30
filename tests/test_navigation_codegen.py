@@ -202,3 +202,22 @@ def test_navigation_rejects_duplicate_canonical_and_legacy_references():
     with pytest.raises(ValueError, match="duplicates model 'd_group'"):
         _build_navigation([{"type": "model", "model": key} for key in ("dgroup", "d_group")],
                           models, reports_enabled=False, reports_role_visible={})
+
+
+@pytest.mark.parametrize("navigation", [None, [], [{"type": "builtin", "key": "tools"}]])
+def test_tools_navigation_respects_role_visibility_and_custom_order(navigation):
+    if navigation is not None:
+        validate_navigation_config({"navigation": navigation})
+    visibility = {"user": False, "admin": True, "developer": True}
+    menu = _build_navigation(
+        navigation, [], reports_enabled=False, reports_role_visible={},
+        tools_role_visible=visibility,
+    )
+    items = [item for item in menu if item["key"] == "/tools"]
+    assert len(items) == 1
+    assert items[0]["visible"] == visibility
+    assert items[0]["label"] == "menu.tools"
+    disabled = _build_navigation(
+        navigation, [], reports_enabled=False, reports_role_visible={},
+    )
+    assert all(item["key"] != "/tools" for item in disabled)

@@ -205,6 +205,7 @@ class NavBuiltin(_ConfigModel):
         "reports",
         "external-resources",
         "task-center",
+        "tools",
     ]
 
     @classmethod
@@ -218,6 +219,10 @@ class NavBuiltin(_ConfigModel):
     @classmethod
     def external_resources(cls) -> "NavBuiltin":
         return cls(key="external-resources")
+
+    @classmethod
+    def tools(cls) -> "NavBuiltin":
+        return cls(key="tools")
 
     @classmethod
     def task_center(cls) -> "NavBuiltin":
@@ -342,12 +347,11 @@ class ToolResult(_ConfigModel):
     type: Literal["json", "text", "file", "toast"] = "json"
 
 
-class DashboardTool(_ConfigModel):
+class Tool(_ConfigModel):
     name: str
     handler: str | None = None
     title: str | None = None
     description: str = ""
-    placement: Literal["dashboard"] = "dashboard"
     permissions: list[Role] = Field(default_factory=lambda: ["admin", "developer"])
     execution: ToolExecution = Field(default_factory=ToolExecution)
     inputs: list[ToolInput] = Field(default_factory=list)
@@ -761,7 +765,7 @@ class SiteConfig(_ConfigModel):
     video_stream: VideoStreamConfig | None = None
     providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
-    tools: list[DashboardTool] = Field(default_factory=list)
+    tools: list[Tool] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
     schedule: ScheduleConfig | None = None
     task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)

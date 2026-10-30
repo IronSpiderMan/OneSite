@@ -73,6 +73,7 @@ _NAVIGATION_BUILTINS = {
     "reports",
     "external-resources",
     "task-center",
+    "tools",
 }
 _NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -352,7 +353,7 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
             if key not in _NAVIGATION_BUILTINS:
                 fail(
                     path + ".key",
-                    "must be dashboard, reports, external-resources, or task-center",
+                    "must be dashboard, reports, external-resources, tools, or task-center",
                 )
             if key in seen_builtins:
                 fail(path + ".key", f"references duplicate builtin '{key}'")
@@ -389,7 +390,7 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
         validate_node(node, f"navigation[{index}]")
 
 def validate_tools_config(config: Dict[str, Any]) -> None:
-    """Validate and normalize Dashboard tool definitions."""
+    """Validate and normalize project tool definitions."""
     tools = config.get("tools")
     if tools is None:
         return
@@ -431,9 +432,6 @@ def validate_tools_config(config: Dict[str, Any]) -> None:
         if not isinstance(title, str) or not title.strip():
             raise SiteConfigError(f"{field}.title must be a non-empty string.")
         tool.setdefault("description", "")
-        tool.setdefault("placement", "dashboard")
-        if tool["placement"] != "dashboard":
-            raise SiteConfigError(f"{field}.placement currently only supports 'dashboard'.")
 
         permissions = tool.setdefault("permissions", ["admin", "developer"])
         if (
