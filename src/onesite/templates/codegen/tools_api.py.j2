@@ -2,10 +2,12 @@
 
 import json
 import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Any
 
+from pydantic import ValidationError
 from fastapi import APIRouter, Depends, HTTPException, Request
 from starlette.datastructures import UploadFile
 from sqlmodel import select
@@ -15,7 +17,8 @@ from app.core import db, deps
 from app.core.config import settings
 from app.core.task_queue import task_queue
 from app.core.background_execution import BackgroundExecution
-from app.core.tool_registry import TOOLS_BY_NAME
+from app.core.tool_registry import TOOL_CLASSES, TOOLS_BY_NAME
+from app.core.tool_types import input_values
 from app.models.user import User
 
 router = APIRouter()
@@ -125,6 +128,69 @@ def _execution_dict(execution: BackgroundExecution) -> dict:
     }
 
 
+async def _typed_inputs(request: Request, tool: dict, tool_class: type, task_id: str) -> tuple[dict, dict]:
+    """Decode transport once, then run the actual developer-owned model."""
+    input_dir = Path(settings.UPLOAD_DIR) / "tools" / task_id / "inputs"
+    form = None
+    try:
+        if request.headers.get("content-type", "").split(";", 1)[0] == "application/json":
+            raw = await request.json()
+        else:
+            form = await request.form()
+            raw = json.loads(str(form.get("__inputs__", "{}")))
+            allowed = {"__inputs__"} | {field["name"] for field in tool["inputs"] if field["type"] in {"file", "files"}}
+            if any(name not in allowed for name in form):
+                raise HTTPException(status_code=422, detail="Put tool parameters in the __inputs__ JSON field")
+        if not isinstance(raw, dict):
+            raise HTTPException(status_code=422, detail="Tool inputs must be an object")
+        for field in tool["inputs"]:
+            if field["type"] not in {"file", "files"}:
+                continue
+            name = field["name"]
+            # File paths/references can only come from server-saved uploads.
+            supplied = raw.get(name)
+            if supplied is not None and supplied != []:
+                raise HTTPException(status_code=422, detail=f"Upload {name} using multipart/form-data")
+            uploads = [] if form is None else [item for item in form.getlist(name) if isinstance(item, UploadFile) and item.filename]
+            if field["type"] == "file" and len(uploads) > 1:
+                raise HTTPException(status_code=422, detail=f"{name} accepts one file")
+            if len(uploads) > field.get("max_files", 10):
+                raise HTTPException(status_code=422, detail=f"Too many files for {name}")
+            files = []
+            for position, upload in enumerate(uploads):
+                _validate_file(upload, field)
+                filename = Path(upload.filename or f"file-{position}").name
+                # A directory per field prevents two inputs overwriting each other.
+                destination = input_dir / str(tool["inputs"].index(field)) / f"{position}-{filename}"
+                content_type = upload.content_type
+                path = await _save_upload(upload, destination, field.get("max_size_mb", 20))
+                files.append({"path": path, "name": filename, "size": destination.stat().st_size, "content_type": content_type})
+            if files:
+                raw[name] = files if field["type"] == "files" else files[0]
+        validated = tool_class.inputs.model_validate_json(json.dumps(raw))
+        parsed = input_values(validated)
+        public = validated.model_dump(mode="json", by_alias=True)
+        for field in tool["inputs"]:
+            name = field.get("history_name", field["name"])
+            if field["type"] == "file" and isinstance(public.get(name), dict):
+                public[name] = {key: value for key, value in public[name].items() if key != "path"}
+            elif field["type"] == "files" and isinstance(public.get(name), list):
+                public[name] = [{key: value for key, value in item.items() if key != "path"} for item in public[name]]
+        return parsed, public
+    except ValidationError as exc:
+        shutil.rmtree(input_dir, ignore_errors=True)
+        raise HTTPException(status_code=422, detail=json.loads(exc.json(include_url=False, include_context=False, include_input=False))) from exc
+    except (ValueError, json.JSONDecodeError) as exc:
+        shutil.rmtree(input_dir, ignore_errors=True)
+        raise HTTPException(status_code=422, detail="Invalid tool input JSON") from exc
+    except Exception:
+        shutil.rmtree(input_dir, ignore_errors=True)
+        raise
+    finally:
+        if form is not None:
+            await form.close()
+
+
 @router.post("/{tool_name}/execute", status_code=202)
 async def execute_tool(
     tool_name: str,
@@ -137,8 +203,32 @@ async def execute_tool(
         raise HTTPException(status_code=404, detail="Tool not found")
     _assert_allowed(tool, current_user)
 
-    form = await request.form()
     task_id = str(uuid.uuid4())
+    tool_class = TOOL_CLASSES.get(tool_name)
+    if tool_class is not None:
+        parsed, public_inputs = await _typed_inputs(request, tool, tool_class, task_id)
+    else:
+        parsed, public_inputs = await _legacy_inputs(request, tool, task_id)
+
+    execution = BackgroundExecution(
+        id=task_id,
+        kind="tool",
+        name=tool_name,
+        trigger="manual",
+        requested_by=current_user.id,
+        inputs_json=json.dumps(public_inputs, ensure_ascii=False, default=str),
+    )
+    session.add(execution)
+    await session.commit()
+    task_queue.publish(
+        "tool.execute",
+        {"task_id": task_id, "tool_name": tool_name, "user_id": current_user.id, "inputs": parsed},
+    )
+    return _execution_dict(execution)
+
+
+async def _legacy_inputs(request: Request, tool: dict, task_id: str) -> tuple[dict, dict]:
+    form = await request.form()
     input_dir = Path(settings.UPLOAD_DIR) / "tools" / task_id / "inputs"
     parsed: dict[str, Any] = {}
     public_inputs: dict[str, Any] = {}
@@ -190,21 +280,7 @@ async def execute_tool(
             parsed[name] = _parse_scalar(str(raw), input_config)
         public_inputs[name] = parsed[name]
 
-    execution = BackgroundExecution(
-        id=task_id,
-        kind="tool",
-        name=tool_name,
-        trigger="manual",
-        requested_by=current_user.id,
-        inputs_json=json.dumps(public_inputs, ensure_ascii=False, default=str),
-    )
-    session.add(execution)
-    await session.commit()
-    task_queue.publish(
-        "tool.execute",
-        {"task_id": task_id, "tool_name": tool_name, "user_id": current_user.id, "inputs": parsed},
-    )
-    return _execution_dict(execution)
+    return parsed, public_inputs
 
 
 @router.get("/executions/{task_id}")

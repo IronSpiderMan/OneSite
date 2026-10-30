@@ -424,9 +424,10 @@ def validate_tools_config(config: Dict[str, Any]) -> None:
             or handler == "__init__"
         ):
             raise SiteConfigError(f"{field}.handler must be a valid Python identifier.")
-        if handler in seen_handlers:
-            raise SiteConfigError(f"{field}.handler duplicates handler {handler!r}.")
-        seen_handlers.add(handler)
+        if not tool.get("class_path"):
+            if handler in seen_handlers:
+                raise SiteConfigError(f"{field}.handler duplicates handler {handler!r}.")
+            seen_handlers.add(handler)
 
         title = tool.setdefault("title", name.replace("_", " ").title())
         if not isinstance(title, str) or not title.strip():
@@ -462,7 +463,7 @@ def validate_tools_config(config: Dict[str, Any]) -> None:
             if not isinstance(input_config, dict):
                 raise SiteConfigError(f"{input_field} must be a JSON object.")
             input_name = input_config.get("name")
-            if (
+            if not tool.get("class_path") and (
                 not isinstance(input_name, str)
                 or not input_name.isidentifier()
                 or keyword.iskeyword(input_name)
@@ -892,29 +893,29 @@ def load_site_config(cwd: Path) -> Dict[str, Any]:
 def _load_python_site_config(config_path: Path) -> Dict[str, Any]:
     """Execute a trusted ``site_config.py`` and return its normalized data."""
     from onesite.config import SiteConfig
+    from .model_imports import isolated_project_imports
 
     module_name = f"_onesite_project_config_{uuid.uuid4().hex}"
     spec = spec_from_file_location(module_name, config_path)
     if spec is None or spec.loader is None:
         raise SiteConfigError(f"Unable to load Python configuration from {config_path}.")
     module = module_from_spec(spec)
-    original_path = list(sys.path)
     sys.modules[module_name] = module
-    sys.path.insert(0, str(config_path.parent))
     try:
-        spec.loader.exec_module(module)
+        with isolated_project_imports(config_path.parent):
+            spec.loader.exec_module(module)
+            config = getattr(module, "config", None)
+            if not isinstance(config, SiteConfig):
+                raise SiteConfigError(
+                    f"{config_path} must export `config = SiteConfig(...)`; "
+                    f"got {type(config).__name__}."
+                )
+            return config.model_dump(mode="json", exclude_none=True)
+    except SiteConfigError:
+        raise
     except Exception as exc:
         raise SiteConfigError(
             f"Unable to load {config_path}: {exc.__class__.__name__}: {exc}"
         ) from exc
     finally:
         sys.modules.pop(module_name, None)
-        sys.path[:] = original_path
-
-    config = getattr(module, "config", None)
-    if not isinstance(config, SiteConfig):
-        raise SiteConfigError(
-            f"{config_path} must export `config = SiteConfig(...)`; "
-            f"got {type(config).__name__}."
-        )
-    return config.model_dump(mode="json", exclude_none=True)

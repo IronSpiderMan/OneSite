@@ -1,0 +1,159 @@
+{% raw %}
+import React, { useEffect, useRef, useState } from 'react';
+import type { TFunction } from 'i18next';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Label } from '../ui/label';
+import { Textarea } from '../ui/textarea';
+
+type Option = string | number | boolean | { label: string; value: string | number | boolean };
+export interface ToolFieldDefinition {
+  [key: string]: unknown;
+  name: string;
+  type: string;
+  label: string;
+  required?: boolean;
+  nullable?: boolean;
+  default?: unknown;
+  help?: string;
+  placeholder?: string;
+  min?: number;
+  max?: number;
+  min_length?: number;
+  max_length?: number;
+  min_items?: number;
+  max_items?: number;
+  pattern?: string;
+  number_kind?: string;
+  options?: Option[];
+  accept?: string[];
+  fields?: ToolFieldDefinition[];
+  item?: ToolFieldDefinition;
+}
+
+const record = (value: unknown): Record<string, unknown> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
+const optionValue = (option: Option) => typeof option === 'object' ? option.value : option;
+const optionLabel = (option: Option) => typeof option === 'object' ? option.label : String(option);
+
+export function fieldDefault(field: ToolFieldDefinition): unknown {
+  if (Object.prototype.hasOwnProperty.call(field, 'default')) return field.default;
+  if (!field.required) return undefined;
+  if (field.fields) return fieldDefaults(field.fields);
+  if (field.item || field.type === 'multi_select' || field.type === 'files') return [];
+  if (field.type === 'bool') return false;
+  return undefined;
+}
+
+export const fieldDefaults = (fields: ToolFieldDefinition[]): Record<string, unknown> =>
+  Object.fromEntries(fields.map((field) => [field.name, fieldDefault(field)]));
+
+const JsonInput: React.FC<{ id: string; value: unknown; onChange: (value: unknown) => void; required?: boolean }> = ({ id, value, onChange, required }) => {
+  const serialized = value === undefined ? '' : JSON.stringify(value, null, 2);
+  const [draft, setDraft] = useState(serialized);
+  const input = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    setDraft(serialized);
+    input.current?.querySelector('textarea')?.setCustomValidity('');
+  }, [serialized]);
+  return <div ref={input}><Textarea id={id} required={required && value === undefined} className="min-h-28 font-mono text-xs" value={draft} onChange={(event) => {
+    const next = event.target.value;
+    setDraft(next);
+    try {
+      const parsed = next === '' ? undefined : JSON.parse(next);
+      event.target.setCustomValidity('');
+      onChange(parsed);
+    } catch {
+      event.target.setCustomValidity('Invalid JSON');
+    }
+  }} /></div>;
+};
+
+interface FieldProps {
+  field: ToolFieldDefinition;
+  value: unknown;
+  onChange: (value: unknown) => void;
+  t: TFunction;
+  prefix: string;
+  id: string;
+}
+
+const TypedField: React.FC<FieldProps> = ({ field, value, onChange, t, prefix, id }) => {
+  const label = t(`${prefix}.label`, field.label);
+  const help = t(`${prefix}.help`, field.help || '');
+  const placeholder = t(`${prefix}.placeholder`, field.placeholder || '');
+  const optionText = (option: Option) => t(`${prefix}.options.${String(optionValue(option))}`, optionLabel(option));
+  let control: React.ReactNode;
+  if (value === null) {
+    control = <Button type="button" variant="outline" onClick={() => onChange(field.fields ? fieldDefaults(field.fields) : field.item ? [] : '')}>{t('tools.set_value', 'Set value')}</Button>;
+  } else if (field.fields) {
+    control = value === undefined && !field.required
+      ? <Button type="button" variant="outline" onClick={() => onChange(fieldDefaults(field.fields!))}>{t('tools.set_value', 'Set value')}</Button>
+      : <div className="rounded-md border p-3"><TypedToolFields fields={field.fields} values={record(value)} onChange={onChange} t={t} prefix={`${prefix}.fields`} id={id} /></div>;
+  } else if (field.item) {
+    const items = Array.isArray(value) ? value : [];
+    control = <div className="space-y-3">
+      {items.map((item, index) => <div key={index} className="flex items-start gap-2 rounded-md border p-3">
+        <div className="min-w-0 flex-1"><TypedField field={{ ...field.item!, name: String(index), label: `${field.item!.label} ${index + 1}` }} value={item} onChange={(next) => onChange(items.map((entry, position) => position === index ? next : entry))} t={t} prefix={`${prefix}.item`} id={`${id}-${index}`} /></div>
+        <Button type="button" variant="outline" disabled={items.length <= (field.min_items || 0)} onClick={() => onChange(items.filter((_, position) => position !== index))}>{t('common.delete', 'Delete')}</Button>
+      </div>)}
+      <Button type="button" variant="outline" disabled={field.max_items !== undefined && items.length >= field.max_items} onClick={() => onChange([...items, fieldDefault({ ...field.item!, required: true }) ?? ''])}>{t('common.add', 'Add')}</Button>
+    </div>;
+  } else if (field.type === 'file' || field.type === 'files') {
+    control = <Input id={id} type="file" required={field.required && value === undefined} multiple={field.type === 'files'} accept={field.accept?.join(',')} onChange={(event) => onChange(field.type === 'files' ? Array.from(event.target.files || []) : event.target.files?.[0])} />;
+  } else if (field.type === 'select' || field.type === 'multi_select') {
+    const options = field.options || [];
+    const multiple = field.type === 'multi_select';
+    const selected = multiple
+      ? options.flatMap((option, index) => Array.isArray(value) && value.includes(optionValue(option)) ? [String(index)] : [])
+      : String(options.findIndex((option) => optionValue(option) === value));
+    control = <select id={id} required={multiple ? (field.min_items || 0) > 0 : field.required && value === undefined} multiple={multiple} className="min-h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm" value={selected} onChange={(event) => onChange(multiple
+      ? Array.from(event.target.selectedOptions, (option) => optionValue(options[Number(option.value)]))
+      : event.target.value === '-1' ? undefined : optionValue(options[Number(event.target.value)]))}>
+      {!multiple && <option value="-1">{placeholder || t('common.select', 'Select')}</option>}
+      {options.map((option, index) => <option key={index} value={String(index)}>{optionText(option)}</option>)}
+    </select>;
+  } else if (field.type === 'bool') {
+    control = <input id={id} type="checkbox" className="h-4 w-4 accent-primary" checked={value === true} onChange={(event) => onChange(event.target.checked)} />;
+  } else if (field.type === 'json') {
+    control = <JsonInput id={id} required={field.required} value={value} onChange={onChange} />;
+  } else if (field.type === 'text') {
+    control = <Textarea id={id} required={field.required && value === undefined} minLength={field.min_length} maxLength={field.max_length} placeholder={placeholder} value={String(value ?? '')} onChange={(event) => onChange(event.target.value)} />;
+  } else {
+    control = <Input id={id} type={field.type === 'number' ? 'number' : field.type === 'date' ? 'date' : field.type === 'datetime' ? 'datetime-local' : 'text'} required={field.required && value === undefined} min={field.min} max={field.max} minLength={field.min_length} maxLength={field.max_length} pattern={field.pattern} step={field.type === 'number' ? field.number_kind === 'int' ? 1 : 'any' : undefined} placeholder={placeholder} value={String(value ?? '')} onChange={(event) => onChange(field.type === 'number' && event.target.value !== '' ? event.target.valueAsNumber : event.target.value)} />;
+  }
+  return <div className={`space-y-2 ${field.fields || field.item || ['text', 'json', 'file', 'files'].includes(field.type) ? 'sm:col-span-2' : ''}`}>
+    <div className="flex items-center justify-between gap-2"><Label htmlFor={id}>{label}{field.required && <span className="ml-1 text-destructive">*</span>}</Label><div className="flex gap-2">
+      {!field.required && value === undefined && <span className="text-xs text-muted-foreground">{t('tools.uses_default', 'Uses default')}</span>}
+      {field.nullable && value !== null && <button type="button" className="text-xs text-muted-foreground underline" onClick={() => onChange(null)}>{t('tools.use_null', 'Use null')}</button>}
+      {!field.required && value !== undefined && <button type="button" className="text-xs text-muted-foreground underline" onClick={() => onChange(undefined)}>{t('tools.use_default', 'Use default')}</button>}
+    </div></div>
+    {control}
+    {help && <p className="text-xs text-muted-foreground">{help}</p>}
+  </div>;
+};
+
+export const TypedToolFields: React.FC<{ fields: ToolFieldDefinition[]; values: Record<string, unknown>; onChange: (values: Record<string, unknown>) => void; t: TFunction; prefix: string; id: string }> = ({ fields, values, onChange, t, prefix, id }) => <div className="grid gap-4 sm:grid-cols-2">{fields.map((field) => <TypedField key={field.name} field={field} value={values[field.name]} onChange={(value) => onChange({ ...values, [field.name]: value })} t={t} prefix={`${prefix}.${field.name}`} id={`${id}-${field.name}`} />)}</div>;
+
+const ResultValue: React.FC<{ value: unknown; fields?: ToolFieldDefinition[]; field?: ToolFieldDefinition; prefix: string; t: TFunction }> = ({ value, fields, field, prefix, t }) => {
+  if (value === null || value === undefined) return <span className="text-muted-foreground">—</span>;
+  const data = record(value);
+  const displayFields: ToolFieldDefinition[] = fields || Object.keys(data).map((name) => ({ name, label: name, type: 'json' }));
+  if (typeof data.download_url === 'string' && data.download_url.startsWith('/uploads/')) return <a href={data.download_url} target="_blank" rel="noreferrer" className="text-primary underline">{String(data.name || t('tools.download', 'Download result'))}</a>;
+  if (Array.isArray(value)) return <div className="space-y-2">{value.map((item, index) => <ResultValue key={index} value={item} fields={fields} field={field?.item || field} prefix={prefix} t={t} />)}</div>;
+  if (typeof value === 'object') return <dl className="space-y-2">{displayFields.map((child) => <div key={child.name} className="grid gap-1 sm:grid-cols-[minmax(6rem,1fr)_2fr]"><dt className="text-muted-foreground">{t(`${prefix}.${child.name}.label`, child.label)}</dt><dd className="min-w-0 break-words"><ResultValue value={data[child.name]} fields={child.fields || child.item?.fields} field={child} prefix={`${prefix}.${child.name}${child.fields ? '.fields' : child.item?.fields ? '.item.fields' : ''}`} t={t} /></dd></div>)}</dl>;
+  const option = field?.options?.find((item) => optionValue(item) === value);
+  return <span className="whitespace-pre-wrap break-words">{option === undefined ? String(value) : t(`${prefix}.options.${String(value)}`, optionLabel(option))}</span>;
+};
+
+export const ToolResultView: React.FC<{ value: unknown; fields: ToolFieldDefinition[]; ui?: { renderer?: string; field?: string | null }; prefix: string; t: TFunction }> = ({ value, fields, ui, prefix, t }) => {
+  if (ui?.renderer === 'json') return <pre className="overflow-auto whitespace-pre-wrap break-words text-xs">{JSON.stringify(value, null, 2)}</pre>;
+  const selected = ui?.field ? record(value)[ui.field] : value;
+  const field = fields.find((item) => item.name === ui?.field);
+  if (ui?.renderer === 'table' && Array.isArray(selected)) {
+    const columns = field?.item?.fields || Object.keys(record(selected[0])).map((name) => ({ name, label: name, type: 'json' }));
+    return <div className="overflow-x-auto"><table className="w-full text-left text-sm"><thead><tr>{columns.map((column) => <th className="border-b p-2 font-medium" key={column.name}>{t(`${prefix}.${ui.field}.item.fields.${column.name}.label`, column.label)}</th>)}</tr></thead><tbody>{selected.map((row, index) => <tr key={index}>{columns.map((column) => <td className="border-b p-2" key={column.name}><ResultValue value={record(row)[column.name]} field={column} prefix={`${prefix}.${ui.field}.item.fields.${column.name}`} t={t} /></td>)}</tr>)}</tbody></table></div>;
+  }
+  return <ResultValue value={selected} fields={ui?.field ? field?.fields : fields} field={field} prefix={ui?.field ? `${prefix}.${ui.field}${field?.fields ? '.fields' : ''}` : prefix} t={t} />;
+};
+{% endraw %}

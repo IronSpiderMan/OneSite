@@ -134,7 +134,7 @@ const TaskCenterPage: React.FC = () => {
     (task: Pick<TaskCenterTask, 'kind' | 'name'>) => {
       const key = task.kind === 'import' || task.kind === 'export'
         ? MODEL_LABEL_KEYS[task.name]
-        : undefined;
+        : task.kind === 'tool' ? `tool_definitions.${task.name}.title` : undefined;
       return key ? t(key, task.name) : task.name;
     },
     [t],

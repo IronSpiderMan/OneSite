@@ -1702,6 +1702,10 @@ def phase_generate_aggregated(
 
     if tools:
         generate_file(
+            "frontend_tool_fields.tsx.j2", {},
+            frontend_path / "src" / "components" / "tools" / "ToolFields.tsx",
+        )
+        generate_file(
             "frontend_tool_service.ts.j2",
             {},
             frontend_path / "src" / "services" / "tools.ts",
@@ -1719,6 +1723,7 @@ def phase_generate_aggregated(
         frontend_path / "src" / "locales",
         navigation_groups,
         frontend_features,
+        tools,
     )
 
     # ── Background task handlers __init__.py ──

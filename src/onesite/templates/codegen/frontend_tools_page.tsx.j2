@@ -10,6 +10,7 @@ import { Input } from '../components/ui/input';
 import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { executeTool, getToolExecution, ToolExecution } from '../services/tools';
+import { fieldDefaults, TypedToolFields, ToolResultView, type ToolFieldDefinition } from '../components/tools/ToolFields';
 
 interface ToolInput {
   [key: string]: unknown;
@@ -24,7 +25,7 @@ interface ToolInput {
   max?: number;
   step?: number;
   accept?: string[];
-  options?: Array<string | number | { label: string; value: string | number }>;
+  options?: Array<string | number | boolean | { label: string; value: string | number | boolean }>;
 }
 
 interface ToolDefinition {
@@ -34,7 +35,9 @@ interface ToolDefinition {
   description?: string;
   permissions: string[];
   inputs: ToolInput[];
-  result?: { type?: string };
+  class_path?: string;
+  result?: { type?: string; fields?: ToolFieldDefinition[] };
+  result_ui?: { renderer?: string; field?: string | null };
 }
 
 const TOOL_DEFINITIONS: ToolDefinition[] = {{ tools | tojson }};
@@ -52,7 +55,7 @@ const optionLabel = (option: NonNullable<ToolInput['options']>[number]): string 
   typeof option === 'object' ? option.label : String(option);
 
 const initialValues = (tool: ToolDefinition): Record<string, unknown> =>
-  Object.fromEntries(tool.inputs.map((input) => [
+  tool.class_path ? fieldDefaults(tool.inputs) : Object.fromEntries(tool.inputs.map((input) => [
     input.name,
     input.default ?? (input.type === 'bool' ? false : input.type === 'multi_select' || input.type === 'files' ? [] : ''),
   ]));
@@ -64,7 +67,7 @@ const selectedFilesLabel = (value: unknown, multiple: boolean, t: TFunction) => 
   return t('tools.files_selected', '{% raw %}{{count}}{% endraw %} files selected', { count: files.length });
 };
 
-const ToolExecutionPanel: React.FC<{ execution: ToolExecution; t: TFunction }> = ({ execution, t }) => {
+const ToolExecutionPanel: React.FC<{ execution: ToolExecution; tool: ToolDefinition; t: TFunction }> = ({ execution, tool, t }) => {
   const { label, surface, Icon } = executionStyle(execution.status);
   const progress = Number.isFinite(execution.progress) ? Math.min(100, Math.max(0, execution.progress)) : 0;
   return (
@@ -76,7 +79,9 @@ const ToolExecutionPanel: React.FC<{ execution: ToolExecution; t: TFunction }> =
       <div role="progressbar" aria-label={t('tools.progress', 'Execution progress')} aria-valuenow={progress} aria-valuemin={0} aria-valuemax={100} className="h-1.5 overflow-hidden rounded-full bg-background/80"><div className="h-full rounded-full bg-primary transition-all duration-500" style={ { width: `${progress}%` } } /></div>
       {execution.message && <p className="break-words text-sm text-muted-foreground">{execution.message}</p>}
       {execution.error && <p className="rounded-md bg-background/60 p-2.5 text-sm text-destructive">{execution.error}</p>}
-      {execution.result != null && <pre className="max-h-64 overflow-auto rounded-lg border bg-background/75 p-3 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>}
+      {execution.result != null && (tool.class_path
+        ? <div className="max-h-96 overflow-auto rounded-lg border bg-background/75 p-3 text-sm"><ToolResultView value={execution.result} fields={tool.result?.fields || []} ui={tool.result_ui} prefix={`tool_definitions.${tool.name}.result`} t={t} /></div>
+        : <pre className="max-h-64 overflow-auto rounded-lg border bg-background/75 p-3 whitespace-pre-wrap break-words text-xs leading-5 text-foreground">{typeof execution.result === 'string' ? execution.result : JSON.stringify(execution.result, null, 2)}</pre>)}
       {execution.download_url && <Button className="bg-background/70" type="button" variant="outline" onClick={() => window.open(execution.download_url!, '_blank')}><Download className="mr-2 h-4 w-4" />{t('tools.download', 'Download result')}</Button>}
     </div>
   );
@@ -87,6 +92,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
   const [values, setValues] = useState<Record<string, unknown>>(() => initialValues(tool));
   const [execution, setExecution] = useState<ToolExecution | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [validationErrors, setValidationErrors] = useState<string[]>([]);
 
   useEffect(() => {
     const listener = (event: Event) => {
@@ -116,7 +122,19 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
+    setValidationErrors([]);
     const form = new FormData();
+    if (tool.class_path) {
+      const payload: Record<string, unknown> = {};
+      for (const input of tool.inputs) {
+        const value = values[input.name];
+        if (input.type === 'file' && value instanceof File) form.append(input.name, value);
+        else if (input.type === 'files' && Array.isArray(value) && value.some((item) => item instanceof File)) {
+          for (const file of value as File[]) form.append(input.name, file);
+        } else if (value !== undefined) payload[input.name] = value;
+      }
+      form.append('__inputs__', JSON.stringify(payload));
+    } else {
     for (const input of tool.inputs) {
       const value = values[input.name];
       if (input.type === 'files') {
@@ -131,13 +149,17 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
         form.append(input.name, String(value));
       }
     }
+    }
     try {
       setSubmitting(true);
       const next = await executeTool(tool.name, form);
       setExecution(next);
       toast.success(t('tools.queued', 'Tool queued'));
     } catch (error: any) {
-      toast.error(error?.response?.data?.detail || t('tools.submit_failed', 'Failed to start tool'));
+      const detail = error?.response?.data?.detail;
+      const messages = Array.isArray(detail) ? detail.map((item) => `${(item.loc || []).join('.')}: ${item.msg || ''}`) : [];
+      setValidationErrors(messages);
+      toast.error(messages[0] || (typeof detail === 'string' ? detail : t('tools.submit_failed', 'Failed to start tool')));
     } finally {
       setSubmitting(false);
     }
@@ -154,7 +176,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
         </div>
       </div>
 
-      {tool.inputs.length > 0 && <div className="grid gap-5 sm:grid-cols-2">
+      {tool.class_path ? <TypedToolFields fields={tool.inputs} values={values} onChange={setValues} t={t} prefix={`tool_definitions.${tool.name}.inputs`} id={tool.name} /> : tool.inputs.length > 0 && <div className="grid gap-5 sm:grid-cols-2">
         {tool.inputs.map((input) => (
           <div key={input.name} className={input.type === 'text' || input.type === 'json' || input.type === 'files' || input.type === 'file' ? 'sm:col-span-2 space-y-2' : 'space-y-2'}>
             <Label className="text-sm font-medium" htmlFor={`${tool.name}-${input.name}`}>
@@ -228,7 +250,8 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
         ))}
       </div>}
 
-      {execution && <ToolExecutionPanel execution={execution} t={t} />}
+      {validationErrors.length > 0 && <ul role="alert" className="space-y-1 text-sm text-destructive">{validationErrors.map((message, index) => <li key={index}>{message}</li>)}</ul>}
+      {execution && <ToolExecutionPanel execution={execution} tool={tool} t={t} />}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-muted/20 px-5 py-4 sm:px-6">
         <span className="flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground">
@@ -236,7 +259,7 @@ const ToolCard: React.FC<{ tool: ToolDefinition }> = ({ tool }) => {
         </span>
         <Button className="min-w-28" type="submit" disabled={submitting || (!!execution && !TERMINAL.has(execution.status))}>
           {submitting || (!!execution && !TERMINAL.has(execution.status)) ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Play className="mr-2 h-4 w-4" />}
-          {submitting || (!!execution && !TERMINAL.has(execution.status)) ? t('tools.status.running', 'Running') : t('tools.execute', 'Execute')}
+          {submitting || (!!execution && !TERMINAL.has(execution.status)) ? t('tools.status.running', 'Running') : t(`tool_definitions.${tool.name}.execute_label`, t('tools.execute', 'Execute'))}
         </Button>
       </div>
     </form>
@@ -247,7 +270,11 @@ const ToolsPage: React.FC = () => {
   const { t } = useTranslation();
   const [search, setSearch] = useState('');
   const role = localStorage.getItem('user_role') || 'user';
-  const tools = useMemo(() => TOOL_DEFINITIONS.filter((tool) => tool.permissions.includes(role)), [role]);
+  const tools = useMemo(() => TOOL_DEFINITIONS.filter((tool) => tool.permissions.includes(role)).map((tool) => ({
+    ...tool,
+    title: t(`tool_definitions.${tool.name}.title`, tool.title),
+    description: t(`tool_definitions.${tool.name}.description`, tool.description || ''),
+  })), [role, t]);
   const query = search.trim().toLocaleLowerCase();
   const matchingTools = tools.filter((tool) => `${tool.title} ${tool.description || ''} ${tool.name}`.toLocaleLowerCase().includes(query));
   return (

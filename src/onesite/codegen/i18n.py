@@ -10,6 +10,7 @@ def generate_locale_files(
     locale_dir: Path,
     navigation_groups: List[Dict[str, Any]] | None = None,
     frontend_features: List[Dict[str, Any]] | None = None,
+    tools: List[Dict[str, Any]] | None = None,
 ):
 
     zh_field_defaults: Dict[str, str] = {
@@ -1258,6 +1259,45 @@ def generate_locale_files(
         "import_error": "无法导入此 JSON 模板。",
         "storage_hint": "模板已保存到当前账号；打开模板时会重新查询图表数据。",
     })
+
+    def tool_fields(fields: list[dict], language: str) -> dict:
+        result = {}
+        for field in fields:
+            pack = {
+                "label": field.get("label", field["name"]),
+                "help": field.get("help", ""),
+                "placeholder": field.get("placeholder", ""),
+                "options": {
+                    str(option["value"] if isinstance(option, dict) else option):
+                    str(option.get("label", option["value"]) if isinstance(option, dict) else option)
+                    for option in field.get("options", [])
+                },
+                **field.get("translations", {}).get(language, {}),
+            }
+            if field.get("fields"):
+                pack["fields"] = tool_fields(field["fields"], language)
+            if field.get("item"):
+                pack["item"] = tool_fields([field["item"]], language)["item"]
+            result[field["name"]] = pack
+        return result
+
+    for language, locale in (("en", en_translations), ("zh", zh_translations)):
+        locale["tools"].update({
+            "set_value": "设置值" if language == "zh" else "Set value",
+            "use_null": "设为空值" if language == "zh" else "Use null",
+            "use_default": "使用默认值" if language == "zh" else "Use default",
+            "uses_default": "使用默认值" if language == "zh" else "Uses default",
+        })
+        locale["tool_definitions"] = {
+            tool["name"]: {
+                "title": tool["title"],
+                "description": tool.get("description", ""),
+                "inputs": tool_fields(tool.get("inputs", []), language),
+                "result": tool_fields(tool.get("result", {}).get("fields", []), language),
+                **tool.get("translations", {}).get(language, {}),
+            }
+            for tool in tools or []
+        }
 
     write_file_with_status(locale_dir / "en.json", json.dumps(en_translations, indent=2))
     write_file_with_status(locale_dir / "zh.json", json.dumps(zh_translations, indent=2, ensure_ascii=False))

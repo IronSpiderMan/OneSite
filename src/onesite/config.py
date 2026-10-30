@@ -13,7 +13,9 @@ from enum import Enum
 from typing import Any, Literal, Mapping, Sequence
 from urllib.parse import quote, urlencode
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
+
+from onesite_runtime.tools import BaseTool
 
 
 Role = Literal["user", "admin", "developer"]
@@ -765,11 +767,22 @@ class SiteConfig(_ConfigModel):
     video_stream: VideoStreamConfig | None = None
     providers: dict[str, ExternalResourceProviderConfig] = Field(default_factory=dict)
     agents: dict[str, AgentConfig] = Field(default_factory=dict)
-    tools: list[Tool] = Field(default_factory=list)
+    tools: list[Tool | type[BaseTool]] = Field(default_factory=list)
     scheduled_tasks: list[ScheduledTask] = Field(default_factory=list)
     schedule: ScheduleConfig | None = None
     task_center: TaskCenterConfig = Field(default_factory=TaskCenterConfig)
     public_dashboard: PublicDashboardConfig = Field(default_factory=PublicDashboardConfig)
+
+    @field_serializer("tools")
+    def serialize_tools(self, tools: list, info: Any) -> list[dict[str, Any]]:
+        from .codegen.tools import compile_tool
+
+        return [
+            compile_tool(tool) if isinstance(tool, type) else tool.model_dump(
+                mode=info.mode, exclude_none=info.exclude_none, exclude_unset=info.exclude_unset,
+            )
+            for tool in tools
+        ]
 
 
 _MISSING = object()

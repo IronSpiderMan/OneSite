@@ -306,6 +306,12 @@ override MQTT credentials through `MQTT_URL`, `MQTT_USERNAME`,
 
 ### Project tools
 
+Tools can be declared as `BaseTool` subclasses with Pydantic input and result
+models, then registered with `SiteConfig(tools=[MyTool])`. OneSite generates typed
+forms, validates inputs and results, and supports translations, nested fields
+and file uploads. See the [class tool guide](docs/tools.md) and
+[runnable example](examples/typed_tools). The configuration format below remains supported.
+
 Project tools add configuration-driven forms to the Tools page (`/tools`) and execute the
 developer implementation in the background:
 

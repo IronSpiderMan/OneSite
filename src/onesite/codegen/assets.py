@@ -453,6 +453,16 @@ def _sync_tools(cwd: Path, backend_path: Path, tools: List[Dict[str, Any]]) -> N
     _ensure_init_py(source_tools)
 
     for tool in tools:
+        if tool.get("class_path"):
+            module, _, class_name = tool["class_path"].partition(":")
+            if not module.startswith("app.tools.") or not all(part.isidentifier() for part in module.split(".")) or not class_name.isidentifier():
+                raise SiteConfigError(f"Invalid tool class_path: {tool['class_path']!r}")
+            source_file = cwd.joinpath(*module.split(".")).with_suffix(".py")
+            if not source_file.is_file():
+                source_file = cwd.joinpath(*module.split("."), "__init__.py")
+            if not source_file.is_file():
+                raise SiteConfigError(f"Tool source does not exist: {source_file}")
+            continue
         handler_name = tool["handler"]
         source_file = source_tools / f"{handler_name}.py"
         if not source_file.exists():
@@ -465,6 +475,24 @@ def _sync_tools(cwd: Path, backend_path: Path, tools: List[Dict[str, Any]]) -> N
         )
 
     _mirror_python_tree(source_tools, target_tools)
+    if tools:
+        runtime = Path(__file__).resolve().parents[2] / "onesite_runtime" / "tools.py"
+        copy_file_with_status(runtime, backend_path / "app" / "core" / "tool_types.py")
+        for target in target_tools.rglob("*.py"):
+            source = target.read_text(encoding="utf-8")
+            source = source.replace("from onesite_runtime.tools import", "from app.core.tool_types import")
+            source = source.replace("import onesite_runtime.tools as ", "import app.core.tool_types as ")
+            imports = [node for node in ast.walk(ast.parse(source)) if isinstance(node, (ast.Import, ast.ImportFrom))]
+            if any(
+                node.module and node.module.split(".")[0] in {"onesite", "onesite_runtime"}
+                if isinstance(node, ast.ImportFrom) else
+                any(alias.name.split(".")[0] in {"onesite", "onesite_runtime"} for alias in node.names)
+                for node in imports
+            ):
+                raise SiteConfigError(
+                    f"{target}: use 'from onesite_runtime.tools import ...' or an aliased module import"
+                )
+            write_file_with_status(target, source)
 
 
 def _strip_legacy_task_registration(file_path: Path) -> None:

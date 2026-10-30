@@ -5,12 +5,14 @@ import json
 import logging
 from datetime import datetime, timezone
 
+from pydantic import BaseModel, ValidationError
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core.db import engine
 from app.core.task_queue import task_queue
 from app.core.background_execution import BackgroundExecution
-from app.core.tool_registry import TOOL_HANDLERS, TOOLS_BY_NAME
+from app.core.tool_registry import TOOL_CLASSES, TOOL_HANDLERS, TOOLS_BY_NAME
+from app.core.tool_types import validation_values
 from app.core.tool_runtime import (
     ToolContext,
     download_url_for,
@@ -53,7 +55,8 @@ async def execute_tool(payload: dict) -> None:
             return
         tool = TOOLS_BY_NAME.get(tool_name)
         handler = TOOL_HANDLERS.get(tool_name)
-        if tool is None or handler is None:
+        tool_class = TOOL_CLASSES.get(tool_name)
+        if tool is None or (handler is None and tool_class is None):
             execution.status = "failed"
             execution.error = "Tool handler is not registered"
             execution.completed_at = datetime.now(timezone.utc)
@@ -87,11 +90,24 @@ async def execute_tool(payload: dict) -> None:
         )
         try:
             timeout = tool.get("execution", {}).get("timeout_seconds", 600)
-            value = await asyncio.wait_for(
-                handler(**payload.get("inputs", {}), context=context),
-                timeout=timeout,
-            )
-            result = normalize_tool_result(value)
+            role = getattr(user.role, "value", str(user.role))
+            if role not in tool["permissions"]:
+                raise PermissionError("Tool execution permission was revoked")
+            if tool_class is not None:
+                # JSON validation preserves date/Decimal/strict-type semantics
+                # across the JSON task-queue boundary.
+                inputs = tool_class.inputs.model_validate_json(json.dumps(payload.get("inputs", {})))
+                value = await asyncio.wait_for(
+                    tool_class().run(inputs=inputs, context=context), timeout=timeout,
+                )
+                raw_result = validation_values(value) if isinstance(value, BaseModel) else value
+                output = tool_class.result.model_validate(raw_result)
+                result = normalize_tool_result(output.model_dump(mode="json", by_alias=True))
+            else:
+                value = await asyncio.wait_for(
+                    handler(**payload.get("inputs", {}), context=context), timeout=timeout,
+                )
+                result = normalize_tool_result(value)
             execution.status = "succeeded"
             execution.progress = 100
             execution.message = result.message
@@ -101,6 +117,13 @@ async def execute_tool(payload: dict) -> None:
             execution.status = "failed"
             execution.error = "Tool execution timed out"
             logger.exception("Tool %s timed out for task %s", tool_name, task_id)
+        except ValidationError:
+            execution.status = "failed"
+            execution.error = "Tool input or result validation failed"
+            logger.exception("Tool %s violated its data model for task %s", tool_name, task_id)
+        except PermissionError:
+            execution.status = "failed"
+            execution.error = "Permission denied"
         except Exception:
             execution.status = "failed"
             execution.error = "Tool execution failed"

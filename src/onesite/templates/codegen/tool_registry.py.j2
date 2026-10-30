@@ -3,13 +3,27 @@
 import json
 
 {% for tool in tools %}
+{% if tool.class_path is defined %}
+from {{ tool.class_path.split(':')[0] }} import {{ tool.class_path.split(':')[1] }} as _tool_{{ loop.index }}
+{% else %}
 from app.tools.{{ tool.handler }} import {{ tool.handler }}
+{% endif %}
 {% endfor %}
 
 TOOL_DEFINITIONS = json.loads({{ tools_json | tojson }})
 TOOLS_BY_NAME = {tool["name"]: tool for tool in TOOL_DEFINITIONS}
 TOOL_HANDLERS = {
 {% for tool in tools %}
+{% if tool.class_path is not defined %}
     "{{ tool.name }}": {{ tool.handler }},
+{% endif %}
+{% endfor %}
+}
+
+TOOL_CLASSES = {
+{% for tool in tools %}
+{% if tool.class_path is defined %}
+    "{{ tool.name }}": _tool_{{ loop.index }},
+{% endif %}
 {% endfor %}
 }
