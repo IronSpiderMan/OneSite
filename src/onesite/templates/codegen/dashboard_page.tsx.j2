@@ -1242,17 +1242,21 @@ const DashboardPage: React.FC = () => {
                         </h3>
                     </div>
                     <div className="flex items-center gap-2">
-                        <select
-                            className="border border-input bg-background text-foreground rounded-md px-2 py-1.5 text-xs focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-                            value={logLevel}
-                            onChange={(e) => setLogLevel(e.target.value)}
+                        <Select
+                            value={logLevel || '__all__'}
+                            onValueChange={(value) => setLogLevel(value === '__all__' ? '' : value)}
                         >
-                            <option value="">{t('dashboard.all_levels', 'All Levels')}</option>
-                            <option value="DEBUG">DEBUG</option>
-                            <option value="INFO">INFO</option>
-                            <option value="WARNING">WARNING</option>
-                            <option value="ERROR">ERROR</option>
-                        </select>
+                            <SelectTrigger className="h-9 w-36 max-w-full text-xs" aria-label={t('dashboard.log_level', 'Level')}>
+                                <SelectValue placeholder={t('dashboard.all_levels', 'All Levels')} />
+                            </SelectTrigger>
+                            <SelectContent>
+                                <SelectItem value="__all__">{t('dashboard.all_levels', 'All Levels')}</SelectItem>
+                                <SelectItem value="DEBUG">DEBUG</SelectItem>
+                                <SelectItem value="INFO">INFO</SelectItem>
+                                <SelectItem value="WARNING">WARNING</SelectItem>
+                                <SelectItem value="ERROR">ERROR</SelectItem>
+                            </SelectContent>
+                        </Select>
                         <Button variant="outline" size="sm" onClick={() => {
                             setLogEntries([]);
                             setLogPage(1);
