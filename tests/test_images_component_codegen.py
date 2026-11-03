@@ -15,6 +15,7 @@ class Gallery(SQLModel, table=True):
     __tablename__ = "test_gallery"
 
     id: Optional[int] = Field(default=None, primary_key=True)
+    avatar: Optional[str] = Field(default=None)
     images: List[str] = Field(
         default_factory=list,
         sa_column=Column(JSON, info={"site_props": {"component": "images"}}),
@@ -39,6 +40,13 @@ def test_images_component_generates_multi_image_uploader_and_galleries():
     assert '<ImagesUpload id="images" value={Array.isArray(value) ? value : []} onChange={onChange} />' in create_page
     assert "item.images.length - 1" in list_page
     assert "currentItem.images.map" in detail_page
+    # Both the shared table cell and detail gallery must use the interactive viewer.
+    for page in (list_page, detail_page):
+        assert "import { ImageViewer }" in page
+    assert '<ImageViewer src={item.images[0]}' in list_page
+    assert 'src={item.avatar ||' in list_page
+    assert '<ImageViewer src={currentItem.avatar}' in detail_page
+    assert '<ImageViewer src={url}' in detail_page
 
 
 def test_images_upload_exposes_a_native_multi_file_input():

@@ -1,3 +1,4 @@
+import { ImageViewer } from '../../components/ui/image-viewer';
 {% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
 {% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
 import { resolveFilterDefault } from '../../utils/filterDefaults';
@@ -966,9 +967,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         {% elif field.ui_type == 'bool' %}
         return <Badge variant={item.{{ field.name }} ? 'default' : 'secondary'}>{item.{{ field.name }} ? t('common.yes', 'Yes') : t('common.no', 'No')}</Badge>;
         {% elif field.ui_type == 'image' %}
-        return item.{{ field.name }} ? <img src={item.{{ field.name }}} alt="{{ field.name }}" className="h-24 w-full rounded-md border object-cover" /> : <span className="text-muted-foreground">-</span>;
+        return item.{{ field.name }} ? <ImageViewer src={item.{{ field.name }}} alt="{{ field.name }}" className="h-24 w-full rounded-md border object-cover" /> : <span className="text-muted-foreground">-</span>;
         {% elif field.ui_type == 'images' %}
-        return Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length ? <div className="flex items-center gap-2"><img src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-16 w-16 rounded-md border object-cover" />{item.{{ field.name }}.length > 1 && <span className="text-xs text-muted-foreground">+{item.{{ field.name }}.length - 1}</span>}</div> : <span className="text-muted-foreground">-</span>;
+        return Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length ? <div className="flex items-center gap-2"><ImageViewer src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-16 w-16 rounded-md border object-cover" />{item.{{ field.name }}.length > 1 && <span className="text-xs text-muted-foreground">+{item.{{ field.name }}.length - 1}</span>}</div> : <span className="text-muted-foreground">-</span>;
         {% elif field.ui_type == 'file' and field.private_upload %}
         return item.{{ field.name }} ? <span>{String(item.{{ field.name }}).split('/').pop()}</span> : <span className="text-muted-foreground">-</span>;
         {% elif field.ui_type == 'file' %}
@@ -1009,7 +1010,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           </Label>
           {% if display.renderer == 'image' %}
           {item.{{ display.field }} ? (
-            <img
+            <ImageViewer
               src={item.{{ display.field }}}
               alt={String(t('{{ display.label_key }}'))}
               loading="lazy"
@@ -1020,7 +1021,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
           {Array.isArray(item.{{ display.field }}) && item.{{ display.field }}.length ? (
             <div className="grid grid-cols-2 gap-2">
               {item.{{ display.field }}.slice(0, 4).map((url: string, index: number) => (
-                <img key={`${url}-${index}`} src={url} alt={`${String(t('{{ display.label_key }}'))} ${index + 1}`} loading="lazy" className="aspect-video w-full rounded-md border object-{{ display.fit }}" />
+                <ImageViewer key={`${url}-${index}`} src={url} alt={`${String(t('{{ display.label_key }}'))} ${index + 1}`} loading="lazy" className="aspect-video w-full rounded-md border object-{{ display.fit }}" />
               ))}
             </div>
           ) : <div className="flex aspect-video items-center justify-center rounded-md bg-muted/30 text-sm text-muted-foreground">-</div>}

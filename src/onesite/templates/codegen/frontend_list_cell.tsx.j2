@@ -16,7 +16,7 @@
                         </Badge>
                         {% elif field.ui_type == 'image' %}
                         <div className="h-10 w-10 overflow-hidden rounded-md border bg-muted">
-                            <img
+                            <ImageViewer
                                 src={item.{{ field.name }} || 'https://placehold.co/100?text=No+Image'}
                                 alt="{{ field.name }}"
                                 className="h-full w-full object-cover"
@@ -29,7 +29,7 @@
                         {Array.isArray(item.{{ field.name }}) && item.{{ field.name }}.length ? (
                             <div className="flex items-center gap-2">
                                 <div className="h-10 w-10 overflow-hidden rounded-md border bg-muted">
-                                    <img src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-full w-full object-cover" />
+                                    <ImageViewer src={item.{{ field.name }}[0]} alt="{{ field.name }}" className="h-full w-full object-cover" />
                                 </div>
                                 {item.{{ field.name }}.length > 1 && <span className="text-sm text-muted-foreground">+{item.{{ field.name }}.length - 1}</span>}
                             </div>

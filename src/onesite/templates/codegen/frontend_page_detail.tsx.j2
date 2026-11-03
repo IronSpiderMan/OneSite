@@ -1,3 +1,4 @@
+import { ImageViewer } from '../../components/ui/image-viewer';
 {% macro detail_m2m_editors() -%}
                             {% for m2m in model.m2m_fields %}
                             <div className="space-y-2">
@@ -202,7 +203,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         {% elif field.ui_type == 'image' %}
         {currentItem.{{ field.name }} ? (
             <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
-                <img src={currentItem.{{ field.name }}} alt="{{ field.name }}" className="h-full w-full object-cover" />
+                <ImageViewer src={currentItem.{{ field.name }}} alt="{{ field.name }}" className="h-full w-full object-cover" />
             </div>
         ) : <span className="text-muted-foreground italic">No image</span>}
         {% elif field.ui_type == 'images' %}
@@ -210,7 +211,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
             <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
                 {currentItem.{{ field.name }}.map((url: string, index: number) => (
                     <div key={`${url}-${index}`} className="aspect-video overflow-hidden rounded-lg border bg-muted">
-                        <img src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
+                        <ImageViewer src={url} alt={`{{ field.name }} ${index + 1}`} className="h-full w-full object-cover" />
                     </div>
                 ))}
             </div>
