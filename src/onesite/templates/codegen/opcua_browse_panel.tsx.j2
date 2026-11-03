@@ -1,5 +1,5 @@
 {% raw %}
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AlertCircle, ArrowLeft, Check, ChevronDown, ChevronRight, CircleDot, Crosshair, Folder, FolderOpen, FolderTree, Home, Info, ListChecks, Loader2, Minus, Plus, Radio, RefreshCw, Search, Server, X } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '../../components/ui/button';
@@ -14,6 +14,9 @@ type Location = { nodeid: string; title: string };
 type LoadState = { items: Entry[]; loading: boolean; error?: string };
 type Filter = 'all' | 'node' | 'ac';
 type Result = { added: number; skipped: number; failed: number; message?: string };
+const TREE_MIN_WIDTH = 180;
+const TREE_MAX_WIDTH = 400;
+const clampTreeWidth = (width: number) => Math.min(TREE_MAX_WIDTH, Math.max(TREE_MIN_WIDTH, width));
 const ROOT: Location = { nodeid: 'i=84', title: 'Root' };
 const OBJECTS: Location = { nodeid: 'i=85', title: 'Objects' };
 const normalId = (id?: string | null) => (id || '').trim().replace(/^ns=0;/, '');
@@ -49,6 +52,8 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
   const [result, setResult] = useState<Result | null>(null);
   const [showSelection, setShowSelection] = useState(false);
   const [showTree, setShowTree] = useState(false);
+  const [treeWidth, setTreeWidth] = useState(216);
+  const treeDrag = useRef<{ pointerId: number; startX: number; startWidth: number } | null>(null);
   const cache = useRef(new Map<string, Entry[]>());
   const pending = useRef(new Map<string, Promise<void>>());
   const mounted = useRef(true);
@@ -184,12 +189,37 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FolderTree className="h-5 w-5" /></div>
         <div className="min-w-0"><DialogTitle className="text-base">节点浏览器</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-xs"><Server className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{serverTitle}</span><span className="hidden sm:inline">· 浏览服务器，选择需要接入的点位与 A&amp;C</span></DialogDescription></div>
       </header>
-      <div className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[200px_minmax(0,1fr)] xl:grid-cols-[216px_minmax(0,1fr)_288px]">
+      <div style={{ '--tree-width': `${treeWidth}px` } as CSSProperties} className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--tree-width)_minmax(0,1fr)] xl:grid-cols-[var(--tree-width)_minmax(0,1fr)_288px]">
         {showTree && <button aria-label="收起目录" className="absolute inset-0 z-10 bg-black/20 md:hidden" onClick={() => setShowTree(false)} />}
-        <aside className={`${showTree ? 'absolute inset-y-0 left-0 z-20 flex w-60 bg-background shadow-xl' : 'hidden'} min-h-0 flex-col border-r bg-muted/20 md:static md:flex md:w-auto md:shadow-none`}>
+        <aside className={`${showTree ? 'absolute inset-y-0 left-0 z-20 flex w-60 bg-background shadow-xl' : 'hidden'} min-h-0 flex-col border-r bg-muted/20 md:relative md:flex md:w-auto md:min-w-0 md:shadow-none`}>
           <div className="flex h-12 shrink-0 items-center justify-between px-4"><span className="text-xs font-medium text-muted-foreground">服务器目录</span><button aria-label="收起目录" className="md:hidden" onClick={() => setShowTree(false)}><X className="h-4 w-4" /></button></div>
           <nav aria-label="服务器节点目录" className="min-h-0 flex-1 overflow-auto px-2 pb-4"><ul>{renderTree(ROOT, [ROOT])}</ul></nav>
           <p className="flex items-start gap-2 border-t p-4 text-[11px] leading-relaxed text-muted-foreground"><Info className="mt-0.5 h-3.5 w-3.5 shrink-0" />展开目录按需加载。此处始终显示目录，不受列表筛选影响。</p>
+          <div role="separator" aria-label="调整服务器目录宽度" aria-orientation="vertical" aria-valuemin={TREE_MIN_WIDTH} aria-valuemax={TREE_MAX_WIDTH} aria-valuenow={treeWidth} tabIndex={0}
+            className="absolute inset-y-0 -right-1 z-30 hidden w-2 cursor-col-resize touch-none select-none items-center justify-center hover:bg-primary/10 focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:flex"
+            onPointerDown={event => {
+              if (event.button !== 0) return;
+              event.preventDefault();
+              event.currentTarget.focus();
+              event.currentTarget.setPointerCapture(event.pointerId);
+              treeDrag.current = { pointerId: event.pointerId, startX: event.clientX, startWidth: treeWidth };
+            }}
+            onPointerMove={event => {
+              const drag = treeDrag.current;
+              if (drag && drag.pointerId === event.pointerId) setTreeWidth(clampTreeWidth(drag.startWidth + event.clientX - drag.startX));
+            }}
+            onPointerUp={event => {
+              treeDrag.current = null;
+              if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId);
+            }}
+            onPointerCancel={() => { treeDrag.current = null; }}
+            onLostPointerCapture={() => { treeDrag.current = null; }}
+            onKeyDown={event => {
+              if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+              event.preventDefault();
+              setTreeWidth(width => event.key === 'Home' ? TREE_MIN_WIDTH : event.key === 'End' ? TREE_MAX_WIDTH : clampTreeWidth(width + (event.key === 'ArrowRight' ? 16 : -16)));
+            }}
+          ><span className="h-8 w-0.5 rounded bg-border" /></div>
         </aside>
         <main className="flex min-h-0 min-w-0 flex-col bg-background">
           <div className="flex h-12 shrink-0 items-center gap-1 border-b px-3">
