@@ -50,7 +50,7 @@ function App() {
           </RequireAuth>
         }>
           <Route path="profile" element={<ProfilePage />} />
-          <Route index element={<Navigate to={GeneratedRoutes[0]?.path || "/"} replace />} />
+          <Route index element={<Navigate to="/dashboard" replace />} />
           {GeneratedRoutes.map((route) => (
              <Route key={route.id} path={route.path} element={route.element} />
           ))}
