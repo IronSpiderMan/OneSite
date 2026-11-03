@@ -1,4 +1,5 @@
 import React, { useRef, useState } from 'react';
+import { useTranslation } from 'react-i18next';
 import { Upload, X, Loader2, File, FileText, FileCode, FileVideo, Music, Eye } from 'lucide-react';
 import { Button } from './button';
 import { cn } from '../../lib/utils';
@@ -27,6 +28,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
     allowDownload = true,
     privateUpload,
 }) => {
+    const { t } = useTranslation();
     const inputRef = useRef<HTMLInputElement>(null);
     const [uploading, setUploading] = useState(false);
     const [previewOpen, setPreviewOpen] = useState(false);
@@ -175,7 +177,7 @@ export const FileUpload: React.FC<FileUploadProps> = ({
                                     <p className="text-xs text-muted-foreground/75">(Max {maxSize}MB)</p>
                                 </>
                             ) : (
-                                <p>No file attached</p>
+                                <p>{t('common.no_file', 'No file')}</p>
                             )}
                         </div>
                     )}

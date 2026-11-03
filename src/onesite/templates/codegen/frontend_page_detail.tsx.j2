@@ -219,7 +219,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         {% elif field.ui_type == 'file' %}
         {currentItem.{{ field.name }} ? (
             <FileUpload value={currentItem.{{ field.name }}} onChange={() => {}} readOnly={true} allowDownload={ {{ "true" if field.allow_download else "false" }} }{% if field.private_upload %} privateUpload={ { model: '{{ model.module_name }}', field: '{{ field.name }}' } }{% endif %} />
-        ) : <span className="text-muted-foreground italic">No file</span>}
+        ) : <span className="text-muted-foreground italic">{t('common.no_file', 'No file')}</span>}
         {% elif field.ui_type == 'video_stream' %}
         {currentItem.{{ field.name }} ? (
             <VideoStreamPlayer src={currentItem.{{ field.name }}} protocol="{{ field.stream_protocol }}" autoPlay={ {{ "true" if field.stream_autoplay else "false" }} } muted={ {{ "true" if field.stream_muted else "false" }} } controls={ {{ "true" if field.stream_controls else "false" }} } reconnect={ {{ "true" if field.stream_reconnect else "false" }} } className="max-w-3xl" />

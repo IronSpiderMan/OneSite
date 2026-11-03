@@ -115,6 +115,8 @@ def generate_locale_files(
             "details": "Details",
             "basic_information": "Basic Information",
             "related_information": "Related Information",
+            "additional_information": "Additional information",
+            "no_file": "No file",
         },
         "location": {
             "latitude": "Latitude",
@@ -559,6 +561,8 @@ def generate_locale_files(
             "details": "详情",
             "basic_information": "基础信息",
             "related_information": "关联信息",
+            "additional_information": "附加信息",
+            "no_file": "暂无文件",
         },
         "location": {
             "latitude": "纬度",
