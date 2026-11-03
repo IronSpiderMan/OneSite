@@ -106,7 +106,7 @@ export function SearchableSelect({
                 const existing = selectedItems.find(i => String(i.value) === String(v))
                 return {
                     value: v,
-                    label: found?.label || existing?.label || valueLabels?.[String(v)] || String(v)
+                    label: valueLabels?.[String(v)] || found?.label || existing?.label || String(v)
                 }
             })
             // Only update if different length or values to avoid infinite loop

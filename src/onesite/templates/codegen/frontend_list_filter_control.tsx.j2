@@ -44,6 +44,10 @@
               value={Array.isArray(searchValues['{{ field.name }}']) ? searchValues['{{ field.name }}'] : searchValues['{{ field.name }}'] != null && searchValues['{{ field.name }}'] !== '' && searchValues['{{ field.name }}'] !== '__all__' ? [String(searchValues['{{ field.name }}'])] : []}
               onValueChange={(v) => setSearchValues((s) => ({ ...s, ['{{ field.name }}']: v }))}
               multiple={true}
+              valueLabels={Object.fromEntries({{ field.enum_values | tojson }}.map((v: string) => [
+                v, String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v)),
+              ]))}
+              optionsKey={i18n.resolvedLanguage || i18n.language}
               placeholder={t('common.all', 'All')}
               searchPlaceholder={`${t('common.search')}...`}
               loadOptions={async () => [

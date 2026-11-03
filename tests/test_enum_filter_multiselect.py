@@ -63,6 +63,13 @@ def test_generated_enum_filters_execute_with_or_and_pagination_counts():
         model=metadata, field=next(f for f in metadata.fields if f.name == 'status'), ns={'search_field_count': 2})
     assert '<SearchableSelect' in control and 'multiple={true}' in control
     assert '<SelectItem' not in control
+    # Defaults need translated labels before the dropdown has loaded any options.
+    assert 'valueLabels={Object.fromEntries(["pending", "running", "completed"].map' in control
+    assert 'String(t(`models.enum_filter_item.enums.status.${v}`, v))' in control
+    assert 'optionsKey={i18n.resolvedLanguage || i18n.language}' in control
+    # Explicit labels must override cached labels when the language changes.
+    select_source = (TEMPLATES.parent / 'frontend/src/components/ui/searchable-select.tsx').read_text()
+    assert 'label: valueLabels?.[String(v)] || found?.label || existing?.label' in select_source
 
 
 def test_scalar_enum_defaults_accept_single_and_multiple_values():
