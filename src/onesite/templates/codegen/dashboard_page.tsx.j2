@@ -43,6 +43,15 @@ import { useTaskStore } from '../stores/useTaskStore';
 import { TypedToolFields } from '../components/tools/ToolFields';
 {% endif %}
 
+{% if scheduled_tasks %}
+const taskExecutionMessageKeys: Record<string, string> = {
+    Queued: 'dashboard.execution_messages.queued',
+    Running: 'dashboard.execution_messages.running',
+    Completed: 'dashboard.execution_messages.completed',
+    'Not implemented': 'dashboard.execution_messages.not_implemented',
+};
+{% endif %}
+
 interface ChartSeries {
     name: string;
     values: number[];
@@ -1385,12 +1394,14 @@ const DashboardPage: React.FC = () => {
                                                 task.last_execution.status === 'failed' ? 'text-red-600' :
                                                 'text-blue-600'
                                             }>
-                                                {task.last_execution.status}
+                                                {t(`dashboard.execution_status.${task.last_execution.status}`, task.last_execution.status)}
                                             </span>
                                             {(task.last_execution.status === 'queued' || task.last_execution.status === 'running') && (
                                                 <span>{task.last_execution.progress}%</span>
                                             )}
-                                            {task.last_execution.message && <span>- {task.last_execution.message}</span>}
+                                            {task.last_execution.message && <span>- {taskExecutionMessageKeys[task.last_execution.message]
+                                                ? t(taskExecutionMessageKeys[task.last_execution.message], task.last_execution.message)
+                                                : task.last_execution.message}</span>}
                                         </div>
                                     )}
                                 </div>
