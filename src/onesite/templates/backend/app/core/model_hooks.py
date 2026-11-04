@@ -3,9 +3,15 @@
 from __future__ import annotations
 
 import inspect
+import logging
 from copy import deepcopy
 from dataclasses import dataclass, field
+from functools import lru_cache
+from importlib import import_module
 from typing import Any, Literal
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -26,35 +32,83 @@ def snapshot_model(target: Any) -> dict[str, Any]:
     }
 
 
-async def invoke_model_hook(target: Any, hook_name: str, **values: Any) -> None:
-    """Invoke a hook on a model instance or class with its declared arguments.
+async def _invoke_named_hook(hook: Any, label: str, values: dict[str, Any]) -> None:
+    signature = inspect.signature(hook)
+    kwargs: dict[str, Any] = {}
+    for name, parameter in signature.parameters.items():
+        if parameter.kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD):
+            continue
+        if parameter.kind is inspect.Parameter.POSITIONAL_ONLY:
+            raise TypeError(f"{label} parameter '{name}' cannot be positional-only")
+        if name in values:
+            kwargs[name] = values[name]
+        elif parameter.default is inspect.Parameter.empty:
+            supported = ", ".join(sorted(values))
+            raise TypeError(
+                f"{label} has unsupported required parameter '{name}'. "
+                f"Supported parameters: {supported}"
+            )
+    result = hook(**kwargs)
+    if inspect.isawaitable(result):
+        await result
 
-    Hooks may be regular or async instance methods. Arguments are matched by
-    name so a hook only needs to declare the values it uses, for example
-    ``async def on_after_update(self, session, old, context)``.
-    """
 
+async def _invoke_model_method(target: Any, hook_name: str, values: dict[str, Any]) -> None:
     hook = getattr(target, hook_name, None)
     if hook is not None:
-        signature = inspect.signature(hook)
-        kwargs: dict[str, Any] = {}
-        for name, parameter in signature.parameters.items():
-            if name in values:
-                kwargs[name] = values[name]
-            elif (
-                parameter.default is inspect.Parameter.empty
-                and parameter.kind
-                not in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
-            ):
-                supported = ", ".join(sorted(values))
-                raise TypeError(
-                    f"{type(target).__name__}.{hook_name} has unsupported required "
-                    f"parameter '{name}'. Supported parameters: {supported}"
-                )
+        model = target if inspect.isclass(target) else type(target)
+        await _invoke_named_hook(hook, f"{model.__name__}.{hook_name}", values)
 
-        result = hook(**kwargs)
-        if inspect.isawaitable(result):
-            await result
+
+@lru_cache(maxsize=None)
+def _load_external_hook(module_name: str, hook_name: str) -> Any:
+    hook = getattr(import_module(module_name), hook_name)
+    if not callable(hook):
+        raise TypeError(f"{module_name}.{hook_name} must be callable")
+    return hook
+
+
+async def _invoke_external_hook(target: Any, hook_name: str, values: dict[str, Any]) -> None:
+    try:
+        from app.core.model_hook_registry import MODEL_HOOKS
+    except ModuleNotFoundError as exc:
+        if exc.name not in {"app", "app.core", "app.core.model_hook_registry"}:
+            raise
+        return
+
+    model = target if inspect.isclass(target) else type(target)
+    module_name = MODEL_HOOKS.get((model.__module__, model.__name__), {}).get(hook_name)
+    if module_name is not None:
+        hook = _load_external_hook(module_name, hook_name)
+        argument = "model" if inspect.isclass(target) else "obj"
+        await _invoke_named_hook(
+            hook, f"{module_name}.{hook_name}", {**values, argument: target}
+        )
+
+
+async def invoke_model_hook(target: Any, hook_name: str, **values: Any) -> None:
+    """Run model methods and external functions at the same lifecycle boundary.
+
+    Before hooks run external functions first so model validators see their
+    changes. After hooks run model methods first so external functions see the
+    initialized state. Arguments are injected by name; sync and async work alike.
+    Transactional failures propagate. Post-commit failures are logged separately
+    so a failed model method does not suppress the external function.
+    """
+    handlers = (_invoke_model_method, _invoke_external_hook)
+    if hook_name.startswith("on_before_"):
+        handlers = tuple(reversed(handlers))
+    for handler in handlers:
+        try:
+            await handler(target, hook_name, values)
+        except Exception:
+            if not hook_name.startswith("on_after_commit_"):
+                raise
+            model = target if inspect.isclass(target) else type(target)
+            logger.exception(
+                "Post-commit hook %s.%s failed (%s)",
+                model.__name__, hook_name, handler.__name__,
+            )
 
     # External resources behave like framework-owned transactional on_after
     # hooks. The import stays lazy so ordinary projects need no runtime module.

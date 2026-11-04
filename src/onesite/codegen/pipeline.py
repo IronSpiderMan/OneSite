@@ -24,6 +24,7 @@ from .visualizations import (
     load_and_compile_visualizations,
 )
 from .frontend_features import load_frontend_features
+from .model_hooks import sync_model_hooks
 
 console = Console()
 
@@ -68,11 +69,12 @@ def _generate_staged_code() -> None:
     models = phase_introspect.phase_introspect(
         backend_path, site_config=site_config, source_path=cwd / "app"
     )
-    if not models:
-        return
-
     # Phase 4 — Relationships
     phase_relationships.phase_resolve_relationships(models)
+    # Association tables acquire their CUD lifecycle flags during resolution.
+    sync_model_hooks(cwd, backend_path, models)
+    if not models:
+        return
 
     # Project-level charts and KPIs are compiled only after relationships have
     # resolved FK and reverse-FK paths.  Keep charts in the transient

@@ -33,7 +33,7 @@ uv run ruff check src/onesite src/onesite_runtime tests
 - API 文档：`http://localhost:8000/docs`
 - 初始管理员：`admin@example.com` / `admin`（上线前必须修改）
 
-日常循环是：修改 `app/models/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.py` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
+日常循环是：修改 `app/models/`、`app/hooks/`、`app/integrations/`、`app/utils/`、`app/resources.py` 或 `site_config.py` → `site sync` → 在 `/docs` 和前端验证。`generated/` 下的内容都是可重新生成的产物，不应作为唯一业务源码。项目统一使用 `app/` 与 `generated/` 布局，顶层 `models/`、`backend/`、`frontend/` 不受支持。
 
 ## 本地可视化编辑器
 
@@ -76,6 +76,47 @@ config = SiteConfig(agents={
 - 内置执行超时和步数限制；中断的写操作不会自动重放。页面通过轮询按完整消息更新。
 
 完整配置、自定义工具、Hook 示例和表结构见 [Agent 使用说明](docs/agents.md)。
+
+## 模型外部 Hook
+
+除模型中的 `on_before_xxx` / `on_after_xxx` 方法外，也可以在
+`app/hooks/<模型类名的 snake_case>.py` 中编写同名顶层函数。
+普通模型、plugin 模型和内置模型采用相同写法，无需在 `SiteConfig` 或
+`__onesite__` 中额外登记，也不需要复制模型定义：
+
+```python
+# app/hooks/user.py：扩展内置 User
+def on_before_create(obj):
+    if obj.full_name:
+        obj.full_name = obj.full_name.strip()
+
+
+def on_before_update(changes):
+    if changes.get("full_name"):
+        changes["full_name"] = changes["full_name"].strip()
+```
+
+例如 `OpcuaServer` 对应 `app/hooks/opcua_server.py`，`OrderItem` 对应
+`app/hooks/order_item.py`；绑定依据是模型类名，与数据库表名、模型所在文件名无关。
+
+- 支持同步或异步函数，按参数名注入，声明需要的参数即可。单条操作使用 `obj`
+  代替模型方法的 `self`；`session`、`old`、`changes`、`context` 按原有阶段提供。
+  `on_before_update` 通过修改 `changes` 调整待写入字段。
+- 批量删除函数使用 `model` 接收模型类，`olds` 接收整批删除前的快照，另有
+  `context`；事务内的 `on_after_bulk_delete` 还可接收 `session`，无需 `@classmethod`。
+- `before` 顺序为外部函数 → 模型方法，`after` 为模型方法 → 外部函数，保留
+  plugin 自带校验和初始化；框架外部资源同步在事务内两类 `after` 都完成后执行。
+- 事务内任一 hook 失败会停止后续处理并回滚写操作及 hook 的数据库变更。
+  `on_after_commit_*` 不提供 `session`；模型方法与外部函数分别捕获异常并记录日志，
+  一个失败仍会执行另一个，已提交的数据不会回滚。
+- `site sync` 静态校验模型、函数名和参数，不执行 hook 模块；随后同步到
+  `generated/backend/app/hooks/`，删除源 hook 也会清理生成副本。未启用 plugin
+  却声明对应 hook 时会报目标不存在。共享逻辑放在 `_helpers.py` 或辅助包中；
+  `app/hooks/` 下非下划线开头的 Python 文件保留给模型入口，每个阶段定义一个顶层函数。
+
+外部 hook 沿用生成代码现有的 CUD 调用位置；直接 `session.add()`、执行 SQL 或
+直接调用模型方法不会触发外部 hook。单例模型沿用仅更新的生命周期。
+完整参数表见 [英文说明](README.md#hooks-outside-models)。
 
 ## 应用资源生命周期
 

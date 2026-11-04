@@ -846,6 +846,77 @@ outbox or another durable queue.
 | `on_after_bulk_delete` | Once per batch, same transaction | Yes |
 | `on_after_commit_bulk_delete` | Once per batch, after commit | No |
 
+### Hooks outside models
+
+Lifecycle hooks can also be top-level functions in
+`app/hooks/<model_key>.py`. This works for project models, plugin models and
+built-in models without copying or replacing their model definitions. No
+additional configuration or registration import is needed:
+
+```text
+app/hooks/
+├── user.py           # User (built-in)
+├── opcua_server.py   # OpcuaServer (opcua plugin)
+└── order.py          # Order (project model)
+```
+
+The key is the snake_case model **class name**, matching its generated service
+module, not the database table or the file containing the model. For example,
+`OrderItem` uses `order_item.py` even if it is defined in `app/models/sales.py`.
+
+```python
+# app/hooks/user.py
+def on_before_create(obj):
+    if obj.full_name:
+        obj.full_name = obj.full_name.strip()
+
+
+def on_before_update(changes):
+    if changes.get("full_name"):
+        changes["full_name"] = changes["full_name"].strip()
+```
+
+Functions may be synchronous or asynchronous and declare only the named
+arguments they need. The existing model-method arguments remain available,
+with `obj` replacing `self` and `model` replacing `cls`:
+
+| Hook | Available arguments |
+|---|---|
+| `on_before_create`, `on_after_create` | `obj`, `session`, `context` |
+| `on_before_update`, `on_after_update` | `obj`, `session`, `old`, `changes`, `context` |
+| `on_before_delete`, `on_after_delete` | `obj`, `session`, `old`, `context` |
+| `on_after_commit_create` | `obj`, `context` |
+| `on_after_commit_update` | `obj`, `old`, `changes`, `context` |
+| `on_after_commit_delete` | `obj`, `old`, `context` |
+| `on_after_bulk_delete` | `model`, `session`, `olds`, `context` |
+| `on_after_commit_bulk_delete` | `model`, `olds`, `context` |
+
+For example, `async def on_after_bulk_delete(model, session, olds): ...`
+receives the model class and deleted row snapshots once per batch, without
+`@classmethod`. Update hooks should modify `changes` to change pending writes;
+`old` is the pre-write snapshot and `context` describes the original input.
+
+External hooks supplement existing model methods, including plugin validation
+and initialization. Before hooks run **external function → model method**;
+after hooks run **model method → external function**. Framework external-resource
+synchronization runs after both transactional after hooks. Transactional
+failures stop the chain and roll back the write and hook database changes.
+Post-commit methods and functions run independently: each failure is logged,
+and the other handler still runs without undoing the committed transaction.
+
+`site sync` validates hook names, named parameters and target models without
+executing the hook modules, then mirrors them into
+`generated/backend/app/hooks/` and generates the binding registry. Deleted
+source hooks are removed from the generated backend. A hook for a disabled
+plugin fails with an unknown-target error; enable the plugin or remove its hook.
+Use `_helpers.py` or helper packages for shared implementation; public Python
+files directly under `app/hooks/` are reserved for model entry points. Define
+each hook once as a top-level function; compose shared functions inside it.
+
+Hooks run at the existing generated CUD/service boundaries. Direct
+`session.add()`, SQL statements and direct calls to a model method do not
+dispatch external hooks. Singleton models retain their update-only lifecycle.
+
 ### Business primary keys
 
 Integer IDs with `default=None` are database-generated and are not accepted by the create API by default. A business key can be passed on creation by making the `id` field required and explicitly granting it create permission:

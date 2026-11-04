@@ -26,6 +26,7 @@ from onesite_runtime import (
 )
 
 from ..introspect import get_model_fields
+from ..model_hooks import BULK_HOOK_ARGUMENTS, INSTANCE_HOOK_ARGUMENTS, UPDATE_HOOKS
 from ..model_imports import ModelIntrospectionError, isolated_project_imports
 from ..render import generate_file
 from ..types import (
@@ -469,19 +470,10 @@ def _build_model_dict(
 
 
 _TRANSACTIONAL_HOOK_ARGUMENTS = {
-    "on_before_create": {"self", "session", "context"},
-    "on_after_create": {"self", "session", "context"},
-    "on_before_update": {"self", "session", "old", "changes", "context"},
-    "on_after_update": {"self", "session", "old", "changes", "context"},
-    "on_before_delete": {"self", "session", "old", "context"},
-    "on_after_delete": {"self", "session", "old", "context"},
-    "on_after_commit_create": {"self", "context"},
-    "on_after_commit_update": {"self", "old", "changes", "context"},
-    "on_after_commit_delete": {"self", "old", "context"},
+    name: arguments | {"self"} for name, arguments in INSTANCE_HOOK_ARGUMENTS.items()
 }
 _BULK_DELETE_HOOK_ARGUMENTS = {
-    "on_after_bulk_delete": {"cls", "session", "olds", "context"},
-    "on_after_commit_bulk_delete": {"cls", "olds", "context"},
+    name: arguments | {"cls"} for name, arguments in BULK_HOOK_ARGUMENTS.items()
 }
 def _validate_named_hook_signature(
     model_cls: type,
@@ -921,7 +913,7 @@ def _process_introspected_class(
     # Update hooks can modify records other than the returned object.
     mdl["has_update_hooks"] = any(
         callable(getattr(obj, hook, None))
-        for hook in ("on_before_update", "on_after_update", "on_after_commit_update")
+        for hook in UPDATE_HOOKS
     )
     mdl["schema_imports"] = sorted(
         set(mdl["schema_imports"])
