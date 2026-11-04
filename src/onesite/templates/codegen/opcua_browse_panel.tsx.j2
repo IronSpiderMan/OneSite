@@ -13,7 +13,7 @@ type Entry = { nodeid: string; stable_nodeid: string; title: string; node_class:
 type Location = { nodeid: string; title: string };
 type LoadState = { items: Entry[]; loading: boolean; error?: string };
 type Filter = 'all' | 'node' | 'ac';
-type Result = { added: number; skipped: number; failed: number; message?: string };
+type Result = { added: number; skipped: number; failed: number; message?: string; error?: boolean };
 const TREE_MIN_WIDTH = 180;
 const TREE_MAX_WIDTH = 400;
 const clampTreeWidth = (width: number) => Math.min(TREE_MAX_WIDTH, Math.max(TREE_MIN_WIDTH, width));
@@ -48,6 +48,7 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
   const [configLoading, setConfigLoading] = useState(false);
   const [configError, setConfigError] = useState('');
   const [saving, setSaving] = useState(false);
+  const [scanning, setScanning] = useState(false);
   const [progress, setProgress] = useState({ done: 0, total: 0 });
   const [result, setResult] = useState<Result | null>(null);
   const [showSelection, setShowSelection] = useState(false);
@@ -57,6 +58,7 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
   const cache = useRef(new Map<string, Entry[]>());
   const pending = useRef(new Map<string, Promise<void>>());
   const mounted = useRef(true);
+  const operation = useRef(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const current = path[path.length - 1];
   useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -130,33 +132,57 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
   const acsSelected = selections.filter(row => row.is_condition);
   const editingDisabled = saving || configLoading;
 
-  const add = async () => {
-    if (saving || !selections.length) return;
-    setSaving(true); setResult(null); setProgress({ done: 0, total: selections.length });
+  const add = async (allAcs = false) => {
+    if (operation.current || configLoading || configError) return;
+    if (allAcs ? !canReadAcs || !canAddAcs || !notifier.trim() : !selections.length || (acsSelected.length > 0 && !notifier.trim())) return;
+    operation.current = true;
+    setSaving(true); setScanning(allAcs); setResult(null); setProgress({ done: 0, total: 0 });
+    let batch = allAcs ? [] : selections;
+    let discoveryComplete = !allAcs;
     const remaining = { ...selected };
     const outcome: Result = { added: 0, skipped: 0, failed: 0 };
     try {
-      const latest = await loadConfigured();
-      for (const [index, row] of selections.entries()) {
+      if (allAcs) {
+        const { data } = await request.get<{ items: Entry[] }>(`/opcua/${serverId}/conditions`, { timeout: 125000, suppressErrorToast: true });
+        batch = [...new Map(data.items.filter(row => row.is_condition).map(row => [normalId(row.stable_nodeid), row])).values()];
+        discoveryComplete = true;
+        setScanning(false);
+        for (const row of batch) remaining[row.nodeid] = row;
+        setSelected({ ...remaining });
+        if (!batch.length) {
+          outcome.message = '未发现可导入的 A&C 条件；仅通过事件公开的条件仍需手动配置。';
+          setResult(outcome);
+          toast.info(outcome.message);
+          return;
+        }
+      }
+      setProgress({ done: 0, total: batch.length });
+      const existing = await loadConfigured();
+      const latest = { nodes: [...existing.nodes], acs: [...existing.acs] };
+      for (const [index, row] of batch.entries()) {
         if (!canAdd(row)) { outcome.failed++; outcome.message = '没有添加权限'; }
         else if (isConfigured(row, latest)) { outcome.skipped++; delete remaining[row.nodeid]; }
         else {
           try {
             const title = `${row.title} [${row.stable_nodeid}${row.is_condition ? `@${notifier.trim()}` : ''}]`;
-            if (row.is_condition) await createOpcuaAc({ title, opcua_server_id: serverId, condition_id: row.stable_nodeid, event_notifier_nodeid: notifier.trim(), is_enabled: true });
-            else await createOpcuaNode({ title, opcua_server_id: serverId, nodeid: row.stable_nodeid });
+            if (row.is_condition) latest.acs.push(await createOpcuaAc({ title, opcua_server_id: serverId, condition_id: row.stable_nodeid, event_notifier_nodeid: notifier.trim(), is_enabled: true }));
+            else latest.nodes.push(await createOpcuaNode({ title, opcua_server_id: serverId, nodeid: row.stable_nodeid }));
             outcome.added++; delete remaining[row.nodeid];
           } catch (error) { outcome.failed++; outcome.message = getErrorMessage(error, '请重试或在关联配置中手动添加'); }
         }
-        setProgress({ done: index + 1, total: selections.length });
+        setProgress({ done: index + 1, total: batch.length });
       }
       setSelected(remaining); setResult(outcome);
       if (outcome.failed) toast.error(`已添加 ${outcome.added} 项，${outcome.failed} 项未完成，已保留选择`);
       else toast.success(`已添加 ${outcome.added} 项${outcome.skipped ? `，跳过 ${outcome.skipped} 个已添加项` : ''}`);
     } catch (error) {
-      setResult({ ...outcome, failed: selections.length, message: getErrorMessage(error, '无法读取现有配置，请重试') });
+      const message = getErrorMessage(error, discoveryComplete ? '无法读取现有配置，请重试' : '查找 A&C 条件失败，请检查连接后重试');
+      setSelected(remaining);
+      setResult({ ...outcome, failed: batch.length, error: true, message });
+      toast.error(message);
     } finally {
-      setSaving(false);
+      operation.current = false;
+      setSaving(false); setScanning(false);
       if (outcome.added) onAdded();
       void loadConfigured().catch(() => {});
     }
@@ -189,6 +215,12 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
         <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><FolderTree className="h-5 w-5" /></div>
         <div className="min-w-0"><DialogTitle className="text-base">节点浏览器</DialogTitle><DialogDescription className="mt-1 flex items-center gap-1.5 text-xs"><Server className="h-3.5 w-3.5 shrink-0" /><span className="truncate">{serverTitle}</span><span className="hidden sm:inline">· 浏览服务器，选择需要接入的点位与 A&amp;C</span></DialogDescription></div>
       </header>
+      {canReadAcs && canAddAcs && <div className="flex shrink-0 flex-wrap items-center gap-3 border-b bg-muted/20 px-5 py-3 sm:px-6">
+        <div className="min-w-48 flex-1"><p className="text-xs font-medium">导入全部 A&amp;C 条件</p><p className="mt-1 text-[11px] text-muted-foreground">查找 Objects 下所有子目录，自动跳过已添加项，不受当前目录和筛选影响。</p></div>
+        <div className="flex min-w-0 flex-wrap items-center gap-2"><label htmlFor={`notifier-${serverId}`} className="text-xs text-muted-foreground">A&amp;C 事件入口</label><Input id={`notifier-${serverId}`} className="h-8 w-40 bg-background font-mono text-xs" title="所有 A&C 共用此事件订阅入口，默认使用 Server 对象 i=2253" disabled={saving} value={notifier} onChange={event => setNotifier(event.target.value)} placeholder="i=2253" />
+          <Button size="sm" variant="outline" className="gap-1.5" disabled={editingDisabled || !!configError || !notifier.trim()} onClick={() => void add(true)}>{scanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Radio className="h-3.5 w-3.5" />}一键导入所有 A&amp;C</Button>
+        </div>
+      </div>}
       <div style={{ '--tree-width': `${treeWidth}px` } as CSSProperties} className="relative grid min-h-0 flex-1 grid-cols-1 md:grid-cols-[var(--tree-width)_minmax(0,1fr)] xl:grid-cols-[var(--tree-width)_minmax(0,1fr)_288px]">
         {showTree && <button aria-label="收起目录" className="absolute inset-0 z-10 bg-black/20 md:hidden" onClick={() => setShowTree(false)} />}
         <aside className={`${showTree ? 'absolute inset-y-0 left-0 z-20 flex w-60 bg-background shadow-xl' : 'hidden'} min-h-0 flex-col border-r bg-muted/20 md:relative md:flex md:w-auto md:min-w-0 md:shadow-none`}>
@@ -259,14 +291,13 @@ export default function BrowsePanel({ serverId, serverTitle, open, onOpenChange,
           <div className="min-h-0 flex-1 overflow-auto p-4">
             {!selections.length ? <div className="flex min-h-48 flex-col items-center justify-center px-2 text-center"><div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full border border-dashed text-muted-foreground/50"><ListChecks className="h-5 w-5" /></div><p className="text-xs font-medium text-muted-foreground">选择需要接入的节点</p><p className="mt-2 text-[11px] leading-relaxed text-muted-foreground/70">勾选左侧列表中的点位或 A&amp;C<br />切换目录会保留已选项</p></div> : <div className="space-y-5">{[{ title: '点位', items: nodesSelected }, { title: 'A&C 条件', items: acsSelected }].filter(group => group.items.length).map(group => <section key={group.title}><h4 className="mb-2 text-[11px] font-medium text-muted-foreground">{group.title}<span className="ml-1.5">{group.items.length}</span></h4><ul className="space-y-2">{group.items.map(row => <li key={row.nodeid} className="flex items-center gap-2 rounded-lg border bg-background p-2.5"><span className={row.is_condition ? 'text-amber-600 dark:text-amber-400' : 'text-primary'}>{row.is_condition ? <Radio className="h-3.5 w-3.5" /> : <CircleDot className="h-3.5 w-3.5" />}</span><div className="min-w-0 flex-1"><p className="truncate text-xs font-medium" title={row.title}>{row.title}</p><p className="mt-1 truncate font-mono text-[10px] text-muted-foreground" title={row.nodeid}>{row.nodeid}</p></div><button type="button" aria-label={`移除 ${row.title}`} disabled={saving} onClick={() => toggle(row)} className="rounded p-1 text-muted-foreground/50 hover:bg-muted hover:text-destructive disabled:opacity-30"><X className="h-3 w-3" /></button></li>)}</ul></section>)}</div>}
           </div>
-          {acsSelected.length > 0 && <div className="shrink-0 border-t p-4"><label htmlFor={`notifier-${serverId}`} className="flex items-center gap-1.5 text-xs font-medium"><Radio className="h-3.5 w-3.5 text-amber-600" />A&amp;C 事件入口</label><Input id={`notifier-${serverId}`} className="mt-2 h-8 bg-background font-mono text-xs" aria-describedby={`notifier-hint-${serverId}`} disabled={saving} value={notifier} onChange={event => setNotifier(event.target.value)} placeholder="i=2253" /><p id={`notifier-hint-${serverId}`} className="mt-2 text-[11px] leading-relaxed text-muted-foreground">默认使用 Server 对象 i=2253。所选条件将共用此事件订阅入口。</p></div>}
           <p className="flex items-start gap-1.5 border-t px-4 py-3 text-[10px] leading-relaxed text-muted-foreground"><Info className="mt-0.5 h-3 w-3 shrink-0" />关闭窗口会保留选择，已添加的节点会自动跳过。</p>
         </aside>
       </div>
-      {result && <div role="status" className={`flex shrink-0 items-start gap-2 border-t px-5 py-2.5 text-xs ${result.failed ? 'bg-destructive/5 text-destructive' : 'bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'}`}>{result.failed ? <AlertCircle className="h-4 w-4 shrink-0" /> : <Check className="h-4 w-4 shrink-0" />}<span>已添加 {result.added} 项{result.skipped > 0 ? `，跳过 ${result.skipped} 个已添加项` : ''}{result.failed > 0 ? `；${result.failed} 项未完成，保留选择供重试。${result.message || ''}` : '，可继续浏览或关闭窗口。'}</span></div>}
+      {result && <div role="status" className={`flex shrink-0 items-start gap-2 border-t px-5 py-2.5 text-xs ${result.failed || result.error ? 'bg-destructive/5 text-destructive' : 'bg-emerald-500/5 text-emerald-600 dark:text-emerald-400'}`}>{result.failed || result.error ? <AlertCircle className="h-4 w-4 shrink-0" /> : <Check className="h-4 w-4 shrink-0" />}<span>{result.message && !result.failed ? result.message : <>已添加 {result.added} 项{result.skipped > 0 ? `，跳过 ${result.skipped} 个已添加项` : ''}{result.failed > 0 ? `；${result.failed} 项未完成，保留选择供重试。${result.message || ''}` : '，可继续浏览或关闭窗口。'}</>}</span></div>}
       <footer className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t bg-background px-5 py-3 sm:px-6">
-        <div className="min-w-0 text-xs text-muted-foreground" aria-live="polite">{saving ? <span className="flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />正在添加 {progress.done} / {progress.total}，请稍候…</span> : selections.length ? <span>已选 <strong className="font-medium text-foreground">{selections.length}</strong> 项<span className="ml-2">{nodesSelected.length > 0 ? `${nodesSelected.length} 个点位` : ''}{nodesSelected.length > 0 && acsSelected.length > 0 ? ' · ' : ''}{acsSelected.length > 0 ? `${acsSelected.length} 个 A&C` : ''}</span></span> : '从列表中勾选节点，批量添加到当前服务器'}</div>
-        <div className="ml-auto flex gap-2"><Button size="sm" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>{result && !selections.length ? '完成' : '关闭'}</Button><Button size="sm" className="gap-1.5" disabled={saving || configLoading || !!configError || !selections.length || (acsSelected.length > 0 && !notifier.trim())} onClick={add}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{saving ? '正在添加' : `添加到服务器${selections.length ? ` (${selections.length})` : ''}`}</Button></div>
+        <div className="min-w-0 text-xs text-muted-foreground" aria-live="polite">{saving ? <span className="flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />{scanning ? '正在查找服务器全部 A&C 条件，请稍候…' : `正在添加 ${progress.done} / ${progress.total}，请稍候…`}</span> : selections.length ? <span>已选 <strong className="font-medium text-foreground">{selections.length}</strong> 项<span className="ml-2">{nodesSelected.length > 0 ? `${nodesSelected.length} 个点位` : ''}{nodesSelected.length > 0 && acsSelected.length > 0 ? ' · ' : ''}{acsSelected.length > 0 ? `${acsSelected.length} 个 A&C` : ''}</span></span> : '从列表中勾选节点，批量添加到当前服务器'}</div>
+        <div className="ml-auto flex gap-2"><Button size="sm" variant="outline" disabled={saving} onClick={() => onOpenChange(false)}>{result && !selections.length ? '完成' : '关闭'}</Button><Button size="sm" className="gap-1.5" disabled={saving || configLoading || !!configError || !selections.length || (acsSelected.length > 0 && !notifier.trim())} onClick={() => void add()}>{saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Plus className="h-3.5 w-3.5" />}{saving ? '正在添加' : `添加到服务器${selections.length ? ` (${selections.length})` : ''}`}</Button></div>
       </footer>
     </DialogContent>
   </Dialog>;

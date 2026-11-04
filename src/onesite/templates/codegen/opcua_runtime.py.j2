@@ -3,12 +3,18 @@
 import base64
 import math
 import re
+from collections import deque
 from pathlib import Path
 from uuid import UUID
 
 from app.core.config import settings
 
 _NODE_ID = re.compile(r"(?:(?:ns=(\d+)|nsu=(.+));)?([isgb])=(.*)")
+MAX_CONDITION_SCAN_NODES = 10000
+
+
+class ConditionScanLimitError(RuntimeError):
+    """The address space cannot be completely scanned within the node budget."""
 
 
 def validate_nodeid(value):
@@ -125,9 +131,50 @@ async def is_condition(client, type_id, cache):
     return result
 
 
-async def browse(server, nodeid):
+def _local_nodeid(nodeid, namespaces):
     from asyncua import ua
 
+    if getattr(nodeid, "ServerIndex", 0):
+        return None
+    namespace_index = nodeid.NamespaceIndex
+    if getattr(nodeid, "NamespaceUri", None):
+        namespace_index = namespaces.index(nodeid.NamespaceUri)
+    return ua.NodeId(nodeid.Identifier, namespace_index, nodeid.NodeIdType)
+
+
+async def _reference_entry(client, ref, namespaces, cache):
+    from asyncua import ua
+
+    nid = _local_nodeid(ref.NodeId, namespaces)
+    if nid is None:
+        return None
+    raw = nid.to_string()
+    stable = (
+        f"nsu={namespaces[nid.NamespaceIndex]};{raw.split(';', 1)[-1]}"
+        if nid.NamespaceIndex
+        else raw
+    )
+    condition = False
+    if ref.NodeClass == ua.NodeClass.Object:
+        type_id = _local_nodeid(ref.TypeDefinition, namespaces)
+        # Some servers omit TypeDefinition on alias/HasCondition references.
+        # Resolve it before classifying the node so traversal order cannot
+        # cause an otherwise discoverable condition to be missed.
+        if type_id is not None and type_id.is_null():
+            definition = await client.get_node(nid).read_type_definition()
+            type_id = _local_nodeid(definition, namespaces) if definition is not None else None
+        if type_id is not None and not type_id.is_null():
+            condition = await is_condition(client, type_id.to_string(), cache)
+    return dict(
+        nodeid=raw,
+        stable_nodeid=stable,
+        title=ref.DisplayName.Text or ref.BrowseName.Name or raw,
+        node_class=ref.NodeClass.name,
+        is_condition=condition,
+    )
+
+
+async def browse(server, nodeid):
     match = validate_nodeid(nodeid)
     client = await create_client(server)
     async with client:
@@ -137,26 +184,42 @@ async def browse(server, nodeid):
         refs = await client.get_node(nodeid).get_children_descriptions()
         cache, items = {}, {}
         for ref in refs:
-            if getattr(ref.NodeId, "ServerIndex", 0):
-                continue
-            namespace_index = ref.NodeId.NamespaceIndex
-            if getattr(ref.NodeId, "NamespaceUri", None):
-                namespace_index = namespaces.index(ref.NodeId.NamespaceUri)
-            nid = ua.NodeId(ref.NodeId.Identifier, namespace_index, ref.NodeId.NodeIdType)
-            raw = nid.to_string()
-            stable = (
-                f"nsu={namespaces[nid.NamespaceIndex]};{raw.split(';', 1)[-1]}"
-                if nid.NamespaceIndex
-                else raw
-            )
-            condition = ref.NodeClass == ua.NodeClass.Object and await is_condition(
-                client, ref.TypeDefinition.to_string(), cache
-            )
-            items[raw] = dict(
-                nodeid=raw,
-                stable_nodeid=stable,
-                title=ref.DisplayName.Text or ref.BrowseName.Name or raw,
-                node_class=ref.NodeClass.name,
-                is_condition=condition,
-            )
+            entry = await _reference_entry(client, ref, namespaces, cache)
+            if entry is not None:
+                items[entry["nodeid"]] = entry
+        return {"items": list(items.values())}
+
+
+async def browse_conditions(server):
+    """Find all exposed conditions below Objects, or fail without partial results."""
+    from asyncua import ua
+
+    client = await create_client(server)
+    async with client:
+        namespaces = await client.get_namespace_array()
+        pending = deque(["i=85"])
+        visited = {"i=85"}
+        cache, items = {}, {}
+        while pending:
+            node = client.get_node(pending.popleft())
+            refs = await node.get_children_descriptions()
+            # HasCondition is non-hierarchical and may be the only reference to
+            # an exposed condition. HasNotifier/HasEventSource are hierarchical.
+            refs += await node.get_children_descriptions(refs=ua.NodeId(ua.ObjectIds.HasCondition))
+            for ref in refs:
+                if ref.NodeClass not in (ua.NodeClass.Object, ua.NodeClass.Variable):
+                    continue
+                nid = _local_nodeid(ref.NodeId, namespaces)
+                if nid is None:
+                    continue
+                raw = nid.to_string()
+                if raw in visited:
+                    continue
+                if len(visited) >= MAX_CONDITION_SCAN_NODES:
+                    raise ConditionScanLimitError("OPC UA condition scan node limit exceeded")
+                visited.add(raw)
+                pending.append(raw)
+                entry = await _reference_entry(client, ref, namespaces, cache)
+                if entry["is_condition"]:
+                    items[raw] = entry
         return {"items": list(items.values())}

@@ -120,6 +120,7 @@ def test_project_can_override_plugin_model(tmp_path):
         "profile_validation_and_secrets",
         "database_uniqueness_and_cascade",
         "live_browse_with_custom_condition_and_namespace_uri",
+        "recursive_condition_discovery",
         "browse_api_permissions_validation_and_error_redaction",
         "live_secure_browse_uses_saved_certificates",
     ],

@@ -205,6 +205,62 @@ async def test_live_browse_with_custom_condition_and_namespace_uri(tmp_path):
             assert (await runtime.browse(profile, stable_device))["items"] == result["items"]
 
 
+async def test_recursive_condition_discovery(tmp_path):
+    import asyncua
+
+    backend, _ = generate(tmp_path)
+    with isolated_project_imports(backend):
+        Server, _, _ = load_models()
+        runtime = importlib.import_module("app.core.opcua")
+        with socket.socket() as sock:
+            sock.bind(("127.0.0.1", 0))
+            port = sock.getsockname()[1]
+        server = asyncua.Server()
+        await server.init()
+        server.set_endpoint(f"opc.tcp://127.0.0.1:{port}/test/")
+        ns = await server.register_namespace("urn:onesite:conditions;v=1")
+        plant = await server.nodes.objects.add_folder(ns, "Plant")
+        device = await plant.add_object(ns, "Device")
+        variable = await device.add_variable(ns, "Temperature", 25.0)
+        subtype = await server.get_node(asyncua.ua.ObjectIds.ConditionType).add_object_type(
+            ns, "CustomCondition"
+        )
+        nested = await device.add_object(ns, "High", subtype.nodeid)
+        under_variable = await variable.add_object(ns, "SensorFault", subtype.nodeid)
+        linked_condition = await server.get_node(asyncua.ua.ObjectIds.ViewsFolder).add_object(
+            ns, "EventCondition", subtype.nodeid
+        )
+        await device.add_reference(
+            linked_condition, asyncua.ua.NodeId(asyncua.ua.ObjectIds.HasCondition)
+        )
+        # The same instance can have several parents and reference kinds, and
+        # real device hierarchies can lead back to an already-visited folder.
+        await plant.add_reference(nested, asyncua.ua.ObjectIds.Organizes)
+        await device.add_reference(nested, asyncua.ua.NodeId(asyncua.ua.ObjectIds.HasCondition))
+        await device.add_reference(plant, asyncua.ua.ObjectIds.HasComponent)
+        # Type definitions, even when referenced from Objects, are not instances
+        # to import or branches to scan for live conditions.
+        await device.add_reference(subtype, asyncua.ua.ObjectIds.Organizes)
+        await subtype.add_object(ns, "TemplateOnly", subtype.nodeid)
+        profile = Server(title="test", endpoint=f"opc.tcp://127.0.0.1:{port}/test/")
+        async with server:
+            with patch.object(runtime, "create_client", wraps=runtime.create_client) as create_client:
+                result = await runtime.browse_conditions(profile)
+                create_client.assert_awaited_once_with(profile)
+            rows = result["items"]
+            expected = {node.nodeid.to_string() for node in (nested, under_variable, linked_condition)}
+            assert {row["nodeid"] for row in rows} == expected, (rows, expected)
+            assert len(rows) == len(expected)
+            assert all(row["is_condition"] and row["node_class"] == "Object" for row in rows)
+            assert all(
+                row["stable_nodeid"].startswith("nsu=urn:onesite:conditions;v=1;")
+                for row in rows
+            )
+            with patch.object(runtime, "MAX_CONDITION_SCAN_NODES", 1):
+                with pytest.raises(runtime.ConditionScanLimitError):
+                    await runtime.browse_conditions(profile)
+
+
 def test_browse_api_permissions_validation_and_error_redaction(tmp_path, monkeypatch):
     backend, _ = generate(tmp_path)
     with isolated_project_imports(backend):
@@ -237,21 +293,46 @@ def test_browse_api_permissions_validation_and_error_redaction(tmp_path, monkeyp
         with (
             TestClient(app) as client,
             patch.object(api, "browse", new_callable=AsyncMock) as browse,
+            patch.object(api, "browse_conditions", new_callable=AsyncMock) as browse_conditions,
         ):
-            url = "/opcua/1/browse"
-            assert client.get(url).status_code == 403
-            browse.assert_not_called()
-            actor.allowed = True
-            assert client.get(url, params={"nodeid": "bad"}).status_code == 422
-            browse.assert_not_called()
-            browse.return_value = {"items": []}
-            assert client.get(url).json() == {"items": []}
-            browse.side_effect = RuntimeError("password=SECRET /private/key.pem")
-            response = client.get(url)
-            assert response.status_code == 502
-            assert "SECRET" not in response.text and "key.pem" not in response.text
-            session.get.return_value = None
-            assert client.get(url).status_code == 404
+            for path, operation in (("browse", browse), ("conditions", browse_conditions)):
+                url = f"/opcua/1/{path}"
+                actor.allowed = False
+                session.get.return_value = record
+                assert client.get(url).status_code == 403
+                operation.assert_not_called()
+                actor.allowed = True
+                api.require_owned_record.side_effect = HTTPException(403)
+                assert client.get(url).status_code == 403
+                operation.assert_not_called()
+                api.require_owned_record.side_effect = None
+                if path == "browse":
+                    assert client.get(url, params={"nodeid": "bad"}).status_code == 422
+                    operation.assert_not_called()
+                operation.return_value = {"items": []}
+                with patch.object(api.asyncio, "wait_for", wraps=api.asyncio.wait_for) as wait_for:
+                    assert client.get(url).json() == {"items": []}
+                    assert wait_for.call_args.kwargs["timeout"] == (30 if path == "browse" else 120)
+                if path == "browse":
+                    operation.assert_awaited_once_with(record, "i=84")
+                else:
+                    operation.assert_awaited_once_with(record)
+                api.require_owned_record.assert_awaited_with(session, "opcua_server", 1)
+                errors = [
+                    RuntimeError("password=SECRET /private/key.pem"),
+                    TimeoutError("password=SECRET /private/key.pem"),
+                ]
+                if path == "conditions":
+                    errors.append(api.ConditionScanLimitError("password=SECRET /private/key.pem"))
+                for error in errors:
+                    operation.side_effect = error
+                    response = client.get(url)
+                    assert response.status_code == 502
+                    assert "SECRET" not in response.text and "key.pem" not in response.text
+                session.get.return_value = None
+                operation.reset_mock()
+                assert client.get(url).status_code == 404
+                operation.assert_not_called()
 
 
 async def test_live_secure_browse_uses_saved_certificates(tmp_path):

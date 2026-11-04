@@ -5,7 +5,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlmodel.ext.asyncio.session import AsyncSession
 from app.core import db, deps
 from app.core.access import require_owned_record
-from app.core.opcua import browse, validate_nodeid
+from app.core.opcua import ConditionScanLimitError, browse, browse_conditions, validate_nodeid
 from app.models.{{ model.source_module }} import {{ model.name }}
 
 router = APIRouter(dependencies=[Depends(deps.model_access({{ model.role_permissions | tojson }}))])
@@ -30,3 +30,22 @@ async def browse_server(
     except Exception:
         # Never include credentials, paths or remote diagnostics in an API error.
         raise HTTPException(502, "浏览失败：请检查服务器连接、认证、证书及节点访问权限") from None
+
+
+@router.get("/{server_id}/conditions")
+async def browse_server_conditions(
+    server_id: int,
+    session: AsyncSession = Depends(db.get_session),
+):
+    await require_owned_record(session, {{ model.module_name | tojson }}, server_id)
+    server = await session.get({{ model.name }}, server_id)
+    if server is None:
+        raise HTTPException(404, "OPC UA 服务不存在")
+    try:
+        return await asyncio.wait_for(browse_conditions(server), timeout=120)
+    except ConditionScanLimitError:
+        raise HTTPException(502, "扫描节点过多：请按目录选择 A&C 条件后添加") from None
+    except asyncio.TimeoutError:
+        raise HTTPException(502, "扫描超时：请稍后重试，或按目录选择 A&C 条件后添加") from None
+    except Exception:
+        raise HTTPException(502, "扫描失败：请检查服务器连接、认证、证书及节点访问权限") from None
