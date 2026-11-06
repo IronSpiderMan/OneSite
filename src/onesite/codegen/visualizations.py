@@ -429,6 +429,10 @@ def compile_visualizations(
             raise _fail(key, f"references unknown model '{model_name}'")
 
         inputs = declaration.get("inputs")
+        if preset_name == "line.basic":
+            bindings = inputs if isinstance(inputs, dict) else declaration
+            if "series" in bindings:
+                preset = {**preset, "contract": "xy_series"}
         if inputs is None:
             allowed_top_level = CONTRACT_INPUTS[preset["contract"]]
             inputs = {name: declaration[name] for name in allowed_top_level if name in declaration}
