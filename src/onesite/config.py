@@ -703,7 +703,8 @@ class AgentConfig(_StrictConfigModel):
     title: str = "Assistant"
     base_url: str = "https://api.openai.com/v1"
     api_key_env: str = "AGENT_API_KEY"
-    model: str
+    model: str | None = None
+    connection_provider: str | None = None
     instructions: str = "Help the user work with their data."
     roles: list[Role] = Field(default_factory=lambda: ["admin", "developer"])
     max_steps: int = Field(default=20, ge=1, le=100)

@@ -483,6 +483,8 @@ def get_model_fields(
             ui_type = "multi_select"
         elif site_props.get("component") == "textarea":
             ui_type = "textarea"
+        elif site_props.get("component") == "password":
+            ui_type = "password"
         elif site_props.get("component") == "image":
             ui_type = "image"
         elif site_props.get("component") == "images":

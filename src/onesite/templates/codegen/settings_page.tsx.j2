@@ -238,6 +238,7 @@ const SettingsPage: React.FC = () => {
               {% endif %}
               {% endfor %}
               {% if group_fields %}
+              {({% for field in group_fields %}hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', '{{ "u" if field.ui_type == "password" else "r" }}'){% if not loop.last %} || {% endif %}{% endfor %}) && (
               <div className="settings-group border rounded-lg overflow-hidden">
                 <button
                   type="button"
@@ -254,7 +255,7 @@ const SettingsPage: React.FC = () => {
                 {expandedGroups.has('{{ group_key }}') && (
                   <div className="settings-group-content p-4 space-y-4">
                     {% for field in group_fields %}
-                    {hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', 'r') && (
+                    {hasFieldPerm(systemFieldRolePerms, '{{ field.name }}', '{{ "u" if field.ui_type == "password" else "r" }}') && (
                     <div className="space-y-2">
                       <Label htmlFor="{{ field.name }}">
                         {t('{{ field.label_key }}', '{{ field.name | replace("_", " ") | title }}')}
@@ -375,6 +376,14 @@ const SettingsPage: React.FC = () => {
                           </Select>
                         )}
                       />
+                      {% elif field.ui_type == 'password' %}
+                      <Input
+                        id="{{ field.name }}"
+                        type="password"
+                        autoComplete="new-password"
+                        placeholder={t('settings.keep_saved_secret', 'Leave blank to keep the saved key')}
+                        {...register('{{ field.name }}')}
+                      />
                       {% elif field.ui_type == 'textarea' %}
                       <Controller
                         name="{{ field.name }}"
@@ -403,6 +412,7 @@ const SettingsPage: React.FC = () => {
                   </div>
                 )}
               </div>
+              )}
               {% endif %}
               {% endfor %}
               {% endif %}

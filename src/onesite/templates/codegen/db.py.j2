@@ -64,7 +64,7 @@ elif database_url.startswith("postgresql://"):
         database_url = database_url.replace("postgresql://", "postgresql+asyncpg://")
 
 # Create Async Engine
-engine = create_async_engine(database_url, future=True)
+engine = create_async_engine(database_url, future=True{% if hide_sql_parameters %}, hide_parameters=True{% endif %})
 
 def register_models():
     """Register application and runtime tables for startup and Alembic."""

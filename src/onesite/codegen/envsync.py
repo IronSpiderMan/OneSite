@@ -38,8 +38,9 @@ def sync_env_files(config: Dict[str, Any], backend_path: Path, frontend_path: Pa
     # environment key once and preserve any value supplied by the operator.
     agents = config.get("agents", {})
     if isinstance(agents, dict) and agents:
-        agent = next(iter(agents.values()))
-        if isinstance(agent, dict):
+        agent = next((item for item in agents.values()
+                      if isinstance(item, dict) and not item.get("connection_provider")), None)
+        if agent is not None:
             new_keys["AGENT_BASE_URL"] = agent.get("base_url")
             new_keys["AGENT_MODEL"] = agent.get("model")
             api_key_env = agent.get("api_key_env", "AGENT_API_KEY")

@@ -445,6 +445,7 @@ def generate_locale_files(
         "settings": {
             "system_title": "System Settings",
             "save_system": "Save System Settings",
+            "keep_saved_secret": "Leave blank to keep the saved key",
             "custom_title": "Personal Settings",
             "save_custom": "Save Personal Settings",
         },
@@ -886,6 +887,7 @@ def generate_locale_files(
         "settings": {
             "system_title": "系统配置",
             "save_system": "保存系统配置",
+            "keep_saved_secret": "留空保留已保存的密钥",
             "custom_title": "个性化配置",
             "save_custom": "保存个性化配置",
         },

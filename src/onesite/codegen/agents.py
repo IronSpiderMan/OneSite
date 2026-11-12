@@ -38,14 +38,21 @@ def validate_agents_config(config: dict) -> None:
             definition = AgentConfig.model_validate(value).model_dump()
         except ValidationError as exc:
             raise SiteConfigError(f"agents.{key}: {exc}") from exc
-        for field in ("model", "title", "api_key_env"):
-            if not definition[field].strip():
-                raise SiteConfigError(f"agents.{key}.{field} must not be empty")
-        parsed = urlparse(definition["base_url"])
-        if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username:
-            raise SiteConfigError(
-                f"agents.{key}.base_url must be an HTTP(S) URL without credentials"
-            )
+        if not definition["title"].strip():
+            raise SiteConfigError(f"agents.{key}: title must not be empty")
+        provider = definition["connection_provider"]
+        if provider is not None:
+            if not re.fullmatch(r"agent_hooks\.[A-Za-z_][A-Za-z0-9_]*", provider):
+                raise SiteConfigError(f"agents.{key}.connection_provider must name a function in agent_hooks")
+        else:
+            for field in ("model", "api_key_env"):
+                if not (definition[field] or "").strip():
+                    raise SiteConfigError(f"agents.{key}: {field} must not be empty")
+            parsed = urlparse(definition["base_url"])
+            if parsed.scheme not in {"http", "https"} or not parsed.netloc or parsed.username:
+                raise SiteConfigError(
+                    f"agents.{key}.base_url must be an HTTP(S) URL without credentials"
+                )
         if not definition["roles"]:
             raise SiteConfigError(f"agents.{key}.roles must not be empty")
         for model, operations in definition["model_tools"].items():
@@ -199,7 +206,11 @@ def generate_agents(config: dict, models: list, cwd: Path, backend: Path) -> Non
     hook_names = sorted(
         {handler.split(".")[1] for a in agents.values() for handler in a["hooks"].values()}
     )
+    providers = {agent["connection_provider"] for agent in agents.values()
+                 if agent["connection_provider"] is not None}
     hooks_path = paths.source / "agent_hooks.py"
+    if providers and not hooks_path.is_file():
+        raise SiteConfigError("Define the Agent connection provider in app/agent_hooks.py")
     if hook_names and not hooks_path.exists():
         hooks_path.parent.mkdir(parents=True, exist_ok=True)
         hooks_path.write_text(
@@ -208,11 +219,13 @@ def generate_agents(config: dict, models: list, cwd: Path, backend: Path) -> Non
             ),
             encoding="utf-8",
         )
-    for name in hook_names:
+    for name in sorted(set(hook_names) | {provider.split(".")[1] for provider in providers}):
         _validate_function(hooks_path, name)
     if hooks_path.exists():
         copy_file_with_status(hooks_path, backend / "app/agent_hooks.py")
     context = {
+        "uses_connection_provider": bool(providers),
+        "uses_environment_connection": any(agent["connection_provider"] is None for agent in agents.values()),
         "agents_json": json.dumps(agents, ensure_ascii=False),
         "models_json": json.dumps(metadata, ensure_ascii=False),
         "form_model_labels": {name: {"label_key": model["label_key"], "field_labels": model["field_labels"]}

@@ -1071,6 +1071,9 @@ def phase_generate_aggregated(
             "external_resources_enabled": external_resources_enabled,
             "generated_indexes": generated_indexes,
             "obsolete_indexes": obsolete_indexes,
+            "hide_sql_parameters": any(
+                field["ui_type"] == "password" for model in models for field in model["fields"]
+            ),
         },
         backend_path / "app" / "core" / "db.py",
     )
