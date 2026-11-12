@@ -96,7 +96,7 @@ class CustomCsvDocument(SQLModel, table=True):
     __tablename__ = "custom_csv_document"
     __onesite__ = {
         "importable": {"custom": True},
-        "exportable": {"custom": True},
+        "exportable": {"custom": True, "selected_rows": True},
     }
 
     id: Optional[int] = Field(default=None, primary_key=True)
@@ -260,6 +260,8 @@ def test_custom_import_export_generates_preserved_background_hooks(tmp_path):
     assert "async def export_custom_csv_document(filters: dict[str, Any]) -> Path" in custom_io
     assert "Promise<ImportTask>" in frontend_service
     assert "Import started, you will be notified when complete" in frontend_page
+    assert "...(selectedIds.length > 0 ? { ids: selectedIds } : {})," in frontend_page
+    assert "` (${selectedIds.length})`" in frontend_page
 
     (tmp_path / "app").mkdir()
     backend_path = tmp_path / "generated" / "backend"
@@ -302,7 +304,8 @@ def test_embedded_import_export_preserves_scope_and_passes_fixed_fields():
     assert "onClick={handleExport}" in embedded_actions
     assert "hasPermission('c') && hasPermission('u')" in embedded_actions
     assert "hasPermission('r')" in embedded_actions
-    assert "...scopeFilters }" in page
+    assert "...scopeFilters," in page
+    assert "ids: selectedIds" not in page
     assert "queueImportCsvItems(importingFile, fixedFields)" in page
     api = _template("api.py.j2").render(model=model)
     assert '"category_id":' in api.split("allowed_fixed_fields =", 1)[1]

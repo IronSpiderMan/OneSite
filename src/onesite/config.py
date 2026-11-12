@@ -426,6 +426,8 @@ class ImportExportConfig(_ConfigModel):
     """CSV or custom import/export behavior for a model."""
 
     custom: bool = False
+    # Pass checked row IDs as filters["ids"] to a custom export hook.
+    selected_rows: bool = False
     fields: list[str] | None = None
     foreign_keys: dict[str, str] = Field(default_factory=dict)
     reverse_foreign_keys: dict[str, str] = Field(default_factory=dict)

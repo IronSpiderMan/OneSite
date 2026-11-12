@@ -893,6 +893,7 @@ def _resolve_import_export_config(
             model[f"{direction}_m2m"] = resolved_m2m
             if direction == "export":
                 model["export_reverse_fks"] = resolved_reverse_fks
+                model["export_selected_rows"] = custom and config.get("selected_rows") is True
 
 
 def _apply_m2m_direction(

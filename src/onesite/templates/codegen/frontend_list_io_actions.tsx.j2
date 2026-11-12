@@ -16,6 +16,9 @@
                   <Download className="mr-2 h-4 w-4" />
                 )}
                 {isExporting ? t('common.loading', 'Loading...') : t('common.export', 'Export')}
+                {% if model.export_selected_rows %}
+                {!isExporting && selectedIds.length > 0 && ` (${selectedIds.length})`}
+                {% endif %}
               </Button>
             )}
             {% endif %}
