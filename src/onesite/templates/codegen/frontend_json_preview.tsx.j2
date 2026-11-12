@@ -26,25 +26,27 @@ const formatJsonDetails = (value: unknown, labelFor?: (key: string) => string, i
   }).join('\n');
 };
 
-const JsonPreviewContent: React.FC<{ value: object; labelFor: (key: string) => string }> = ({ value, labelFor }) => {
+const JsonPreviewContent: React.FC<{ value: unknown; labelFor: (key: string) => string }> = ({ value, labelFor }) => {
   const { t } = useTranslation();
   const [showRaw, setShowRaw] = useState(false);
 
   return (
     <>
-      <div className="flex justify-end border-b border-border px-2 py-1">
-        <Button type="button" variant="ghost" size="sm" onClick={() => setShowRaw((current) => !current)}>
-          {t(showRaw ? 'common.view_json_fields' : 'common.view_raw_json')}
-        </Button>
-      </div>
-      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
-        {showRaw ? JSON.stringify(value, null, 2) : formatJsonDetails(value, labelFor)}
+      {typeof value === 'object' && (
+        <div className="flex shrink-0 justify-end border-b border-border px-2 py-1">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setShowRaw((current) => !current)}>
+            {t(showRaw ? 'common.view_json_fields' : 'common.view_raw_json')}
+          </Button>
+        </div>
+      )}
+      <pre tabIndex={0} className="max-h-80 min-h-0 overflow-auto overscroll-contain whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
+        {showRaw && typeof value === 'object' ? JSON.stringify(value, null, 2) : formatJsonDetails(value, labelFor)}
       </pre>
     </>
   );
 };
 
-const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null }> = ({ value, schema }) => {
+const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null; inline?: boolean }> = ({ value, schema, inline = false }) => {
   const { t } = useTranslation();
   if (value === undefined || value === null) {
     return <span className="text-muted-foreground">-</span>;
@@ -55,12 +57,26 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
     try {
       parsedValue = JSON.parse(value);
     } catch {
-      return <span className="block max-w-[250px] whitespace-pre-line break-words" title={value}>{value}</span>;
+      if (!inline) return <span className="block max-w-[250px] whitespace-pre-line break-words" title={value}>{value}</span>;
     }
   }
 
   if (parsedValue === undefined || parsedValue === null) {
     return <span className="text-muted-foreground">-</span>;
+  }
+
+  const labelFor = (key: string): string => {
+    const field = schema?.fields?.find((candidate) => candidate.name === key);
+    if (!field?.labelKey) return key;
+    return String(t(field.labelKey, { defaultValue: field.translations?.en || key }));
+  };
+
+  if (inline) {
+    return (
+      <div className="flex max-h-80 min-w-0 flex-col rounded-md border border-border bg-muted/40">
+        <JsonPreviewContent value={parsedValue} labelFor={labelFor} />
+      </div>
+    );
   }
 
   if (typeof parsedValue !== 'object') {
@@ -72,14 +88,6 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
 
     const text = typeof item === 'object' ? JSON.stringify(item) : String(item);
     return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
-  };
-
-  // Structured JSON fields carry their own i18n keys.  Use them in the
-  // compact list preview too, while preserving raw keys for untyped JSON.
-  const labelFor = (key: string): string => {
-    const field = schema?.fields?.find((candidate) => candidate.name === key);
-    if (!field?.labelKey) return key;
-    return String(t(field.labelKey, { defaultValue: field.translations?.en || key }));
   };
 
   // Format key-value pairs for objects.

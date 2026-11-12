@@ -1,4 +1,4 @@
-"""Regression coverage for JSON array rendering on generated detail pages."""
+"""Regression coverage for JSON rendering on generated detail pages."""
 
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -11,6 +11,7 @@ from sqlmodel import Field, SQLModel
 
 from onesite.codegen.introspect import get_model_fields
 from onesite.codegen.phases.introspect_models import _build_model_dict
+from onesite.codegen.phases.relationships import phase_resolve_relationships
 
 
 class JsonEntry(BaseModel):
@@ -28,6 +29,45 @@ class JsonDetailRecord(SQLModel, table=True):
     untyped_entries: List[Dict[str, Any]] = Field(default_factory=list, sa_column=Column(JSON))
     keyed_entries: Dict[str, JsonEntry] = Field(default_factory=dict, sa_column=Column(JSON))
     settings: Dict[str, Any] = Field(default_factory=dict, sa_column=Column(JSON))
+    config: JsonEntry = Field(sa_column=Column(JSON))
+
+
+class JsonDetailChild(SQLModel, table=True):
+    __tablename__ = "test_json_detail_child"
+
+    id: Optional[int] = Field(default=None, primary_key=True)
+    record_id: int = Field(foreign_key="test_json_detail_record.id")
+    levels: List[int] = Field(default_factory=list, sa_column=Column(JSON))
+
+
+def test_detail_and_related_fields_show_scrollable_json_inline():
+    models = [
+        _build_model_dict(
+            cls.__name__, module, cls.__tablename__, get_model_fields(cls, module),
+            table_name=cls.__tablename__,
+        )
+        for cls, module in (
+            (JsonDetailRecord, "json_detail_record"),
+            (JsonDetailChild, "json_detail_child"),
+        )
+    ]
+    phase_resolve_relationships(models)
+    template_dir = Path(__file__).parents[1] / "src" / "onesite" / "templates" / "codegen"
+    template = Environment(loader=FileSystemLoader(template_dir)).get_template(
+        "frontend_page_detail.tsx.j2"
+    )
+    record_page, child_page = (template.render(model=model) for model in models)
+
+    assert "<JsonPreview inline value={ currentItem.levels } schema={ null } />" in child_page
+    assert "<JsonPreview inline value={ item.levels } schema={ null } />" in record_page
+    for field in ("config", "entries"):
+        preview = child_page.partition(f"<JsonPreview inline value={{ json_detail_recordData.{field} }}")[2]
+        assert '"labelKey": "json_models.json_entry.fields.name"' in preview.split("/>", 1)[0]
+    inline_branch = child_page.split("if (inline) {", 1)[1].split("if (typeof parsedValue", 1)[0]
+    assert "max-h-80" in inline_branch
+    assert "<JsonPreviewContent value={parsedValue} labelFor={labelFor} />" in inline_branch
+    assert "max-h-80 min-h-0 overflow-auto" in child_page
+    assert "t(showRaw ? 'common.view_json_fields' : 'common.view_raw_json')" in child_page
 
 
 def test_json_collections_render_inline_with_configuration_fields():
@@ -61,6 +101,7 @@ def test_json_collections_render_inline_with_configuration_fields():
     assert "<TableHead>name</TableHead>" not in detail_page
     assert "<TableHead>enabled</TableHead>" not in detail_page
     assert "items.flatMap((item: unknown)" in detail_page
+    assert 'className="max-h-80 overflow-auto overscroll-contain rounded-md border"' in detail_page
     assert '<JsonModelArrayEditor itemSchema=' in detail_page
     assert '<JsonInput value={value}' in detail_page
     assert "JSON.stringify(currentItem.entries, null, 2)" not in detail_page

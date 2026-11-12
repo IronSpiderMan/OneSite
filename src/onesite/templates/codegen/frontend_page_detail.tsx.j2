@@ -1,4 +1,25 @@
 import { ImageViewer } from '../../components/ui/image-viewer';
+{% macro inline_json(field, record) -%}
+<JsonPreview inline value={ {{ record }}.{{ field.name }} } schema={ {{ (field.json_model_schema or field.json_item_schema) | default(none) | tojson }} } />
+{%- endmacro %}
+{% macro detail_enum(field, module_name, record) -%}
+{% set value = record ~ '.' ~ field.name %}
+{% if field.is_multi_select %}
+<div className="flex flex-wrap gap-1">
+    {Array.isArray({{ value }}) && {{ value }}.length > 0 ? {{ value }}.map((v: string | number) => (
+        <Badge key={v} variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">
+            {t(`models.{{ module_name }}.enums.{{ field.name }}.${v}`, { defaultValue: String(v) })}
+        </Badge>
+    )) : '-'}
+</div>
+{% else %}
+{ {{- value }} != null ? (
+    <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">
+        {t(`models.{{ module_name }}.enums.{{ field.name }}.${ {{- value -}} }`, { defaultValue: String({{ value }}) })}
+    </Badge>
+) : '-'}
+{% endif %}
+{%- endmacro %}
 {% macro detail_m2m_editors() -%}
                             {% for m2m in model.m2m_fields %}
                             <div className="space-y-2">
@@ -59,8 +80,8 @@ import { ImageViewer } from '../../components/ui/image-viewer';
                             {% endfor %}
 {%- endmacro %}
 {% macro collection_array_detail(field) -%}
-<div className="overflow-x-auto rounded-md border">
-                            {% if field.json_item_schema and field.json_item_schema.fields %}
+{% if field.json_item_schema and field.json_item_schema.fields %}
+                        <div className="max-h-80 overflow-auto overscroll-contain rounded-md border" tabIndex={0}>
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -95,38 +116,39 @@ import { ImageViewer } from '../../components/ui/image-viewer';
                                     )}
                                 </TableBody>
                             </Table>
-                            {% else %}
+                        </div>
+{% else %}
                             {(() => {
                                 const items = Array.isArray(currentItem.{{ field.name }}) ? currentItem.{{ field.name }} : [];
                                 const columns = Array.from(new Set(items.flatMap((item: unknown) =>
                                     item !== null && typeof item === 'object' && !Array.isArray(item) ? Object.keys(item) : []
                                 )));
+                                if (!columns.length) return {{ inline_json(field, 'currentItem') }};
                                 return (
-                                    <Table>
-                                        <TableHeader>
-                                            <TableRow>{columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</TableRow>
-                                        </TableHeader>
-                                        <TableBody>
-                                            {items.length > 0 ? items.map((item: any, index: number) => (
-                                                <TableRow key={index}>
-                                                    {columns.map((column) => (
-                                                        <TableCell key={column}>
-                                                            {typeof item?.[column] === 'object' ? JSON.stringify(item[column]) : String(item?.[column] ?? '-')}
-                                                        </TableCell>
-                                                    ))}
-                                                </TableRow>
-                                            )) : (
-                                                <TableRow><TableCell colSpan={Math.max(columns.length, 1)} className="h-24 text-center">{t('common.no_result')}</TableCell></TableRow>
-                                            )}
-                                        </TableBody>
-                                    </Table>
+                                    <div className="max-h-80 overflow-auto overscroll-contain rounded-md border" tabIndex={0}>
+                                        <Table>
+                                            <TableHeader>
+                                                <TableRow>{columns.map((column) => <TableHead key={column}>{column}</TableHead>)}</TableRow>
+                                            </TableHeader>
+                                            <TableBody>
+                                                {items.map((item: any, index: number) => (
+                                                    <TableRow key={index}>
+                                                        {columns.map((column) => (
+                                                            <TableCell key={column}>
+                                                                {typeof item?.[column] === 'object' ? JSON.stringify(item[column]) : String(item?.[column] ?? '-')}
+                                                            </TableCell>
+                                                        ))}
+                                                    </TableRow>
+                                                ))}
+                                            </TableBody>
+                                        </Table>
+                                    </div>
                                 );
                             })()}
-                            {% endif %}
-                        </div>
+{% endif %}
 {%- endmacro %}
 {% macro collection_dict_detail(field) -%}
-<div className="overflow-x-auto rounded-md border">
+<div className="max-h-80 overflow-auto overscroll-contain rounded-md border" tabIndex={0}>
                             <Table>
                                 <TableHeader>
                                     <TableRow>
@@ -190,16 +212,8 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
         <Badge variant={currentItem.{{ field.name }} ? "default" : "secondary"}>
             {currentItem.{{ field.name }} ? 'Yes' : 'No'}
         </Badge>
-        {% elif field.is_enum and field.is_multi_select %}
-        <div className="flex flex-wrap gap-1">
-        {Array.isArray(currentItem.{{ field.name }}) && currentItem.{{ field.name }}.map((v: string) => (
-            <Badge key={v} variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${v}`, v))}</Badge>
-        ))}
-        </div>
         {% elif field.is_enum %}
-        {currentItem.{{ field.name }} != null ? (
-            <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ model.module_name }}.enums.{{ field.name }}.${currentItem.{{ field.name }}}`, currentItem.{{ field.name }}))}</Badge>
-        ) : '-'}
+        {{ detail_enum(field, model.module_name, 'currentItem') }}
         {% elif field.ui_type == 'image' %}
         {currentItem.{{ field.name }} ? (
             <div className="relative aspect-video w-full max-w-sm overflow-hidden rounded-lg border bg-muted">
@@ -243,9 +257,7 @@ hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} &&
             className="max-h-80 overflow-auto overscroll-contain rounded-md border bg-muted/20 p-3"
         />
         {% elif field.ui_type == 'json' %}
-        <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
-            {currentItem.{{ field.name }} !== undefined && currentItem.{{ field.name }} !== null ? JSON.stringify(currentItem.{{ field.name }}, null, 2) : '-'}
-        </pre>
+        {{ inline_json(field, 'currentItem') }}
         {% elif field.ui_type == 'datetime' %}
         <span className="text-muted-foreground">{formatDateTime(currentItem.{{ field.name }}, timeZone)}</span>
         {% elif field.ui_type == 'time' %}
@@ -579,84 +591,7 @@ import { AreaChart, Area, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip,
 {% endif %}
 {% endif %}
 
-const JsonPreview: React.FC<{ value: unknown }> = ({ value }) => {
-    if (value === undefined || value === null) {
-        return <span className="text-muted-foreground">-</span>;
-    }
-
-    let parsedValue = value;
-    if (typeof value === 'string') {
-        try {
-            parsedValue = JSON.parse(value);
-        } catch {
-            return <span className="block max-w-[250px] truncate" title={value}>{value}</span>;
-        }
-    }
-
-    if (parsedValue === undefined || parsedValue === null) {
-        return <span className="text-muted-foreground">-</span>;
-    }
-
-    if (typeof parsedValue !== 'object') {
-        return <span>{String(parsedValue)}</span>;
-    }
-
-    // Format key-value pairs for objects
-    const formatKeyValuePairs = (obj: Record<string, unknown>, maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
-        const entries = Object.entries(obj);
-        const lines = entries.map(([key, value]) => {
-            const valueStr = typeof value === 'object' ? JSON.stringify(value) : String(value);
-            return `${key}: ${valueStr}`;
-        });
-        
-        const preview = lines.slice(0, maxLines).join('\n');
-        const full = lines.join('\n');
-        const hasMore = lines.length > maxLines;
-        
-        return { preview, full, hasMore };
-    };
-
-    // Format array items for arrays
-    const formatArrayItems = (arr: unknown[], maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
-        const lines = arr.map((item, index) => {
-            const itemStr = typeof item === 'object' ? JSON.stringify(item) : String(item);
-            return `[${index}]: ${itemStr}`;
-        });
-        
-        const preview = lines.slice(0, maxLines).join('\n');
-        const full = lines.join('\n');
-        const hasMore = lines.length > maxLines;
-        
-        return { preview, full, hasMore };
-    };
-
-    const isArray = Array.isArray(parsedValue);
-    const { preview, full, hasMore } = isArray
-        ? formatArrayItems(parsedValue as unknown[])
-        : formatKeyValuePairs(parsedValue as Record<string, unknown>);
-
-    return (
-        <Popover>
-            <PopoverTrigger asChild>
-                <button
-                    type="button"
-                    className="inline-flex max-w-[250px] items-start gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-                    title="View JSON"
-                >
-                    <span className="whitespace-pre-line break-all text-left">
-                        {preview}
-                        {hasMore && <span className="text-muted-foreground">...</span>}
-                    </span>
-                </button>
-            </PopoverTrigger>
-            <PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-0">
-                <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
-                    {full}
-                </pre>
-            </PopoverContent>
-        </Popover>
-    );
-};
+{% include 'frontend_json_preview.tsx.j2' %}
 
 const {{ model.name }}DetailPage: React.FC = () => {
     const { t, i18n } = useTranslation();
@@ -1716,17 +1651,22 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                             { {{ fk.target_service }}Data.{{ target_field.name }} !== undefined && (
                                                 <>
                                                 <span className="text-muted-foreground">{t('{{ target_field.label_key }}')}:</span>
-                                                <span className="min-w-0 font-medium">
-                                                    {% if target_field.ui_type == 'bool' %}
-                                                    { {{ fk.target_service }}Data.{{ target_field.name }} ? 'Yes' : 'No' }
+                                                <div className="min-w-0 font-medium">
+                                                    {% set target_value = fk.target_service ~ 'Data.' ~ target_field.name %}
+                                                    {% if target_field.is_enum %}
+                                                    {{ detail_enum(target_field, fk.target_service, fk.target_service ~ 'Data') }}
+                                                    {% elif target_field.ui_type == 'bool' %}
+                                                    { {{ target_value }} == null ? '-' : ({{ target_value }} ? 'Yes' : 'No') }
+                                                    {% elif target_field.ui_type == 'datetime' %}
+                                                    {formatDateTime({{ target_value }}, timeZone)}
+                                                    {% elif target_field.ui_type == 'time' %}
+                                                    {formatTime({{ target_value }})}
                                                     {% elif target_field.ui_type == 'json' %}
-                                                    <pre className="max-h-80 overflow-auto overscroll-contain whitespace-pre-wrap break-words rounded-md border bg-muted/40 p-2 text-sm">
-                                                        {JSON.stringify({{ fk.target_service }}Data.{{ target_field.name }}, null, 2)}
-                                                    </pre>
+                                                    {{ inline_json(target_field, fk.target_service ~ 'Data') }}
                                                     {% else %}
                                                     {String({{ fk.target_service }}Data.{{ target_field.name }} ?? '-')}
                                                     {% endif %}
-                                                </span>
+                                                </div>
                                                 </>
                                             )}
                                             {% endfor %}
@@ -1736,7 +1676,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                 ) : (
                                     <div className="flex items-center space-x-2 text-muted-foreground">
                                         <Loader2 className="h-4 w-4 animate-spin" />
-                                        <span>Loading related data...</span>
+                                        <span>{t('common.loading')}</span>
                                     </div>
                                 )}
                             </div>
@@ -1787,11 +1727,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% elif field.ui_type == 'bool' %}
                                                     {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
-                                                    {item.{{ field.name }} != null ? (
-                                                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ m2m.target_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
-                                                    ) : '-'}
+                                                    {{ detail_enum(field, m2m.target_service, 'item') }}
                                                     {% elif field.ui_type == 'datetime' %}
                                                     {formatDateTime(item.{{ field.name }}, timeZone)}
+                                                    {% elif field.ui_type == 'json' %}
+                                                    {{ inline_json(field, 'item') }}
                                                     {% else %}
                                                     {typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }} ?? '-')}
                                                     {% endif %}
@@ -1891,11 +1831,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% elif field.ui_type == 'bool' %}
                                                     {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
-                                                    {item.{{ field.name }} != null ? (
-                                                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rel.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
-                                                    ) : '-'}
+                                                    {{ detail_enum(field, rel.source_service, 'item') }}
                                                     {% elif field.ui_type == 'datetime' %}
                                                     {formatDateTime(item.{{ field.name }}, timeZone)}
+                                                    {% elif field.ui_type == 'json' %}
+                                                    {{ inline_json(field, 'item') }}
                                                     {% else %}
                                                     {typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }} ?? '-')}
                                                     {% endif %}
@@ -2133,13 +2073,11 @@ const {{ model.name }}DetailPage: React.FC = () => {
                                                     {% elif field.ui_type == 'bool' %}
                                                     {item.{{ field.name }} ? t('common.yes') : t('common.no')}
                                                     {% elif field.is_enum %}
-                                                    {item.{{ field.name }} != null ? (
-                                                        <Badge variant="default" className="px-2.5 py-0.5 text-xs font-medium shadow-sm whitespace-nowrap">{String(t(`models.{{ rfk.source_service }}.enums.{{ field.name }}.${item.{{ field.name }}}`, item.{{ field.name }}))}</Badge>
-                                                    ) : '-'}
+                                                    {{ detail_enum(field, rfk.source_service, 'item') }}
                                                     {% elif field.ui_type == 'datetime' %}
                                                     {formatDateTime(item.{{ field.name }}, timeZone)}
                                                     {% elif field.ui_type == 'json' %}
-                                                    <JsonPreview value={item.{{ field.name }}} />
+                                                    {{ inline_json(field, 'item') }}
                                                     {% else %}
                                                     {typeof item.{{ field.name }} === 'object' ? JSON.stringify(item.{{ field.name }}) : String(item.{{ field.name }} ?? '-')}
                                                     {% endif %}

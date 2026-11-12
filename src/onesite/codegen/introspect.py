@@ -552,8 +552,9 @@ def get_model_fields(
                     if isinstance(enums_section, dict) and name in enums_section:
                         enum_translations[lang] = dict(enums_section[name])
             # 2. Enum-level __i18n__ (fallback, shared across models)
-            if hasattr(_inner, "__i18n__") and isinstance(getattr(_inner, "__i18n__"), dict):
-                for lang, trans in _inner.__i18n__.items():
+            enum_i18n = getattr(enum_cls, "__i18n__", None)
+            if isinstance(enum_i18n, dict):
+                for lang, trans in enum_i18n.items():
                     if isinstance(trans, dict) and lang not in enum_translations:
                         enum_translations[lang] = dict(trans)
 
