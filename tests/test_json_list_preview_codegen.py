@@ -25,7 +25,7 @@ def test_paginated_list_summarizes_json_object_arrays():
     assert "[key: string]: unknown;" in source
     assert "schema={ {{ (field.json_model_schema or field.json_item_schema) | tojson }} }" in source
     assert "if (Array.isArray(parsedValue) && parsedValue.length === 0)" in source
-    assert "{JSON.stringify(parsedValue, null, 2)}" in source
+    assert "JSON.stringify(value, null, 2)" in source
 
 
 def test_multi_display_preserves_object_and_array_preview_schemas():

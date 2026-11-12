@@ -8,6 +8,42 @@ type JsonPreviewSchema = {
   [key: string]: unknown;
 };
 
+const formatJsonDetails = (value: unknown, labelFor?: (key: string) => string, indent = ''): string => {
+  if (value == null) return '-';
+  if (typeof value !== 'object') return String(value);
+
+  const isArray = Array.isArray(value);
+  const entries = Object.entries(value);
+  if (entries.length === 0) return isArray ? '[]' : '{}';
+
+  return entries.map(([key, item]) => {
+    const label = isArray ? `${Number(key) + 1}.` : `${labelFor?.(key) ?? key}:`;
+    if (item != null && typeof item === 'object' && Object.keys(item).length > 0) {
+      const nested = formatJsonDetails(item, isArray ? labelFor : undefined, `${indent}  `);
+      return `${indent}${label}\n${nested}`;
+    }
+    return `${indent}${label} ${formatJsonDetails(item)}`;
+  }).join('\n');
+};
+
+const JsonPreviewContent: React.FC<{ value: object; labelFor: (key: string) => string }> = ({ value, labelFor }) => {
+  const { t } = useTranslation();
+  const [showRaw, setShowRaw] = useState(false);
+
+  return (
+    <>
+      <div className="flex justify-end border-b border-border px-2 py-1">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setShowRaw((current) => !current)}>
+          {t(showRaw ? 'common.view_json_fields' : 'common.view_raw_json')}
+        </Button>
+      </div>
+      <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
+        {showRaw ? JSON.stringify(value, null, 2) : formatJsonDetails(value, labelFor)}
+      </pre>
+    </>
+  );
+};
+
 const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null }> = ({ value, schema }) => {
   const { t } = useTranslation();
   if (value === undefined || value === null) {
@@ -32,8 +68,7 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
   }
 
   const previewValue = (item: unknown, maxLength: number = 80): string => {
-    if (item === null) return 'null';
-    if (item === undefined) return '-';
+    if (item == null) return '-';
 
     const text = typeof item === 'object' ? JSON.stringify(item) : String(item);
     return text.length > maxLength ? `${text.slice(0, maxLength)}…` : text;
@@ -48,17 +83,16 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
   };
 
   // Format key-value pairs for objects.
-  const formatKeyValuePairs = (obj: Record<string, unknown>, maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
+  const formatKeyValuePairs = (obj: Record<string, unknown>, maxLines: number = 3): { preview: string; hasMore: boolean } => {
     const entries = Object.entries(obj);
     const lines = entries.map(([key, value]) => {
       return `${labelFor(key)}: ${previewValue(value)}`;
     });
     
-    const preview = lines.slice(0, maxLines).join('\n');
-    const full = lines.join('\n');
+    const preview = lines.slice(0, maxLines).join('\n') || '{}';
     const hasMore = lines.length > maxLines;
     
-    return { preview, full, hasMore };
+    return { preview, hasMore };
   };
 
   // Array objects are common for JSON-backed list fields (for example, [{}]).
@@ -71,7 +105,7 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
   };
 
   // Format array items for arrays.
-  const formatArrayItems = (arr: unknown[], maxLines: number = 3): { preview: string; full: string; hasMore: boolean } => {
+  const formatArrayItems = (arr: unknown[], maxLines: number = 3): { preview: string; hasMore: boolean } => {
     const lines = arr.map((item, index) => {
       const itemStr = item !== null && typeof item === 'object' && !Array.isArray(item)
         ? formatObjectItem(item as Record<string, unknown>)
@@ -80,10 +114,9 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
     });
     
     const preview = lines.slice(0, maxLines).join('\n');
-    const full = lines.join('\n');
     const hasMore = lines.length > maxLines;
     
-    return { preview, full, hasMore };
+    return { preview, hasMore };
   };
 
   const isArray = Array.isArray(parsedValue);
@@ -101,7 +134,7 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
         <button
           type="button"
           className="inline-flex max-w-[250px] items-start gap-1.5 rounded-md border border-border bg-muted/40 px-2 py-1 font-mono text-xs text-foreground transition-colors hover:bg-muted focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
-          title="View JSON"
+          title={t('common.view_json')}
         >
           <span className="whitespace-pre-line break-all text-left">
             {preview}
@@ -110,9 +143,7 @@ const JsonPreview: React.FC<{ value: unknown; schema?: JsonPreviewSchema | null 
         </button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-[min(32rem,calc(100vw-2rem))] p-0">
-        <pre className="max-h-80 overflow-auto whitespace-pre-wrap break-words p-3 font-mono text-xs leading-relaxed">
-          {JSON.stringify(parsedValue, null, 2)}
-        </pre>
+        <JsonPreviewContent value={parsedValue} labelFor={labelFor} />
       </PopoverContent>
     </Popover>
   );
