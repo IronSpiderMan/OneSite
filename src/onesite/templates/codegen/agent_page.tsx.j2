@@ -8,6 +8,8 @@ import rehypeHighlight from 'rehype-highlight';
 import { ArrowDown, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Copy, History, Loader2, MessageSquare, PanelLeftClose, PanelLeftOpen, Plus, Search, Square, Terminal, X, AlertCircle, RefreshCw, Trash2 } from 'lucide-react';
 import request, { getBaseURL, getErrorMessage } from '../utils/request';
 
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../components/ui/alert-dialog';
+import { Button } from '../components/ui/button';
 import { SearchableSelect } from '../components/ui/searchable-select';
 
 type Relation = { path: string; label_field: string; parent_field?: string; filter_field?: string };
@@ -297,7 +299,9 @@ export default function AgentPage() {
   const [sending, setSending] = useState(false);
   const [stopping, setStopping] = useState(false);
   const [confirming, setConfirming] = useState('');
+  const [deleteTargetId, setDeleteTargetId] = useState('');
   const [deleting, setDeleting] = useState('');
+  const [deleteError, setDeleteError] = useState('');
   const [pending, setPending] = useState<{ id: string; content: string } | null>(null);
   const [error, setError] = useState('');
   const [connectionError, setConnectionError] = useState(false);
@@ -327,13 +331,19 @@ export default function AgentPage() {
   const messages = active?.messages || [];
   const awaitingInteraction = running && messages.some(m => Object.values(interactions(m)).some(c => c.status === 'pending'));
   const visiblePending = pending?.id === selected ? pending : null;
+  const deleteTarget = sessions.find(item => item.id === deleteTargetId);
+  const deleteDialogOpen = !!deleteTarget;
 
   useEffect(() => { alive.current = true; return () => { alive.current = false; clearTimeout(copyTimer.current); }; }, []);
 
   useEffect(() => {
-    if (!historyOpen) return;
+    if (historyOpen) sidebar.current?.querySelector<HTMLButtonElement>('button')?.focus();
+  }, [historyOpen]);
+
+  useEffect(() => {
+    if (!historyOpen || deleteDialogOpen) return;
     const onKey = (event: KeyboardEvent) => {
-      if (window.innerWidth >= 768) return;
+      if (window.innerWidth >= 768 || event.defaultPrevented) return;
       if (event.key === 'Escape') { setHistoryOpen(false); historyButton.current?.focus(); }
       if (event.key === 'Tab') {
         const controls = Array.from(sidebar.current?.querySelectorAll<HTMLElement>('button:not(:disabled), input, select') || []).filter(el => el.offsetParent !== null);
@@ -342,10 +352,9 @@ export default function AgentPage() {
         else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
       }
     };
-    sidebar.current?.querySelector<HTMLButtonElement>('button')?.focus();
     document.addEventListener('keydown', onKey);
     return () => document.removeEventListener('keydown', onKey);
-  }, [historyOpen]);
+  }, [historyOpen, deleteDialogOpen]);
 
   useEffect(() => {
     if (restoreComposerFocus.current && !sending && !loadingSession && !loading && agents.length) {
@@ -442,17 +451,19 @@ export default function AgentPage() {
     pinned.current = true; setAtBottom(true);
   };
   const newConversation = () => { if (!submitting.current) { select(''); setSession(null); setDrafts(d => ({ ...d, new: '' })); inputRef.current?.focus(); } };
-  const deleteConversation = async (item: Session) => {
-    if (deleting || submitting.current || item.status === 'running') return;
-    if (!window.confirm(t('agent.delete_confirm', { title: item.title }))) return;
-    setDeleting(item.id);
+  const deleteConversation = async () => {
+    if (!deleteTarget || deleting || submitting.current || deleteTarget.status === 'running') return;
+    const { id } = deleteTarget;
+    setDeleteError('');
+    setDeleting(id);
     try {
-      await request.delete(`/agents/sessions/${item.id}`, { suppressErrorToast: true });
+      await request.delete(`/agents/sessions/${id}`, { suppressErrorToast: true });
       if (!alive.current) return;
-      setSessions(items => items.filter(s => s.id !== item.id));
-      setDrafts(d => { const next = { ...d }; delete next[item.id]; return next; });
-      if (current.current === item.id) { select(''); setSession(null); setPending(null); }
-    } catch (e) { if (alive.current) setError(getErrorMessage(e, t('agent.delete_error'))); }
+      setDeleteTargetId('');
+      setSessions(items => items.filter(s => s.id !== id));
+      setDrafts(d => { const next = { ...d }; delete next[id]; return next; });
+      if (current.current === id) { select(''); setSession(null); setPending(null); }
+    } catch (e) { if (alive.current) setDeleteError(getErrorMessage(e, t('agent.delete_error'))); }
     finally { if (alive.current) setDeleting(''); }
   };
   const setInput = (value: string) => setDrafts(d => ({ ...d, [draftKey]: value }));
@@ -544,6 +555,28 @@ export default function AgentPage() {
   const focusStyle = 'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2';
 
   return <div className="relative flex h-[calc(100dvh-7rem)] min-h-[360px] overflow-hidden sm:min-h-[480px] rounded-2xl border bg-background shadow-sm">
+    <AlertDialog open={deleteDialogOpen} onOpenChange={open => { if (!open && !deleting) setDeleteTargetId(''); }}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>{t('agent.delete')}</AlertDialogTitle>
+          <AlertDialogDescription className="break-words">
+            {t('agent.delete_confirm', { title: deleteTarget?.title })}
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        {deleteError && <p role="alert" className="text-sm text-destructive">{deleteError}</p>}
+        <AlertDialogFooter>
+          <AlertDialogCancel disabled={!!deleting}>{t('common.cancel')}</AlertDialogCancel>
+          <Button
+            type="button"
+            variant="destructive"
+            disabled={!!deleting || sending || deleteTarget?.status === 'running'}
+            onClick={() => void deleteConversation()}
+          >
+            {deleting ? t('common.deleting') : t('common.delete')}
+          </Button>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
     {historyOpen && <button aria-label={t('agent.close_history')} onClick={() => setHistoryOpen(false)} className="absolute inset-0 z-20 bg-black/30 md:hidden" />}
     <aside id="agent-history" ref={sidebar} aria-label={t('agent.conversations')} className={`${historyOpen ? 'flex' : 'hidden'} ${desktopHistoryOpen ? 'md:flex' : 'md:hidden'} absolute inset-y-0 left-0 z-30 w-72 shrink-0 flex-col border-r bg-card md:static md:z-auto md:w-64 lg:w-72`}>
       <div className="space-y-4 p-5">
@@ -555,7 +588,7 @@ export default function AgentPage() {
       <nav className="min-h-0 flex-1 space-y-1 overflow-y-auto px-3 pb-4">
         {loading ? Array.from({ length: 3 }, (_, i) => <div key={i} className="m-2 h-12 animate-pulse rounded-lg bg-muted motion-reduce:animate-none" />) : filtered.length ? filtered.map(item => <div key={item.id} className={`flex min-w-0 items-center rounded-xl pr-2 transition-colors ${selected === item.id ? 'bg-primary/10 text-primary' : 'hover:bg-muted focus-within:bg-muted'}`}><button disabled={sending || deleting === item.id} onClick={() => select(item.id)} aria-current={selected === item.id ? 'page' : undefined} className={`flex min-w-0 flex-1 items-start gap-2.5 rounded-xl p-3 pr-2 text-left disabled:opacity-50 ${focusStyle}`}>
           <MessageSquare className="mt-0.5 h-4 w-4 shrink-0 opacity-60" /><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.title}</span><span className="mt-1 block truncate text-xs text-muted-foreground">{agents.find(a => a.key === item.agent_key)?.title}{item.updated_at && ` · ${new Date(item.updated_at.endsWith('Z') ? item.updated_at : `${item.updated_at}Z`).toLocaleDateString(i18n.language, { month: 'short', day: 'numeric' })}`}</span></span>{item.status === 'running' && <span className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />}
-        </button><button type="button" onClick={() => void deleteConversation(item)} disabled={!!deleting || sending || item.status === 'running'} aria-label={t('agent.delete_named', { title: item.title })} title={t(item.status === 'running' ? 'agent.delete_running' : 'agent.delete')} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-30 ${focusStyle}`}>{deleting === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div>) : <p className="px-3 py-8 text-center text-xs leading-6 text-muted-foreground">{search ? t('agent.no_matches') : t('agent.no_history')}</p>}
+        </button><button type="button" onClick={() => { setDeleteError(''); setDeleteTargetId(item.id); }} disabled={!!deleting || sending || item.status === 'running'} aria-label={t('agent.delete_named', { title: item.title })} title={t(item.status === 'running' ? 'agent.delete_running' : 'agent.delete')} className={`flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-30 ${focusStyle}`}>{deleting === item.id ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}</button></div>) : <p className="px-3 py-8 text-center text-xs leading-6 text-muted-foreground">{search ? t('agent.no_matches') : t('agent.no_history')}</p>}
       </nav>
       <div className="border-t px-5 py-4 text-xs leading-relaxed text-muted-foreground">{t('agent.history_hint')}</div>
     </aside>
