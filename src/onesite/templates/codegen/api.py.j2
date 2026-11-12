@@ -1,3 +1,4 @@
+{% from "sdk_crud.py.j2" import sdk_crud with context -%}
 from typing import List, Any, Optional, Annotated, Literal
 {% if model.importable or model.exportable %}
 import json
@@ -162,7 +163,7 @@ async def _check_inline_relation_permissions(payload: Any, current_user: User, *
 {% if model.is_timescaledb %}
 
 # ── TimescaleDB: create a new record ──
-@router.post("/", dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))])
+@router.post("/", dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))]{{ sdk_crud("create", "c") }})
 {% if "create" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="create")
 {% endif %}
@@ -438,7 +439,7 @@ async def get_{{ model.lower_name }}_stats_filters(
 {% endif %}
 
 {% if not model.is_timescaledb %}
-@router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %}{{ sdk_crud("list", "r") }})
 {% if "read" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="read")
 {% endif %}
@@ -538,7 +539,7 @@ async def read_{{ model.lower_name }}s(
         {% endif %}
     )
 
-@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))]{% endif %})
+@router.post("/", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "c"))]{% endif %}{{ sdk_crud("create", "c") }})
 {% if "create" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="create")
 {% endif %}
@@ -687,7 +688,7 @@ async def read_{{ reference.field }}_key_options(
     return options
 
 {% endfor %}
-@router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.get("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %}{{ sdk_crud("get", "r") }})
 {% if "read" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="read")
 {% endif %}
@@ -724,7 +725,7 @@ async def read_{{ model.lower_name }}(
     {% endif %}
     return {{ model.lower_name }}
 
-@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))]{% endif %})
+@router.put("/{id}", response_model={{ model.name }}Read{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% else %}, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))]{% endif %}{{ sdk_crud("update", "u") }})
 {% if "update" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="update")
 {% endif %}
@@ -810,7 +811,7 @@ async def update_{{ model.lower_name }}(
             ),
         )
 
-@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "d"))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %})
+@router.delete("/{id}"{% if not model.is_notification_table %}, response_model=dict[str, {{ model.id_type }}], dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "d"))]{% endif %}{% if model.is_notification_table %}, dependencies=[Depends(deps.get_current_user)]{% endif %}{{ sdk_crud("delete", "d") }})
 {% if "delete" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="delete")
 {% endif %}

@@ -178,12 +178,46 @@ Provider 全局扫描并修复超时、进程中断或外部漂移造成的不�
 | `site create <项目名>` | 创建全栈项目。 |
 | `site sync [-i/--install]` | 同步模型并生成代码；`-i` 会安装依赖。 |
 | `site sync --build-cmd` | 同步代码，并构建命令项目到 `generated/backend/bin/`。 |
+| `site sdk build` | 构建包含自定义模型 CRUD 和登录功能的 Python wheel。 |
 | `site run [项目路径] --component backend\|frontend\|all` | 启动后端、前端或两者。 |
 | `site build [-c backend\|frontend\|all] [-e docker\|podman] [-t 标签] [-p 端口]` | 构建镜像并生成 `deploy/docker-compose.yml`。 |
 | `site build --component desktop` | 为当前 macOS 或 Windows 平台构建原生 Tauri 客户端。 |
 | `site compose [--engine docker\|podman] up -d` | 使用 `deploy/docker-compose.yml` 执行 Compose；也支持 `down`、`logs -f`。 |
 
 `backend`/`frontend` 是 `--component` 选项值，正确写法是 `site run --component backend`，不是 `site run backend`。
+
+### Python SDK
+
+在项目目录运行 `site sync`，然后运行 `site sdk build`。SDK 根据生成后端的 OpenAPI
+规范构建，提供 `Client` 和按模型分组的 `list`、`get`、`create`、`update`、
+`delete`。各模型的方法取决于服务端开放的操作，接口继续校验当前用户权限。
+适用范围为 `app/models/` 中自定义模型的标准 CRUD。内置系统模型、模型自定义操作、批量删除及导入导出均在 SDK 范围之外。
+
+在项目目录创建可选的 `sdk.json` 可以设置 wheel 名称、版本和输出目录。
+
+```json
+{
+  "name": "my-project-sdk",
+  "version": "0.1.0",
+  "output": "dist"
+}
+```
+
+CLI 支持 `--name`、`--version` 和 `--output` 覆盖这些值。`--openapi FILE` 可使用
+由新版 OneSite 生成的 OpenAPI JSON，在构建机上直接打包。
+
+安装 wheel 后，用服务根地址初始化客户端。例如：
+
+```python
+from my_project_sdk import Client
+
+with Client(base_url=service_url) as client:
+    client.login(email=email, password=password)
+    devices = client.devices.list(page=1)
+```
+
+客户端在内存中保存 Bearer Token，收到服务端的 HTTP 401 时抛出
+`AuthenticationExpired`，调用方可重新登录。已有 Token 可通过构造参数 `token` 注入。
 
 ### 命令行可执行文件
 

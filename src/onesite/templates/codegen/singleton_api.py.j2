@@ -1,3 +1,4 @@
+{% from "sdk_crud.py.j2" import sdk_crud with context -%}
 from typing import Any
 from fastapi import APIRouter, Depends
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -15,7 +16,7 @@ router = APIRouter(
     dependencies=[Depends(deps.model_access({{ model.role_permissions | tojson }}))]
 )
 
-@router.get("/", response_model={{ model.name }}Read)
+@router.get("/", response_model={{ model.name }}Read{{ sdk_crud("get", "r") }})
 {% if "read" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="read")
 {% endif %}
@@ -27,7 +28,7 @@ async def get_{{ model.lower_name }}(
 ) -> Any:
     return await service.get(session{% if model.has_read_resolvers %}, current_user=current_user{% endif %})
 
-@router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))])
+@router.put("/", response_model={{ model.name }}Read, dependencies=[Depends(deps.require_permission({{ model.role_permissions | tojson }}, "u"))]{{ sdk_crud("update", "u") }})
 {% if "update" in model.tracked_operations %}
 @tracked_operation(resource="{{ model.module_name }}", operation="update")
 {% endif %}

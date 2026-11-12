@@ -1,3 +1,4 @@
+{% from "sdk_crud.py.j2" import sdk_crud with context -%}
 from typing import Any, Optional
 from datetime import datetime
 
@@ -16,7 +17,7 @@ router = APIRouter(
 )
 
 
-@router.get("/", response_model=PaginatedResponse[{{ model.name }}Read])
+@router.get("/", response_model=PaginatedResponse[{{ model.name }}Read]{{ sdk_crud("list", "r") }})
 async def read_{{ model.lower_name }}s(
     page: int = 1,
     size: int = 20,
@@ -47,7 +48,7 @@ async def read_{{ model.lower_name }}s(
     )
 
 
-@router.get("/{id}", response_model={{ model.name }}Read)
+@router.get("/{id}", response_model={{ model.name }}Read{{ sdk_crud("get", "r") }})
 async def read_{{ model.lower_name }}(
     *,
     session: AsyncSession = Depends(db.get_session),

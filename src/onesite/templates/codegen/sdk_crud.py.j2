@@ -1,0 +1,5 @@
+{% macro sdk_crud(operation, permission) -%}
+{%- if sdk_crud_permissions and permission in sdk_crud_permissions -%}
+, openapi_extra={"x-onesite-crud": "{{ operation }}"}
+{%- endif -%}
+{%- endmacro %}

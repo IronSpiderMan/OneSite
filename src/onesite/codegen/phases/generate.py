@@ -298,6 +298,16 @@ def _find_fk_to_table(
 # ═══════════════════════════════════════════════════════════════════════════
 
 
+def _sdk_crud_permissions(model: ModelDefinition, cwd: Path) -> str:
+    """Return the CRUD operations the SDK may expose for a project model."""
+    if model["module_name"] in {"user", "system_config", "custom_config"}:
+        return ""
+    module = Path(*model["source_module"].split(".")).with_suffix(".py")
+    if not (get_project_paths(cwd).models / module).is_file():
+        return ""
+    return "".join(model["role_permissions"].values())
+
+
 def _generate_singleton(
     model: ModelDefinition,
     cwd: Path,
@@ -306,7 +316,11 @@ def _generate_singleton(
     theme_name: str = "normal",
 ) -> None:
     """Generate code for singleton / config models."""
-    context = {"model": model, "is_postgresql": is_postgresql}
+    context = {
+        "model": model,
+        "is_postgresql": is_postgresql,
+        "sdk_crud_permissions": _sdk_crud_permissions(model, cwd),
+    }
     frontend_path = get_project_paths(cwd).frontend
     is_config = (
         model["module_name"] == "system_config" and model["name"] == "SystemConfig"
@@ -364,7 +378,11 @@ def _generate_regular_model(
     theme_name: str = "normal",
 ) -> None:
     """Generate code for a regular (non-singleton, non-link) model."""
-    context = {"model": model, "is_postgresql": is_postgresql}
+    context = {
+        "model": model,
+        "is_postgresql": is_postgresql,
+        "sdk_crud_permissions": _sdk_crud_permissions(model, cwd),
+    }
     frontend_path = get_project_paths(cwd).frontend
     is_user_model = model["name"] == "User"
 

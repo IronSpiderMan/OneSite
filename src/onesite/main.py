@@ -380,6 +380,28 @@ def sync(
         paths = get_project_paths(base_dir)
         _install_project_dependencies(paths.backend, paths.frontend)
 
+sdk_app = typer.Typer(help="Build a Python client for the project's custom model CRUD APIs.")
+app.add_typer(sdk_app, name="sdk")
+
+
+@sdk_app.command("build")
+def build_project_sdk(
+    output: Path | None = typer.Option(None, "--output", "-o", help="Wheel output directory"),
+    openapi: Path | None = typer.Option(None, "--openapi", help="An exported OpenAPI JSON file"),
+    name: str | None = typer.Option(None, "--name", help="Python distribution name"),
+    version: str | None = typer.Option(None, "--version", help="Python distribution version"),
+) -> None:
+    """Generate and package a standalone Python SDK wheel."""
+    from .sdk import SDKBuildError, build_sdk
+
+    try:
+        wheel = build_sdk(get_cwd_safely(), output, openapi=openapi, name=name, version=version)
+    except (SDKBuildError, OSError, ValueError, KeyError, TypeError) as exc:
+        console.print(f"SDK build failed: {exc}", markup=False, style="red")
+        raise typer.Exit(code=1) from exc
+    console.print(f"Built {wheel.resolve()}", markup=False)
+
+
 db_app = typer.Typer(help="Generate and apply Alembic database migrations")
 app.add_typer(db_app, name="db")
 
