@@ -382,8 +382,8 @@ def test_report_table_uses_list_field_renderers(tmp_path):
     fields = [
         {"name": "customer_id", "fk_info": {"label_field": "name", "target_model": "Customer", "target_service": "customer"}},
         *[{"name": kind, "ui_type": kind} for kind in ["datetime", "time", "date", "bool", "image", "images", "file", "video_stream", "location", "int", "float", "str"]],
-        {"name": "state", "is_enum": True},
-        {"name": "tags", "is_enum": True, "is_multi_select": True},
+        {"name": "state", "is_enum": True, "enum_values": ["ready"]},
+        {"name": "tags", "is_enum": True, "is_multi_select": True, "enum_values": ["a", "b"]},
         {"name": "json", "ui_type": "json", "json_model_schema": {"fields": [{"name": "name", "labelKey": "json.name"}]}, "json_item_schema": None},
     ]
     for field in fields:
@@ -420,7 +420,7 @@ def test_report_table_uses_list_field_renderers(tmp_path):
         f"assert.equal(compile({json.dumps(page)}).diagnostics.length,0);\n"
         f"const js = compile({json.dumps(datetime + helpers + cells)}).outputText;\n"
         "const React={Fragment:'fragment',createElement:(type,props,...children)=>({type,props,children})};\n"
-        "const sources=new Function('React','Badge','JsonPreview','readTableOrder',js+';return {sources:tableSources,valid:validReportTableSize,readable:readableReportTableFields,visible:visibleReportTableFields};')(React,'badge','json',()=>{});\n"
+        "const sources=new Function('React','Badge','JsonPreview','ImageViewer','readTableOrder',js+';return {sources:tableSources,valid:validReportTableSize,readable:readableReportTableFields,visible:visibleReportTableFields};')(React,'badge','json','image-viewer',()=>{});\n"
         "for(const size of [1,7,35,123,1000]) assert.equal(sources.valid(size),true);\n"
         "for(const size of [0,-1,1.5,NaN,Infinity,Number.MAX_SAFE_INTEGER+1]) assert.equal(sources.valid(size),false);\n"
         "const fields=sources.sources[0].fields; const available=sources.readable(fields,'user');\n"
@@ -434,7 +434,7 @@ def test_report_table_uses_list_field_renderers(tmp_path):
         "assert.deepEqual(sources.visible(sources.readable(restricted,'user'),[]),[]);\n"
         "const build=sources.sources[0].buildFilters;\n"
         "const raw={str:'Alice',bool:'false',datetime_from:'2026-09-01',datetime_to:'2026-09-05',time:'11:02',state:'ready',tags:['a','b'],customer_id:'42',secret:'hidden',unknown:'drop'};\n"
-        "const expected={str:'Alice',bool:false,datetime_from:'2026-09-01T00:00:00',datetime_to:'2026-09-05T23:59:59',time:'11:02',state:'ready',tags:['a','b'],customer_id:42};\n"
+        "const expected={str:'Alice',bool:false,datetime_from:'2026-09-01T00:00:00',datetime_to:'2026-09-05T23:59:59',time:'11:02',state:['ready'],tags:['a','b'],customer_id:42};\n"
         "assert.deepEqual(build(raw,'user'),expected);\n"
         "assert.deepEqual(build(JSON.parse(JSON.stringify(raw)),'user'),expected);\n"
         "assert.deepEqual(build(raw,'unknown'),{});\n"
