@@ -604,6 +604,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const rolePermissions: Record<string, string> = {{ model.role_permissions | tojson }};
     const userPerms = rolePermissions[userRole] || '';
     const hasPermission = (perm: 'r' | 'c' | 'u' | 'd') => userPerms.includes(perm);
+    {% set inline_edit_tabs = model.reverse_foreign_keys | default([]) | selectattr('display') | selectattr('editor', 'equalto', 'inline') | list %}
     const [activeTab, setActiveTab] = useState('detail');
     {% if model.opcua_browse %}
     const [browseOpen, setBrowseOpen] = useState(false);
@@ -765,6 +766,9 @@ const {{ model.name }}DetailPage: React.FC = () => {
         fetch{{ m2m.target_model }}s(currentItem!.id, 1);
         {% endfor %}
         {% endif %}
+        {% for rfk in inline_edit_tabs %}
+        void fetch{{ rfk.source_model }}s(currentItem!.id, 1);
+        {% endfor %}
       } catch (error) {
         toast.error(getErrorMessage(error, t('toast.save_failed', 'Save failed')));
         console.error(error);
@@ -821,12 +825,20 @@ const {{ model.name }}DetailPage: React.FC = () => {
         const {{ rfk.name }}Rel = await get{{ rfk.source_model }}s(1, -1, { {{ rfk.source_fk_field }}: item.id });
         setEditValue('{{ rfk.write_name }}', {{ rfk.name }}Rel.items);
       } catch (error) {
-        console.error(error);
-        setEditValue('{{ rfk.write_name }}', []);
+        toast.error(getErrorMessage(error, t('common.error')));
+        return;
       }
       {% endif %}
       {% endfor %}
+      {% if inline_edit_tabs %}
+      setActiveTab(tab => [
+        {% for rfk in inline_edit_tabs %}
+        'reverse-fk-{{ rfk.name }}',
+        {% endfor %}
+      ].includes(tab) ? tab : 'detail');
+      {% else %}
       setActiveTab('detail');
+      {% endif %}
       setIsEditing(true);
     };
 
@@ -1503,7 +1515,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     <Button variant="outline" size="sm" disabled={isSaving} onClick={() => setIsEditing(false)}>
                       <X className="mr-2 h-4 w-4" /> {t('common.cancel')}
                     </Button>
-                    <Button size="sm" type="button" disabled={isSaving} onClick={handleEditSubmit(onEditSave)}>
+                    <Button size="sm" type="button" disabled={isSaving} onClick={handleEditSubmit(onEditSave{% if inline_edit_tabs %}, () => setActiveTab('detail'){% endif %})}>
                       {isSaving ? (
                         <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> {t('common.saving', 'Saving...')}</>
                       ) : (
@@ -1522,7 +1534,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 <Button
                     type="button"
                     role="tab"
-                    {% if model.page_edit %}disabled={isEditing}{% endif %}
+                    {% if model.page_edit and not inline_edit_tabs %}disabled={isEditing}{% endif %}
                     aria-selected={activeTab === 'detail'}
                     variant="ghost"
                     className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'detail' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
@@ -1550,7 +1562,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 <Button
                     type="button"
                     role="tab"
-                    {% if model.page_edit %}disabled={isEditing}{% endif %}
+                    {% if model.page_edit and rfk.editor != 'inline' %}disabled={isEditing}{% endif %}
                     aria-selected={activeTab === 'reverse-fk-{{ rfk.name }}'}
                     variant="ghost"
                     className={`shrink-0 rounded-none border-b-2 px-4 ${activeTab === 'reverse-fk-{{ rfk.name }}' ? 'border-primary text-foreground' : 'border-transparent text-muted-foreground'}`}
@@ -1583,10 +1595,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
                     onAdded={() => setBrowseVersion(value => value + 1)}
                 />}
                 {% endif %}
-                {activeTab === 'detail' && hasDetailLayout && (
+                {{ '{' }}{% if model.page_edit and inline_edit_tabs %}(activeTab === 'detail' || isEditing){% else %}activeTab === 'detail'{% endif %} && hasDetailLayout && (
                     {% if model.page_edit %}
                     isEditing ? (
-                        <form id="detail-edit-form" className="space-y-4">
+                        <form id="detail-edit-form" className="space-y-4"{% if inline_edit_tabs %} hidden={activeTab !== 'detail'}{% endif %}>
                             {editLayout.map((node, index) => renderDetailLayoutNode(node, `detail-layout-${index}`, true))}
                             {{ detail_m2m_editors() }}
                         </form>

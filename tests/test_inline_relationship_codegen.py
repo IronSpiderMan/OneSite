@@ -260,6 +260,14 @@ def test_inline_detail_editor_keeps_m2m_editing_in_the_detail_form():
     detail_form = rendered.split('<form id="detail-edit-form"', 1)[1].split("</form>", 1)[0]
     assert 'name="inline_bs"' not in detail_form
     assert 'name="inline_cs"' in detail_form
+    assert "hidden={activeTab !== 'detail'}" in detail_form
+    assert "(activeTab === 'detail' || isEditing) && hasDetailLayout" in rendered
+    tabs = rendered.split('role="tablist"', 1)[1].split('</div>', 1)[0]
+    for tab in ('detail', 'reverse-fk-inline_bs'):
+        button = tabs.split(f"aria-selected={{activeTab === '{tab}'}}", 1)[0].rsplit('<Button', 1)[1]
+        assert 'disabled={isEditing}' not in button
+    assert "].includes(tab) ? tab : 'detail'" in rendered
+    assert 'void fetchInlineBs(currentItem!.id, 1);' in rendered
 
 
 def test_inline_editor_foreign_keys_render_searchable_select_loaders():
@@ -394,7 +402,10 @@ def test_embedded_reverse_uses_fixed_height_only_on_embedded_tab():
     phase_resolve_relationships(models)
 
     parent = next(model for model in models if model.name == "InlineA")
+    parent.page_edit = True
     detail = _template("frontend_page_detail.tsx.j2").render(model=parent)
+    embedded_tab = detail.split("aria-selected={activeTab === 'reverse-fk-inline_bs'}", 1)[0].rsplit('<Button', 1)[1]
+    assert 'disabled={isEditing}' in embedded_tab
     assert "const isEmbeddedTab" in detail
     assert "isEmbeddedTab ? '!flex !h-full" in detail
     assert "isEmbeddedTab ? '!flex-1 !min-h-0'" in detail
