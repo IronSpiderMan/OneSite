@@ -54,9 +54,16 @@ _TABLE = text("""
 _COLUMNS = text("""
     SELECT a.attname AS name, pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
            NOT a.attnotnull AS nullable,
-           CASE WHEN t.typnamespace = 'pg_catalog'::regnamespace THEN t.typname END AS builtin_type
+           CASE WHEN t.typnamespace = 'pg_catalog'::regnamespace THEN t.typname END AS builtin_type,
+           pk.position AS primary_key_position
     FROM pg_catalog.pg_attribute AS a
     JOIN pg_catalog.pg_type AS t ON t.oid = a.atttypid
+    LEFT JOIN (
+        SELECT i.indrelid, k.attnum, k.position
+        FROM pg_catalog.pg_index AS i
+        CROSS JOIN LATERAL pg_catalog.unnest(i.indkey) WITH ORDINALITY AS k(attnum, position)
+        WHERE i.indrelid = :oid AND i.indisprimary AND i.indisvalid AND k.position <= i.indnkeyatts
+    ) AS pk ON pk.indrelid = a.attrelid AND pk.attnum = a.attnum
     WHERE a.attrelid = :oid AND a.attnum > 0 AND NOT a.attisdropped
     ORDER BY a.attnum
 """)
@@ -201,10 +208,18 @@ async def _read_rows(connection, query):
         if metadata[query.sort.column]["builtin_type"] not in _COMPARISON_TYPES:
             field = cast(field, Text)
         statement = statement.order_by((field.desc() if query.sort.direction == "desc" else field.asc()).nulls_last())
-    # PostgreSQL physical row identifiers provide a tie-breaker for ordinary and partitioned tables.
-    statement = statement.order_by(
-        column("tableoid", _selectable=source), column("ctid", _selectable=source),
-    ).offset((query.page - 1) * query.page_size).limit(query.page_size + 1)
+    primary_key = sorted(
+        (item for item in definitions if item["primary_key_position"] is not None),
+        key=lambda item: item["primary_key_position"],
+    )
+    if primary_key:
+        # Logical keys also work when reading compressed TimescaleDB chunks, which reject ctid.
+        statement = statement.order_by(*(source.c[item["name"]] for item in primary_key))
+    else:
+        statement = statement.order_by(
+            column("tableoid", _selectable=source), column("ctid", _selectable=source),
+        )
+    statement = statement.offset((query.page - 1) * query.page_size).limit(query.page_size + 1)
     result = (await connection.execute(statement)).all()
 
     rows = []

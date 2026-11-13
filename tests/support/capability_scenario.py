@@ -2,8 +2,10 @@
 
 import asyncio
 from contextlib import asynccontextmanager
+from types import SimpleNamespace
 
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy.dialects import postgresql
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.api.endpoints import capability_database, capability_opcua
@@ -16,6 +18,29 @@ from app.models.user import User, UserRole
 
 def auth(user_id):
     return {"Authorization": f"Bearer {create_access_token(user_id)}"}
+
+
+class BrowseConnection:
+    def __init__(self):
+        self.order_by = None
+
+    async def execute(self, statement, parameters=None):
+        if statement is capability_database._TABLE:
+            oid = {"events": 1, "keyless": 2}[parameters["table"]]
+            return SimpleNamespace(scalar_one_or_none=lambda: oid)
+        if statement is capability_database._COLUMNS:
+            has_key = parameters["oid"] == 1
+            definitions = [
+                {"name": "reading", "type": "integer", "nullable": False, "builtin_type": "int4",
+                 "primary_key_position": 2 if has_key else None},
+                {"name": "device", "type": "integer", "nullable": False, "builtin_type": "int4",
+                 "primary_key_position": 1 if has_key else None},
+            ]
+            return SimpleNamespace(mappings=lambda: SimpleNamespace(all=lambda: definitions))
+
+        sql = str(statement.compile(dialect=postgresql.dialect()))
+        self.order_by = sql.split(" ORDER BY ", 1)[1].split("LIMIT", 1)[0].strip()
+        return SimpleNamespace(all=lambda: [("1", "2")])
 
 
 async def main():
@@ -36,20 +61,15 @@ async def main():
         return {"items": []}
 
     capability_opcua.browse = browse
+    browse_connection = BrowseConnection()
 
     @asynccontextmanager
     async def database(profile):
         assert profile == {"host": "warehouse.test", "port": 5432, "username": "readonly",
                            "password": "pw", "database": "warehouse", "driver": "postgresql"}
-        yield object()
-
-    async def rows(connection, query):
-        assert query.schema_name == "public" and query.table == "events"
-        return {"columns": ["id"], "rows": [["1"]], "page": 1, "page_size": 25,
-                "has_more": False, "truncated": False}
+        yield browse_connection
 
     capability_database._database = database
-    capability_database._read_rows = rows
     payload = {"id": "west-1", "owner_id": 1, "name": "West gateway",
                "address": "opc.tcp://plant.test:4840", "broker_url": "mqtts://plant.test",
                "username": "operator", "credential": "the-secret"}
@@ -89,8 +109,23 @@ async def main():
         query = {"schema": "public", "table": "events"}
         response = await client.post(f"{database_path}/query", headers=auth(1), json=query)
         assert response.status_code == 403, response.text
-        response = await client.post(f"{database_path}/query", headers=auth(3), json=query)
-        assert response.status_code == 200 and response.json()["rows"] == [["1"]], response.text
+        keys = '"public"."events"."device", "public"."events"."reading"'
+        response = await client.post(f"{database_path}/query", headers=auth(3), json={
+            **query, "sort": {"column": "reading", "direction": "desc"},
+        })
+        assert response.status_code == 200 and response.json()["rows"] == [["1", "2"]], response.text
+        assert browse_connection.order_by == f'"public"."events"."reading" DESC NULLS LAST, {keys}'
+        response = await client.get(f"{database_path}/rows", headers=auth(3), params=query)
+        assert response.status_code == 200 and response.json()["rows"] == [["1", "2"]], response.text
+        assert browse_connection.order_by == keys
+        response = await client.get(f"{database_path}/rows", headers=auth(3), params={**query, "table": "keyless"})
+        assert response.status_code == 200, response.text
+        assert browse_connection.order_by == '"public"."keyless".tableoid, "public"."keyless".ctid'
+        response = await client.get(f"{database_path}/columns", headers=auth(3), params=query)
+        assert response.status_code == 200 and response.json()["columns"] == [
+            {"name": "reading", "type": "integer", "nullable": False},
+            {"name": "device", "type": "integer", "nullable": False},
+        ], response.text
         response = await client.post(f"{database_path}/query", headers=auth(3), json={**query, "sql": "SELECT 1"})
         assert response.status_code == 422, response.text
 
