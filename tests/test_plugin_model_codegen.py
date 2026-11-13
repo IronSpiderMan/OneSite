@@ -34,7 +34,7 @@ def test_project_app_log_model_overrides_plugin_default(tmp_path):
     assert generated_model.read_text(encoding="utf-8") == "PROJECT_MODEL = True\n"
 
 
-def test_device_timeseries_plugin_generates_six_models(tmp_path):
+def test_device_timeseries_plugin_generates_models_and_dependencies(tmp_path):
     backend = tmp_path / "generated" / "backend"
 
     phase_sync_models(tmp_path, backend)
@@ -44,6 +44,8 @@ def test_device_timeseries_plugin_generates_six_models(tmp_path):
 
     models = backend / "app" / "models"
     expected = {
+        "connector.py",
+        "dgroup.py",
         "device_model.py",
         "device_model_field.py",
         "device.py",
@@ -88,6 +90,8 @@ def test_device_timeseries_models_import_and_resolve_as_one_schema(tmp_path):
     by_name = {model["name"]: model for model in models}
 
     assert {
+        "Connector",
+        "DGroup",
         "DeviceModel",
         "DeviceModelField",
         "Device",
@@ -116,8 +120,9 @@ def test_device_timeseries_models_import_and_resolve_as_one_schema(tmp_path):
     assert by_name["DeviceField"]["uses_composite_identity"] is True
     assert "id" not in {field["name"] for field in by_name["DeviceField"]["fields"]}
     assert {field["name"] for field in by_name["Device"]["fields"]} == {
-        "id", "name", "device_model_id", "protocol", "collection_interval_seconds",
-        "timeout", "heartbeat_interval_seconds"
+        "id", "name", "dgroup_id", "device_model_id", "connector_id",
+        "collection_interval_seconds", "enabled", "status", "last_online_at",
+        "timeout", "heartbeat_interval_seconds",
     }
     assert {
         field["name"] for field in by_name["DeviceField"]["fields"]
@@ -156,7 +161,7 @@ def test_device_timeseries_models_import_and_resolve_as_one_schema(tmp_path):
     assert device_field_permissions["name"] == "r"
     assert any(
         relation["source_model"] == "DeviceModelField"
-        and relation["editor"] == "embedded"
+        and relation["editor"] == "inline"
         for relation in by_name["DeviceModel"]["reverse_foreign_keys"]
     )
     assert any(

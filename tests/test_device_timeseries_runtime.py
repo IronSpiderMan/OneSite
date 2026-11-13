@@ -2,23 +2,47 @@
 
 import importlib
 from datetime import datetime, timezone
+from uuid import UUID
 
 import pytest
+from sqlalchemy import event, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.orm.attributes import flag_modified
 from sqlmodel import SQLModel, select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from onesite.codegen.model_imports import isolated_project_imports
 from onesite.codegen.phases.plugin_models import phase_generate_plugin_models
+from onesite.codegen.pipeline import generate_code
 from onesite_runtime import ReadContext, WriteContext, resolve_read_data, resolve_write_data
 
 
-@pytest.mark.asyncio
-async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_path):
+@pytest.fixture
+def device_backend(tmp_path):
     backend = tmp_path / "backend"
     phase_generate_plugin_models({"plugins": ["device_timeseries"]}, tmp_path, backend)
-    with isolated_project_imports(backend):
+    return backend
+
+
+async def _create_connector(session, Connector, title, protocol="mqtt"):
+    connector = Connector(title=title, protocol=protocol, endpoint="localhost:1883")
+    session.add(connector)
+    await session.flush()
+    return connector
+
+
+def _enable_foreign_keys(connection, _record):
+    cursor = connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
+
+
+@pytest.mark.asyncio
+async def test_device_defaults_initialization_and_value_conversion(device_backend):
+    with isolated_project_imports(device_backend):
+        Connector = importlib.import_module("app.models.connector").Connector
+        DGroup = importlib.import_module("app.models.dgroup").DGroup
         DeviceModel = importlib.import_module("app.models.device_model").DeviceModel
         Device = importlib.import_module("app.models.device").Device
         DeviceModelField = importlib.import_module(
@@ -29,14 +53,17 @@ async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_pa
             "app.models.device_history_latest"
         ).DeviceLatest
         engine = create_async_engine("sqlite+aiosqlite://")
-        tables = [cls.__table__ for cls in (DeviceModel, DeviceModelField, Device, DeviceField, DeviceLatest)]
+        tables = [
+            cls.__table__
+            for cls in (Connector, DGroup, DeviceModel, DeviceModelField, Device, DeviceField, DeviceLatest)
+        ]
         async with engine.begin() as connection:
             await connection.run_sync(lambda conn: SQLModel.metadata.create_all(conn, tables=tables))
         try:
             async with AsyncSession(engine, expire_on_commit=False) as session:
+                connector = await _create_connector(session, Connector, "mqtt")
                 model = DeviceModel(name="sensor")
-                unused = DeviceModel(name="unused")
-                session.add_all([model, unused])
+                session.add(model)
                 await session.flush()
                 definition = DeviceModelField(
                     device_model_id=model.id, name="temperature", dtype="float32", unit="C",
@@ -44,10 +71,7 @@ async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_pa
                 await definition.on_before_create(session)
                 session.add(definition)
                 await session.flush()
-                await definition.on_before_update(session, {"unit": "Celsius"})
-                await definition.on_before_delete(session)
-                device = Device(name="sensor-1", device_model_id=model.id, protocol="mqtt")
-                from uuid import UUID
+                device = Device(name="sensor-1", device_model_id=model.id, connector_id=connector.id)
                 assert UUID(device.id).version == 4
                 assert device.timeout == device.heartbeat_interval_seconds == 60
                 await device.on_before_create(session)
@@ -63,21 +87,6 @@ async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_pa
                 )
                 with pytest.raises(ValueError, match="不能手工创建"):
                     await field.on_before_create()
-                with pytest.raises(ValueError, match="不能更换"):
-                    await device.on_before_update({"device_model_id": unused.id})
-                await device.on_before_update({"name": "renamed"})
-                with pytest.raises(ValueError, match="已被设备使用"):
-                    await definition.on_before_update(session, {"name": "new"})
-                with pytest.raises(ValueError, match="已被设备使用"):
-                    await definition.on_before_delete(session)
-                with pytest.raises(ValueError, match="已被设备使用"):
-                    await definition.on_before_update(session, {"device_model_id": unused.id})
-                added = DeviceModelField(device_model_id=model.id, name="extra", dtype="str")
-                with pytest.raises(ValueError, match="已被设备使用"):
-                    await added.on_before_create(session)
-                moving = DeviceModelField(device_model_id=unused.id, name="moving", dtype="str")
-                with pytest.raises(ValueError, match="已被设备使用"):
-                    await moving.on_before_update(session, {"device_model_id": model.id})
 
                 # Current telemetry comes from latest, not the stored command.
                 field.value = {"value": 999}
@@ -100,7 +109,6 @@ async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_pa
                     ({"value": None}, ""), ({"value": "ready"}, "ready"),
                 ):
                     latest.value = payload
-                    from sqlalchemy.orm.attributes import flag_modified
                     flag_modified(latest, "value")
                     await session.flush()
                     assert await field.present_value(None, session) == expected
@@ -136,11 +144,13 @@ async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_pa
                 ):
                     with pytest.raises(IntegrityError):
                         async with session.begin_nested():
-                            session.add(Device(device_model_id=model.id, protocol="mqtt", **attributes))
+                            session.add(Device(device_model_id=model.id, connector_id=connector.id, **attributes))
                             await session.flush()
 
                 # Initializing fields must not commit independently of the device.
-                transient = Device(name="rolled-back", device_model_id=model.id, protocol="mqtt")
+                transient = Device(
+                    name="rolled-back", device_model_id=model.id, connector_id=connector.id,
+                )
                 await transient.on_before_create(session)
                 session.add(transient)
                 await session.flush()
@@ -157,14 +167,10 @@ async def test_device_defaults_initialization_freeze_and_value_conversion(tmp_pa
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("delete_mode", ["orm", "sql"])
-async def test_device_deletion_cascades_telemetry_and_can_roll_back(tmp_path, delete_mode):
-    from datetime import datetime, timezone
-
-    from sqlalchemy import event, text
-
-    backend = tmp_path / "backend"
-    phase_generate_plugin_models({"plugins": ["device_timeseries"]}, tmp_path, backend)
-    with isolated_project_imports(backend):
+async def test_device_deletion_cascades_telemetry_and_can_roll_back(device_backend, delete_mode):
+    with isolated_project_imports(device_backend):
+        Connector = importlib.import_module("app.models.connector").Connector
+        DGroup = importlib.import_module("app.models.dgroup").DGroup
         classes = [
             getattr(importlib.import_module(f"app.models.{module}"), name)
             for module, name in (
@@ -178,18 +184,14 @@ async def test_device_deletion_cascades_telemetry_and_can_roll_back(tmp_path, de
         ]
         DeviceModel, Definition, Device, DeviceField, History, Latest = classes
         engine = create_async_engine("sqlite+aiosqlite://")
+        event.listen(engine.sync_engine, "connect", _enable_foreign_keys)
 
-        @event.listens_for(engine.sync_engine, "connect")
-        def enable_foreign_keys(connection, _record):
-            cursor = connection.cursor()
-            cursor.execute("PRAGMA foreign_keys=ON")
-            cursor.close()
-
-        tables = [cls.__table__ for cls in classes]
+        tables = [cls.__table__ for cls in (Connector, DGroup, *classes)]
         async with engine.begin() as connection:
             await connection.run_sync(lambda conn: SQLModel.metadata.create_all(conn, tables=tables))
         try:
             async with AsyncSession(engine) as session:
+                connector = await _create_connector(session, Connector, "mqtt")
                 model = DeviceModel(name="shared-model")
                 session.add(model)
                 await session.flush()
@@ -199,7 +201,7 @@ async def test_device_deletion_cascades_telemetry_and_can_roll_back(tmp_path, de
                 session.add(definition)
                 await session.flush()
                 devices = [
-                    Device(name=name, device_model_id=model.id, protocol="mqtt")
+                    Device(name=name, device_model_id=model.id, connector_id=connector.id)
                     for name in ("delete-me", "keep-me")
                 ]
                 ids = [device.id for device in devices]
@@ -241,3 +243,199 @@ async def test_device_deletion_cascades_telemetry_and_can_roll_back(tmp_path, de
                 await assert_remaining({ids[1]})
         finally:
             await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_generated_device_model_updates_propagate_inline_fields(tmp_path, monkeypatch):
+    (tmp_path / "site_config.py").write_text(
+        "from onesite.config import SiteConfig\n"
+        "config = SiteConfig(project_name='devices', plugins=['device_timeseries'])\n"
+    )
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("DATABASE_URI", "sqlite+aiosqlite://")
+    generate_code()
+
+    with isolated_project_imports(tmp_path / "generated" / "backend"):
+        db = importlib.import_module("app.core.db")
+        model_crud = importlib.import_module("app.cruds.device_model")
+        definition_crud = importlib.import_module("app.cruds.device_model_field")
+        device_crud = importlib.import_module("app.cruds.device")
+        connector_crud = importlib.import_module("app.cruds.connector")
+        model_schemas = importlib.import_module("app.schemas.device_model")
+        definition_schemas = importlib.import_module("app.schemas.device_model_field")
+        device_schemas = importlib.import_module("app.schemas.device")
+        connector_schemas = importlib.import_module("app.schemas.connector")
+        Connector = importlib.import_module("app.models.connector").Connector
+        DGroup = importlib.import_module("app.models.dgroup").DGroup
+        Device = importlib.import_module("app.models.device").Device
+        DeviceModel = importlib.import_module("app.models.device_model").DeviceModel
+        Definition = importlib.import_module("app.models.device_model_field").DeviceModelField
+        DeviceField = importlib.import_module("app.models.device_field").DeviceField
+        History = importlib.import_module("app.models.device_history").DeviceHistory
+        Latest = importlib.import_module("app.models.device_history_latest").DeviceLatest
+        tables = [
+            cls.__table__
+            for cls in (Connector, DGroup, Device, DeviceModel, Definition, DeviceField, History, Latest)
+        ]
+        try:
+            async with db.engine.begin() as connection:
+                assert (await connection.execute(text("PRAGMA foreign_keys"))).scalar_one() == 1
+                await connection.run_sync(lambda conn: SQLModel.metadata.create_all(conn, tables=tables))
+            async with AsyncSession(db.engine, expire_on_commit=False) as session:
+                model = await model_crud.create(session, model_schemas.DeviceModelCreate(name="sensor"))
+                other_model = await model_crud.create(
+                    session, model_schemas.DeviceModelCreate(
+                        name="other-sensor", device_model_fields=[{"name": "temp", "dtype": "float32"}],
+                    ),
+                )
+                opcua = await connector_crud.create(
+                    session, connector_schemas.ConnectorCreate(
+                        title="opcua-a", protocol="opcua", endpoint="opc.tcp://localhost:4840",
+                    ),
+                )
+                same_protocol = await _create_connector(session, Connector, "opcua-b", "opcua")
+                mqtt = await _create_connector(session, Connector, "mqtt")
+                first, second, unrelated = [
+                    await device_crud.create(
+                        session, device_schemas.DeviceCreate(
+                            name=name, device_model_id=parent.id, connector_id=opcua.id,
+                        ),
+                    )
+                    for name, parent in (("first", model), ("second", model), ("unrelated", other_model))
+                ]
+                model_id, other_model_id = model.id, other_model.id
+                first_id, second_id, unrelated_id = first.id, second.id, unrelated.id
+                same_protocol_id = same_protocol.id
+                mqtt_id = mqtt.id
+
+                await device_crud.update(
+                    session, first, device_schemas.DeviceUpdate(connector_id=same_protocol_id),
+                )
+                assert first.connector_id == same_protocol_id
+                with pytest.raises(ValueError, match="协议"):
+                    await device_crud.update(
+                        session, first, device_schemas.DeviceUpdate(connector_id=mqtt_id),
+                    )
+                first = await session.get(Device, first_id)
+                assert first.connector_id == same_protocol_id
+                with pytest.raises(ValueError, match="不能更换设备模型"):
+                    await device_crud.update(
+                        session, first, device_schemas.DeviceUpdate(device_model_id=other_model_id),
+                    )
+                with pytest.raises(ValueError, match="协议"):
+                    await connector_crud.update(
+                        session, await session.get(Connector, same_protocol_id),
+                        connector_schemas.ConnectorUpdate(protocol="mqtt"),
+                    )
+                connector = await session.get(Connector, same_protocol_id)
+                assert connector.protocol == "opcua"
+                connector = await connector_crud.update(
+                    session, connector, connector_schemas.ConnectorUpdate(title="edited"),
+                )
+                assert connector.title == "edited"
+
+                await model_crud.update(
+                    session, await session.get(DeviceModel, model_id),
+                    model_schemas.DeviceModelUpdate(
+                        name="new-name", description="safe edit",
+                        device_model_fields=[{"name": "temp", "dtype": "float32", "unit": "C"}],
+                    ),
+                )
+                model = await session.get(DeviceModel, model_id)
+                assert (model.name, model.description) == ("new-name", "safe edit")
+                definition = (await session.exec(
+                    select(Definition).where(Definition.device_model_id == model_id),
+                )).one()
+                definition_id = definition.id
+                assert set((await session.exec(
+                    select(DeviceField.device_id).where(DeviceField.device_model_field_id == definition_id),
+                )).all()) == {first_id, second_id}
+                field = await session.get(DeviceField, (first_id, "temp"))
+                field.address = "custom-address"
+                field.value = {"value": 11.5}
+                reported_at = datetime(2026, 1, 1, tzinfo=timezone.utc)
+                for device_id in (first_id, second_id, unrelated_id):
+                    payload = dict(
+                        device_id=device_id, metric="temp", value={"value": 12.5}, reported_at=reported_at,
+                    )
+                    session.add_all([History(**payload), Latest(**payload)])
+                await session.commit()
+
+                await model_crud.update(
+                    session, model, model_schemas.DeviceModelUpdate(
+                        device_model_fields=[
+                            {"id": definition_id, "name": "temperature", "dtype": "float64", "unit": "°C"},
+                        ],
+                    ),
+                )
+                fields = (await session.exec(
+                    select(DeviceField).where(DeviceField.device_model_field_id == definition_id),
+                )).all()
+                assert {
+                    (item.device_id, item.name, item.dtype, item.unit, item.address) for item in fields
+                } == {
+                    (first_id, "temperature", "float64", "°C", "custom-address"),
+                    (second_id, "temperature", "float64", "°C", "temp"),
+                }
+                field = await session.get(DeviceField, (first_id, "temperature"))
+                assert field.value == {"value": 11.5}
+                for cls in (History, Latest):
+                    rows = (await session.exec(select(cls))).all()
+                    assert {(row.device_id, row.metric) for row in rows} == {
+                        (first_id, "temperature"), (second_id, "temperature"), (unrelated_id, "temp"),
+                    }
+                    assert all(
+                        row.value == {"value": 12.5}
+                        and row.reported_at.replace(tzinfo=timezone.utc) == reported_at
+                        for row in rows
+                    )
+
+                # Incompatible history alone must block the change.
+                field.value = None
+                for device_id in (first_id, second_id):
+                    (await session.get(Latest, (device_id, "temperature"))).value = {"value": True}
+                await session.commit()
+                with pytest.raises(ValueError, match="bool|数据类型"):
+                    await model_crud.update(
+                        session, model, model_schemas.DeviceModelUpdate(
+                            name="rolled-back",
+                            device_model_fields=[{"id": definition_id, "dtype": "bool"}],
+                        ),
+                    )
+                model = await session.get(DeviceModel, model_id)
+                assert model.name == "new-name"
+                assert (await session.get(Definition, definition_id)).dtype == "float64"
+                with pytest.raises(ValueError, match="已被设备使用"):
+                    await model_crud.update(
+                        session, model, model_schemas.DeviceModelUpdate(
+                            name="also-rolled-back",
+                            device_model_fields=[{"name": "rolled-back-field", "dtype": "str"}],
+                        ),
+                    )
+                assert (await session.get(DeviceModel, model_id)).name == "new-name"
+                assert await session.get(Definition, definition_id) is not None
+                assert (await session.exec(
+                    select(DeviceField).where(DeviceField.name == "rolled-back-field"),
+                )).first() is None
+                with pytest.raises(ValueError, match="已被设备使用"):
+                    await definition_crud.update(
+                        session, await session.get(Definition, definition_id),
+                        definition_schemas.DeviceModelFieldUpdate(device_model_id=other_model_id),
+                    )
+                with pytest.raises(ValueError, match="已被设备使用"):
+                    await model_crud.delete(session, model_id)
+
+                direct = await definition_crud.create(
+                    session, definition_schemas.DeviceModelFieldCreate(
+                        device_model_id=model_id, name="pressure", dtype="float32",
+                    ),
+                )
+                await definition_crud.update(
+                    session, direct, definition_schemas.DeviceModelFieldUpdate(unit="kPa"),
+                )
+                assert set((await session.exec(
+                    select(DeviceField.device_id, DeviceField.unit)
+                    .where(DeviceField.device_model_field_id == direct.id),
+                )).all()) == {(first_id, "kPa"), (second_id, "kPa")}
+        finally:
+            await db.engine.dispose()

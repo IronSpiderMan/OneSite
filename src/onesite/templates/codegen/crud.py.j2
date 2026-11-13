@@ -161,6 +161,32 @@ def _serialize_json_scalar_arrays(data: dict) -> dict:
 
 {% endif %}
 
+{% if model.reverse_foreign_keys | selectattr('editor', 'equalto', 'inline') | list %}
+async def _update_inline_child(session: AsyncSession, child: Any, changes: dict[str, Any]) -> None:
+    if all(getattr(child, key) == value for key, value in changes.items()):
+        return
+
+    old = snapshot_model(child)
+    context = ModelHookContext(
+        operation="update",
+        input_data=dict(changes),
+        changed_fields=frozenset(changes),
+    )
+    await invoke_model_hook(
+        child, "on_before_update", session=session, old=old, changes=changes, context=context,
+    )
+    for key, value in changes.items():
+        setattr(child, key, value)
+    session.add(child)
+    await session.flush()
+    await session.refresh(child)
+    await invoke_model_hook(
+        child, "on_after_update", session=session, old=old, changes=changes, context=context,
+    )
+    await session.flush()
+
+
+{% endif %}
 {% for rfk in model.reverse_foreign_keys %}
 {% if rfk.editor == 'inline' %}
 async def _sync_inline_{{ rfk.name }}(
@@ -192,26 +218,39 @@ async def _sync_inline_{{ rfk.name }}(
                 raise ValueError("Missing required {{ rfk.source_model }} fields: " + ", ".join(missing))
             child = {{ rfk.source_model }}(**data)
             setattr(child, "{{ rfk.source_fk_field }}", parent_id)
+            data["{{ rfk.source_fk_field }}"] = parent_id
+            context = ModelHookContext(
+                operation="create",
+                input_data=dict(data),
+                changed_fields=frozenset(data),
+            )
+            await invoke_model_hook(child, "on_before_create", session=session, context=context)
             session.add(child)
+            await session.flush()
+            await session.refresh(child)
+            await invoke_model_hook(child, "on_after_create", session=session, context=context)
             await session.flush()
             kept_ids.add(child.id)
         else:
             child = existing.get(item_id)
             if child is None:
                 raise ValueError("{{ rfk.source_model }} is not related to this {{ model.name }}")
-            for key, value in data.items():
-                setattr(child, key, value)
-            session.add(child)
+            await _update_inline_child(session, child, data)
             kept_ids.add(item_id)
 
     for item_id, child in existing.items():
         if item_id in kept_ids:
             continue
         {% if rfk.on_remove == 'nullify' %}
-        setattr(child, "{{ rfk.source_fk_field }}", None)
-        session.add(child)
+        await _update_inline_child(session, child, {"{{ rfk.source_fk_field }}": None})
         {% else %}
+        old = snapshot_model(child)
+        context = ModelHookContext(operation="delete")
+        await invoke_model_hook(child, "on_before_delete", session=session, old=old, context=context)
         await session.delete(child)
+        await session.flush()
+        await invoke_model_hook(child, "on_after_delete", session=session, old=old, context=context)
+        await session.flush()
         {% endif %}
 
 

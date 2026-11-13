@@ -110,6 +110,21 @@ class Device(SQLModel, table=True):
     timeout: int = Field(default=60, gt=0)
     heartbeat_interval_seconds: int = Field(default=60, gt=0)
 
+    @staticmethod
+    async def _lock_connector_protocols(session, connector_ids):
+        from app.models.connector import Connector
+
+        statement = (
+            select(Connector.id, Connector.protocol)
+            .where(Connector.id.in_(connector_ids))
+            .order_by(Connector.id)
+            .with_for_update()
+        )
+        protocols = dict((await session.exec(statement)).all())
+        if protocols.keys() != connector_ids:
+            raise ValueError("设备连接器不存在")
+        return protocols
+
     async def on_before_create(self, session) -> None:
         from app.models.device_model import DeviceModel
 
@@ -120,6 +135,7 @@ class Device(SQLModel, table=True):
         )).first()
         if model is None:
             raise ValueError("设备模型不存在")
+        await self._lock_connector_protocols(session, {self.connector_id})
 
     async def on_after_create(self, session) -> None:
         from app.models.device_field import DeviceField
@@ -147,11 +163,19 @@ class Device(SQLModel, table=True):
         ])
         await session.flush()
 
-    async def on_before_update(self, changes) -> None:
+    async def on_before_update(self, session, changes) -> None:
         if ("device_model_id" in changes
                 and changes["device_model_id"] != self.device_model_id):
             raise ValueError("设备创建后不能更换设备模型")
-
+        if "connector_id" in changes:
+            # Read the current assignment under a row lock to serialize concurrent swaps.
+            await session.refresh(self, attribute_names=["connector_id"], with_for_update=True)
+            current_id = self.connector_id
+            next_id = changes["connector_id"]
+            if next_id != current_id:
+                protocols = await self._lock_connector_protocols(session, {current_id, next_id})
+                if protocols[current_id] != protocols[next_id]:
+                    raise ValueError("设备不能切换到不同协议的连接器")
 
     async def on_after_update(self, changes) -> None:
         if "enabled" in changes:

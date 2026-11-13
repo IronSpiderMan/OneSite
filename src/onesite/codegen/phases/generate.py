@@ -1063,6 +1063,7 @@ def phase_generate_aggregated(
             ),
             "has_timescaledb": has_timescaledb,
             "timescaledb_models": timescaledb_models,
+            "enable_sqlite_foreign_keys": "device_timeseries" in site_config.get("plugins", []),
             "model_imports": model_imports,
             "latest_table_imports": latest_table_imports,
             "external_resources_enabled": external_resources_enabled,

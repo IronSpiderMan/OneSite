@@ -19,6 +19,7 @@ class DeviceLatest(SQLModel, table=True):
             ["device_id", "metric"],
             ["device_field.device_id", "device_field.name"],
             ondelete="CASCADE",
+            onupdate="CASCADE",
             name="fk_device_latest_field",
         ),
     )

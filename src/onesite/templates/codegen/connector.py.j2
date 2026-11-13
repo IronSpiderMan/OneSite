@@ -159,15 +159,24 @@ class Connector(SQLModel, table=True):
     )
     is_enabled: bool = True
     auth_type: Optional[AuthType] = AuthType.NONE
-    auth_config: AuthConfig = Field(default_factory=AuthConfig, sa_column=Column(JSON))
+    auth_config: AuthConfig = Field(default_factory=dict, sa_column=Column(JSON))
 
-    async def on_before_delete(self, session) -> None:
+    async def _lock_protocol(self, session) -> None:
+        await session.refresh(self, attribute_names=["protocol"], with_for_update=True)
+
+    async def _has_devices(self, session) -> bool:
         from app.models.device import Device
 
-        device_id = (
-            await session.exec(
-                select(Device.id).where(Device.connector_id == self.id).limit(1)
-            )
-        ).first()
-        if device_id is not None:
+        statement = select(Device.id).where(Device.connector_id == self.id).limit(1)
+        return (await session.exec(statement)).first() is not None
+
+    async def on_before_update(self, session, changes) -> None:
+        if "protocol" in changes:
+            await self._lock_protocol(session)
+            if changes["protocol"] != self.protocol and await self._has_devices(session):
+                raise ValueError("连接器下已有设备，不能更换协议")
+
+    async def on_before_delete(self, session) -> None:
+        await self._lock_protocol(session)
+        if await self._has_devices(session):
             raise ValueError("连接器下已有设备，不能删除")

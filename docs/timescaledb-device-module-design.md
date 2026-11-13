@@ -2,7 +2,7 @@
 
 ## 结论
 
-`device_timeseries` 采用六张最小业务表：
+`device_timeseries` 生成六张设备与时序表：
 
 1. `device_model`
 2. `device_model_field`
@@ -11,13 +11,12 @@
 5. `device_history`
 6. `device_latest`
 
-项目通过 `plugins=["device_timeseries"]` 启用模块。未启用时不生成这些模型。
+项目通过 `plugins=["device_timeseries"]` 启用模块，同时生成设备依赖的 `connector` 和 `dgroup`。
 
 `device_model_field` 和 `device_field` 是从属资源，不提供顶层菜单入口：
 前者嵌入 `device_model` 详情页维护，后者嵌入 `device` 详情页维护；其后端 API
-继续保留，供业务集成和设备反写使用。`device_field` 只能由
-创建设备时自动生成，不能通过接口或嵌入页手工添加；编辑时其设备、模型字段、
-名称、数据类型和单位均为只读快照。
+继续保留，供业务集成和设备反写使用。创建设备或给模型新增字段时自动生成 `device_field`。
+设备、模型字段、名称、数据类型和单位在设备字段页面中只读。
 
 ## 表结构
 
@@ -29,7 +28,7 @@
 | `name` | string | 必填、唯一、索引 |
 | `description` | string | 可空 |
 
-`name` 同时作为展示名称和业务标识，不再单独设置 `identifier`。模型下存在设备时，默认 hook 禁止新增、修改、删除模型字段（包含跨模型移动）。模型名称和说明仍可修改；已有设备不能直接更换设备模型。
+`name` 同时作为展示名称和业务标识。已有设备引用时，仍可修改模型名称和说明，可以新增和编辑模型字段。已有设备不能直接更换设备模型，使用中的模型及其字段不能删除，涉及使用中模型的字段不能跨模型移动。
 
 ### `device_model_field`
 
@@ -53,7 +52,8 @@
 | `id` | string | 主键，自动生成 UUID v4 字符串，接口只读 |
 | `name` | string | 必填、唯一、索引，设备业务名称 |
 | `device_model_id` | int | FK → `device_model.id` |
-| `protocol` | enum | `opcua/mqtt/modbus` |
+| `connector_id` | int | FK → `connector.id`，连接器决定协议 |
+| `dgroup_id` | int | 可空，FK → `dgroup.id` |
 | `collection_interval_seconds` | int | 默认 60，必须大于 0 |
 | `timeout` | int | 默认 60 秒，必须 > 0；仅保存离线超时配置，不实现判断逻辑 |
 | `heartbeat_interval_seconds` | int | 默认 60 秒，必须 > 0；设备所有字段共用 |
@@ -80,7 +80,7 @@
 | `deadband` | decimal | 可空，必须 ≥ 0 |
 
 没有独立整数 ID。联合主键为 `(device_id, name)`，另有唯一约束 `(device_id, device_model_field_id)`。`name/dtype/unit`
-是创建设备字段时从模型字段生成的不可编辑快照，用于高频时序查询和界面展示；模型字段一旦被设备使用便不可修改，因此不会产生漂移。周期模式直接使用设备的 `collection_interval_seconds`，不再增加字段级 report interval。
+从模型字段生成，并随模型字段编辑而同步。设备地址、上报模式等配置由设备字段各自维护。周期模式使用设备的 `collection_interval_seconds`。
 
 ### `device_history`
 
@@ -125,7 +125,8 @@ device_model
 
 插件通过 SQLModel 的 `Field(foreign_key="device.id", ondelete="CASCADE")`
 配置 `device_field`、`device_history`、`device_latest` 的设备外键。
-history/latest 到 device_field 的联合外键也保留 `ON DELETE CASCADE`。
+history/latest 到 device_field 的联合外键使用 `ON DELETE CASCADE` 和 `ON UPDATE CASCADE`。设备字段改名时，数据库同步更新对应 history/latest 的 `metric`，保留采样值及时间戳。
+已有压缩历史数据时，TimescaleDB 2.11 起支持更新压缩行。 [TimescaleDB 文档](https://github.com/timescale/docs/blob/latest/use-timescale/compression/modify-compressed-data.md)
 
 - 删除设备时，数据库自动删除其字段、历史数据和最新值；无需项目编写清理 hook。
 - 通过 ORM 或直接 SQL 删除设备均生效，删除及级联清理在同一事务中，可一起回滚。
@@ -142,10 +143,11 @@ history/latest 到 device_field 的联合外键也保留 `ON DELETE CASCADE`。
   默认地址为模型字段名；已有字段按模型字段 ID 跳过，重复调用不重复创建。
   使用同一 session 添加、flush，不独立 commit；设备创建失败时一起回滚。
   该内部初始化直接使用 ORM，不经过禁止手工创建的 hook。
-- `Device.on_before_update`：禁止直接更换设备模型。
-- `DeviceModelField.on_before_create/update/delete`：模型已有设备时拒绝字段增删改；
-  移动字段同时检查原模型和目标模型。与设备创建使用同一个父模型行锁，
-  PostgreSQL 默认 READ COMMITTED 隔离级别下将两种操作串行化。
+- `Device.on_before_update` 禁止更换设备模型，只允许切换到同协议连接器。已被设备引用的连接器不能改协议。
+- `DeviceModel` 支持在设备使用期间编辑名称和说明，删除时检查设备引用。
+- `DeviceModelField.on_after_create` 给模型下的现有设备补齐新字段。重复调用时跳过已存在的设备字段。
+- `DeviceModelField.on_after_update` 同步设备字段名称、类型和单位，保留设备专属配置。改名时 history/latest 通过外键更新 `metric`。修改类型前校验已有采样值、最新值和反写值，任何不兼容的数据都会使整个事务回滚。修改单位只更新元数据，采样值保持原值。
+- `DeviceModelField` 删除时检查模型是否已被设备使用，移动字段时检查原模型和目标模型。设备创建、模型字段编辑和模型页面的内联编辑使用同一个父模型行锁。
 - `DeviceField.on_before_create`：拒绝通过通用 CRUD 手工创建。
 
 这些是生成 CRUD 调用的应用层 hook，不是数据库触发器。直接 SQL 或绕过 CRUD 的
@@ -188,10 +190,11 @@ app.integrations.device_timeseries.write_device_field(
 
 - 项目源模型同名文件会完全覆盖插件默认模型；已有覆盖文件需手工合入这些改动。
 - `site sync` 生成代码不等于完成数据库迁移，已有数据库须单独迁移。
-- 原有 device_field、device_history、device_latest 到 device.id 的外键需要迁移为
-  `ON DELETE CASCADE`，并确认 history/latest 到 device_field 的联合外键同样配置级联。
-  仅修改模型或运行 sync 不会改写数据库已有约束。生产环境执行前应备份数据；
-  SQLite 验证环境需要显式启用 `PRAGMA foreign_keys=ON`。
+- 已纳入 Alembic 管理的数据库运行 `site db revision -m "cascade device metric rename"` 生成迁移，检查
+  `fk_device_history_field` 和 `fk_device_latest_field` 重建后同时包含
+  `ON DELETE CASCADE` 和 `ON UPDATE CASCADE`，再运行 `site db upgrade`。
+- 尚未纳入 Alembic 管理的数据库先使用与现有表结构匹配的旧模型执行 `site db baseline`，
+  再升级插件并生成迁移。启用插件的生成后端会在 SQLite 连接上开启外键约束。
 - 现有 string 设备 ID 可以保留；UUID 默认工厂仅影响新建设备。
 - 添加 name 唯一约束前，必须先处理重复业务名称。
 - 给 device 新增 timeout 和 heartbeat_interval_seconds，并为旧设备回填正值

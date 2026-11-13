@@ -19,6 +19,8 @@ _PLUGIN_MODEL_TEMPLATES = {
         ("opcua_ac.py.j2", "opcua_ac.py"),
     ),
     "device_timeseries": (
+        ("connector.py.j2", "connector.py"),
+        ("dgroup.py.j2", "dgroup.py"),
         ("device_model.py.j2", "device_model.py"),
         ("device_model_field.py.j2", "device_model_field.py"),
         ("device.py.j2", "device.py"),

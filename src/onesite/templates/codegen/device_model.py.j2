@@ -30,21 +30,21 @@ class DeviceModel(SQLModel, table=True):
     name: str = Field(unique=True, index=True)
     description: Optional[str] = None
 
-    async def _ensure_unused(self, session) -> None:
+    async def _lock_row(self, session) -> None:
+        # The inline field editor and device creation share this lock.
+        await session.exec(select(DeviceModel.id).where(DeviceModel.id == self.id).with_for_update())
+
+    async def on_before_update(self, session) -> None:
+        await self._lock_row(session)
+
+    async def on_before_delete(self, session) -> None:
         from app.models.device import Device
 
-        await session.exec(select(DeviceModel).where(DeviceModel.id == self.id).with_for_update())
-
+        await self._lock_row(session)
         device_id = (
             await session.exec(
                 select(Device.id).where(Device.device_model_id == self.id).limit(1)
             )
         ).first()
         if device_id is not None:
-            raise ValueError("设备模型已被设备使用，不能修改或删除")
-
-    async def on_before_update(self, session) -> None:
-        await self._ensure_unused(session)
-
-    async def on_before_delete(self, session) -> None:
-        await self._ensure_unused(session)
+            raise ValueError("设备模型已被设备使用，不能删除")

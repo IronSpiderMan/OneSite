@@ -117,31 +117,141 @@ class DeviceModelField(SQLModel, table=True):
             raise ValueError("min_value 不能大于 max_value")
         return self
 
-    async def _ensure_models_unused(self, session, model_ids) -> None:
-        from app.models.device import Device
+    @staticmethod
+    async def _lock_models(session, model_ids) -> None:
         from app.models.device_model import DeviceModel
 
-        # Lock in stable order, including the destination when moving a field.
-        for model_id in sorted(set(model_ids)):
-            model = (await session.exec(
-                select(DeviceModel).where(DeviceModel.id == model_id)
-                .with_for_update()
-            )).first()
-            if model is None:
-                raise ValueError("设备模型不存在")
-            device = (await session.exec(
-                select(Device.id).where(Device.device_model_id == model_id).limit(1)
-            )).first()
-            if device is not None:
-                raise ValueError("设备模型已被设备使用，不能新增、修改或删除字段")
+        statement = (
+            select(DeviceModel.id)
+            .where(DeviceModel.id.in_(model_ids))
+            .order_by(DeviceModel.id)
+            .with_for_update()
+        )
+        if set((await session.exec(statement)).all()) != model_ids:
+            raise ValueError("设备模型不存在")
+
+    async def _lock_existing_models(self, session, changes) -> set[int]:
+        statement = select(DeviceModelField.device_model_id).where(DeviceModelField.id == self.id)
+        current_id = (await session.exec(statement)).one_or_none()
+        if current_id is None:
+            raise ValueError("设备模型字段不存在")
+        model_ids = {current_id, changes.get("device_model_id", current_id)}
+        await self._lock_models(session, model_ids)
+        # Standalone CRUD may have loaded this row before a concurrent edit committed.
+        await session.refresh(self)
+        if self.device_model_id != current_id:
+            raise ValueError("设备模型字段已被移动，请重试")
+        return model_ids
+
+    @staticmethod
+    async def _ensure_models_unused(session, model_ids) -> None:
+        from app.models.device import Device
+
+        statement = select(Device.id).where(Device.device_model_id.in_(model_ids)).limit(1)
+        if (await session.exec(statement)).first() is not None:
+            raise ValueError("设备模型已被设备使用，不能移动或删除字段")
 
     async def on_before_create(self, session) -> None:
-        await self._ensure_models_unused(session, [self.device_model_id])
+        await self._lock_models(session, {self.device_model_id})
+        self.validate_definition()
+
+    async def on_after_create(self, session) -> None:
+        from app.models.device import Device
+        from app.models.device_field import DeviceField
+
+        dtype = DeviceDataType(self.dtype).value
+        existing = select(DeviceField.device_id).where(DeviceField.device_model_field_id == self.id)
+        statement = (
+            select(Device.id)
+            .where(Device.device_model_id == self.device_model_id, ~Device.id.in_(existing))
+            .order_by(Device.id)
+            .with_for_update(read=True, key_share=True)
+        )
+        session.add_all(
+            DeviceField(
+                device_id=device_id,
+                device_model_field_id=self.id,
+                name=self.name,
+                dtype=dtype,
+                unit=self.unit,
+                address=self.name,
+            )
+            for device_id in (await session.exec(statement)).all()
+        )
 
     async def on_before_update(self, session, changes) -> None:
-        await self._ensure_models_unused(session, [
-            self.device_model_id, changes.get("device_model_id", self.device_model_id),
-        ])
+        model_ids = await self._lock_existing_models(session, changes)
+        if len(model_ids) > 1:
+            await self._ensure_models_unused(session, model_ids)
+
+    async def on_after_update(self, session, changes) -> None:
+        from app.models.device import Device
+        from app.models.device_field import DeviceField
+
+        self.validate_definition()
+        if not {"name", "dtype", "unit"}.intersection(changes):
+            return
+
+        device_ids = select(DeviceField.device_id).where(DeviceField.device_model_field_id == self.id)
+        await session.exec(
+            select(Device.id).where(Device.id.in_(device_ids))
+            .order_by(Device.id).with_for_update(read=True, key_share=True)
+        )
+        statement = (
+            select(DeviceField)
+            .where(DeviceField.device_model_field_id == self.id)
+            .order_by(DeviceField.device_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
+        fields = (await session.exec(statement)).all()
+        dtype = DeviceDataType(self.dtype).value
+        if any(field.dtype != dtype for field in fields):
+            await self._validate_stored_values(session, dtype, fields)
+        for field in fields:
+            # The composite foreign keys cascade a name change to history and latest.
+            field.name = self.name
+            field.dtype = dtype
+            field.unit = self.unit
+
+    async def _validate_stored_values(self, session, dtype, fields) -> None:
+        from app.models.device_field import DeviceField, _validate_write_value
+        from app.models.device_history import DeviceHistory
+        from app.models.device_history_latest import DeviceLatest
+
+        def validate(payload):
+            if payload is None:
+                return
+            if not isinstance(payload, dict) or "value" not in payload:
+                raise ValueError("已有值的格式与新数据类型不兼容")
+            value = payload["value"]
+            if value is None:
+                return
+            try:
+                _validate_write_value(dtype, value)
+                if self.dtype == DeviceDataType.ENUM and value not in self.enum_values:
+                    raise ValueError("已有值不在新枚举范围内")
+            except ValueError as exc:
+                raise ValueError(f"已有值与新数据类型不兼容：{exc}") from exc
+
+        for field in fields:
+            if field.dtype != dtype:
+                validate(field.value)
+        for table in (DeviceLatest, DeviceHistory):
+            statement = select(table.value).join(
+                DeviceField,
+                (DeviceField.device_id == table.device_id) & (DeviceField.name == table.metric),
+            ).where(
+                DeviceField.device_model_field_id == self.id,
+                DeviceField.dtype != dtype,
+            )
+            values = await session.stream_scalars(statement)
+            try:
+                async for payload in values:
+                    validate(payload)
+            finally:
+                await values.close()
 
     async def on_before_delete(self, session) -> None:
-        await self._ensure_models_unused(session, [self.device_model_id])
+        model_ids = await self._lock_existing_models(session, {})
+        await self._ensure_models_unused(session, model_ids)
