@@ -213,12 +213,32 @@ def test_site_sync_generates_background_scheduled_task_feature(tmp_path, monkeyp
     assert (backend / "api" / "endpoints" / "tasks.py").exists()
     assert (backend / "api" / "endpoints" / "task_center.py").exists()
     frontend = project / "generated" / "frontend" / "src"
+    scheduled_page = (frontend / "pages" / "ScheduledTasks.tsx").read_text(encoding="utf-8")
+    assert "useTaskStore" in scheduled_page
+    assert 'to="/task-center"' in scheduled_page
+    dashboard = (frontend / "pages" / "Dashboard.tsx").read_text(encoding="utf-8")
+    assert "useTaskStore" not in dashboard
+    assert "Scheduled Tasks" not in dashboard
+    routes = (frontend / "Routes.tsx").read_text(encoding="utf-8")
+    assert "id: 'builtin.scheduled-tasks', path: '/scheduled-tasks'" in routes
+    menu = (frontend / "Menu.tsx").read_text(encoding="utf-8")
+    assert 'key: "/scheduled-tasks"' in menu
+    for language, label in (("en", "Scheduled Tasks"), ("zh", "定时任务")):
+        locale = json.loads((frontend / "locales" / f"{language}.json").read_text(encoding="utf-8"))
+        assert locale["menu"]["scheduled_tasks"] == label
     assert (frontend / "pages" / "TaskCenter.tsx").exists()
     assert "scheduled_task" in (frontend / "pages" / "TaskCenter.tsx").read_text(
         encoding="utf-8"
     )
     for python_file in backend.rglob("*.py"):
         compile(python_file.read_text(encoding="utf-8"), str(python_file), "exec")
+
+    config_path.write_text("from onesite.config import SiteConfig\nconfig = SiteConfig()\n", encoding="utf-8")
+    synced = runner.invoke(app, ["sync"])
+    assert synced.exit_code == 0, synced.output
+    assert not (frontend / "pages" / "ScheduledTasks.tsx").exists()
+    assert "/scheduled-tasks" not in (frontend / "Routes.tsx").read_text(encoding="utf-8")
+    assert "/scheduled-tasks" not in (frontend / "Menu.tsx").read_text(encoding="utf-8")
 
 
 def test_tools_and_schedules_share_background_execution_model(tmp_path, monkeypatch):
@@ -228,11 +248,16 @@ def test_tools_and_schedules_share_background_execution_model(tmp_path, monkeypa
     assert created.exit_code == 0, created.output
     project = tmp_path / "CombinedApp"
     config_path = project / "site_config.py"
+    tasks = _tasks()
+    tasks[0]["manual_permissions"] = ["user", "developer"]
     config_path.write_text(
-        "from onesite.config import SiteConfig\n"
+        "from onesite.config import HiddenTask, NavBuiltin, NavGroup, SiteConfig, TaskCenterConfig\n"
         "config = SiteConfig(\n"
-        f"    scheduled_tasks={_tasks()!r},\n"
-        "    tools=[{'name': 'recalculate', 'inputs': [{'name': 'count', 'type': 'number', 'number_kind': 'int'}]}],\n"
+        f"    scheduled_tasks={tasks!r},\n"
+        "    tools=[{'name': 'recalculate', 'permissions': ['admin'], 'inputs': [{'name': 'count', 'type': 'number', 'number_kind': 'int'}]}],\n"
+        "    task_center=TaskCenterConfig(hidden=[HiddenTask(kind='scheduled_task', name='daily_summary')]),\n"
+        "    navigation=[NavGroup(key='operations', label={'zh': '运维', 'en': 'Operations'},\n"
+        "        children=[NavBuiltin.tools(), NavBuiltin.scheduled_tasks()])],\n"
         ")\n",
         encoding="utf-8",
     )
@@ -246,3 +271,12 @@ def test_tools_and_schedules_share_background_execution_model(tmp_path, monkeypa
     handlers = (backend / "handlers" / "__init__.py").read_text(encoding="utf-8")
     assert "tool_execution" in handlers
     assert "scheduled_task_execution" in handlers
+
+    frontend = project / "generated" / "frontend" / "src"
+    menu = (frontend / "Menu.tsx").read_text(encoding="utf-8")
+    assert menu.count('key: "/tools"') == menu.count('key: "/scheduled-tasks"') == 1
+    operations = menu[menu.index('key: "group:operations"'):menu.index('key: "/task-center"')]
+    tools_entry, scheduled_entry = operations.split('key: "/scheduled-tasks"')
+    assert 'key: "/tools"' in tools_entry
+    assert 'visible: {"admin": true, "developer": false, "user": false}' in tools_entry
+    assert 'visible: {"admin": false, "developer": true, "user": true}' in scheduled_entry

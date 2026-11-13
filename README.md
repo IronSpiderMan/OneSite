@@ -183,14 +183,30 @@ encoded PostgreSQL URL from its individual connection fields.
 ### Navigation
 
 `navigation` is the ordered, declarative sidebar tree. A `model` entry refers
-to the model's `module_name`; a `group` is a non-routable, collapsible second-
-level container; and `builtin` supports `dashboard`, `reports`,
-`external-resources`, and `task-center`. Group
-labels require `zh` and `en` translations. Model
-permissions and `visible` settings still control whether each child is shown;
-empty groups are hidden automatically. Models omitted from an explicitly
-configured tree remain reachable by route and API but are not shown in the
-sidebar.
+to the model's `module_name`. A `group` is a collapsible second-level menu.
+The `builtin` type supports `dashboard`, `reports`,
+`external-resources`, `tools`, `scheduled-tasks`, and `task-center`. Group
+labels require `zh` and `en` translations. Model permissions and `visible`
+settings control whether each model entry is shown. The sidebar hides empty
+groups and appends eligible models omitted from an explicit navigation tree.
+
+To place Tools and Scheduled Tasks in the same sidebar group, add this entry
+to `SiteConfig.navigation`.
+
+```python
+NavGroup(
+    key="operations",
+    label={"zh": "运维", "en": "Operations"},
+    children=[NavBuiltin.tools(), NavBuiltin.scheduled_tasks()],
+)
+```
+
+In `site_config.json`, use `{"type": "builtin", "key": "tools"}` and
+`{"type": "builtin", "key": "scheduled-tasks"}` as the group's `children`.
+Each page gets a top-level sidebar entry when the feature is configured and
+the entry is omitted from `navigation`. A role sees Tools if at least one
+tool grants it `permissions`, and Scheduled Tasks if at least one task grants
+it `manual_permissions`.
 
 ### Application resources
 
@@ -515,6 +531,10 @@ register them with `SiteConfig(scheduled_tasks=[MyTask])`. APScheduler continues
 to handle triggers, while the shared background queue executes each task.
 See the [class task guide](docs/scheduled-tasks.md) and
 [runnable example](examples/typed_tasks). Existing `ScheduledTask(...)` declarations remain supported.
+
+After `site sync`, use `/scheduled-tasks` to edit schedules and parameters, turn
+scheduled runs on or off, or run a task manually. Execution history is available
+in Task Center (`/task-center`).
 
 Scheduled tasks use the same developer-owned source and background execution
 model. A scheduler trigger creates an execution record and publishes work to

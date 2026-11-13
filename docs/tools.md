@@ -11,8 +11,10 @@ config = SiteConfig(tools=[TextTransformTool])
 ```
 
 完整示例见 [examples/typed_tools](../examples/typed_tools/app/tools/text_transform.py)。
-进入示例目录运行 `site sync`，然后运行 `site run all`。默认只有 admin 和
-developer 可以执行工具。
+进入示例目录运行 `site sync`，然后运行 `site run all`，在“工具”页面（`/tools`）
+执行工具。默认只有 admin 和 developer 可以执行。角色至少拥有一项工具的
+`permissions` 时才会看到工具入口。将 `NavBuiltin.tools()` 加入 `NavGroup.children`
+可指定导航分组。
 
 ## 定义工具
 

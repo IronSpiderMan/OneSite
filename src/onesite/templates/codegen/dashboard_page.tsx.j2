@@ -1,6 +1,6 @@
 // frontend/src/pages/Dashboard.tsx
 import React, { useEffect, useRef, useState } from 'react';
-import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, ArrowDownRight, ArrowUpRight{% for icon in dashboard_metric_icons | default([]) %}{% if icon not in ['Loader2', 'RefreshCw', 'ChevronLeft', 'ChevronRight', 'CalendarDays', 'BarChart3', 'Activity', 'ArrowDownRight', 'ArrowUpRight', 'Play', 'Pencil', 'Power', 'PowerOff', 'Terminal'] %}, {{ icon }}{% endif %}{% endfor %}{% if scheduled_tasks %}, Play, Pencil, Power, PowerOff{% endif %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
+import { Loader2, RefreshCw, ChevronLeft, ChevronRight, CalendarDays, BarChart3, LineChart as LineChartIcon, PieChart as PieChartIcon, Activity, ArrowDownRight, ArrowUpRight{% for icon in dashboard_metric_icons | default([]) %}{% if icon not in ['Loader2', 'RefreshCw', 'ChevronLeft', 'ChevronRight', 'CalendarDays', 'BarChart3', 'Activity', 'ArrowDownRight', 'ArrowUpRight'] and not (site_logger and icon == 'Terminal') %}, {{ icon }}{% endif %}{% endfor %}{% if site_logger %}, Terminal{% endif %} } from 'lucide-react';
 import { visualizationFilterDefaults } from '../utils/filterDefaults';
 import { useTranslation } from 'react-i18next';
 import { AreaChart, Area, BarChart, Bar, PieChart, Pie, Cell, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer } from 'recharts';
@@ -23,11 +23,6 @@ import { getAppLogs } from '../services/app_log';
 import { buildNotificationWsUrl } from '../services/notification-center';
 import { formatDateTime, getUserTimeZone } from '../lib/datetime';
 {% endif %}
-{% if scheduled_tasks %}
-import { Input } from '../components/ui/input';
-import { Label } from '../components/ui/label';
-import { Modal } from '../components/ui/modal';
-{% endif %}
 {% for model in dashboard_models | default(models) %}
 {% if model.dashboard_metrics %}
 import { get{{ model.name }}DashboardMetrics } from '../services/{{ model.module_name }}';
@@ -38,19 +33,6 @@ import { get{{ model.name }}DashboardMetrics } from '../services/{{ model.module
 import { get{{ model.name }}Stats{% if model.visualize.get('resolved_filters') %}, get{{ model.name }}StatsFilters, {{ model.name }}FilterOption{% endif %} } from '../services/{{ model.module_name }}';
 {% endif %}
 {% endfor %}
-{% if scheduled_tasks %}
-import { useTaskStore } from '../stores/useTaskStore';
-import { TypedToolFields } from '../components/tools/ToolFields';
-{% endif %}
-
-{% if scheduled_tasks %}
-const taskExecutionMessageKeys: Record<string, string> = {
-    Queued: 'dashboard.execution_messages.queued',
-    Running: 'dashboard.execution_messages.running',
-    Completed: 'dashboard.execution_messages.completed',
-    'Not implemented': 'dashboard.execution_messages.not_implemented',
-};
-{% endif %}
 
 interface ChartSeries {
     name: string;
@@ -147,66 +129,6 @@ const validateDateSpan = (startTime: string, endTime: string, period: string): s
     return null;
 };
 
-const formatLocalDateTime = (dateStr: string | null): string => {
-    if (!dateStr) return '';
-    try {
-        const date = new Date(dateStr);
-        return date.toLocaleString(undefined, {
-            year: 'numeric',
-            month: '2-digit',
-            day: '2-digit',
-            hour: '2-digit',
-            minute: '2-digit',
-            second: '2-digit',
-        });
-    } catch {
-        return dateStr;
-    }
-};
-
-const formatInterval = (seconds: number, t: (key: string, fallback: string) => string): string => {
-    if (seconds <= 0) return '';
-    const every = t('dashboard.every', 'Every');
-    if (seconds < 60) return `${every} ${seconds}${t('dashboard.seconds_short', 's')}`;
-    if (seconds < 3600) return `${every} ${Math.floor(seconds / 60)}${t('dashboard.minutes_short', 'm')}`;
-    if (seconds < 86400) return `${every} ${Math.floor(seconds / 3600)}${t('dashboard.hours_short', 'h')}`;
-    return `${every} ${Math.floor(seconds / 86400)}${t('dashboard.days_short', 'd')}`;
-};
-
-const parseCronToTimes = (cron: string): string[] => {
-    if (!cron || cron === '* * * * *') return [];
-    const parts = cron.trim().split(/\s+/);
-    if (parts.length < 2) return [];
-    const minutePart = parts[0];
-    const hourPart = parts[1];
-    if (minutePart === '*' || hourPart === '*') return [];
-    const hours = hourPart.split(',').filter(h => h !== '*');
-    const minutes = minutePart.split(',').filter(m => m !== '*');
-    const times: string[] = [];
-    for (const h of hours) {
-        for (const m of minutes) {
-            times.push(`${h.padStart(2, '0')}:${m.padStart(2, '0')}`);
-        }
-    }
-    return times.length > 0 ? times : [];
-};
-
-const timesToCron = (times: string[]): string => {
-    if (times.length === 0) return '* * * * *';
-    const hours = [...new Set(times.map(t => t.split(':')[0]))].sort();
-    const minutes = [...new Set(times.map(t => t.split(':')[1]))].sort();
-    return `${minutes.join(',')} ${hours.join(',')} * * *`;
-};
-
-const formatCron = (cron: string, t: (key: string, fallback: string) => string): string => {
-    if (!cron) return '';
-    const times = parseCronToTimes(cron);
-    if (times.length === 0) return cron;
-    const prefix = t('dashboard.every_day_at', 'Every day at');
-    if (times.length === 1) return `${prefix} ${times[0]}`;
-    return `${prefix} ${times.join(', ')}`;
-};
-
 const dotStyle = (color: string): React.CSSProperties => ({ backgroundColor: color });
 const colorStyle = (color: string): React.CSSProperties => ({ color });
 const gradientLineStyle = (color: string): React.CSSProperties => ({
@@ -288,34 +210,6 @@ const DashboardPage: React.FC = () => {
     const timeZone = getUserTimeZone();
     const logInitialized = useRef(false);
     {% endif %}
-    {% if scheduled_tasks %}
-    const [runningTasks, setRunningTasks] = useState<Set<string>>(new Set());
-
-    // Task store
-    const {
-        tasks,
-        loading: taskLoading,
-        fetchTasks,
-        runTask,
-        enableTask,
-        disableTask,
-        updateTask,
-        editingTask,
-        isEditModalOpen,
-        setEditingTask,
-        setEditModalOpen,
-    } = useTaskStore();
-
-    const [scheduleMode, setScheduleMode] = useState<'cron' | 'interval'>('cron');
-    const [intervalValue, setIntervalValue] = useState(5);
-    const [intervalUnit, setIntervalUnit] = useState<'seconds' | 'minutes' | 'hours' | 'days'>('minutes');
-    const [taskInputOverrides, setTaskInputOverrides] = useState<Record<string, unknown>>({});
-    const [taskEditorError, setTaskEditorError] = useState('');
-    const [cronExpression, setCronExpression] = useState('');
-    const taskInputContainer = useRef<HTMLDivElement>(null);
-    const [cronTimes, setCronTimes] = useState<string[]>([]);
-    {% endif %}
-
     useEffect(() => { fetchSystemConfig(); }, []);
 
     useEffect(() => {
@@ -489,68 +383,6 @@ const DashboardPage: React.FC = () => {
     }, []);
     {% endif %}
 
-    {% if scheduled_tasks %}
-    useEffect(() => {
-        fetchTasks();
-        const timer = window.setInterval(() => { fetchTasks(); }, 5000);
-        return () => window.clearInterval(timer);
-    }, []);
-
-    useEffect(() => {
-        const listener = (event: Event) => {
-            const execution = (event as CustomEvent<any>).detail;
-            if (execution?.status === 'succeeded' || execution?.status === 'failed') {
-                fetchTasks();
-            }
-        };
-        window.addEventListener('onesite:scheduled-task-status', listener);
-        return () => window.removeEventListener('onesite:scheduled-task-status', listener);
-    }, []);
-
-    const handleRunTask = async (name: string) => {
-        setRunningTasks(prev => new Set(prev).add(name));
-        try {
-            await runTask(name);
-            toast.success(t('dashboard.task_queued', `Task '${name}' queued`));
-        } catch (error: any) {
-            toast.error(t('dashboard.task_run_error', { name, message: error.message }));
-        } finally {
-            setRunningTasks(prev => {
-                const next = new Set(prev);
-                next.delete(name);
-                return next;
-            });
-        }
-    };
-
-    const handleEnableTask = async (name: string) => {
-        try {
-            await enableTask(name);
-            toast.success(t('dashboard.task_enabled', { name }));
-        } catch (error: any) {
-            toast.error(error.message);
-        }
-    };
-
-    const handleDisableTask = async (name: string) => {
-        try {
-            await disableTask(name);
-            toast.success(t('dashboard.task_disabled', { name }));
-        } catch (error: any) {
-            toast.error(error.message);
-        }
-    };
-
-    const handleRefresh = async () => {
-        try {
-            await fetchTasks();
-            toast.success(t('dashboard.refresh_success', 'Tasks refreshed'));
-        } catch (error: any) {
-            toast.error(error.message);
-        }
-    };
-    {% endif %}
-
     if (loading) {
         return (
             <div className="flex justify-center items-center h-64">
@@ -575,7 +407,7 @@ const DashboardPage: React.FC = () => {
         {% endfor %}
     ];
 
-    if (chartModels.length === 0 && dashboardMetrics.length === 0 && customDashboardWidgets.length === 0 {% if visualizations | default([]) %}&& visualizationSpecs.length === 0{% endif %}{% if scheduled_tasks %}&& tasks.length === 0{% endif %}{% if site_logger %}&& false{% endif %}) {
+    if (chartModels.length === 0 && dashboardMetrics.length === 0 && customDashboardWidgets.length === 0 {% if visualizations | default([]) %}&& visualizationSpecs.length === 0{% endif %}{% if show_dashboard_announcement %}&& !systemConfig?.announcement_content{% endif %}{% if site_logger %}&& false{% endif %}) {
         return (
             <div className="space-y-6">
                 <div className="flex items-center justify-between">
@@ -584,7 +416,7 @@ const DashboardPage: React.FC = () => {
                     </h1>
                 </div>
                 <div className="text-center py-12 text-muted-foreground">
-                    {t('dashboard.no_visualizations', 'No visualizations or tasks configured')}
+                    {t('dashboard.no_visualizations', 'No visualizations configured')}
                 </div>
             </div>
         );
@@ -1324,378 +1156,6 @@ const DashboardPage: React.FC = () => {
             </div>
             {% endif %}
 
-            {% if scheduled_tasks %}
-            {/* Scheduled Tasks Section */}
-            <div className="rounded-xl border bg-card text-card-foreground shadow-sm p-6">
-                <div className="flex items-center justify-between mb-4">
-                    <h3 className="text-lg font-semibold">
-                        {t('dashboard.scheduled_tasks', 'Scheduled Tasks')}
-                    </h3>
-                    <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={handleRefresh}
-                        disabled={taskLoading}
-                    >
-                        <RefreshCw className={`w-4 h-4 ${taskLoading ? 'animate-spin' : ''}`} />
-                    </Button>
-                </div>
-
-                {taskLoading && tasks.length === 0 ? (
-                    <div className="flex justify-center items-center h-32">
-                        <Loader2 className="w-6 h-6 animate-spin text-muted-foreground" />
-                    </div>
-                ) : tasks.length === 0 ? (
-                    <div className="text-center py-8 text-muted-foreground">
-                        {t('dashboard.no_tasks', 'No scheduled tasks configured')}
-                    </div>
-                ) : (
-                    <div className="space-y-3">
-                        {tasks.map((task) => (
-                            <div
-                                key={task.name}
-                                className="flex items-center justify-between p-4 rounded-lg border bg-background"
-                            >
-                                <div className="flex-1">
-                                    <div className="flex items-center gap-2">
-                                        <span className="font-medium">{t(`scheduled_task_definitions.${task.name}.title`, task.title || task.name)}</span>
-                                        <span
-                                            className={`px-2 py-0.5 rounded text-xs ${
-                                                task.enabled
-                                                    ? 'bg-green-100 text-green-700'
-                                                    : 'bg-gray-100 text-gray-500'
-                                            }`}
-                                        >
-                                            {task.enabled
-                                                ? t('dashboard.enabled', 'Enabled')
-                                                : t('dashboard.disabled', 'Disabled')}
-                                        </span>
-                                    </div>
-                                    <div className="text-sm text-muted-foreground mt-1">
-                                        <span>
-                                            {task.interval > 0 ? formatInterval(task.interval, t) : formatCron(task.cron, t)}
-                                        </span>
-                                        {task.description && (
-                                            <span className="ml-2">- {task.class_path && task.description === task.source_description ? t(`scheduled_task_definitions.${task.name}.description`, task.description) : task.description}</span>
-                                        )}
-                                    </div>
-                                    {task.params && Object.keys(task.params).length > 0 && (
-                                        <div className="text-xs text-muted-foreground mt-1 font-mono">
-                                            {Object.entries(task.params).map(([k, v]) => `${k}: ${String(v.value)}`).join(' | ')}
-                                        </div>
-                                    )}
-                                    {task.next_run && task.enabled && (
-                                        <div className="text-xs text-muted-foreground mt-1">
-                                            {t('dashboard.next_run', 'Next run')}: {formatLocalDateTime(task.next_run)}
-                                        </div>
-                                    )}
-                                    {task.configuration_error && <p role="alert" className="text-sm text-destructive">{task.configuration_error}</p>}
-                                    {task.last_execution && (
-                                        <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
-                                            <span>{t('dashboard.last_execution', 'Last execution')}:</span>
-                                            <span className={
-                                                task.last_execution.status === 'succeeded' ? 'text-green-600' :
-                                                task.last_execution.status === 'failed' ? 'text-red-600' :
-                                                'text-blue-600'
-                                            }>
-                                                {t(`dashboard.execution_status.${task.last_execution.status}`, task.last_execution.status)}
-                                            </span>
-                                            {(task.last_execution.status === 'queued' || task.last_execution.status === 'running') && (
-                                                <span>{task.last_execution.progress}%</span>
-                                            )}
-                                            {task.last_execution.message && <span>- {taskExecutionMessageKeys[task.last_execution.message]
-                                                ? t(taskExecutionMessageKeys[task.last_execution.message], task.last_execution.message)
-                                                : task.last_execution.message}</span>}
-                                        </div>
-                                    )}
-                                </div>
-                                <div className="flex items-center gap-2">
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => handleRunTask(task.name)}
-                                        disabled={runningTasks.has(task.name)}
-                                        title={t('dashboard.run_now', 'Run now')}
-                                    >
-                                        {runningTasks.has(task.name) ? (
-                                            <Loader2 className="w-4 h-4 animate-spin" />
-                                        ) : (
-                                            <Play className="w-4 h-4" />
-                                        )}
-                                    </Button>
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => {
-                                            setEditingTask(task);
-                                            setTaskInputOverrides({ ...task.input_overrides });
-                                            setTaskEditorError('');
-                                            setCronExpression(task.cron);
-                                            if (task.interval > 0) {
-                                                setScheduleMode('interval');
-                                                if (task.class_path && task.interval % 60 !== 0) {
-                                                    setIntervalValue(task.interval);
-                                                    setIntervalUnit('seconds');
-                                                } else if (task.interval % 86400 === 0) {
-                                                    setIntervalValue(task.interval / 86400);
-                                                    setIntervalUnit('days');
-                                                } else if (task.interval % 3600 === 0) {
-                                                    setIntervalValue(task.interval / 3600);
-                                                    setIntervalUnit('hours');
-                                                } else {
-                                                    setIntervalValue(Math.max(1, Math.floor(task.interval / 60)));
-                                                    setIntervalUnit('minutes');
-                                                }
-                                                setCronTimes([]);
-                                            } else {
-                                                setScheduleMode('cron');
-                                                setCronTimes(parseCronToTimes(task.cron));
-                                                setIntervalValue(5);
-                                                setIntervalUnit('minutes');
-                                            }
-                                            setEditModalOpen(true);
-                                        }}
-                                        title={t('dashboard.edit', 'Edit')}
-                                    >
-                                        <Pencil className="w-4 h-4" />
-                                    </Button>
-                                    {task.enabled ? (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleDisableTask(task.name)}
-                                            title={t('dashboard.disable', 'Disable')}
-                                        >
-                                            <PowerOff className="w-4 h-4" />
-                                        </Button>
-                                    ) : (
-                                        <Button
-                                            variant="outline"
-                                            size="sm"
-                                            onClick={() => handleEnableTask(task.name)}
-                                            title={t('dashboard.enable', 'Enable')}
-                                        >
-                                            <Power className="w-4 h-4" />
-                                        </Button>
-                                    )}
-                                </div>
-                            </div>
-                        ))}
-                    </div>
-                )}
-            </div>
-            {% endif %}
-
-            {% if scheduled_tasks %}
-            {/* Edit Task Modal */}
-            {editingTask && (
-                <Modal
-                    isOpen={isEditModalOpen}
-                    onClose={() => setEditModalOpen(false)}
-                    title={t('dashboard.edit_task', 'Edit Task')}
-                    footer={(
-                        <div className="flex flex-wrap justify-end gap-2">
-                            <Button variant="outline" onClick={() => setEditModalOpen(false)}>
-                                {t('common.cancel', 'Cancel')}
-                            </Button>
-                            <Button
-                                onClick={async () => {
-                                    const controls = taskInputContainer.current?.querySelectorAll<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>('input, textarea, select');
-                                    if (controls && !Array.from(controls).every((control) => control.reportValidity())) return;
-                                    setTaskEditorError('');
-                                    const descInput = document.getElementById('description') as HTMLInputElement;
-                                    const params: Record<string, unknown> = editingTask.class_path ? { ...taskInputOverrides } : {};
-                                    for (const [key, param] of Object.entries(editingTask.class_path ? {} : editingTask.params || {})) {
-                                        const el = document.getElementById(`param-${key}`) as HTMLInputElement;
-                                        if (el) {
-                                            if (param.type === 'bool') {
-                                                params[key] = el.checked;
-                                            } else if (param.type === 'number') {
-                                                params[key] = parseFloat(el.value) || 0;
-                                            } else if (param.type === 'multi_select') {
-                                                params[key] = el.value.split(',').map(s => s.trim()).filter(Boolean);
-                                            } else {
-                                                params[key] = el.value;
-                                            }
-                                        }
-                                    }
-                                    let interval = 0;
-                                    let cron = '';
-                                    if (scheduleMode === 'interval') {
-                                        const multipliers: Record<string, number> = { seconds: 1, minutes: 60, hours: 3600, days: 86400 };
-                                        interval = intervalValue * (multipliers[intervalUnit] || 60);
-                                    } else {
-                                        cron = editingTask.class_path ? cronExpression : cronTimes.length > 0 ? timesToCron(cronTimes) : '* * * * *';
-                                    }
-                                    try {
-                                        await updateTask(editingTask.name, {
-                                            cron,
-                                            interval,
-                                            description: descInput.value,
-                                            params,
-                                        });
-                                        toast.success(t('dashboard.task_updated', { name: editingTask.name }));
-                                    } catch (error: any) {
-                                        const detail = error?.response?.data?.detail;
-                                        setTaskEditorError(Array.isArray(detail) ? detail.map((item: any) => `${(item.loc || []).join('.')}: ${item.msg}`).join('\n') : typeof detail === 'string' ? detail : error.message);
-                                    }
-                                }}
-                            >
-                                {t('common.save', 'Save')}
-                            </Button>
-                        </div>
-                    )}
-                >
-                    <div className="space-y-4">
-                        <div>
-                            <Label>{t('dashboard.task_name', 'Task Name')}</Label>
-                            <div className="font-medium">{t(`scheduled_task_definitions.${editingTask.name}.title`, editingTask.title || editingTask.name)}</div>
-                        </div>
-                        <div>
-                            <Label>{t('dashboard.schedule_type', 'Schedule Type')}</Label>
-                            <div className="flex gap-4 mt-1">
-                                <label className="flex items-center gap-2">
-                                    <input
-                                        type="radio"
-                                        name="taskType"
-                                        value="cron"
-                                        checked={scheduleMode === 'cron'}
-                                        onChange={() => setScheduleMode('cron')}
-                                    />
-                                    {t('dashboard.type_cron', 'Scheduled Time')}
-                                </label>
-                                <label className="flex items-center gap-2">
-                                    <input
-                                        type="radio"
-                                        name="taskType"
-                                        value="interval"
-                                        checked={scheduleMode === 'interval'}
-                                        onChange={() => setScheduleMode('interval')}
-                                    />
-                                    {t('dashboard.type_interval', 'Interval')}
-                                </label>
-                            </div>
-                        </div>
-                        {scheduleMode === 'cron' && editingTask.class_path ? (
-                            <div><Label>Cron</Label><Input value={cronExpression} onChange={(event) => setCronExpression(event.target.value)} placeholder="0 3 * * *" /></div>
-                        ) : scheduleMode === 'cron' ? (
-                            <div>
-                                <Label>{t('dashboard.scheduled_times', 'Scheduled Times')}</Label>
-                                <div className="space-y-2 mt-1">
-                                    {cronTimes.map((time, idx) => (
-                                        <div key={idx} className="flex items-center gap-2">
-                                            <Input
-                                                type="time"
-                                                value={time}
-                                                className="w-32"
-                                                onChange={(e) => {
-                                                    const newTimes = [...cronTimes];
-                                                    newTimes[idx] = e.target.value;
-                                                    setCronTimes(newTimes);
-                                                }}
-                                            />
-                                            <Button
-                                                variant="outline"
-                                                size="sm"
-                                                onClick={() => {
-                                                    const newTimes = cronTimes.filter((_, i) => i !== idx);
-                                                    setCronTimes(newTimes);
-                                                }}
-                                            >
-                                                {t('common.remove', 'Remove')}
-                                            </Button>
-                                        </div>
-                                    ))}
-                                    <Button
-                                        variant="outline"
-                                        size="sm"
-                                        onClick={() => setCronTimes([...cronTimes, '08:00'])}
-                                    >
-                                        + {t('dashboard.add_time', 'Add Time')}
-                                    </Button>
-                                </div>
-                                <p className="text-xs text-muted-foreground mt-1">
-                                    {t('dashboard.cron_help', 'Select the times to run each day')}
-                                </p>
-                            </div>
-                        ) : (
-                            <div>
-                                <Label>{t('dashboard.interval_value', 'Run Every')}</Label>
-                                <div className="flex items-center gap-2 mt-1">
-                                    <Input
-                                        type="number"
-                                        min="1"
-                                        className="w-24"
-                                        value={intervalValue}
-                                        onChange={(e) => setIntervalValue(Math.max(1, parseInt(e.target.value) || 1))}
-                                    />
-                                    <select
-                                        className="border rounded px-3 py-2 bg-background text-sm"
-                                        value={intervalUnit}
-                                        onChange={(e) => setIntervalUnit(e.target.value as 'seconds' | 'minutes' | 'hours' | 'days')}
-                                    >
-                                        <option value="seconds">{t('dashboard.seconds', 'seconds')}</option>
-                                        <option value="minutes">{t('dashboard.minutes', 'minutes')}</option>
-                                        <option value="hours">{t('dashboard.hours', 'hours')}</option>
-                                        <option value="days">{t('dashboard.days', 'days')}</option>
-                                    </select>
-                                </div>
-                            </div>
-                        )}
-                        <div>
-                            <Label>{t('dashboard.description', 'Description')}</Label>
-                            <Input
-                                id="description"
-                                defaultValue={editingTask.description}
-                                placeholder={t('dashboard.description_placeholder', 'Task description')}
-                            />
-                        </div>
-                        {taskEditorError && <p role="alert" className="whitespace-pre-wrap text-sm text-destructive">{taskEditorError}</p>}
-                        {editingTask.class_path ? (
-                            <div ref={taskInputContainer} className="border-t pt-4">
-                                <TypedToolFields fields={editingTask.inputs || []} values={taskInputOverrides} defaults={editingTask.defaults || {}} onChange={setTaskInputOverrides} t={t} prefix={`scheduled_task_definitions.${editingTask.name}.inputs`} id={`scheduled-${editingTask.name}`} />
-                            </div>
-                        ) : editingTask.params && Object.keys(editingTask.params).length > 0 && (
-                            <div className="border-t pt-4">
-                                <Label className="mb-2 block">{t('dashboard.parameters', 'Parameters')}</Label>
-                                <div className="space-y-3">
-                                    {Object.entries(editingTask.params).map(([key, param]) => (
-                                        <div key={key}>
-                                            <Label className="text-sm">{param.label || key}</Label>
-                                            {param.type === 'bool' ? (
-                                                <div className="flex items-center gap-2 mt-1">
-                                                    <input
-                                                        type="checkbox"
-                                                        id={`param-${key}`}
-                                                        defaultChecked={!!param.value}
-                                                        className="h-4 w-4"
-                                                    />
-                                                </div>
-                                            ) : param.type === 'multi_select' ? (
-                                                <Input
-                                                    id={`param-${key}`}
-                                                    defaultValue={Array.isArray(param.value) ? param.value.join(', ') : String(param.value ?? '')}
-                                                    placeholder="a, b, c"
-                                                    className="mt-1"
-                                                />
-                                            ) : (
-                                                <Input
-                                                    id={`param-${key}`}
-                                                    defaultValue={String(param.value ?? '')}
-                                                    type={param.type === 'number' ? 'number' : 'text'}
-                                                    className="mt-1"
-                                                />
-                                            )}
-                                        </div>
-                                    ))}
-                                </div>
-                            </div>
-                        )}
-
-                    </div>
-                </Modal>
-            )}
-            {% endif %}
         </div>
     );
 };

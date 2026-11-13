@@ -204,20 +204,43 @@ def test_navigation_rejects_duplicate_canonical_and_legacy_references():
                           models, reports_enabled=False, reports_role_visible={})
 
 
-@pytest.mark.parametrize("navigation", [None, [], [{"type": "builtin", "key": "tools"}]])
-def test_tools_navigation_respects_role_visibility_and_custom_order(navigation):
+@pytest.mark.parametrize(
+    ("key", "visibility_argument", "label"),
+    [
+        ("tools", "tools_role_visible", "menu.tools"),
+        ("scheduled-tasks", "scheduled_tasks_role_visible", "menu.scheduled_tasks"),
+    ],
+)
+@pytest.mark.parametrize("placement", ["default", "omitted", "top-level", "grouped"])
+def test_tools_and_scheduled_tasks_navigation_respects_role_visibility_and_placement(
+    key, visibility_argument, label, placement
+):
+    navigation = None if placement == "default" else []
+    if placement == "top-level":
+        navigation = [{"type": "builtin", "key": key}]
+    if placement == "grouped":
+        navigation = [{
+            "type": "group",
+            "key": "operations",
+            "label": {"zh": "运维", "en": "Operations"},
+            "children": [{"type": "builtin", "key": key}],
+        }]
     if navigation is not None:
         validate_navigation_config({"navigation": navigation})
     visibility = {"user": False, "admin": True, "developer": True}
     menu = _build_navigation(
         navigation, [], reports_enabled=False, reports_role_visible={},
-        tools_role_visible=visibility,
+        **{visibility_argument: visibility},
     )
-    items = [item for item in menu if item["key"] == "/tools"]
+    path = f"/{key}"
+    if placement == "grouped":
+        assert [node["key"] for node in menu] == ["group:operations"]
+        menu = menu[0]["children"]
+    items = [item for item in menu if item["key"] == path]
     assert len(items) == 1
     assert items[0]["visible"] == visibility
-    assert items[0]["label"] == "menu.tools"
+    assert items[0]["label"] == label
     disabled = _build_navigation(
         navigation, [], reports_enabled=False, reports_role_visible={},
     )
-    assert all(item["key"] != "/tools" for item in disabled)
+    assert [node["key"] for node in disabled] == (["/dashboard"] if navigation is None else [])

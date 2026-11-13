@@ -55,8 +55,12 @@ class CleanupTask(BaseScheduledTask):
 `extra["TIMEZONE"]`。框架为每次执行创建新实例；构造函数应无必填参数。
 
 完整示例见 [examples/typed_tasks](../examples/typed_tasks)。进入示例目录运行
-`site sync`、`site run all`，以 admin/developer 登录后，在 Dashboard 编辑参数、
-手动执行或启用调度，在任务中心查看结构化结果。示例默认关闭自动调度。
+`site sync`、`site run all`，以 admin/developer 登录后，在“定时任务”页面
+（`/scheduled-tasks`）编辑参数、手动执行或启停调度，在“任务中心”查看执行历史和
+结构化结果。示例默认关闭自动调度。
+
+角色至少拥有一项任务的 `manual_permissions` 时才会看到定时任务入口。
+将 `NavBuiltin.scheduled_tasks()` 加入 `NavGroup.children` 可指定导航分组。
 
 ## 参数与持久化
 

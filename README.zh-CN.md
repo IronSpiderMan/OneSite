@@ -271,7 +271,24 @@ category_id: Optional[int] = Field(default=None, foreign_key="category.id")
 
 ## 配置与权限
 
-推荐在 `site_config.py` 中使用带类型的 `SiteConfig`；旧项目的 `site_config.json` 仍然兼容。两种格式都支持 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation` 等配置。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports`、`external-resources` 和 `task-center`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的模型仍可通过路由和 API 访问，但不会出现在侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `extra={"TIMEZONE": Timezone.ASIA_SHANGHAI}` 设置系统时区，也可继续使用任意有效的 IANA 时区字符串。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。`Timezone` 内置了常见时区，使用 `postgres_url(host, port, user, password, db, params)` 可安全拼装并编码 PostgreSQL 连接地址。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
+推荐在 `site_config.py` 中使用带类型的 `SiteConfig`；旧项目的 `site_config.json` 仍然兼容。两种格式都支持 `project_name`、`database_url`、`upload_dir`、`secret_key`、`allowed_origins`、`style`、`radius`、`navigation` 等配置。`navigation` 是按数组顺序排列的侧边栏树：`model` 引用模型的 `module_name`，`group` 是没有路由的可折叠二级菜单，`builtin` 支持 `dashboard`、`reports`、`external-resources`、`tools`、`scheduled-tasks` 和 `task-center`。分组标签须同时提供 `zh`、`en`；模型本身的权限和 `visible` 仍决定子项是否显示，空分组会自动隐藏。显式配置 `navigation` 后，未列出的可见模型会追加到侧边栏。`extra` 下的所有键值都会同步到后端 `.env`；可通过 `extra={"TIMEZONE": Timezone.ASIA_SHANGHAI}` 设置系统时区，也可继续使用任意有效的 IANA 时区字符串。它默认使用上海时区，并控制前端默认时间显示与 APScheduler 的 cron 调度；写入数据库的 datetime 会统一转换为 UTC。`Timezone` 内置了常见时区，使用 `postgres_url(host, port, user, password, db, params)` 可安全拼装并编码 PostgreSQL 连接地址。内置结构主题：`normal`、`industrial`、`neuron`。`style` 是构建时主题，执行 `site sync` 时会选择对应主题目录下的列表、详情、创建、仪表盘、设置、个人资料、单例页和 CSS 模板；缺少覆盖模板时回退到公共模板。`normal` 通过生成的兼容适配层使用 Ant Design 6，并且只有 normal 构建会增加 `antd` 依赖；明暗模式会同步到 Ant Design 的主题算法。生产环境务必更换 `secret_key`、数据库地址和跨域来源。
+
+将下面的 `NavGroup` 加入 `SiteConfig.navigation`，即可把工具和定时任务放进同一个侧边栏分组。
+
+```python
+from onesite.config import NavBuiltin, NavGroup
+
+NavGroup(
+    key="operations",
+    label={"zh": "运维", "en": "Operations"},
+    children=[NavBuiltin.tools(), NavBuiltin.scheduled_tasks()],
+)
+```
+
+在 `site_config.json` 中，分组的 `children` 使用 `{"type": "builtin", "key": "tools"}`
+和 `{"type": "builtin", "key": "scheduled-tasks"}`。配置相应功能后，若 `navigation`
+里没有指定位置，对应入口会自动出现在侧边栏顶层。角色至少拥有一项工具的
+`permissions` 或一项定时任务的 `manual_permissions` 时，才会看到对应入口。
 
 模型级选项写入 `__onesite__`：
 
@@ -442,6 +459,9 @@ __onesite__ = {
 `SiteConfig(scheduled_tasks=[MyTask])` 注册；APScheduler 继续负责触发，后台队列
 负责执行。参见 [Python 类定时任务说明](docs/scheduled-tasks.md) 和
 [完整示例](examples/typed_tasks)，旧的 `ScheduledTask(...)` 写法继续兼容。
+
+执行 `site sync` 后，可在独立的“定时任务”页面（`/scheduled-tasks`）编辑调度和参数、
+启停调度或手动运行任务。执行历史可在“任务中心”（`/task-center`）查看。
 
 配置任一导入、导出、项目工具或定时任务后，`site sync` 会自动生成统一的
 “任务中心”页面。页面展示提交到进程内任务队列的导入、导出、工具和定时任务，

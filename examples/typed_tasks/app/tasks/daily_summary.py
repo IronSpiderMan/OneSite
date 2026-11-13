@@ -36,7 +36,7 @@ class DailySummaryTask(BaseScheduledTask):
     inputs = SummaryInputs
     result = SummaryResult
     schedule = CronSchedule(cron="0 3 * * *")
-    enabled = False  # Enable automatic scheduling from the Dashboard when ready.
+    enabled = False  # Enable automatic scheduling from the Scheduled Tasks page when ready.
     overlap = "skip"
     execution = ExecutionOptions(timeout_seconds=120)
     manual_permissions = ("admin", "developer")

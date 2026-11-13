@@ -560,8 +560,7 @@ def _custom_route_menu_node(route: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-def _builtin_menu_node(
-    key: str,
+def _builtin_menu_nodes(
     *,
     reports_enabled: bool,
     reports_role_visible: dict[str, bool],
@@ -569,7 +568,8 @@ def _builtin_menu_node(
     import_export_enabled: bool = False,
     import_export_role_visible: dict[str, bool] | None = None,
     tools_role_visible: dict[str, bool] | None = None,
-) -> dict[str, Any] | None:
+    scheduled_tasks_role_visible: dict[str, bool] | None = None,
+) -> dict[str, dict[str, Any]]:
     builtins = {
         "dashboard": {
             "key": "/dashboard",
@@ -595,6 +595,12 @@ def _builtin_menu_node(
             "label": "menu.tools",
             "visible": tools_role_visible or {},
         },
+        "scheduled-tasks": {
+            "key": "/scheduled-tasks",
+            "icon": "CalendarClock",
+            "label": "menu.scheduled_tasks",
+            "visible": scheduled_tasks_role_visible or {},
+        },
         "task-center": {
             "key": "/task-center",
             "icon": "ArrowRightLeft",
@@ -603,16 +609,17 @@ def _builtin_menu_node(
             or {"user": False, "admin": False, "developer": False},
         },
     }
-    if key == "tools" and not tools_role_visible:
-        return None
-    if key == "reports" and not reports_enabled:
-        return None
-    if key == "external-resources" and not external_resources_enabled:
-        return None
-    if key == "task-center" and not import_export_enabled:
-        return None
-    node = builtins[key]
-    return {"type": "item", **node}
+    if not tools_role_visible:
+        del builtins["tools"]
+    if not scheduled_tasks_role_visible:
+        del builtins["scheduled-tasks"]
+    if not reports_enabled:
+        del builtins["reports"]
+    if not external_resources_enabled:
+        del builtins["external-resources"]
+    if not import_export_enabled:
+        del builtins["task-center"]
+    return {key: {"type": "item", **node} for key, node in builtins.items()}
 
 
 def _build_navigation(
@@ -626,6 +633,7 @@ def _build_navigation(
     import_export_enabled: bool = False,
     import_export_role_visible: dict[str, bool] | None = None,
     tools_role_visible: dict[str, bool] | None = None,
+    scheduled_tasks_role_visible: dict[str, bool] | None = None,
 ) -> list[dict[str, Any]]:
     """Build the generated menu tree from ``site_config.navigation``.
 
@@ -648,6 +656,15 @@ def _build_navigation(
             models_by_source.setdefault(source, []).append(model)
     declared_models: set[str] = set()
     route_by_id = {route["id"]: route for route in custom_routes}
+    builtin_nodes = _builtin_menu_nodes(
+        reports_enabled=reports_enabled,
+        reports_role_visible=reports_role_visible,
+        external_resources_enabled=external_resources_enabled,
+        import_export_enabled=import_export_enabled,
+        import_export_role_visible=import_export_role_visible,
+        tools_role_visible=tools_role_visible,
+        scheduled_tasks_role_visible=scheduled_tasks_role_visible,
+    )
 
     def build_node(declaration: dict[str, Any], path: str) -> dict[str, Any] | None:
         node_type = declaration["type"]
@@ -689,15 +706,7 @@ def _build_navigation(
                 )
             return _custom_route_menu_node(route)
         if node_type == "builtin":
-            return _builtin_menu_node(
-                declaration["key"],
-                reports_enabled=reports_enabled,
-                reports_role_visible=reports_role_visible,
-                external_resources_enabled=external_resources_enabled,
-                import_export_enabled=import_export_enabled,
-                import_export_role_visible=import_export_role_visible,
-                tools_role_visible=tools_role_visible,
-            )
+            return builtin_nodes.get(declaration["key"])
 
         children = [
             built
@@ -718,35 +727,18 @@ def _build_navigation(
         }
 
     if navigation is None:
-        default_nodes: list[dict[str, Any]] = [
-            _builtin_menu_node(
-                "dashboard",
-                reports_enabled=reports_enabled,
-                reports_role_visible=reports_role_visible,
-                external_resources_enabled=external_resources_enabled,
-                import_export_enabled=import_export_enabled,
-                import_export_role_visible=import_export_role_visible,
-                tools_role_visible=tools_role_visible,
-            )
-        ]
+        default_nodes = [builtin_nodes["dashboard"]]
         default_nodes.extend(_model_menu_node(model) for model in model_by_module.values())
         default_nodes.extend(
             _custom_route_menu_node(route)
             for route in custom_routes
             if route.get("menu") is not None
         )
-        for key in ("tools", "reports", "external-resources", "task-center"):
-            node = _builtin_menu_node(
-                key,
-                reports_enabled=reports_enabled,
-                reports_role_visible=reports_role_visible,
-                external_resources_enabled=external_resources_enabled,
-                import_export_enabled=import_export_enabled,
-                import_export_role_visible=import_export_role_visible,
-                tools_role_visible=tools_role_visible,
-            )
-            if node is not None:
-                default_nodes.append(node)
+        default_nodes.extend(
+            builtin_nodes[key]
+            for key in ("tools", "scheduled-tasks", "reports", "external-resources", "task-center")
+            if key in builtin_nodes
+        )
         return default_nodes
 
     declared_nodes = [
@@ -788,24 +780,11 @@ def _build_navigation(
         for child in declaration["children"]
         if child["type"] == "builtin"
     )
-    if import_export_enabled and "task-center" not in declared_builtins:
-        declared_nodes.append(
-            _builtin_menu_node(
-                "task-center",
-                reports_enabled=reports_enabled,
-                reports_role_visible=reports_role_visible,
-                external_resources_enabled=external_resources_enabled,
-                import_export_enabled=True,
-                import_export_role_visible=import_export_role_visible,
-                tools_role_visible=tools_role_visible,
-            )
-        )
-    if tools_role_visible and "tools" not in declared_builtins:
-        declared_nodes.append(_builtin_menu_node(
-            "tools", reports_enabled=reports_enabled,
-            reports_role_visible=reports_role_visible,
-            tools_role_visible=tools_role_visible,
-        ))
+    declared_nodes.extend(
+        builtin_nodes[key]
+        for key in ("task-center", "tools", "scheduled-tasks")
+        if key in builtin_nodes and key not in declared_builtins
+    )
     return declared_nodes
 
 
@@ -1468,6 +1447,16 @@ def phase_generate_aggregated(
         generated_route_paths["builtin.external-resources"] = "/external-resources"
     if tools:
         generated_route_paths["builtin.tools"] = "/tools"
+    if scheduled_tasks:
+        scheduled_tasks_path = "/scheduled-tasks"
+        if (
+            public_dashboard.get("enabled")
+            and public_dashboard["path"].rstrip("/").lower() == scheduled_tasks_path
+        ):
+            raise ValueError(
+                f"public_dashboard.path conflicts with generated path '{scheduled_tasks_path}'."
+            )
+        generated_route_paths["builtin.scheduled-tasks"] = scheduled_tasks_path
     if background_tasks_enabled:
         generated_route_paths["builtin.task-center"] = "/task-center"
     for model in frontend_models:
@@ -1552,6 +1541,10 @@ def phase_generate_aggregated(
         import_export_role_visible=import_export_role_visible,
         tools_role_visible={role: any(role in tool["permissions"] for tool in tools)
                             for role in ("user", "admin", "developer")} if tools else None,
+        scheduled_tasks_role_visible={
+            role: any(role in task["manual_permissions"] for task in scheduled_tasks)
+            for role in ("user", "admin", "developer")
+        } if scheduled_tasks else None,
     )
     if site_config.get("agents"):
         navigation.append({
@@ -1609,6 +1602,7 @@ def phase_generate_aggregated(
             "public_dashboard": public_dashboard,
             "agents_enabled": bool(site_config.get("agents")),
             "tools_enabled": bool(tools),
+            "scheduled_tasks_enabled": bool(scheduled_tasks),
         },
         frontend_path / "src" / "Routes.tsx",
     )
@@ -1650,10 +1644,8 @@ def phase_generate_aggregated(
         {
             "models": visualize_models,
             "dashboard_models": dashboard_models,
-            "scheduled_tasks": scheduled_tasks,
             "site_logger": site_logger_enabled,
             "show_dashboard_announcement": show_dashboard_announcement,
-            "tools": tools,
             "dashboard_metric_icons": dashboard_metric_icons,
             "visualizations": visualizations,
             "public_dashboard": public_dashboard,
@@ -1710,7 +1702,7 @@ def phase_generate_aggregated(
         frontend_path / "src" / "features.ts",
     )
 
-    # ── Scheduled task service/store ──
+    # ── Scheduled tasks ──
     if scheduled_tasks:
         generate_file(
             "frontend_task_service.ts.j2", {},
@@ -1719,6 +1711,11 @@ def phase_generate_aggregated(
         generate_file(
             "task_store.ts.j2", {},
             frontend_path / "src" / "stores" / "useTaskStore.ts",
+        )
+        generate_file(
+            "frontend_scheduled_tasks_page.tsx.j2",
+            {},
+            frontend_path / "src" / "pages" / "ScheduledTasks.tsx",
         )
 
     if tools or scheduled_tasks:

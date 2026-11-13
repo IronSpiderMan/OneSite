@@ -74,6 +74,7 @@ _NAVIGATION_BUILTINS = {
     "external-resources",
     "task-center",
     "tools",
+    "scheduled-tasks",
 }
 _NAVIGATION_KEY_RE = re.compile(r"[A-Za-z][A-Za-z0-9_-]*")
 _MODULE_NAME_RE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*")
@@ -353,7 +354,8 @@ def validate_navigation_config(config: Dict[str, Any]) -> None:
             if key not in _NAVIGATION_BUILTINS:
                 fail(
                     path + ".key",
-                    "must be dashboard, reports, external-resources, tools, or task-center",
+                    "must be dashboard, reports, external-resources, tools, "
+                    "scheduled-tasks, or task-center",
                 )
             if key in seen_builtins:
                 fail(path + ".key", f"references duplicate builtin '{key}'")

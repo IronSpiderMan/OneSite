@@ -209,6 +209,7 @@ class NavBuiltin(_ConfigModel):
         "external-resources",
         "task-center",
         "tools",
+        "scheduled-tasks",
     ]
 
     @classmethod
@@ -226,6 +227,10 @@ class NavBuiltin(_ConfigModel):
     @classmethod
     def tools(cls) -> "NavBuiltin":
         return cls(key="tools")
+
+    @classmethod
+    def scheduled_tasks(cls) -> "NavBuiltin":
+        return cls(key="scheduled-tasks")
 
     @classmethod
     def task_center(cls) -> "NavBuiltin":

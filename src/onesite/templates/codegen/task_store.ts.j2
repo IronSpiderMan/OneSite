@@ -9,7 +9,7 @@ interface TaskState {
   editingTask: Task | null;
   isEditModalOpen: boolean;
 
-  fetchTasks: () => Promise<void>;
+  fetchTasks: (options?: { clearCache?: boolean }) => Promise<void>;
   runTask: (name: string) => Promise<void>;
   enableTask: (name: string) => Promise<void>;
   disableTask: (name: string) => Promise<void>;
@@ -18,6 +18,9 @@ interface TaskState {
   setEditModalOpen: (open: boolean) => void;
 }
 
+let latestFetch = 0;
+let latestSettled = 0;
+
 export const useTaskStore = create<TaskState>((set, get) => ({
   tasks: [],
   loading: false,
@@ -25,12 +28,18 @@ export const useTaskStore = create<TaskState>((set, get) => ({
   editingTask: null,
   isEditModalOpen: false,
 
-  fetchTasks: async () => {
-    set({ loading: true, error: null });
+  fetchTasks: async ({ clearCache = false } = {}) => {
+    const fetchId = ++latestFetch;
+    if (clearCache) latestSettled = fetchId;
+    set(clearCache ? { tasks: [], loading: true, error: null } : { loading: true, error: null });
     try {
       const tasks = await taskService.getTasks();
-      set({ tasks, loading: false });
+      if (fetchId < latestSettled) return;
+      latestSettled = fetchId;
+      set({ tasks, loading: false, error: null });
     } catch (error: any) {
+      if (fetchId < latestSettled) return;
+      latestSettled = fetchId;
       set({ error: error.message, loading: false });
     }
   },
