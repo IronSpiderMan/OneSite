@@ -1,25 +1,53 @@
+import { useEffect, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useParams } from 'react-router-dom';
+import request from '../../utils/request';
 import MqttCapability from './MqttCapability';
 
 type Props = {
     model: string;
     allowedRoles: string[];
     modelPermissions: Record<string, string>;
+    selector?: { field: string; values: string[] };
 };
 
-export default function MqttCapabilityPage({ model, allowedRoles, modelPermissions }: Props) {
+export default function MqttCapabilityPage({ model, allowedRoles, modelPermissions, selector }: Props) {
     const { t } = useTranslation();
     const { id } = useParams();
     const role = localStorage.getItem('user_role') || 'user';
-    if (!id || !allowedRoles.includes(role) || !modelPermissions[role]?.includes('r')) {
+    const allowed = allowedRoles.includes(role) && Boolean(modelPermissions[role]?.includes('r'));
+    const record = encodeURIComponent(id ?? '');
+    const recordPath = `/${model}s/${record}`;
+    const [check, setCheck] = useState<{ path: string; status: 'active' | 'inactive' | 'error' }>();
+
+    useEffect(() => {
+        if (!id || !allowed || !selector) return;
+        const controller = new AbortController();
+        setCheck(undefined);
+        request.get<Record<string, unknown>>(recordPath, { signal: controller.signal, suppressErrorToast: true })
+            .then(({ data }) => {
+                if (controller.signal.aborted) return;
+                const value = data[selector.field];
+                const active = typeof value === 'string' && selector.values.includes(value);
+                setCheck({ path: recordPath, status: active ? 'active' : 'inactive' });
+            })
+            .catch(() => {
+                if (!controller.signal.aborted) setCheck({ path: recordPath, status: 'error' });
+            });
+        return () => controller.abort();
+    }, [id, allowed, recordPath, selector]);
+
+    if (!id || !allowed) {
         return <p role="alert">{t('capabilities.denied')}</p>;
     }
-    const record = encodeURIComponent(id);
+    const status = selector ? (check?.path === recordPath ? check.status : 'loading') : 'active';
     return (
         <div className="space-y-4">
-            <Link className="text-sm underline" to={`/${model}s/${record}`}>{t('capabilities.back_to_record')}</Link>
-            <MqttCapability key={`${model}/${record}`} apiPath={`/model-capabilities/${model}/${record}/mqtt_broker`} />
+            <Link className="text-sm underline" to={recordPath}>{t('capabilities.back_to_record')}</Link>
+            {status === 'loading' && <p role="status">{t('common.loading')}</p>}
+            {status === 'inactive' && <p role="alert">{t('capabilities.inactive')}</p>}
+            {status === 'error' && <p role="alert">{t('capabilities.denied')}</p>}
+            {status === 'active' && <MqttCapability key={recordPath} apiPath={`/model-capabilities/${model}/${record}/mqtt_broker`} />}
         </div>
     );
 }

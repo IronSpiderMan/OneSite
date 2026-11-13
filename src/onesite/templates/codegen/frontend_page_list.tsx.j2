@@ -1,4 +1,5 @@
 import { ImageViewer } from '../../components/ui/image-viewer';
+{% set universal_capabilities = model.capabilities | default([]) | selectattr('selector_field', 'defined') | list %}
 {% set override_field_names = model.override_fields | default([]) | map(attribute='field') | list %}
 {% set writable_override_field_names = model.override_fields | default([]) | selectattr('write_handler', 'defined') | map(attribute='field') | list %}
 import { resolveFilterDefault } from '../../utils/filterDefaults';
@@ -249,6 +250,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     if (!fp) return true; // no restrictions = allowed
     return (fp[userRole] || '').includes(perm);
   };
+{% if universal_capabilities %}{% include 'frontend_capability_fields.ts.j2' %}{% endif %}
 {% include "frontend_write_payload.ts.j2" %}
 
 
@@ -398,6 +400,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
 
   const { register, handleSubmit, reset, setValue, control, watch } = useForm({
     defaultValues: {
+    {% if universal_capabilities %}...capabilityFormDefaults,{% endif %}
     {% for field in model.fields %}
     {% if field.ui_type in ['int', 'float'] and field.default is number and not field.fk_info %}
       {{ field.name }}: {{ field.default | tojson }},
@@ -406,6 +409,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     } as Record<string, any>,
   });
   const rootValue = watch();
+  {% if universal_capabilities and not model.page_edit %}
+  const savedCapabilityRecord = useRef<Record<string, unknown>>();
+  {% endif %}
 
   {% if model.refresh_interval %}
   const [autoRefresh, setAutoRefresh] = useState(true);
@@ -690,6 +696,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     setEditingId(record.id);
     const full = await fetchItem(record.id);
     const item = full || record;
+    {% if universal_capabilities %}
+    savedCapabilityRecord.current = { ...item };
+    {% endif %}
     // Set form values
     {% for field in model.fields %}
     {% if field.capability_secret %}
@@ -882,8 +891,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
   const onSubmit = async (values: any) => {
     if (isSaving) return;
     setIsSaving(true);
-    const payload = writablePayload({ ...values, ...fixedFields }, editingId ? 'u' : 'c');
     try {
+      const payload = writablePayload({ ...values, ...fixedFields }, editingId !== null ? 'u' : 'c'{% if universal_capabilities %}, editingId !== null ? savedCapabilityRecord.current : undefined{% endif %});
       {% if model.is_tree %}
       if (editingId) {
         await updateItem(editingId, payload);
@@ -1594,7 +1603,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     {% if 'r' in field.permissions %}{hasFieldPerm('{{ field.name }}', 'r'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
                     <TableCell>
                         {% if model.edit_mode == 'inplace_edit' and 'u' in field.permissions %}
-                        {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} ? (
+                        {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u'){% if universal_capabilities %} && capabilityFieldVisible('{{ field.name }}', rootValue[capabilitySelectorField]){% endif %} ? (
                         <div className="min-w-[10rem]" data-inplace-field="{{ field.name }}">
                         {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
                         {% if field.name in writable_override_field_names %}
@@ -1662,7 +1671,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         )} />
                         {% elif field.is_enum %}
                         <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
-                            <Select value={value == null ? undefined : String(value)} onValueChange={onChange}>
+                            <Select value={value == null ? undefined : String(value)} {% if universal_capabilities and field.name == universal_capabilities[0].selector_field %}onValueChange={next => { if (next !== value) clearCapabilityPasswordDraft(setValue); onChange(next); }}{% else %}onValueChange={onChange}{% endif %}>
                                 <SelectTrigger className="min-w-[10rem]"><SelectValue /></SelectTrigger>
                                 <SelectContent>
                                     {({% if model.module_name == "user" and model.name == "User" and field.name == "role" %}userRole === 'developer' ? {{ field.enum_values | tojson }} : ({{ field.enum_values | tojson }} as string[]).filter(v => v !== 'developer'){% else %}{{ field.enum_values | tojson }}{% endif %}).map((enumVal: string) => (
@@ -1712,7 +1721,15 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                         ) : (
                         <>
                         {% endif %}
+                        {% if universal_capabilities %}
+                        {(!hasFieldPerm(capabilitySelectorField, 'r') || capabilityFieldVisible('{{ field.name }}', {% if model.edit_mode == 'inplace_edit' %}editingId === item.id ? rootValue[capabilitySelectorField] : {% endif %}item.{{ universal_capabilities[0].selector_field }})) && (
+                        <>
+                        {% endif %}
                         {% include 'frontend_list_cell.tsx.j2' %}
+                        {% if universal_capabilities %}
+                        </>
+                        )}
+                        {% endif %}
                         {% if model.edit_mode == 'inplace_edit' and 'u' in field.permissions %}
                         </>
                         )}
@@ -1727,15 +1744,17 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     {% endfor %}
                     <TableCell className="sticky right-0 bg-card z-10">
                         {% for field in model.fields if field.capability_secret and 'u' in field.permissions and model.edit_mode == 'inplace_edit' %}
-                        {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u') && (
+                        {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u'){% if universal_capabilities %} && capabilityFieldVisible('{{ field.name }}', rootValue[capabilitySelectorField]){% endif %} && (
                           <div>
                             <Input className="mb-2 min-w-32" type="password" autoComplete="new-password"
                                 aria-label={t('{{ field.label_key }}')} placeholder={t('{{ field.label_key }}')}
                                 {...register('{{ field.name }}')} />
                             {% if field.capability_secret_clearable %}
+                            {% if universal_capabilities %}{canClearCapabilityPassword('{{ field.name }}', rootValue[capabilitySelectorField]) && ({% endif %}
                             <label className="flex items-center gap-2 text-sm">
                                 <input type="checkbox" {...register('__clear_{{ field.name }}')} /> {t('capabilities.clear_password')}
                             </label>
+                            {% if universal_capabilities %})}{% endif %}
                             {% endif %}
                           </div>
                         )}
@@ -2282,9 +2301,9 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
         <form onSubmit={handleSubmit(onSubmit)} className="flex min-h-0 max-h-[calc(100dvh-12rem)] flex-col">
           <div className="min-h-0 flex-1 space-y-5 overflow-y-auto overscroll-contain px-1 pb-1">
           {% macro modal_form_field(field, as_expression=false) -%}
-          {% if not as_expression %}{{ '{' }}{% endif %}!(embedded && relationField === '{{ field.name }}' && fixedFields['{{ field.name }}'] !== undefined) && (!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %}{% if field.visible_when %}{% for controller, values in field.visible_when.items() %} && ({{ values | tojson }} as any[]).includes(rootValue?.['{{ controller }}']){% endfor %}{% endif %} && (
+          {% if not as_expression %}{{ '{' }}{% endif %}!(embedded && relationField === '{{ field.name }}' && fixedFields['{{ field.name }}'] !== undefined) && (!editingId ? hasFieldPerm('{{ field.name }}', 'c') : hasFieldPerm('{{ field.name }}', 'u')){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %}{% if field.visible_when %}{% for controller, values in field.visible_when.items() %} && ({{ values | tojson }} as any[]).includes(rootValue?.['{{ controller }}']){% endfor %}{% endif %}{% if universal_capabilities %} && capabilityFieldVisible('{{ field.name }}', rootValue[capabilitySelectorField]){% endif %} && (
           <div className="space-y-2">
-            <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{((!editingId && {{ 'true' if field.required and not field.create_optional else 'false' }}) || (Boolean(editingId) && {{ 'true' if field.required and not field.update_optional else 'false' }})) && <span className="text-destructive"> *</span>}</Label>
+            <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{((!editingId && {{ 'true' if field.required and not field.create_optional else 'false' }}) || (Boolean(editingId) && {{ 'true' if field.required and not field.update_optional else 'false' }}){% if universal_capabilities %} || capabilityFieldRequired('{{ field.name }}', rootValue[capabilitySelectorField], editingId !== null, savedCapabilityRecord.current?.[capabilitySelectorField]){% endif %}) && <span className="text-destructive"> *</span>}</Label>
             {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
             {% if field.name in writable_override_field_names %}
             {% if override.read_type == 'bool' %}
@@ -2434,7 +2453,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     const filteredValues = {{ field.enum_values | tojson }};
                     {% endif %}
                     return (
-                    <Select onValueChange={onChange} defaultValue={value}>
+                    <Select {% if universal_capabilities and field.name == universal_capabilities[0].selector_field %}onValueChange={next => { if (next !== value) clearCapabilityPasswordDraft(setValue); onChange(next); }}{% else %}onValueChange={onChange}{% endif %} {% if universal_capabilities %}value={value ?? ''}{% else %}defaultValue={value}{% endif %}>
                         <SelectTrigger>
                             <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
                         </SelectTrigger>
@@ -2598,7 +2617,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
             />
             {% endif %}
             {% if field.capability_secret_clearable %}
-            {editingId !== null && (
+            {editingId !== null{% if universal_capabilities %} && canClearCapabilityPassword('{{ field.name }}', rootValue[capabilitySelectorField]){% endif %} && (
                 <label className="flex items-center gap-2 text-sm">
                     <input type="checkbox" {...register('__clear_{{ field.name }}')} /> {t('capabilities.clear_password')}
                 </label>

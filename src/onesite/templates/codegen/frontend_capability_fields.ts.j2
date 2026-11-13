@@ -1,0 +1,80 @@
+{% set standalone = model.capabilities | rejectattr('selector_field', 'defined') | list %}
+{% set fields = namespace(names=[universal_capabilities[0].selector_field]) %}
+{% for capability in universal_capabilities %}
+{% set fields.names = fields.names + (capability.fields.values() | list) %}
+{% endfor %}
+  const capabilitySelectorField = {{ universal_capabilities[0].selector_field | tojson }};
+  const capabilityFormDefaults: Record<string, unknown> = {
+    {% for field in model.fields if field.name in fields.names and (field.default is string or field.default is number) %}
+    {{ field.name | tojson }}: {{ field.default | tojson }},
+    {% endfor %}
+  };
+  const capabilityBranches: {
+    kind: string;
+    values: string[];
+    fields: string[];
+    requiredFields: string[];
+    password: string;
+  }[] = [
+    {% for capability in universal_capabilities %}
+    {
+      kind: {{ capability.kind | tojson }},
+      values: {{ capability.selector_values | tojson }},
+      fields: {{ capability.fields.values() | list | tojson }},
+      requiredFields: {{ capability.required_fields | tojson }},
+      password: {{ capability.fields[capability.credential] | tojson }},
+    },
+    {% endfor %}
+  ];
+  const standaloneCapabilityFields = new Set<string>([
+    {% for capability in standalone %}
+    ...{{ capability.fields.values() | list | tojson }},
+    {% endfor %}
+  ]);
+  const standaloneClearablePasswords = new Set<string>([
+    {% for capability in standalone if capability.kind != 'database' %}
+    {{ capability.fields[capability.credential] | tojson }},
+    {% endfor %}
+  ]);
+  const conditionalCapabilityFields = new Set(capabilityBranches.flatMap(branch => branch.fields)
+    .filter(field => !standaloneCapabilityFields.has(field)));
+  const capabilityForValue = (value: unknown) => typeof value === 'string'
+    ? capabilityBranches.find(branch => branch.values.includes(value))
+    : undefined;
+  const capabilityFieldVisible = (field: string, value: unknown) => !conditionalCapabilityFields.has(field)
+    || Boolean(capabilityForValue(value)?.fields.includes(field));
+  const canClearCapabilityPassword = (field: string, value: unknown) => {
+    const active = capabilityForValue(value);
+    if (active?.password === field) return active.kind !== 'database';
+    return standaloneClearablePasswords.has(field);
+  };
+  const capabilityFieldRequired = (field: string, value: unknown, editing: boolean, savedValue?: unknown) => {
+    const active = capabilityForValue(value);
+    return Boolean(active?.requiredFields.includes(field)
+      && (field !== active.password || !editing || value !== savedValue));
+  };
+  const validateCapabilityFields = (payload: Record<string, unknown>, operation: 'c' | 'u', saved?: Record<string, unknown>) => {
+    const savedValue = saved?.[capabilitySelectorField];
+    const value = payload[capabilitySelectorField] ?? savedValue ?? capabilityFormDefaults[capabilitySelectorField];
+    const active = capabilityForValue(value);
+    const missing = !active && operation === 'c' && hasFieldPerm(capabilitySelectorField, operation)
+      ? capabilitySelectorField
+      : active?.requiredFields.find(field => {
+        if (!hasFieldPerm(field, operation) || !capabilityFieldRequired(field, value, operation === 'u', savedValue)) return false;
+        const input = field in payload ? payload[field] : (saved ?? capabilityFormDefaults)[field];
+        return input == null || (typeof input === 'string' && !input.trim());
+      });
+    if (missing) {
+      throw new Error(t('capabilities.required_field', { field: t(`models.{{ model.module_name }}.fields.${missing}`, missing) }));
+    }
+  };
+  const clearCapabilityPasswordDraft = (setValue: (field: string, value: string | boolean) => void) => {
+    {% for field in model.fields if field.capability_secret %}
+    {% if universal_capabilities | selectattr('fields.password', 'equalto', field.name) | list %}
+    setValue({{ field.name | tojson }}, '');
+    {% if field.capability_secret_clearable %}
+    setValue('__clear_{{ field.name }}', false);
+    {% endif %}
+    {% endif %}
+    {% endfor %}
+  };

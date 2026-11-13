@@ -5,7 +5,7 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 
 from app.core import db, deps
 from app.core.access import get_owned_record, policy_for, require_operation, role_of
-from app.core.capability_profiles import read_profile
+from app.core.capability_profiles import profile_applies, read_profile
 from app.models.user import User
 {% for adapter in adapters %}
 from app.api.endpoints import capability_{{ adapter }}
@@ -33,6 +33,8 @@ def _resolver(model, capability, id_type):
                 record = await get_owned_record(session, model, record_id, user)
             except ValueError:
                 raise HTTPException(404, "Record not found") from None
+            if not profile_applies(record, capability):
+                raise HTTPException(404, "Capability is not active for this record")
             profile = read_profile(record, capability)
             # MQTT streams and remote calls must not hold the application DB session.
             await session.close()
@@ -48,8 +50,12 @@ def _resolver(model, capability, id_type):
 router.include_router(
     capability_{{ capability.adapter }}.create_router(_resolver(
         {{ model.module_name | tojson }},
-        {"kind": {{ capability.kind | tojson }}, "fields": {{ capability.fields | tojson }},
+        {"kind": {{ capability.kind | tojson }}, "fields": {{ capability.fields | pprint }},
          "credential": {% if capability.credential %}{{ capability.credential | tojson }}{% else %}None{% endif %},
+{% if capability.selector_field %}
+         "selector_field": {{ capability.selector_field | pprint }},
+         "selector_values": {{ capability.selector_values | pprint }},
+{% endif %}
          "permissions": {{ capability.permissions | tojson }}},
         {{ model.name }}Read.model_fields["id"].annotation,
     )),

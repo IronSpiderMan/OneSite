@@ -1,3 +1,4 @@
+{% set has_universal_capability = model.capabilities | default([]) | selectattr('selector_field') | list %}
 from app.core.access import require_relation, scope_statement, scope_label_statement
 from typing import Optional, List, Dict, Any
 from datetime import date, datetime, timezone{% if model.fields | selectattr('ui_type', 'equalto', 'time') | list %}, time{% endif %}
@@ -11,14 +12,32 @@ from app.core.db import transactional_write
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
 from app.models.{{ model.source_module }} import {{ model.name }}{% if model.definition_binding_meta and model.definition_binding_meta.config_class %}, {{ model.definition_binding_meta.config_class }}{% endif %}
 {% if model.capabilities %}
+{% if has_universal_capability %}
+from app.core.capability_profiles import (
+    check_profile_write, prepare_profiles, snapshot_profile_values,
+    unchanged_profile_values, validate_profile_nulls,
+)
+{% else %}
 from app.core.capability_profiles import prepare_profiles
+{% endif %}
 
 _CAPABILITY_PROFILES = [
 {% for capability in model.capabilities if capability.credential %}
-    {"kind": {{ capability.kind | tojson }}, "fields": {{ capability.fields | tojson }}, "credential": {{ capability.credential | tojson }}},
+    {"kind": {{ capability.kind | tojson }}, "fields": {{ capability.fields | pprint }},
+     "credential": {{ capability.credential | tojson }},
+{% if capability.selector_field %}
+     "selector_field": {{ capability.selector_field | pprint }},
+     "selector_values": {{ capability.selector_values | pprint }},
+{% endif %}
+    },
 {% endfor %}
 ]
 _CAPABILITY_SECRETS = {profile["fields"][profile["credential"]] for profile in _CAPABILITY_PROFILES}
+{% if has_universal_capability %}
+_CAPABILITY_PROFILE_FIELDS = frozenset(
+    name for profile in _CAPABILITY_PROFILES for name in profile["fields"].values()
+) | frozenset(profile["selector_field"] for profile in _CAPABILITY_PROFILES if "selector_field" in profile)
+{% endif %}
 {% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
 from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
@@ -1076,6 +1095,11 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% else %}
     obj_data = obj_in.dict(exclude_unset=True)
     {% endif %}
+    {% if has_universal_capability %}
+    validate_profile_nulls(db_obj, obj_data, _CAPABILITY_PROFILE_FIELDS)
+    expected_profile = (snapshot_profile_values(db_obj, _CAPABILITY_PROFILE_FIELDS)
+                        if obj_data.keys() & _CAPABILITY_PROFILE_FIELDS else {})
+    {% endif %}
     {% if model.capabilities %}
     prepare_profiles(db_obj, obj_data, _CAPABILITY_PROFILES)
     {% endif %}
@@ -1233,9 +1257,15 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% if datetime_fields %}
     _normalize_model_datetimes(db_obj)
     {% endif %}
+    {% if has_universal_capability %}
+    expected_profile = unchanged_profile_values(db_obj, expected_profile)
+    {% endif %}
     session.add(db_obj)
     await session.flush()
     await session.refresh(db_obj)
+    {% if has_universal_capability %}
+    check_profile_write(db_obj, expected_profile)
+    {% endif %}
     await invoke_model_hook(
         db_obj,
         "on_after_update",

@@ -1,3 +1,4 @@
+{% set universal_capabilities = model.capabilities | default([]) | selectattr('selector_field', 'defined') | list %}
 import React, { useEffect, useState } from 'react';
 import { ArrowLeft, Loader2, Save } from 'lucide-react';
 import { useForm, Controller } from 'react-hook-form';
@@ -83,6 +84,7 @@ const Create{{ model.name }}Page: React.FC = () => {
     if (!fp) return true;
     return (fp[userRole] || '').includes(perm);
   };
+{% if universal_capabilities %}{% include 'frontend_capability_fields.ts.j2' %}{% endif %}
 {% include "frontend_write_payload.ts.j2" %}
 
 
@@ -99,6 +101,7 @@ const Create{{ model.name }}Page: React.FC = () => {
 
   const { register, handleSubmit, reset, setValue, control, watch } = useForm({
     defaultValues: {
+    {% if universal_capabilities %}...capabilityFormDefaults,{% endif %}
     {% for field in model.fields %}
     {% if field.ui_type in ['int', 'float'] and field.default is number and not field.fk_info %}
       {{ field.name }}: {{ field.default | tojson }},
@@ -155,7 +158,7 @@ const Create{{ model.name }}Page: React.FC = () => {
             {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | selectattr('write_handler', 'defined') | list | first) %}
             hasFieldPerm('{{ field.name }}', 'c'){% if field.name == model.owner_field %} && userRole !== 'user'{% endif %} && (
             <div className="space-y-2">
-              <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{ {{ 'true' if field.required and not field.create_optional else 'false' }} && <span className="text-destructive"> *</span>}</Label>
+              <Label htmlFor="{{ field.name }}">{t('{{ field.label_key }}')}{ ({{ 'true' if field.required and not field.create_optional else 'false' }}{% if universal_capabilities %} || capabilityFieldRequired('{{ field.name }}', rootValue[capabilitySelectorField], false){% endif %}) && <span className="text-destructive"> *</span>}</Label>
               {% if override %}
               {% if override.read_type == 'bool' %}
               <Controller control={control} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
@@ -310,7 +313,7 @@ const Create{{ model.name }}Page: React.FC = () => {
                   const filteredValues = {{ field.enum_values | tojson }};
                   {% endif %}
                   return (
-                    <Select onValueChange={onChange} defaultValue={value}>
+                    <Select {% if universal_capabilities and field.name == universal_capabilities[0].selector_field %}onValueChange={next => { if (next !== value) clearCapabilityPasswordDraft(setValue); onChange(next); }}{% else %}onValueChange={onChange}{% endif %} {% if universal_capabilities %}value={value ?? ''}{% else %}defaultValue={value}{% endif %}>
                       <SelectTrigger>
                         <SelectValue placeholder={`${t('common.select')} ${t('{{ field.label_key }}')}`} />
                       </SelectTrigger>
@@ -494,6 +497,9 @@ const Create{{ model.name }}Page: React.FC = () => {
                 switch (fieldName) {
                   {% for field in model.fields %}
                   case '{{ field.name }}':
+                    {% if universal_capabilities %}
+                    if (!capabilityFieldVisible('{{ field.name }}', rootValue[capabilitySelectorField])) return null;
+                    {% endif %}
                     {% if field.visible_when %}
                     if (!({% for controller, values in field.visible_when.items() %}{{ '' if loop.first else ' && ' }}({{ values | tojson }} as any[]).includes(rootValue?.['{{ controller }}']){% endfor %})) return null;
                     {% endif %}

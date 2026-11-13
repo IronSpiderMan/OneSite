@@ -40,3 +40,59 @@ MQTT 订阅页使用 MQTT 5。Endpoint 可用 `mqtt://` 或 `mqtts://`，默认�
 每个操作都检查模型读取权限、记录归属和能力操作授权。能力操作默认允许 `admin`、`developer`，用 `permissions` 可逐项覆盖，空列表禁用该项。创建能力模型记录和修改连接字段由 `admin`、`developer` 执行，仍受模型和字段权限约束。
 
 映射后的密码字段只写。保存非空密码前，为后端设置稳定的 `CAPABILITY_SECRET_KEY`（至少 32 个字符），或者使用符合长度要求的 `SECRET_KEY`。本地可以通过环境变量或 `generated/backend/.env` 设置，Compose 部署可在 `deploy/.env` 设置 `CAPABILITY_SECRET_KEY`。加密后的值保存在模型原有字段中，字段需能容纳密文。给已有模型添加能力时，重新保存已有密码即可加密。更新表单中留空会保留已保存的密码，OPC UA 和 MQTT 可显式清除。修改连接目标时需要重新提供或清除密码。
+
+## Universal Capability
+
+用 `kind: "universal"` 让同一个模型保存多种协议的连接。`selector_field` 指向模型中的非空字符串枚举列。每条记录启用一个分支。
+
+```python
+from enum import Enum
+
+from sqlmodel import Field, SQLModel
+
+
+class Protocol(str, Enum):
+    MQTT = "mqtt"
+    OPCUA = "opcua"
+    OPCUA_LEGACY = "opcua_legacy"
+    PG = "pg"
+
+
+class DatabaseDriver(str, Enum):
+    POSTGRESQL = "postgresql"
+
+
+class Connection(SQLModel, table=True):
+    __onesite__ = {
+        "capabilities": [{
+            "kind": "universal",
+            "selector_field": "protocol",
+            "branches": {
+                "mqtt": {"kind": "mqtt_broker"},
+                "opcua": {
+                    "kind": "opcua_server",
+                    "when": {"protocol": ["opcua", "opcua_legacy"]},
+                    "field_map": {"endpoint": "opcua_url"},
+                },
+                "pg": {"kind": "database"},
+            },
+        }],
+    }
+
+    id: int | None = Field(default=None, primary_key=True)
+    protocol: Protocol
+    endpoint: str | None = None
+    opcua_url: str | None = None
+    username: str | None = None
+    password: str | None = None
+    host: str | None = None
+    port: int = 5432
+    database: str | None = None
+    driver: DatabaseDriver = DatabaseDriver.POSTGRESQL
+```
+
+省略 `when` 时，分支键与枚举的值做相等比较。显式条件支持一个值，例如 `{"protocol": "opcua"}`，或一个值列表。每个枚举值必须恰好命中一个分支。一个模型可以声明一个 Universal，每个具体 `kind` 在该模型中最多使用一次。Python 类型配置对应 `UniversalCapabilityConfig` 和 `CapabilityBranchConfig`。
+
+每个分支沿用对应能力的字段规则和 `permissions`。`field_map` 省略的项按同名映射。示例的 OPC UA 连接从 `opcua_url` 取地址，从 `username` 和 `password` 取凭据。`pg` 是选择值，数据库分支仍从 `driver` 读取 `postgresql`。`site sync` 检查每个分支的列名和类型。分支专用列需要能在未启用时省略，例如定义为 `str | None = None`，或像 `port` 一样提供默认值。
+
+创建和编辑表单按选择展示连接字段。保存时，后端校验当前分支的连接配置。详情页和操作 API 使用记录已保存的选择值，未启用的分支无法调用。选择字段遵循连接字段的写权限，也需要对能使用对应操作的角色可读。切换协议时，目标分支已有密码需要重新输入，或在目标分支允许时显式清除。

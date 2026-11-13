@@ -98,9 +98,21 @@ def get_model_fields(
         frontend_only = True
     capabilities = compile_capabilities(model_cls, model_site_props.get("capabilities", []))
     profiles = [entry for entry in capabilities if entry["credential"]]
+    branches = [entry for entry in capabilities if "selector_field" in entry]
+    selector_field = branches[0]["selector_field"] if branches else None
     profile_fields = {name for entry in profiles for name in entry["fields"].values()}
+    if selector_field:
+        profile_fields.add(selector_field)
     secret_fields = {entry["fields"][entry["credential"]] for entry in profiles}
     database_secrets = {entry["fields"]["password"] for entry in capabilities if entry["kind"] == "database"}
+    standalone_database_secrets = {
+        entry["fields"]["password"] for entry in capabilities
+        if entry["kind"] == "database" and "selector_field" not in entry
+    }
+    clearable_branch_secrets = {
+        entry["fields"]["password"] for entry in branches if entry["kind"] != "database"
+    }
+    clearable_secrets = (secret_fields - database_secrets) | (clearable_branch_secrets - standalone_database_secrets)
     if capabilities:
         if (frontend_only or is_singleton or is_link_table or model_cls_name == "User"
                 or model_site_props.get("is_latest_table") or model_site_props.get("time_series_table")
@@ -755,7 +767,7 @@ def get_model_fields(
                 is_search_field=is_search_field,
                 capability_profile=name in profile_fields,
                 capability_secret=is_capability_secret,
-                capability_secret_clearable=is_capability_secret and name not in database_secrets,
+                capability_secret_clearable=name in clearable_secrets,
                 fk_info=fk_info,
                 allow_download=allow_download,
                 private_upload=private_upload,
@@ -775,6 +787,20 @@ def get_model_fields(
         )
 
     model_field_names = {field.name for field in fields}
+    if selector_field:
+        fields_by_name = {field.name: field for field in fields}
+        selector = fields_by_name.get(selector_field)
+        if selector is None:
+            raise ValueError(f"{model_cls_name}.{selector_field}: the Universal selector must be a generated field")
+        branch_roles = {role for entry in branches for roles in entry["permissions"].values() for role in roles}
+        branch_fields = {selector_field} | {name for entry in branches for name in entry["fields"].values()}
+        editable_roles = {
+            role for name in branch_fields if name in fields_by_name
+            for role, grants in (fields_by_name[name].role_permissions or {}).items() if "u" in grants
+        }
+        for role in sorted(branch_roles | editable_roles):
+            if "r" in role_permissions.get(role, "") and "r" not in (selector.role_permissions or {}).get(role, ""):
+                raise ValueError(f"{model_cls_name}.{selector_field}: Universal selector must be readable by {role!r}")
     if secret_fields:
         for field in fields:
             if secret_fields.intersection((field.visible_when or {}).keys() | (field.required_when or {}).keys()):

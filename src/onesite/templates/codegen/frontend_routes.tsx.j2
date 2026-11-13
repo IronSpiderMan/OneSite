@@ -117,7 +117,7 @@ const GeneratedBaseRoutes: GeneratedRouteDefinition[] = [
   {
     id: 'model.{{ model.module_name }}.mqtt',
     path: '/{{ model.module_name }}s/:id/mqtt',
-    element: <MqttCapabilityPage model={{ '{' }}{{ model.module_name | tojson }}{{ '}' }} allowedRoles={{ '{' }}{{ capability.permissions.subscribe | tojson }}{{ '}' }} modelPermissions={{ '{' }}{{ model.role_permissions | tojson }}{{ '}' }} />,
+    element: <MqttCapabilityPage model={{ '{' }}{{ model.module_name | tojson }}{{ '}' }} allowedRoles={{ '{' }}{{ capability.permissions.subscribe | tojson }}{{ '}' }} modelPermissions={{ '{' }}{{ model.role_permissions | tojson }}{{ '}' }}{% if capability.selector_field is defined %} selector={ { field: {{ capability.selector_field | tojson }}, values: {{ capability.selector_values | tojson }} } }{% endif %} />,
   },
 {% endfor %}
 {% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}

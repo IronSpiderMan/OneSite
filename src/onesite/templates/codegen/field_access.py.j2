@@ -1,7 +1,7 @@
     __{{ access_kind }}_permissions__ = {
 {% for field in model.fields %}
 {% if field.name != 'id' %}
-        {{ field.name | tojson }}: {{ (field.role_permissions or {}) | tojson }},
+        {{ field.name | pprint }}: {{ (field.role_permissions or {}) | tojson }},
 {% endif %}
 {% endfor %}
 {% if access_kind == 'read' %}

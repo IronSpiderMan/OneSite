@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import os
 from enum import Enum
-from typing import Any, Literal, Mapping, Sequence
+from typing import Annotated, Any, Literal, Mapping, Sequence
 from urllib.parse import quote, urlencode
 
 from pydantic import BaseModel, ConfigDict, Field, field_serializer, model_validator
@@ -562,12 +562,28 @@ class CapabilityKind(str, Enum):
     OPCUA_SERVER = "opcua_server"
     MQTT_BROKER = "mqtt_broker"
     DATABASE = "database"
+    UNIVERSAL = "universal"
 
 
 class CapabilityConfig(_StrictConfigModel):
-    kind: CapabilityKind
+    kind: Literal[CapabilityKind.OPCUA_SERVER, CapabilityKind.MQTT_BROKER, CapabilityKind.DATABASE]
     field_map: dict[str, str] = Field(default_factory=dict)
     permissions: dict[str, list[Role]] = Field(default_factory=dict)
+
+
+class CapabilityBranchConfig(CapabilityConfig):
+    """An adapter and its optional condition on the Universal selector field."""
+
+    when: dict[str, str | list[str]] | None = None
+
+
+class UniversalCapabilityConfig(_StrictConfigModel):
+    kind: Literal[CapabilityKind.UNIVERSAL]
+    selector_field: str
+    branches: dict[str, CapabilityBranchConfig] = Field(min_length=1)
+
+
+ModelCapabilityConfig = Annotated[CapabilityConfig | UniversalCapabilityConfig, Field(discriminator="kind")]
 
 
 class TreeLeafConfig(_ConfigModel):
@@ -682,7 +698,7 @@ class OneSiteConfig(_ConfigModel):
     )
     external_resource: ExternalResourceConfig | None = None
     network_device: str | NetworkDeviceConfig | None = None
-    capabilities: list[CapabilityConfig] = Field(default_factory=list)
+    capabilities: list[ModelCapabilityConfig] = Field(default_factory=list)
     tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)
     special_me_permissions: ModelPermissions | None = None

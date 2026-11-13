@@ -5,7 +5,7 @@ POLICIES = {
         "permissions": {{ model.role_permissions | tojson }},
         "fields": {
 {% for field in model.fields if field.name != 'id' %}
-            {{ field.name | tojson }}: {{ (field.role_permissions or {}) | tojson }},
+            {{ field.name | pprint }}: {{ (field.role_permissions or {}) | tojson }},
 {% endfor %}
         },
         "owner_field": {{ ('id' if model.module_name == 'user' else ('user_id' if model.is_notification_table else (model.owner_field or ''))) | tojson }},
@@ -16,7 +16,7 @@ POLICIES = {
 CAPABILITY_SECRET_FIELDS = {
 {% for model in models if model.capabilities | default([]) | selectattr('credential') | list %}
     ({{ ('app.models.' ~ model.source_module) | tojson }}, {{ model.name | tojson }}): {
-        {% for field in model.fields if field.capability_secret %}{{ field.name | tojson }}, {% endfor %}
+        {% for field in model.fields if field.capability_secret %}{{ field.name | pprint }}, {% endfor %}
     },
 {% endfor %}
 }

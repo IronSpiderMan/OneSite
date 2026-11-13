@@ -46,6 +46,38 @@ def _value(value):
     return getattr(value, "value", value)
 
 
+def profile_applies(record, capability: dict, changes: dict | None = None) -> bool:
+    selector = capability.get("selector_field")
+    if selector is None:
+        return True
+    value = getattr(record, selector, None)
+    if changes is not None:
+        value = changes.get(selector, value)
+    return _value(value) in capability["selector_values"]
+
+
+def validate_profile_nulls(record, changes: dict, fields: frozenset[str]) -> None:
+    columns = inspect(type(record)).column_attrs
+    for name in sorted(fields & changes.keys()):
+        if changes[name] is None and not columns[name].columns[0].nullable:
+            raise HTTPException(422, f"{name} cannot be null")
+
+
+def snapshot_profile_values(record, fields: frozenset[str]) -> dict:
+    return {name: json.dumps(_value(getattr(record, name))) for name in fields}
+
+
+def unchanged_profile_values(record, expected: dict) -> dict:
+    # A column the ORM will not write can retain a concurrent change.
+    state = inspect(record)
+    return {name: value for name, value in expected.items() if not state.attrs[name].history.has_changes()}
+
+
+def check_profile_write(record, expected: dict) -> None:
+    if any(json.dumps(_value(getattr(record, name))) != value for name, value in expected.items()):
+        raise HTTPException(409, "The connection configuration changed during this update. Reload and retry.")
+
+
 def _binding(kind: str, profile: dict) -> str:
     settings = {key: value for key, value in profile.items() if key != "password"}
     data = json.dumps([kind, settings], sort_keys=True, separators=(",", ":"))
@@ -109,20 +141,42 @@ def _check_profile(kind: str, profile: dict) -> None:
 def prepare_profiles(record, changes: dict, capabilities: list, *, creating: bool = False) -> None:
     """Prepare writes through the generated CRUD entry points."""
     bindings = {}
+    written_selectors = set()
+    active_selectors = set()
+    active_secrets = set()
+    inactive_secrets = set()
     for capability in capabilities:
         fields = capability["fields"]
         credential = capability["credential"]
         secret = fields[credential]
-        if not creating and not changes.keys() & fields.values():
+        selector = capability.get("selector_field")
+        selector_changed = False
+        if selector is not None:
+            if creating or selector in changes:
+                written_selectors.add(selector)
+            if not profile_applies(record, capability, changes):
+                inactive_secrets.add(secret)
+                continue
+            active_selectors.add(selector)
+            selector_changed = (selector in changes
+                                and _value(changes[selector]) != _value(getattr(record, selector, None)))
+        active_secrets.add(secret)
+        if not creating and not selector_changed and not changes.keys() & fields.values():
             continue
         before = {key: _value(getattr(record, name, None)) for key, name in fields.items()}
         after = {key: _value(changes.get(name, before[key])) for key, name in fields.items()}
         if (not creating and before[credential] and secret not in changes
-                and any(before[key] != after[key] for key in fields if key != credential)):
+                and (selector_changed or any(before[key] != after[key] for key in fields if key != credential))):
             raise HTTPException(422, "Re-enter the password when changing the connection configuration")
         _check_profile(capability["kind"], after)
         if creating or secret in changes:
             bindings.setdefault(secret, []).append(_binding(capability["kind"], after))
+
+    if written_selectors - active_selectors:
+        raise HTTPException(422, "Select a supported capability")
+    for secret in inactive_secrets - active_secrets:
+        if changes.get(secret, getattr(record, secret, None) if creating else None):
+            raise HTTPException(422, "A password can only be set for an active capability")
 
     for name, destinations in bindings.items():
         password = changes.get(name, getattr(record, name, None))

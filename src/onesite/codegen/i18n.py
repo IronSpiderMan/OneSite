@@ -33,6 +33,8 @@ def generate_locale_files(
             "clear_password": "Clear saved password",
             "back_to_record": "Back to record",
             "denied": "You don't have access to this operation.",
+            "inactive": "This capability is inactive for the record's protocol.",
+            "required_field": "{{field}} is required for the selected protocol.",
         },
         "common": {
             "welcome": "Welcome",
@@ -493,6 +495,8 @@ def generate_locale_files(
             "clear_password": "清除已保存的密码",
             "back_to_record": "返回详情",
             "denied": "你没有此操作的权限。",
+            "inactive": "该记录当前的协议未启用此能力。",
+            "required_field": "所选协议需要填写{{field}}。",
         },
         "common": {
             "welcome": "欢迎",
