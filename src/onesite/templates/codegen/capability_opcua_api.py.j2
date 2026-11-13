@@ -1,0 +1,33 @@
+"""Browse the address space of a saved model record."""
+
+import asyncio
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+
+from app.core.opcua import OpcuaConnection, browse, validate_nodeid
+
+
+def create_router(resolve):
+    router = APIRouter()
+
+    @router.get("/browse")
+    async def browse_nodes(
+        nodeid: str = Query("i=84", max_length=4096),
+        connection: dict = Depends(resolve("browse")),
+    ):
+        try:
+            validate_nodeid(nodeid)
+        except ValueError:
+            raise HTTPException(422, "Invalid OPC UA NodeId") from None
+        try:
+            profile = OpcuaConnection.from_fields(connection)
+        except (KeyError, TypeError, ValueError):
+            raise HTTPException(422, "Invalid OPC UA connection settings") from None
+        try:
+            return await asyncio.wait_for(browse(profile, nodeid, max_references=1000), timeout=25)
+        except asyncio.TimeoutError:
+            raise HTTPException(504, "OPC UA browse timed out") from None
+        except Exception:
+            raise HTTPException(502, "Unable to browse the OPC UA server") from None
+
+    return router

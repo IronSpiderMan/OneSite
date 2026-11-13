@@ -1,6 +1,13 @@
   // Submit only fields writable by this role, including embedded child rows.
   const writablePayload = (values: Record<string, any>, operation: 'c' | 'u') => {
     const payload = Object.fromEntries(Object.entries(values).filter(([key]) => hasFieldPerm(key, operation)));
+    {% for field in model.fields if field.capability_secret %}
+    if (operation === 'u') {
+      {% if field.capability_secret_clearable %}
+      if (values.__clear_{{ field.name }} && hasFieldPerm('{{ field.name }}', 'u')) payload.{{ field.name }} = '';
+      else {% endif %}if (payload.{{ field.name }} === '') delete payload.{{ field.name }};
+    }
+    {% endfor %}
     {% for rel in model.inline_relations | default([]) %}
     if (Array.isArray(payload.{{ rel.write_name }})) {
       const grants: Record<string, Record<string, string>> = {{ rel.field_permissions | default({}) | tojson }};

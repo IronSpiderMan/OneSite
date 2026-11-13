@@ -22,19 +22,30 @@ interface MarkerProps {
   'aria-label'?: string
 }
 
+interface SelectContentProps extends MarkerProps {
+  withinDialog?: boolean
+}
+
 const SelectItem: React.FC<MarkerProps> = () => null
 const SelectValue: React.FC<MarkerProps> = () => null
 const SelectTrigger = React.forwardRef<HTMLDivElement, MarkerProps>(() => null)
-const SelectContent = React.forwardRef<HTMLDivElement, MarkerProps>(() => null)
+const SelectContent = React.forwardRef<HTMLDivElement, SelectContentProps>(() => null)
 const SelectGroup: React.FC<MarkerProps> = () => null
 const SelectLabel: React.FC<MarkerProps> = () => null
 const SelectSeparator: React.FC<MarkerProps> = () => null
 const SelectScrollUpButton: React.FC<MarkerProps> = () => null
 const SelectScrollDownButton: React.FC<MarkerProps> = () => null
 
+interface ParsedSelect {
+  options: any[]
+  trigger?: MarkerProps
+  content?: SelectContentProps
+  placeholder?: React.ReactNode
+}
+
 function walk(
   nodes: React.ReactNode,
-  result: { options: any[]; trigger?: MarkerProps; placeholder?: React.ReactNode },
+  result: ParsedSelect,
 ) {
   React.Children.forEach(nodes, (node) => {
     if (!React.isValidElement(node)) return
@@ -46,6 +57,9 @@ function walk(
     if (node.type === SelectTrigger) {
       result.trigger = node.props as MarkerProps
     }
+    if (node.type === SelectContent) {
+      result.content = node.props as SelectContentProps
+    }
     if (node.type === SelectValue) {
       result.placeholder = (node.props as MarkerProps).placeholder
     }
@@ -54,7 +68,7 @@ function walk(
 }
 
 const Select: React.FC<SelectProps> = ({ children, onValueChange, ...props }) => {
-  const parsed: { options: any[]; trigger?: MarkerProps; placeholder?: React.ReactNode } = { options: [] }
+  const parsed: ParsedSelect = { options: [] }
   walk(children, parsed)
   return (
     <AntSelect
@@ -64,6 +78,9 @@ const Select: React.FC<SelectProps> = ({ children, onValueChange, ...props }) =>
       placeholder={parsed.placeholder}
       options={parsed.options}
       onChange={onValueChange}
+      getPopupContainer={parsed.content?.withinDialog
+        ? (trigger: HTMLElement) => trigger.closest<HTMLElement>('[role="dialog"]') ?? trigger.ownerDocument.body
+        : undefined}
       {...props}
       value={props.value === '' ? undefined : props.value}
     />

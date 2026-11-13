@@ -1,0 +1,174 @@
+"""Stream messages from an authorized MQTT broker record."""
+
+import asyncio
+import base64
+import json
+import logging
+import ssl
+from datetime import datetime, timezone
+from urllib.parse import urlsplit
+from uuid import uuid4
+
+from anyio import move_on_after
+from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi.responses import StreamingResponse
+
+
+_CONNECTION_TIMEOUT = 10
+_SESSION_SECONDS = 300
+_MAX_MESSAGES = 1000
+_MAX_TOPIC_BYTES = 1024
+_MAX_PREVIEW_BYTES = 4096
+_STREAM_SLOTS = asyncio.Semaphore(16)
+_CLIENT_LOGGER = logging.Logger("onesite.capabilities.mqtt", level=logging.CRITICAL + 1)
+
+
+class _MessageStream(StreamingResponse):
+    async def stream_response(self, send):
+        try:
+            await super().stream_response(send)
+        finally:
+            # Close the generator even when a client disconnects during an SSE send.
+            with move_on_after(5, shield=True):
+                await self.body_iterator.aclose()
+
+
+def _validate_filter(topic_filter):
+    if not topic_filter or "\x00" in topic_filter or len(topic_filter.encode("utf-8")) > _MAX_TOPIC_BYTES:
+        raise ValueError("Invalid topic filter")
+    if topic_filter.startswith("$share/"):
+        # An inspector is an independent subscriber and should not take another consumer's messages.
+        raise ValueError("Shared subscriptions are unavailable")
+    levels = topic_filter.split("/")
+    for index, level in enumerate(levels):
+        if ("+" in level and level != "+") or ("#" in level and (level != "#" or index != len(levels) - 1)):
+            raise ValueError("Invalid topic filter")
+
+
+def _event(name, data):
+    return f"event: {name}\ndata: {json.dumps(data, separators=(',', ':'))}\n\n"
+
+
+def _preview(topic, preview, qos, retained, size, received_at):
+    try:
+        payload, encoding = preview.decode("utf-8"), "utf-8"
+    except UnicodeDecodeError:
+        payload, encoding = base64.b64encode(preview).decode("ascii"), "base64"
+    return {
+        "topic": topic,
+        "payload": payload,
+        "encoding": encoding,
+        "qos": qos,
+        "retained": retained,
+        "size": size,
+        "truncated": size > len(preview),
+        "received_at": received_at,
+    }
+
+
+async def _messages(connection, endpoint, topic_filter):
+    from gmqtt import Client
+
+    class Subscriber(Client):
+        async def reconnect(self, delay=False):
+            # A disconnected browser session must never re-open a broker connection.
+            return None
+
+    if _STREAM_SLOTS.locked():
+        yield _event("error", {"code": "busy"})
+        return
+
+    async with _STREAM_SLOTS:
+        host, port, use_tls = endpoint
+        loop = asyncio.get_running_loop()
+        queue = asyncio.Queue(maxsize=64)
+        subscribed = loop.create_future()
+        dropped = 0
+        client = Subscriber(uuid4().hex[:22], logger=_CLIENT_LOGGER, maximum_packet_size=65536)
+
+        def enqueue(item):
+            nonlocal dropped
+            if queue.full():
+                queue.get_nowait()
+                dropped += 1
+            queue.put_nowait(item)
+
+        def on_message(_client, topic, payload, qos, properties):
+            if len(topic.encode("utf-8", errors="replace")) > _MAX_TOPIC_BYTES:
+                return
+            enqueue((topic, payload[:_MAX_PREVIEW_BYTES], qos, bool(properties.get("retain")),
+                     len(payload), datetime.now(timezone.utc).isoformat()))
+
+        def on_subscribe(_client, _mid, codes, _properties):
+            if not subscribed.done():
+                subscribed.set_result(bool(codes) and all(code in {0, 1, 2} for code in codes))
+
+        def on_disconnect(_client, *_args):
+            if not subscribed.done():
+                subscribed.set_result(False)
+            enqueue(None)
+
+        client.on_message = on_message
+        client.on_subscribe = on_subscribe
+        client.on_disconnect = on_disconnect
+        try:
+            if connection["username"]:
+                client.set_auth_credentials(connection["username"], connection["password"])
+            tls = ssl.create_default_context() if use_tls else False
+            await asyncio.wait_for(client.connect(host, port=port, ssl=tls, keepalive=20), _CONNECTION_TIMEOUT)
+            client.subscribe(topic_filter, qos=1)
+            if not await asyncio.wait_for(subscribed, _CONNECTION_TIMEOUT):
+                yield _event("error", {"code": "subscription_denied"})
+                return
+
+            deadline = loop.time() + _SESSION_SECONDS
+            yield _event("ready", {})
+            sent = 0
+            while sent < _MAX_MESSAGES and (remaining := deadline - loop.time()) > 0:
+                try:
+                    message = await asyncio.wait_for(queue.get(), min(10, remaining))
+                except asyncio.TimeoutError:
+                    yield ": keepalive\n\n"
+                    continue
+                if message is None:
+                    yield _event("error", {"code": "disconnected"})
+                    return
+                if dropped:
+                    count, dropped = dropped, 0
+                    yield _event("overflow", {"count": count})
+                sent += 1
+                yield _event("message", {"id": sent, **_preview(*message)})
+            yield _event("end", {"code": "limit_reached"})
+        except Exception:
+            # Transport and broker diagnostics can contain connection credentials or payloads.
+            yield _event("error", {"code": "connection_failed"})
+        finally:
+            with move_on_after(3, shield=True):
+                try:
+                    await client.disconnect()
+                except Exception:
+                    pass
+
+
+def create_router(resolve):
+    router = APIRouter()
+
+    @router.get("/messages", response_class=StreamingResponse)
+    async def stream_messages(
+        topic_filter: str = Query(min_length=1, max_length=_MAX_TOPIC_BYTES),
+        connection: dict = Depends(resolve("subscribe")),
+    ):
+        try:
+            _validate_filter(topic_filter)
+        except ValueError:
+            raise HTTPException(422, "Invalid MQTT topic filter") from None
+        url = urlsplit(connection["endpoint"])
+        use_tls = url.scheme == "mqtts"
+        endpoint = url.hostname, url.port or (8883 if use_tls else 1883), use_tls
+        return _MessageStream(
+            _messages(connection, endpoint, topic_filter),
+            media_type="text/event-stream",
+            headers={"Cache-Control": "no-store, no-transform", "X-Accel-Buffering": "no"},
+        )
+
+    return router

@@ -692,6 +692,10 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
     const item = full || record;
     // Set form values
     {% for field in model.fields %}
+    {% if field.capability_secret %}
+    setValue('{{ field.name }}', '');
+    {% endif %}
+    {% if field.capability_secret_clearable %}setValue('__clear_{{ field.name }}', false);{% endif %}
     {% if 'r' in field.permissions %}
     {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
     setValue('{{ field.name }}', item.{{ override.raw_field if override and override.raw_field is defined else field.name }});
@@ -913,7 +917,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
       {% endif %}
     } catch (error) {
       toast.error(getErrorMessage(error, t('toast.save_failed', 'Save failed')));
-      console.error(error);
+      {% if not model.capabilities %}console.error(error);{% endif %}
     } finally {
       setIsSaving(false);
     }
@@ -1605,7 +1609,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                             <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
                         )} />
                         {% else %}
-                        <Input type="{% if model.opcua_browse and field.name == 'password' %}password{% else %}text{% endif %}" {% if model.opcua_browse and field.name == 'password' %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}')} />
+                        <Input type="{% if field.capability_secret or (model.opcua_browse and field.name == 'password') %}password{% else %}text{% endif %}" {% if field.capability_secret or (model.opcua_browse and field.name == 'password') %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}')} />
                         {% endif %}
                         {% elif field.ui_type == 'bool' %}
                         <Controller
@@ -1722,6 +1726,20 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     </TableCell>
                     {% endfor %}
                     <TableCell className="sticky right-0 bg-card z-10">
+                        {% for field in model.fields if field.capability_secret and 'u' in field.permissions and model.edit_mode == 'inplace_edit' %}
+                        {editingId === item.id && hasFieldPerm('{{ field.name }}', 'u') && (
+                          <div>
+                            <Input className="mb-2 min-w-32" type="password" autoComplete="new-password"
+                                aria-label={t('{{ field.label_key }}')} placeholder={t('{{ field.label_key }}')}
+                                {...register('{{ field.name }}')} />
+                            {% if field.capability_secret_clearable %}
+                            <label className="flex items-center gap-2 text-sm">
+                                <input type="checkbox" {...register('__clear_{{ field.name }}')} /> {t('capabilities.clear_password')}
+                            </label>
+                            {% endif %}
+                          </div>
+                        )}
+                        {% endfor %}
                         <div className="flex items-center gap-2">
                         {% if model.edit_mode == 'inplace_edit' %}
                         {editingId === item.id ? (
@@ -2280,7 +2298,7 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
             )} />
             {% else %}
-            <Input id="{{ field.name }}" type="{% if model.opcua_browse and field.name == 'password' %}password{% else %}text{% endif %}" {% if model.opcua_browse and field.name == 'password' %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}')} />
+            <Input id="{{ field.name }}" type="{% if field.capability_secret or (model.opcua_browse and field.name == 'password') %}password{% else %}text{% endif %}" {% if field.capability_secret or (model.opcua_browse and field.name == 'password') %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}')} />
             {% endif %}
             {% elif field.ui_type == 'bool' %}
             <div className="flex items-center space-x-2">
@@ -2567,6 +2585,8 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                 {% if field.default_factory == 'date' %}
                 defaultValue={new Date().toLocaleDateString('en-CA')}
                 {% endif %}
+                {% elif field.capability_secret %}
+                type="password" autoComplete="new-password"
                 {% else %}
                 type="text"
                 {% endif %}
@@ -2576,6 +2596,13 @@ const {{ model.name }}Page: React.FC<{{ model.name }}ListProps> = ({
                     {% if field.maximum is not none %}max: {{ field.maximum }},{% endif %}
                 })}
             />
+            {% endif %}
+            {% if field.capability_secret_clearable %}
+            {editingId !== null && (
+                <label className="flex items-center gap-2 text-sm">
+                    <input type="checkbox" {...register('__clear_{{ field.name }}')} /> {t('capabilities.clear_password')}
+                </label>
+            )}
             {% endif %}
           </div>
           ){% if not as_expression %}{{ '}' }}{% endif %}

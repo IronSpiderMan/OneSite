@@ -10,6 +10,7 @@ from functools import lru_cache
 from importlib import import_module
 from typing import Any, Literal
 
+from sqlalchemy import inspect as inspect_model
 
 logger = logging.getLogger(__name__)
 
@@ -25,10 +26,14 @@ class ModelHookContext:
 
 def snapshot_model(target: Any) -> dict[str, Any]:
     """Capture mapped column values without relationship traversal."""
+    from app.core.access_policies import CAPABILITY_SECRET_FIELDS
 
+    model = type(target)
+    excluded = CAPABILITY_SECRET_FIELDS.get((model.__module__, model.__name__), ())
     return {
-        column.name: deepcopy(getattr(target, column.name))
-        for column in target.__table__.columns
+        column.key: deepcopy(getattr(target, column.key))
+        for column in inspect_model(model).column_attrs
+        if column.key not in excluded
     }
 
 

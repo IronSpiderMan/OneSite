@@ -79,7 +79,11 @@ def _sync_integration_requirements(
         if site_config.get(integration)
         for dependency in integration_dependencies
     ]
-    if "opcua" in site_config.get("plugins", []):
+    from .capabilities import CAPABILITIES
+
+    for kind in site_config.get("_capability_kinds", []):
+        dependencies.extend(CAPABILITIES[kind].dependencies)
+    if "opcua" in site_config.get("plugins", []) and "opcua_server" not in site_config.get("_capability_kinds", []):
         dependencies.append("asyncua>=1.1.5,<2")
     _append_missing_requirements(requirements_path, dependencies)
 

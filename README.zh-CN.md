@@ -7,6 +7,8 @@ OneSite 是一个模型驱动的全栈代码生成 CLI。开发者维护 `app/mo
 OPC UA 接入可启用 `plugins=["opcua"]`：生成 Server、Node、A&C 配置，
 并在 Server 详情页提供节点浏览和批量添加。参见 [OPC UA 插件](docs/opcua-plugin.md)。
 
+业务模型可以通过 `__onesite__.capabilities` 添加 OPC UA 节点浏览、MQTT 消息订阅或 PostgreSQL 表浏览。参见 [模型能力](docs/model-capabilities.md)。
+
 ## 安装与快速开始
 
 要求 Python 3.10+；生成前端还需要 Node.js/npm；容器部署可选 Docker 或 Podman。

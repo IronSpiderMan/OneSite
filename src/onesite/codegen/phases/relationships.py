@@ -89,7 +89,7 @@ def _inline_item_schema(model: ModelDefinition, *, excluded: set[str]) -> tuple[
     fields = []
     ui_fields = []
     for field in model.get("fields", []):
-        if field["name"] == "id" or field["name"] in excluded:
+        if field["name"] == "id" or field["name"] in excluded or field.get("capability_profile"):
             continue
         if not ({"c", "u"} & set(field.get("permissions", ""))):
             continue

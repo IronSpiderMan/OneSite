@@ -1,0 +1,25 @@
+import { useTranslation } from 'react-i18next';
+import { Link, useParams } from 'react-router-dom';
+import MqttCapability from './MqttCapability';
+
+type Props = {
+    model: string;
+    allowedRoles: string[];
+    modelPermissions: Record<string, string>;
+};
+
+export default function MqttCapabilityPage({ model, allowedRoles, modelPermissions }: Props) {
+    const { t } = useTranslation();
+    const { id } = useParams();
+    const role = localStorage.getItem('user_role') || 'user';
+    if (!id || !allowedRoles.includes(role) || !modelPermissions[role]?.includes('r')) {
+        return <p role="alert">{t('capabilities.denied')}</p>;
+    }
+    const record = encodeURIComponent(id);
+    return (
+        <div className="space-y-4">
+            <Link className="text-sm underline" to={`/${model}s/${record}`}>{t('capabilities.back_to_record')}</Link>
+            <MqttCapability key={`${model}/${record}`} apiPath={`/model-capabilities/${model}/${record}/mqtt_broker`} />
+        </div>
+    );
+}

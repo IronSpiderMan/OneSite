@@ -334,9 +334,12 @@ class {{ model.name }}Service:
         for key, value in write_values.items():
             setattr(obj_in, key, value)
         {% endif %}
+        {% if model.capabilities %}
+        input_data = obj_in.model_dump(exclude_none=True, exclude=crud._CAPABILITY_SECRETS)
+        {% endif %}
         hook_context = ModelHookContext(
             operation="create",
-            input_data=obj_in.dict(exclude_none=True),
+            input_data={% if model.capabilities %}input_data{% else %}obj_in.dict(exclude_none=True){% endif %},
             changed_fields=frozenset(obj_in.dict(exclude_none=True)),
         )
         {% if model.fields | selectattr('is_unique') | list %}
@@ -490,7 +493,7 @@ class {{ model.name }}Service:
             setattr(obj_in, key, value)
         {% endif %}
         old = snapshot_model(db_obj)
-        changes = obj_in.dict(exclude_unset=True)
+        changes = obj_in.model_dump(exclude_unset=True{% if model.capabilities %}, exclude=crud._CAPABILITY_SECRETS{% endif %})
         hook_context = ModelHookContext(
             operation="update",
             input_data=dict(changes),

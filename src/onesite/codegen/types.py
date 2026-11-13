@@ -97,6 +97,9 @@ class FieldDefinition:
     is_search_field: bool = False
     # Backend filtering for relationship selectors, independent of list filters.
     is_selector_filter: bool = False
+    capability_profile: bool = False
+    capability_secret: bool = False
+    capability_secret_clearable: bool = False
     fk_info: ForeignKeyInfo | None = None
     # Resolved UI selector for the non-id component of a two-column composite
     # FK, e.g. (a_id, b_name) -> (b.a_id, b.name).

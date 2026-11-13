@@ -10,6 +10,16 @@ from app.core.datetime import to_utc
 from app.core.db import transactional_write
 from app.core.model_hooks import ModelHookContext, invoke_model_hook, snapshot_model
 from app.models.{{ model.source_module }} import {{ model.name }}{% if model.definition_binding_meta and model.definition_binding_meta.config_class %}, {{ model.definition_binding_meta.config_class }}{% endif %}
+{% if model.capabilities %}
+from app.core.capability_profiles import prepare_profiles
+
+_CAPABILITY_PROFILES = [
+{% for capability in model.capabilities if capability.credential %}
+    {"kind": {{ capability.kind | tojson }}, "fields": {{ capability.fields | tojson }}, "credential": {{ capability.credential | tojson }}},
+{% endfor %}
+]
+_CAPABILITY_SECRETS = {profile["fields"][profile["credential"]] for profile in _CAPABILITY_PROFILES}
+{% endif %}
 {% if model.timescaledb_entity_model and model.timescaledb_entity_target_table %}
 from app.models.{{ model.timescaledb_entity_target_table }} import {{ model.timescaledb_entity_model }}
 {% endif %}
@@ -992,12 +1002,17 @@ async def create(session: AsyncSession, obj_in: {{ model.name }}Create, *, auto_
     {% endif %}
 
     db_obj = {{ model.name }}(**obj_dict)
+    {% if model.capabilities %}
+    prepare_profiles(db_obj, obj_dict, _CAPABILITY_PROFILES, creating=True)
+    for secret in _CAPABILITY_SECRETS & obj_dict.keys():
+        setattr(db_obj, secret, obj_dict[secret])
+    {% endif %}
     {% if model.fields | selectattr('name', 'equalto', 'updated_at') | list %}
     db_obj.updated_at = datetime.now(timezone.utc)
     {% endif %}
     hook_context = ModelHookContext(
         operation="create",
-        input_data=dict(obj_dict),
+        input_data={% if model.capabilities %}{key: value for key, value in obj_dict.items() if key not in _CAPABILITY_SECRETS}{% else %}dict(obj_dict){% endif %},
         changed_fields=frozenset(obj_dict),
     )
     await invoke_model_hook(
@@ -1061,6 +1076,9 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     {% else %}
     obj_data = obj_in.dict(exclude_unset=True)
     {% endif %}
+    {% if model.capabilities %}
+    prepare_profiles(db_obj, obj_data, _CAPABILITY_PROFILES)
+    {% endif %}
     {% if datetime_fields %}
     obj_data = _normalize_datetimes(obj_data)
     {% endif %}
@@ -1102,7 +1120,7 @@ async def update(session: AsyncSession, db_obj: {{ model.name }}, obj_in: {{ mod
     old = snapshot_model(db_obj)
     hook_context = ModelHookContext(
         operation="update",
-        input_data=dict(obj_data),
+        input_data={% if model.capabilities %}{key: value for key, value in obj_data.items() if key not in _CAPABILITY_SECRETS}{% else %}dict(obj_data){% endif %},
         changed_fields=frozenset(obj_data),
     )
     await invoke_model_hook(

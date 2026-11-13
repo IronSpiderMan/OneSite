@@ -11,6 +11,7 @@ services:
       - PROJECT_NAME={{ project_name }}
       - TIMEZONE={{ config.get('extra', {}).get('TIMEZONE', 'Asia/Shanghai') }}
       - BACKEND_CORS_ORIGINS=${BACKEND_CORS_ORIGINS:-{{ config.allowed_origins | tojson }}}
+      - CAPABILITY_SECRET_KEY=${CAPABILITY_SECRET_KEY:-}
       {% set agent = config.get('agents', {}).values() | rejectattr('connection_provider') | first | default(none) %}
       {% if agent is not none %}
       # Global LLM connection shared by all built-in agents.

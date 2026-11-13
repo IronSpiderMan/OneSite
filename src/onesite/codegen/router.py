@@ -18,6 +18,7 @@ def update_api_router(
     reports_enabled: bool = False,
     schedule_enabled: bool = False,
     opcua_enabled: bool = False,
+    capabilities_enabled: bool = False,
 ):
     imports: List[str] = []
     routers: List[str] = []
@@ -31,6 +32,10 @@ def update_api_router(
     if opcua_enabled:
         imports.append("from app.api.endpoints import opcua_browse")
         routers.append('api_router.include_router(opcua_browse.router, prefix="/opcua", tags=["opcua"])')
+
+    if capabilities_enabled:
+        imports.append("from app.api.endpoints import model_capabilities")
+        routers.append('api_router.include_router(model_capabilities.router, prefix="/model-capabilities")')
 
     if schedule_enabled:
         imports.append("from app.api.endpoints import schedule_calendar")

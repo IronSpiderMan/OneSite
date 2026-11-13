@@ -430,6 +430,7 @@ def _build_model_dict(
         refresh_interval=result.refresh_interval,
         reverse_fk_display=result.reverse_fk_display,
         site_props=result.model_site_props,
+        capabilities=result.model_site_props.get("compiled_capabilities", []),
         tracked_operations=result.model_site_props.get("tracked_operations", []),
         read_only=bool(result.model_site_props.get("read_only", False)),
         actions=result.actions,
@@ -1054,6 +1055,10 @@ def phase_introspect(
             found_models.extend(schedule_models)
 
         seen_keys = {}
+        capability_modules = set()
+        for model in found_models:
+            for entry in model["capabilities"]:
+                capability_modules.update({"model_capabilities", f"capability_{entry['adapter']}"})
         for model in found_models:
             key = model["module_name"]
             if key in seen_keys:
@@ -1067,7 +1072,8 @@ def phase_introspect(
                 "task_center", "visualizations", "public_dashboard", "external_resources",
             }
             reserved_collections = {"task", "agent", "tool", "visualization"}
-            if key in reserved_modules or (not model.get("is_singleton") and key in reserved_collections):
+            if (key in reserved_modules or key in capability_modules
+                    or (not model.get("is_singleton") and key in reserved_collections)):
                 raise ModelIntrospectionError(f"Model key {key!r} is reserved for a framework endpoint")
 
         tracking_enabled = any(

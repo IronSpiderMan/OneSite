@@ -1,0 +1,59 @@
+"""Operations attached to saved model records by site sync."""
+
+from fastapi import APIRouter, Depends, HTTPException
+from sqlmodel.ext.asyncio.session import AsyncSession
+
+from app.core import db, deps
+from app.core.access import get_owned_record, policy_for, require_operation, role_of
+from app.core.capability_profiles import read_profile
+from app.models.user import User
+{% for adapter in adapters %}
+from app.api.endpoints import capability_{{ adapter }}
+{% endfor %}
+{% for model in models %}
+from app.schemas.{{ model.module_name }} import {{ model.name }}Read
+{% endfor %}
+
+router = APIRouter(tags=["model-capabilities"])
+
+
+def _resolver(model, capability, id_type):
+    def resolve(operation):
+        roles = capability["permissions"][operation]
+
+        async def connection(
+            record_id: id_type,
+            user: User = Depends(deps.get_current_user),
+            session: AsyncSession = Depends(db.get_session),
+        ) -> dict:
+            require_operation(policy_for(model)["permissions"], "r", user)
+            if role_of(user) not in roles:
+                raise HTTPException(403, "Permission denied")
+            try:
+                record = await get_owned_record(session, model, record_id, user)
+            except ValueError:
+                raise HTTPException(404, "Record not found") from None
+            profile = read_profile(record, capability)
+            # MQTT streams and remote calls must not hold the application DB session.
+            await session.close()
+            return profile
+
+        return connection
+
+    return resolve
+
+
+{% for model in models %}
+{% for capability in model.capabilities %}
+router.include_router(
+    capability_{{ capability.adapter }}.create_router(_resolver(
+        {{ model.module_name | tojson }},
+        {"kind": {{ capability.kind | tojson }}, "fields": {{ capability.fields | tojson }},
+         "credential": {% if capability.credential %}{{ capability.credential | tojson }}{% else %}None{% endif %},
+         "permissions": {{ capability.permissions | tojson }}},
+        {{ model.name }}Read.model_fields["id"].annotation,
+    )),
+    prefix="/{{ model.module_name }}/{record_id}/{{ capability.kind }}",
+)
+{% endfor %}
+{% endfor %}

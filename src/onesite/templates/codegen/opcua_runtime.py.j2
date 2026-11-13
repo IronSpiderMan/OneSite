@@ -1,10 +1,13 @@
 """OPC UA profile helpers and on-demand address-space browsing."""
 
+import asyncio
 import base64
 import math
 import re
 from collections import deque
+from dataclasses import dataclass, field
 from pathlib import Path
+from urllib.parse import urlsplit
 from uuid import UUID
 
 from app.core.config import settings
@@ -15,6 +18,89 @@ MAX_CONDITION_SCAN_NODES = 10000
 
 class ConditionScanLimitError(RuntimeError):
     """The address space cannot be completely scanned within the node budget."""
+
+
+@dataclass(frozen=True)
+class OpcuaConnection:
+    endpoint: str
+    username: str | None = None
+    password: str | None = field(default=None, repr=False)
+    auth_type: str = "anonymous"
+    request_timeout_seconds: float = 10
+    security_policy: str = "None"
+    security_mode: str = "None"
+    app_uri: str | None = None
+    cert_path: str | None = None
+    key_path: str | None = field(default=None, repr=False)
+    server_cert_path: str | None = None
+
+    @classmethod
+    def from_fields(cls, values):
+        endpoint = values["endpoint"]
+        if not isinstance(endpoint, str) or any(c.isspace() or ord(c) < 32 for c in endpoint):
+            raise ValueError("Invalid OPC UA endpoint")
+        url = urlsplit(endpoint)
+        port = url.port
+        if (
+            url.scheme != "opc.tcp"
+            or not url.hostname
+            or url.username is not None
+            or url.password is not None
+            or url.netloc.endswith(":")
+            or port == 0
+            or url.query
+            or url.fragment
+        ):
+            raise ValueError("Invalid OPC UA endpoint")
+        if port is None:
+            endpoint = url._replace(netloc=f"{url.netloc}:4840").geturl()
+
+        username = values.get("username")
+        password = values.get("password")
+        auth_type = values.get("auth_type") or ("username" if username else "anonymous")
+        if (
+            auth_type not in ("anonymous", "username")
+            or (auth_type == "username" and not (username or "").strip())
+            or (auth_type == "anonymous" and (username or password))
+        ):
+            raise ValueError("Invalid OPC UA authentication settings")
+
+        timeout = values.get("request_timeout_seconds")
+        if timeout is None:
+            timeout = 10
+        if isinstance(timeout, bool) or not isinstance(timeout, (int, float)) or not 0 < timeout <= 30:
+            raise ValueError("Invalid OPC UA request timeout")
+
+        policy = values.get("security_policy") or "None"
+        mode = values.get("security_mode") or "None"
+        certificate = values.get("cert_path")
+        key = values.get("key_path")
+        server_certificate = values.get("server_cert_path")
+        if (policy, mode) != ("None", "None"):
+            if policy != "Basic256Sha256" or mode not in ("Sign", "SignAndEncrypt"):
+                raise ValueError("Invalid OPC UA security settings")
+            for path, prefixes in (
+                (certificate, ("/uploads/", "/private-uploads/")),
+                (key, ("/private-uploads/",)),
+                (server_certificate, ("/uploads/", "/private-uploads/")),
+            ):
+                if not isinstance(path, str) or not path.startswith(prefixes):
+                    raise ValueError("Invalid OPC UA certificate reference")
+                certificate_path(path)
+
+        return cls(
+            endpoint=endpoint,
+            username=username,
+            password=password,
+            auth_type=auth_type,
+            request_timeout_seconds=timeout,
+            security_policy=policy,
+            security_mode=mode,
+            app_uri=values.get("app_uri"),
+            cert_path=certificate,
+            key_path=key,
+            server_cert_path=server_certificate,
+        )
 
 
 def validate_nodeid(value):
@@ -174,20 +260,71 @@ async def _reference_entry(client, ref, namespaces, cache):
     )
 
 
-async def browse(server, nodeid):
+async def _bounded_children(node, limit):
+    from asyncua import ua
+
+    description = ua.BrowseDescription()
+    description.NodeId = node.nodeid
+    description.BrowseDirection = ua.BrowseDirection.Forward
+    description.ReferenceTypeId = ua.NodeId(ua.ObjectIds.HierarchicalReferences)
+    description.IncludeSubtypes = True
+    description.ResultMask = ua.BrowseResultMask.All
+    parameters = ua.BrowseParameters()
+    parameters.NodesToBrowse = [description]
+    parameters.RequestedMaxReferencesPerNode = min(limit, 250)
+
+    references = []
+    continuation = None
+    try:
+        results = await node.session.browse(parameters)
+        while results:
+            result = results[0]
+            continuation = result.ContinuationPoint
+            result.StatusCode.check()
+            remaining = limit - len(references)
+            references.extend(result.References[:remaining])
+            if len(result.References) > remaining or (continuation and len(references) == limit):
+                return references, True
+            if not continuation:
+                return references, False
+            next_page = ua.BrowseNextParameters()
+            next_page.ContinuationPoints = [continuation]
+            results = await node.session.browse_next(next_page)
+        return references, False
+    finally:
+        if continuation:
+            release = ua.BrowseNextParameters()
+            release.ContinuationPoints = [continuation]
+            release.ReleaseContinuationPoints = True
+            await node.session.browse_next(release)
+
+
+async def browse(server, nodeid, *, max_references=None):
     match = validate_nodeid(nodeid)
     client = await create_client(server)
-    async with client:
-        namespaces = await client.get_namespace_array()
-        if match[2]:
-            nodeid = f"ns={namespaces.index(match[2])};{match[3]}={match[4]}"
-        refs = await client.get_node(nodeid).get_children_descriptions()
-        cache, items = {}, {}
-        for ref in refs:
-            entry = await _reference_entry(client, ref, namespaces, cache)
-            if entry is not None:
-                items[entry["nodeid"]] = entry
-        return {"items": list(items.values())}
+    try:
+        async with client:
+            namespaces = await client.get_namespace_array()
+            if match[2]:
+                nodeid = f"ns={namespaces.index(match[2])};{match[3]}={match[4]}"
+            node = client.get_node(nodeid)
+            if max_references is None:
+                refs = await node.get_children_descriptions()
+                truncated = False
+            else:
+                refs, truncated = await _bounded_children(node, max_references)
+            cache, items = {}, {}
+            for ref in refs:
+                entry = await _reference_entry(client, ref, namespaces, cache)
+                if entry is not None:
+                    items[entry["nodeid"]] = entry
+            response = {"items": list(items.values())}
+            if max_references is not None:
+                response["truncated"] = truncated
+            return response
+    except asyncio.CancelledError:
+        client.disconnect_socket()
+        raise
 
 
 async def browse_conditions(server):

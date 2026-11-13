@@ -27,6 +27,13 @@ def generate_locale_files(
     }
 
     en_translations: Dict[str, Any] = {
+        "capabilities": {
+            "mqtt_subscribe": "Subscribe to MQTT",
+            "database_browse": "Browse database",
+            "clear_password": "Clear saved password",
+            "back_to_record": "Back to record",
+            "denied": "You don't have access to this operation.",
+        },
         "common": {
             "welcome": "Welcome",
             "login": "Login",
@@ -480,6 +487,13 @@ def generate_locale_files(
     }
 
     zh_translations: Dict[str, Any] = {
+        "capabilities": {
+            "mqtt_subscribe": "订阅 MQTT 消息",
+            "database_browse": "浏览数据库",
+            "clear_password": "清除已保存的密码",
+            "back_to_record": "返回详情",
+            "denied": "你没有此操作的权限。",
+        },
         "common": {
             "welcome": "欢迎",
             "login": "登录",

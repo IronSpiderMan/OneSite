@@ -7,6 +7,9 @@ class Settings(BaseSettings):
     PROJECT_NAME: str = "{{ config.project_name }}"
     API_V1_STR: str = "/api/v1"
     SECRET_KEY: str = "{{ config.secret_key }}"
+    {% if config.get('_capability_kinds') %}
+    CAPABILITY_SECRET_KEY: str = ""
+    {% endif %}
     ACCESS_TOKEN_EXPIRE_MINUTES: int = {{ config.access_token_expire_minutes }}
     DATABASE_URI: str = "{{ config.database_url }}"
     FIRST_SUPERUSER: str = "admin@example.com"
@@ -60,7 +63,7 @@ class Settings(BaseSettings):
     {% if config.extra %}
     # Custom extra config from site_config.json
     {% for key, value in config.extra.items() %}
-    {% if key != "TIMEZONE" %}
+    {% if key != "TIMEZONE" and (key != "CAPABILITY_SECRET_KEY" or not config.get('_capability_kinds')) %}
     {{ key }}: {% if value is string %}str{% elif value is integer %}int{% elif value is float %}float{% elif value is boolean %}bool{% else %}Any{% endif %} = {% if value is boolean %}{{ value | string | capitalize }}{% else %}{{ value | tojson }}{% endif %}
     {% endif %}
     {% endfor %}

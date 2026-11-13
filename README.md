@@ -8,6 +8,8 @@ Enable `plugins=["opcua"]` to generate OPC UA Server, Node and A&C configuration
 with address-space browsing and bulk addition on the server detail page.
 See the [OPC UA plugin guide](docs/opcua-plugin.md).
 
+Add OPC UA browsing, MQTT subscriptions, or PostgreSQL inspection to a business model with `__onesite__.capabilities`. See [model capabilities](docs/model-capabilities.md).
+
 ## Requirements and installation
 
 - Python 3.10+

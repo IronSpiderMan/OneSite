@@ -6,15 +6,35 @@ from ..render import generate_file
 
 def generate_opcua(models, site_config, cwd, backend_path):
     frontend_path = get_project_paths(cwd).frontend
-    outputs = {
-        "opcua_runtime.py.j2": backend_path / "app/core/opcua.py",
+    runtime = backend_path / "app/core/opcua.py"
+    plugin_enabled = "opcua" in site_config.get("plugins", [])
+    capability_enabled = any(
+        capability["kind"] == "opcua_server"
+        for model in models
+        for capability in model.get("capabilities", ())
+    )
+    if plugin_enabled or capability_enabled:
+        generate_file("opcua_runtime.py.j2", {}, runtime)
+    else:
+        runtime.unlink(missing_ok=True)
+
+    capability_api = backend_path / "app/api/endpoints/capability_opcua.py"
+    capability_panel = frontend_path / "src/components/capabilities/OpcuaCapability.tsx"
+    if capability_enabled:
+        generate_file("capability_opcua_api.py.j2", {}, capability_api)
+        generate_file("opcua_browse_panel.tsx.j2", {"browse_only": True}, capability_panel)
+    else:
+        capability_api.unlink(missing_ok=True)
+        capability_panel.unlink(missing_ok=True)
+
+    plugin_outputs = {
         "opcua_browse_api.py.j2": backend_path / "app/api/endpoints/opcua_browse.py",
         "opcua_browse_panel.tsx.j2": frontend_path / "src/components/opcua/BrowsePanel.tsx",
     }
     for model in models:
         model["opcua_browse"] = None
-    if "opcua" not in site_config.get("plugins", []):
-        for output in outputs.values():
+    if not plugin_enabled:
+        for output in plugin_outputs.values():
             output.unlink(missing_ok=True)
         return
     by_name = {model["name"]: model for model in models}
@@ -55,9 +75,17 @@ def generate_opcua(models, site_config, cwd, backend_path):
                 f"opcua plugin {name} requires the default resource name and integer identity"
             )
     server = by_name["OpcuaServer"]
+    if any(
+        capability["fields"].get(capability.get("credential")) == "password"
+        for capability in server.get("capabilities", ())
+    ):
+        raise ValueError(
+            "OpcuaServer.password is used by the opcua plugin. "
+            "Map the capability password to a separate model field."
+        )
     server["opcua_browse"] = {
         "node_permissions": by_name["OpcuaNode"]["role_permissions"],
         "ac_permissions": by_name["OpcuaAc"]["role_permissions"],
     }
-    for template, output in outputs.items():
+    for template, output in plugin_outputs.items():
         generate_file(template, {"model": server}, output)

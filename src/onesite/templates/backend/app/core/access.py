@@ -103,6 +103,11 @@ async def require_owned_record(session, key: str, identity: Any, user: Any = Non
     user = user or current_actor.get()
     if user is None:
         return
+    await get_owned_record(session, key, identity, user)
+
+
+async def get_owned_record(session, key: str, identity: Any, user: Any):
+    """Fetch a record and enforce its owner scope for an authenticated caller."""
     policy = policy_for(key)
     crud = import_module(f"app.cruds.{key}")
     record = await crud.get(session, identity)
@@ -112,6 +117,7 @@ async def require_owned_record(session, key: str, identity: Any, user: Any = Non
         and getattr(record, owner, None) != user.id
     ):
         raise HTTPException(status_code=404, detail="Record not found")
+    return record
 
 
 async def require_relation(session, source: str, target: str, identity: Any):

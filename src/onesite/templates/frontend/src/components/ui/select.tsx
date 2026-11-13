@@ -66,10 +66,15 @@ const SelectScrollDownButton = React.forwardRef<
 SelectScrollDownButton.displayName =
   SelectPrimitives.ScrollDownButton.displayName
 
+interface SelectContentProps extends React.ComponentPropsWithoutRef<typeof SelectPrimitives.Content> {
+  // The normal-theme adapter uses this to keep its popup inside the modal.
+  withinDialog?: boolean
+}
+
 const SelectContent = React.forwardRef<
   React.ElementRef<typeof SelectPrimitives.Content>,
-  React.ComponentPropsWithoutRef<typeof SelectPrimitives.Content>
->(({ className, children, position = "popper", ...props }, ref) => (
+  SelectContentProps
+>(({ className, children, position = "popper", withinDialog: _withinDialog, ...props }, ref) => (
   <SelectPrimitives.Portal>
     <SelectPrimitives.Content
       ref={ref}

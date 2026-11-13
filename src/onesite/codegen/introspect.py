@@ -61,6 +61,7 @@ from .metadata.tracking import (
     TRACK_EXTENDED_OPERATIONS as TRACK_EXTENDED_OPERATIONS,
     _normalize_tracked_operations as _normalize_tracked_operations,
 )
+from .capabilities import PROFILE_ROLES, compile_capabilities
 from .metadata.display import (
     _normalize_multi_display as _normalize_multi_display,
 )
@@ -95,6 +96,26 @@ def get_model_fields(
         is_singleton = True
     if model_cls_name == "CustomConfig" and module_name == "custom_config":
         frontend_only = True
+    capabilities = compile_capabilities(model_cls, model_site_props.get("capabilities", []))
+    profiles = [entry for entry in capabilities if entry["credential"]]
+    profile_fields = {name for entry in profiles for name in entry["fields"].values()}
+    secret_fields = {entry["fields"][entry["credential"]] for entry in profiles}
+    database_secrets = {entry["fields"]["password"] for entry in capabilities if entry["kind"] == "database"}
+    if capabilities:
+        if (frontend_only or is_singleton or is_link_table or model_cls_name == "User"
+                or model_site_props.get("is_latest_table") or model_site_props.get("time_series_table")
+                or model_site_props.get("is_notification_table") or not model_site_props.get("standalone", True)):
+            raise ValueError(f"{model_cls_name}.capabilities requires a regular model with a detail page")
+        for key in ("label_field", "default_order_field"):
+            if model_site_props.get(key) in secret_fields:
+                raise ValueError(f"{model_cls_name}.{key} cannot reference a capability password field")
+        for key in ("import_key", "owner_field"):
+            if model_site_props.get(key) in profile_fields:
+                raise ValueError(f"{model_cls_name}.{key} cannot reference a capability connection field")
+        union_fields = model_site_props.get("union_key")
+        if isinstance(union_fields, list) and secret_fields.intersection(union_fields):
+            raise ValueError(f"{model_cls_name}.union_key cannot include a capability password field")
+    model_site_props["compiled_capabilities"] = capabilities
     model_translations = model_site_props.get("translations", {})
     refresh_interval = model_site_props.get("refresh_interval", 0)
     reverse_fk_display = model_site_props.get("reverse_fk_display", True)
@@ -239,6 +260,9 @@ def get_model_fields(
     #   d = can call delete API, has delete button
     # ────────────────────────────────────────────────────────────────────────
     role_permissions = _parse_model_permissions(raw_permissions, model_cls.__name__)
+    if profiles:
+        # A complete connection profile is needed to create a row.
+        role_permissions["user"] = role_permissions["user"].replace("c", "")
     model_permissions = _compute_flat_perms(role_permissions)
 
     # ── Layer 3: Frontend visibility ──────────────────────────────────────
@@ -295,6 +319,12 @@ def get_model_fields(
                 if isinstance(sa_column_info, dict):
                     site_props = sa_column_info.get("site_props", {}) or {}
 
+        is_capability_secret = name in secret_fields
+        if is_capability_secret and (site_props.get("visible_when") or site_props.get("required_when") or site_props.get("clear_when_hidden")):
+            raise ValueError(f"{model_cls_name}.{name}: capability passwords cannot use conditional field rules")
+        if is_capability_secret:
+            site_props = {**site_props, "component": "password", "update_optional": True,
+                          "is_search_field": False, "filter_default": None}
         raw_field_permissions = site_props.get("permissions", None)  # None = inherit from model
         create_optional = site_props.get("create_optional", False)
         update_optional = site_props.get("update_optional", False)
@@ -342,6 +372,15 @@ def get_model_fields(
         field_role_permissions, permissions = _parse_field_permissions(
             raw_field_permissions, role_permissions, name
         )
+        if name in profile_fields:
+            field_role_permissions = {
+                role: "".join(perm for perm in grants if (
+                    (perm == "r" and not is_capability_secret)
+                    or (perm in "cu" and role in PROFILE_ROLES)
+                ))
+                for role, grants in field_role_permissions.items()
+            }
+            permissions = _compute_flat_perms(field_role_permissions)
 
         type_annotation = field.annotation
         type_str = str(type_annotation)
@@ -565,6 +604,8 @@ def get_model_fields(
             and declared_foreign_key is not None
         ) or bool(site_props.get("is_foreign_key"))
         if is_fk:
+            if name in profile_fields:
+                raise ValueError(f"{model_cls_name}.{name}: a capability connection field cannot be a foreign key")
             # A declared foreign key is authoritative.  ``*_id`` remains a
             # convenient naming convention, but is not a requirement for a
             # field to be treated as a relationship by the generator.
@@ -712,6 +753,9 @@ def get_model_fields(
                     f"{model_cls.__name__}.{name}.filter_default",
                 ),
                 is_search_field=is_search_field,
+                capability_profile=name in profile_fields,
+                capability_secret=is_capability_secret,
+                capability_secret_clearable=is_capability_secret and name not in database_secrets,
                 fk_info=fk_info,
                 allow_download=allow_download,
                 private_upload=private_upload,
@@ -725,12 +769,16 @@ def get_model_fields(
                 is_unique=is_unique,
                 is_local_storage=is_local_storage,
                 group=field_group,
-                importable=bool(site_props.get("importable", True)),
-                exportable=bool(site_props.get("exportable", True)),
+                importable=name not in profile_fields and bool(site_props.get("importable", True)),
+                exportable=not is_capability_secret and bool(site_props.get("exportable", True)),
             )
         )
 
     model_field_names = {field.name for field in fields}
+    if secret_fields:
+        for field in fields:
+            if secret_fields.intersection((field.visible_when or {}).keys() | (field.required_when or {}).keys()):
+                raise ValueError(f"{model_cls_name}.{field.name}: a capability password cannot control field visibility or requirements")
 
     # Detect the dependent value in a two-column composite FK.  We keep this
     # as raw table/column metadata here; the target model/service is resolved

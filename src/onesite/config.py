@@ -558,6 +558,18 @@ class NetworkDeviceConfig(_StrictConfigModel):
     udp_payload: str = ""
 
 
+class CapabilityKind(str, Enum):
+    OPCUA_SERVER = "opcua_server"
+    MQTT_BROKER = "mqtt_broker"
+    DATABASE = "database"
+
+
+class CapabilityConfig(_StrictConfigModel):
+    kind: CapabilityKind
+    field_map: dict[str, str] = Field(default_factory=dict)
+    permissions: dict[str, list[Role]] = Field(default_factory=dict)
+
+
 class TreeLeafConfig(_ConfigModel):
     """A related model rendered as terminal records in a tree page."""
 
@@ -670,6 +682,7 @@ class OneSiteConfig(_ConfigModel):
     )
     external_resource: ExternalResourceConfig | None = None
     network_device: str | NetworkDeviceConfig | None = None
+    capabilities: list[CapabilityConfig] = Field(default_factory=list)
     tree_view: Literal["auto"] | bool | TreeViewConfig = "auto"
     m2m: dict[str, Any] = Field(default_factory=dict)
     special_me_permissions: ModelPermissions | None = None

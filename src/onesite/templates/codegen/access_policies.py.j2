@@ -12,3 +12,11 @@ POLICIES = {
     },
 {% endfor %}
 }
+
+CAPABILITY_SECRET_FIELDS = {
+{% for model in models if model.capabilities | default([]) | selectattr('credential') | list %}
+    ({{ ('app.models.' ~ model.source_module) | tojson }}, {{ model.name | tojson }}): {
+        {% for field in model.fields if field.capability_secret %}{{ field.name | tojson }}, {% endfor %}
+    },
+{% endfor %}
+}

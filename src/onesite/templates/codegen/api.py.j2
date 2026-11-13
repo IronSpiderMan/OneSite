@@ -18,6 +18,9 @@ from sqlmodel import select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.exc import IntegrityError
 from app.core import db, deps
+{% if model.capabilities %}
+from app.core.capability_profiles import CapabilityModelRoute
+{% endif %}
 {% if model.tracked_operations %}
 from app.core.operation_tracking import tracked_operation{% if "import" in model.tracked_operations or "export" in model.tracked_operations %}, record_operation{% endif %}
 {% endif %}
@@ -69,7 +72,7 @@ from app.schemas.{{ rel.source_service }} import {{ rel.source_model }}Read
 
 router = APIRouter(dependencies=[Depends(deps.model_access(
     {{ model.role_permissions | tojson }}, self_profile={{ 'True' if model.module_name == 'user' else 'False' }}
-))])
+))]{% if model.capabilities %}, route_class=CapabilityModelRoute{% endif %})
 
 {% if model.reverse_foreign_keys %}
 async def _delete_dependencies(session: AsyncSession, id: {{ model.id_type }}) -> list[str]:

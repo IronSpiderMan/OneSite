@@ -69,6 +69,9 @@ def _generate_staged_code() -> None:
     models = phase_introspect.phase_introspect(
         backend_path, site_config=site_config, source_path=cwd / "app"
     )
+    site_config["_capability_kinds"] = sorted({
+        entry["kind"] for model in models for entry in model["capabilities"]
+    })
     # Phase 4 — Relationships
     phase_relationships.phase_resolve_relationships(models)
     # Association tables acquire their CUD lifecycle flags during resolution.

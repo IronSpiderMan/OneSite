@@ -1,0 +1,709 @@
+{% raw %}
+import { useEffect, useId, useMemo, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import {
+    AlertCircle, ArrowDown, ArrowUp, Check, ChevronDown, ChevronLeft, ChevronRight,
+    Columns, Filter as FilterIcon, Folder, FolderOpen, Loader2, PanelLeft, Plus,
+    RefreshCw, Search, Table2, X,
+} from 'lucide-react';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { Popover, PopoverContent, PopoverTrigger } from '../ui/popover';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../ui/select';
+import request, { getErrorMessage } from '../../utils/request';
+
+type Relation = { schema: string; table: string };
+type Column = { name: string; type: string; nullable: boolean };
+type Operator = 'eq' | 'ne' | 'lt' | 'lte' | 'gt' | 'gte' | 'contains' | 'is_null' | 'is_not_null';
+type Filter = { id: number; column: string; operator: Operator; value: string };
+type Query = Relation & {
+    page: number;
+    page_size: number;
+    columns?: string[];
+    filters?: { column: string; operator: Operator; value?: string }[];
+    sort?: { column: string; direction: 'asc' | 'desc' };
+};
+type Result = {
+    columns: string[];
+    rows: (string | null)[][];
+    page: number;
+    page_size: number;
+    has_more: boolean;
+    truncated: boolean;
+};
+type Run = { operation: 'read_rows' | 'query'; query: Query };
+type Translate = (chinese: string, english: string) => string;
+
+const PAGE_SIZES = [25, 50, 100];
+const COLUMN_LIMIT = 64;
+const FILTER_LIMIT = 12;
+const needsValue = (operator: Operator) => operator !== 'is_null' && operator !== 'is_not_null';
+const groupButton = '!flex !h-8 !w-full !justify-start !gap-2 !px-2 !text-xs [&>span:last-child]:min-w-0 [&>span:last-child]:truncate';
+const headerCell = 'h-9 border-b border-r bg-muted px-3 text-left text-xs font-semibold';
+const dataCell = 'h-8 border-b border-r border-border/70 px-3 py-1';
+
+function Notice({ icon: Icon = Table2, children }: { icon?: typeof Table2; children: string }) {
+    return (
+        <div className="flex h-full min-h-28 flex-col items-center justify-center gap-2.5 px-5 py-6 text-center text-sm text-muted-foreground">
+            <span className="flex h-10 w-10 items-center justify-center rounded-lg border bg-muted/40">
+                <Icon aria-hidden="true" className={`h-5 w-5 ${Icon === Loader2 ? 'animate-spin text-primary' : ''}`} />
+            </span>
+            <p>{children}</p>
+        </div>
+    );
+}
+
+function RelationPicker({ relation, onSelect, tr }: { relation: Relation | null; onSelect: (relation: Relation) => void; tr: Translate }) {
+    const [open, setOpen] = useState(false);
+    const [schema, setSchema] = useState('public');
+    const [table, setTable] = useState('');
+
+    return (
+        <Popover open={open} onOpenChange={next => {
+            if (next) {
+                setSchema(relation?.schema ?? 'public');
+                setTable(relation?.table ?? '');
+            }
+            setOpen(next);
+        }}>
+            <PopoverTrigger asChild>
+                <Button type="button" size="sm" variant="outline" className="shrink-0 gap-1.5">
+                    <Search aria-hidden="true" className="h-3.5 w-3.5" />
+                    {tr('按名称打开', 'Open by name')}
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent align="end" collisionPadding={8} className="w-72 max-w-[calc(100vw-2rem)]">
+                <form className="space-y-3" onSubmit={event => {
+                    event.preventDefault();
+                    if (!schema || !table) return;
+                    onSelect({ schema, table });
+                    setOpen(false);
+                }}>
+                    <label className="block space-y-1 text-xs">
+                        <span>Schema</span>
+                        <Input className="h-8 font-mono text-xs" value={schema} maxLength={63} required onChange={event => setSchema(event.target.value)} />
+                    </label>
+                    <label className="block space-y-1 text-xs">
+                        <span>{tr('表名', 'Table name')}</span>
+                        <Input className="h-8 font-mono text-xs" value={table} maxLength={63} required onChange={event => setTable(event.target.value)} />
+                    </label>
+                    <Button type="submit" size="sm" disabled={!schema || !table}>{tr('打开表', 'Open table')}</Button>
+                </form>
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+function ColumnSelect({ columns, label, value, onChange, optional }: {
+    columns: Column[];
+    label: string;
+    value: string;
+    onChange: (name: string) => void;
+    optional?: boolean;
+}) {
+    if (!columns.length) {
+        return <Input className="h-8 min-w-0 font-mono text-xs" maxLength={63} aria-label={label} placeholder={label} value={value} onChange={event => onChange(event.target.value)} />;
+    }
+    return (
+        <Select value={value ? `column:${value}` : optional ? 'none' : ''} onValueChange={(next: string) => onChange(next === 'none' ? '' : next.slice(7))}>
+            <SelectTrigger aria-label={label} className="h-8 min-w-0 font-mono text-xs">
+                <SelectValue placeholder={label} />
+            </SelectTrigger>
+            <SelectContent withinDialog>
+                {optional && <SelectItem value="none">{label}</SelectItem>}
+                {columns.map(column => <SelectItem value={`column:${column.name}`} key={column.name}>{column.name}</SelectItem>)}
+            </SelectContent>
+        </Select>
+    );
+}
+
+function ProjectionPicker({ columns, selected, onChange, tr }: {
+    columns: Column[];
+    selected: string[];
+    onChange: (value: string[]) => void;
+    tr: Translate;
+}) {
+    const [search, setSearch] = useState('');
+    const searchLabel = tr('搜索返回列', 'Search result columns');
+    const visible = columns.filter(column => column.name.toLowerCase().includes(search.trim().toLowerCase()));
+    return (
+        <Popover onOpenChange={open => { if (open) setSearch(''); }}>
+            <PopoverTrigger asChild>
+                <Button type="button" size="sm" variant="outline" className="min-w-0 gap-1.5">
+                    <Columns aria-hidden="true" className="h-3.5 w-3.5" />
+                    {selected.length ? tr(`已选 ${selected.length} 列`, `${selected.length} selected`) : tr('自动选择', 'Automatic')}
+                    <ChevronDown aria-hidden="true" className="h-3 w-3" />
+                </Button>
+            </PopoverTrigger>
+            <PopoverContent align="start" collisionPadding={8} className="flex max-h-[min(24rem,var(--radix-popover-content-available-height))] w-64 max-w-[calc(100vw-2rem)] flex-col gap-2 p-2">
+                <Input value={search} onChange={event => setSearch(event.target.value)} aria-label={searchLabel} placeholder={searchLabel} className="h-8 shrink-0 text-xs" />
+                <ul aria-label={tr('返回列', 'Result columns')} className="min-h-0 space-y-0.5 overflow-auto">
+                    {visible.map(column => {
+                        const checked = selected.includes(column.name);
+                        return (
+                            <li key={column.name}>
+                                <Button type="button" size="sm" variant="ghost" className={`${groupButton} font-mono ${checked ? '!bg-primary/10 !text-primary' : ''}`}
+                                    title={column.name} aria-pressed={checked} disabled={!checked && selected.length >= COLUMN_LIMIT}
+                                    onClick={() => onChange(checked ? selected.filter(name => name !== column.name) : [...selected, column.name])}>
+                                    <Check aria-hidden="true" className={`h-3.5 w-3.5 shrink-0 ${checked ? '' : 'invisible'}`} />
+                                    <span className="min-w-0 truncate">{column.name}</span>
+                                </Button>
+                            </li>
+                        );
+                    })}
+                    {!visible.length && <li className="px-2 py-2 text-xs text-muted-foreground">{tr('没有匹配的列', 'No matching columns')}</li>}
+                </ul>
+                {selected.length > 0 && (
+                    <Button type="button" variant="ghost" size="sm" className="self-start text-xs" onClick={() => onChange([])}>
+                        {tr('恢复自动选择', 'Use automatic columns')}
+                    </Button>
+                )}
+            </PopoverContent>
+        </Popover>
+    );
+}
+
+function RowsGrid({ result, columns, sort, tr }: { result: Result; columns: Column[]; sort?: Query['sort']; tr: Translate }) {
+    const columnTypes = new Map(columns.map(column => [column.name, column.type]));
+    const start = (result.page - 1) * result.page_size;
+    return (
+        <>
+            {!!result.columns.length && (
+                <table className="w-full border-separate border-spacing-0 bg-card text-xs" aria-label={tr('查询结果', 'Query results')}>
+                    <thead className="sticky top-0 z-10">
+                        <tr>
+                            <th scope="col" className={`${headerCell} sticky left-0 z-10 w-px text-right text-muted-foreground`}>
+                                <span aria-hidden="true">#</span><span className="sr-only">{tr('行号', 'Row number')}</span>
+                            </th>
+                            {result.columns.map(name => {
+                                const sorted = sort?.column === name ? sort.direction : undefined;
+                                const type = columnTypes.get(name);
+                                return (
+                                    <th scope="col" key={name} className={headerCell} aria-sort={sorted === 'asc' ? 'ascending' : sorted === 'desc' ? 'descending' : undefined}>
+                                        <div className="flex items-center gap-1.5 whitespace-nowrap py-1.5 font-mono normal-case tracking-normal">
+                                            <span className="max-w-52 truncate" title={name}>{name}</span>
+                                            {sorted === 'asc' && <ArrowUp aria-hidden="true" className="h-3 w-3 text-primary" />}
+                                            {sorted === 'desc' && <ArrowDown aria-hidden="true" className="h-3 w-3 text-primary" />}
+                                        </div>
+                                        {type && <div title={type} className="max-w-44 truncate pb-1.5 font-mono text-[11px] font-normal normal-case tracking-normal text-muted-foreground">{type}</div>}
+                                    </th>
+                                );
+                            })}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {result.rows.map((row, index) => (
+                            <tr key={index} className="group even:bg-muted/30 hover:bg-primary/10">
+                                <th scope="row" className={`${dataCell} sticky left-0 bg-muted text-right font-mono font-normal tabular-nums text-muted-foreground group-hover:text-primary`}>
+                                    {start + index + 1}
+                                </th>
+                                {row.map((value, position) => (
+                                    <td key={position} className={`${dataCell} font-mono`}>
+                                        <div className="max-w-72 truncate whitespace-pre" title={value ?? 'NULL'}>
+                                            {value?.replace(/\r\n?|\n/g, ' ') ?? <span className="italic text-muted-foreground">NULL</span>}
+                                        </div>
+                                    </td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            )}
+            {!result.rows.length && <div className="py-12 text-center text-sm text-muted-foreground">{tr('没有匹配的数据', 'No matching rows')}</div>}
+        </>
+    );
+}
+
+function TableWorkspace({ apiPath, relation, canList, canPreview, canQuery, tr, zh }: {
+    apiPath: string;
+    relation: Relation;
+    canList: boolean;
+    canPreview: boolean;
+    canQuery: boolean;
+    tr: Translate;
+    zh: boolean;
+}) {
+    const canRead = canPreview || canQuery;
+    const operation = canPreview ? 'read_rows' : 'query';
+    const { schema, table } = relation;
+    const queryFormId = useId();
+    const nextFilter = useRef(0);
+    const scrollRef = useRef<HTMLDivElement>(null);
+    const [view, setView] = useState<'data' | 'structure'>(canRead ? 'data' : 'structure');
+    const [run, setRun] = useState<Run | null>(() => canRead ? { operation, query: { schema, table, page: 1, page_size: PAGE_SIZES[0] } } : null);
+    const [data, setData] = useState<{ result: Result; run: Run } | null>(null);
+    const [busy, setBusy] = useState(canRead);
+    const [error, setError] = useState('');
+    const [showQuery, setShowQuery] = useState(false);
+    const [queryError, setQueryError] = useState('');
+    const [filters, setFilters] = useState<Filter[]>([]);
+    const [selectedColumns, setSelectedColumns] = useState<string[] | null>(null);
+    const [namedColumns, setNamedColumns] = useState('');
+    const [sortColumn, setSortColumn] = useState('');
+    const [direction, setDirection] = useState<'asc' | 'desc'>('asc');
+    const [structure, setStructure] = useState<Column[] | null>(null);
+    const [describeError, setDescribeError] = useState('');
+    const [describing, setDescribing] = useState(canList && !canRead);
+    const [descriptionRequest, setDescriptionRequest] = useState(canList && !canRead ? 1 : 0);
+    const columns = structure ?? [];
+
+    useEffect(() => {
+        if (!run) return;
+        const controller = new AbortController();
+        const config = { signal: controller.signal, suppressErrorToast: true };
+        setBusy(true);
+        setError('');
+        const response = run.operation === 'query'
+            ? request.post<Result>(apiPath + '/query', run.query, config)
+            : request.get<Result>(apiPath + '/rows', { ...config, params: run.query });
+        response.then(({ data: result }) => {
+            if (controller.signal.aborted) return;
+            setData({ result, run });
+            scrollRef.current?.scrollTo(0, 0);
+        }).catch((cause: unknown) => {
+            if (!controller.signal.aborted) setError(getErrorMessage(cause, zh ? '无法读取数据。' : 'Could not load rows.'));
+        }).finally(() => {
+            if (!controller.signal.aborted) setBusy(false);
+        });
+        return () => controller.abort();
+    }, [apiPath, run, zh]);
+
+    useEffect(() => {
+        if (!canList || !descriptionRequest) return;
+        const controller = new AbortController();
+        setDescribing(true);
+        setDescribeError('');
+        request.get<{ columns: Column[] }>(apiPath + '/columns', {
+            params: { schema, table }, signal: controller.signal, suppressErrorToast: true,
+        }).then(({ data }) => {
+            if (!controller.signal.aborted) setStructure(data.columns);
+        }).catch((cause: unknown) => {
+            if (!controller.signal.aborted) setDescribeError(getErrorMessage(cause, zh ? '无法读取表结构。' : 'Could not load table structure.'));
+        }).finally(() => {
+            if (!controller.signal.aborted) setDescribing(false);
+        });
+        return () => controller.abort();
+    }, [apiPath, canList, descriptionRequest, schema, table, zh]);
+
+    function editFilter(id: number, changes: Partial<Filter>) {
+        setFilters(current => current.map(filter => filter.id === id ? { ...filter, ...changes } : filter));
+    }
+
+    function selectView(next: typeof view) {
+        setView(next);
+        if (next === 'structure' && !descriptionRequest) setDescriptionRequest(1);
+    }
+
+    function submit(event: FormEvent) {
+        event.preventDefault();
+        if (busy) return;
+        if (filters.some(filter => !filter.column)) {
+            setQueryError(tr('请为每个筛选条件指定一列。', 'Choose a column for each filter.'));
+            return;
+        }
+        if (projection.length > COLUMN_LIMIT) {
+            setQueryError(tr(`最多可选择 ${COLUMN_LIMIT} 列。`, `Choose up to ${COLUMN_LIMIT} columns.`));
+            return;
+        }
+        setQueryError('');
+        setShowQuery(false);
+        setRun({
+            operation: 'query',
+            query: {
+                schema, table, page: 1, page_size: pageSize,
+                columns: projection.length ? projection : undefined,
+                filters: filters.map(filter => ({
+                    column: filter.column,
+                    operator: filter.operator,
+                    value: needsValue(filter.operator) ? filter.value : undefined,
+                })),
+                sort: sortColumn ? { column: sortColumn, direction } : undefined,
+            },
+        });
+    }
+
+    function clearQuery() {
+        setFilters([]);
+        setSelectedColumns(null);
+        setNamedColumns('');
+        setSortColumn('');
+        setDirection('asc');
+        setQueryError('');
+        setRun({ operation, query: { schema, table, page: 1, page_size: pageSize } });
+    }
+
+    const projection = selectedColumns ?? namedColumns.split(',').map(name => name.trim()).filter(Boolean);
+    const operators: Record<Operator, string> = {
+        eq: tr('等于', 'Equals'), ne: tr('不等于', 'Does not equal'),
+        lt: tr('小于', 'Less than'), lte: tr('小于等于', 'At most'),
+        gt: tr('大于', 'Greater than'), gte: tr('大于等于', 'At least'),
+        contains: tr('包含', 'Contains'), is_null: 'IS NULL', is_not_null: 'IS NOT NULL',
+    };
+    const result = data?.result;
+    const pageSize = (busy ? run?.query.page_size : result?.page_size) ?? run?.query.page_size ?? PAGE_SIZES[0];
+    const activeFilters = data?.run.query.filters?.length ?? 0;
+    const refreshing = view === 'data' ? busy : describing;
+    const refreshLabel = view === 'data' ? tr('刷新数据', 'Refresh rows') : tr('刷新表结构', 'Refresh structure');
+
+    function refresh() {
+        if (view === 'structure') setDescriptionRequest(current => current + 1);
+        else if (run) setRun({ ...run });
+    }
+
+    return (
+        <>
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b bg-card px-2 sm:px-3">
+                <div className="flex items-center gap-1" role="group" aria-label={tr('表视图', 'Table view')}>
+                    {canRead && <Button type="button" variant="ghost" size="sm" aria-pressed={view === 'data'} onClick={() => selectView('data')}
+                        className={`!h-10 !gap-1.5 !rounded-none !border-x-0 !border-t-0 !border-b-2 ${view === 'data' ? '!border-b-primary !text-primary' : '!border-b-transparent text-muted-foreground'}`}>
+                        <Table2 aria-hidden="true" className="h-4 w-4" />{tr('数据', 'Data')}
+                    </Button>}
+                    {canList && <Button type="button" variant="ghost" size="sm" aria-pressed={view === 'structure'} onClick={() => selectView('structure')}
+                        className={`!h-10 !gap-1.5 !rounded-none !border-x-0 !border-t-0 !border-b-2 ${view === 'structure' ? '!border-b-primary !text-primary' : '!border-b-transparent text-muted-foreground'}`}>
+                        <Columns aria-hidden="true" className="h-4 w-4" />{tr('结构', 'Structure')}
+                    </Button>}
+                </div>
+                <div className="flex min-w-0 items-center gap-1.5 py-1">
+                    {canQuery && view === 'data' && (
+                        <Button type="button" size="sm" variant={showQuery || activeFilters > 0 ? 'secondary' : 'outline'}
+                            className="gap-1.5" aria-expanded={showQuery} aria-controls={showQuery ? queryFormId : undefined} onClick={() => {
+                                if (!showQuery && canList && !descriptionRequest) setDescriptionRequest(1);
+                                setShowQuery(!showQuery);
+                            }}>
+                            <FilterIcon aria-hidden="true" className="h-3.5 w-3.5" />
+                            {tr('查询条件', 'Query options')}{activeFilters > 0 && <span className="rounded bg-primary/10 px-1 text-xs text-primary">{activeFilters}</span>}
+                        </Button>
+                    )}
+                    <Button type="button" variant="ghost" size="icon" className="!h-8 !w-8" aria-label={refreshLabel} title={refreshLabel} disabled={refreshing} onClick={refresh}>
+                        <RefreshCw aria-hidden="true" className={`h-4 w-4 ${refreshing ? 'animate-spin' : ''}`} />
+                    </Button>
+                </div>
+            </div>
+
+            {view === 'data' && showQuery && canQuery && (
+                <form id={queryFormId} aria-label={tr('查询条件', 'Query options')} onSubmit={submit}
+                    className="max-h-[min(340px,42dvh)] shrink-0 space-y-3 overflow-auto border-b bg-muted/25 p-3 sm:px-4">
+                    {describing && !structure && <p role="status" className="text-xs text-muted-foreground">{tr('正在读取列信息…', 'Loading column information…')}</p>}
+                    {describeError && !structure && <p role="alert" className="text-xs text-destructive">{describeError}</p>}
+                    <div className="flex flex-wrap items-start gap-x-5 gap-y-2.5">
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="text-xs font-medium">{tr('返回列', 'Result columns')}</span>
+                            {columns.length > 0
+                                ? <ProjectionPicker columns={columns} selected={projection} onChange={setSelectedColumns} tr={tr} />
+                                : <Input aria-label={tr('返回列', 'Result columns')} placeholder={tr('列名用逗号分隔，可留空', 'Comma-separated, optional')}
+                                    className="!h-8 w-full font-mono text-xs sm:w-52" value={namedColumns} maxLength={4096} onChange={event => {
+                                        setSelectedColumns(null);
+                                        setNamedColumns(event.target.value);
+                                    }} />}
+                        </div>
+                        <div className="flex min-w-0 flex-wrap items-center gap-2">
+                            <span className="text-xs font-medium">{tr('排序', 'Sort')}</span>
+                            <div className="w-40 min-w-0">
+                                <ColumnSelect columns={columns} label={tr('排序列', 'Sort column')} value={sortColumn} onChange={setSortColumn} optional />
+                            </div>
+                            {sortColumn && (
+                                <div className="w-32">
+                                    <Select value={direction} onValueChange={(next: 'asc' | 'desc') => setDirection(next)}>
+                                        <SelectTrigger aria-label={tr('排序方向', 'Sort direction')} className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                        <SelectContent withinDialog>
+                                            <SelectItem value="asc">{tr('升序', 'Ascending')}</SelectItem>
+                                            <SelectItem value="desc">{tr('降序', 'Descending')}</SelectItem>
+                                        </SelectContent>
+                                    </Select>
+                                </div>
+                            )}
+                        </div>
+                    </div>
+                    {filters.length > 0 && (
+                        <div className="space-y-2">
+                            {filters.map(filter => (
+                                <div key={filter.id} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-center gap-2 sm:grid-cols-[minmax(0,10rem)_minmax(0,9rem)_minmax(0,15rem)_auto] sm:justify-start">
+                                    <ColumnSelect columns={columns} label={tr('筛选列', 'Filter column')} value={filter.column} onChange={column => editFilter(filter.id, { column })} />
+                                    <Select value={filter.operator} onValueChange={(operator: Operator) => editFilter(filter.id, { operator })}>
+                                        <SelectTrigger aria-label={tr('运算符', 'Operator')} className="h-8 min-w-0 text-xs"><SelectValue /></SelectTrigger>
+                                        <SelectContent withinDialog>
+                                            {(Object.keys(operators) as Operator[]).map(operator => <SelectItem key={operator} value={operator}>{operators[operator]}</SelectItem>)}
+                                        </SelectContent>
+                                    </Select>
+                                    {needsValue(filter.operator) && <Input className="col-span-3 row-start-2 h-8 min-w-0 font-mono text-xs sm:col-span-1 sm:row-start-1" maxLength={1024}
+                                        aria-label={tr('筛选值', 'Filter value')} placeholder={tr('筛选值', 'Filter value')}
+                                        value={filter.value} onChange={event => editFilter(filter.id, { value: event.target.value })} />}
+                                    <Button type="button" size="icon" variant="ghost" className="col-start-3 row-start-1 !h-8 !w-8 sm:col-start-4"
+                                        aria-label={tr('移除条件', 'Remove filter')} title={tr('移除条件', 'Remove filter')}
+                                        onClick={() => setFilters(current => current.filter(item => item.id !== filter.id))}>
+                                        <X aria-hidden="true" className="h-4 w-4" />
+                                    </Button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                    {queryError && <p role="alert" className="text-xs text-destructive">{queryError}</p>}
+                    <div className="flex flex-wrap items-center gap-2">
+                        <Button type="button" size="sm" variant="outline" className="gap-1.5" disabled={filters.length >= FILTER_LIMIT}
+                            onClick={() => {
+                                const id = nextFilter.current++;
+                                setFilters(current => [...current, { id, column: '', operator: 'eq', value: '' }]);
+                            }}>
+                            <Plus aria-hidden="true" className="h-3.5 w-3.5" />{tr('添加筛选', 'Add filter')}
+                        </Button>
+                        <Button type="button" size="sm" variant="ghost" className="ml-auto" disabled={busy} onClick={clearQuery}>{tr('重置', 'Reset')}</Button>
+                        <Button type="submit" size="sm" disabled={busy}>{tr('执行查询', 'Run query')}</Button>
+                    </div>
+                </form>
+            )}
+
+            {view === 'structure' ? (
+                <>
+                    {describeError && <p role="alert" className="shrink-0 border-b bg-destructive/5 px-4 py-2 text-xs text-destructive">{describeError}</p>}
+                    <div className="min-h-0 flex-1 overflow-auto" aria-busy={describing}>
+                        {structure?.length ? (
+                            <table className="w-full border-separate border-spacing-0 bg-card text-xs" aria-label={tr('表结构', 'Table structure')}>
+                                <thead className="sticky top-0 z-10"><tr>
+                                    <th scope="col" className={`${headerCell} w-px text-right text-muted-foreground`}><span aria-hidden="true">#</span><span className="sr-only">{tr('序号', 'Position')}</span></th>
+                                    <th scope="col" className={headerCell}>{tr('列名', 'Column')}</th>
+                                    <th scope="col" className={headerCell}>{tr('类型', 'Type')}</th>
+                                    <th scope="col" className={`${headerCell} whitespace-nowrap`}>{tr('允许空值', 'Nullable')}</th>
+                                </tr></thead>
+                                <tbody>{structure.map((column, index) => (
+                                    <tr key={column.name} className="even:bg-muted/30 hover:bg-primary/10">
+                                        <td className={`${dataCell} bg-muted/60 text-right font-mono text-muted-foreground`}>{index + 1}</td>
+                                    <th scope="row" className={`${dataCell} text-left font-mono font-medium`}><span className="normal-case tracking-normal">{column.name}</span></th>
+                                        <td className={`${dataCell} whitespace-nowrap font-mono text-muted-foreground`}>{column.type}</td>
+                                        <td className={dataCell}>{column.nullable ? tr('是', 'Yes') : tr('否', 'No')}</td>
+                                    </tr>
+                                ))}</tbody>
+                            </table>
+                        ) : describing ? <Notice icon={Loader2}>{tr('正在读取表结构…', 'Loading table structure…')}</Notice>
+                            : !describeError && <Notice icon={Columns}>{tr('该表没有列', 'This table has no columns')}</Notice>}
+                    </div>
+                    {structure && <div className="shrink-0 border-t bg-card px-3 py-2 text-xs text-muted-foreground">
+                        {tr(`${structure.length} 列`, `${structure.length} ${structure.length === 1 ? 'column' : 'columns'}`)}
+                    </div>}
+                </>
+            ) : (
+                <>
+                    {error && <p role="alert" className="shrink-0 border-b bg-destructive/5 px-4 py-2 text-xs text-destructive">{error}</p>}
+                    <div ref={scrollRef} className="min-h-0 flex-1 overflow-auto" aria-busy={busy}>
+                        {data ? <RowsGrid result={data.result} columns={columns} sort={data.run.query.sort} tr={tr} />
+                            : busy && <Notice icon={Loader2}>{tr('正在读取数据…', 'Loading rows…')}</Notice>}
+                    </div>
+                    <div className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-t bg-card px-3 py-1.5 text-xs text-muted-foreground">
+                        <div className="min-w-0" role="status">
+                            {busy ? tr('正在读取数据…', 'Loading rows…') : result && (
+                                <span className="tabular-nums">
+                                    {tr(`本页 ${result.rows.length} 行 · ${result.columns.length} 列`, `${result.rows.length} ${result.rows.length === 1 ? 'row' : 'rows'} · ${result.columns.length} ${result.columns.length === 1 ? 'column' : 'columns'}`)}
+                                    {result.truncated && (
+                                        <span className="ml-2 inline-flex items-center gap-1" title={tr('部分列或单元格内容已截断', 'Some columns or cell values were truncated')}>
+                                            <AlertCircle aria-hidden="true" className="h-3.5 w-3.5" />{tr('预览已截断', 'Preview truncated')}
+                                        </span>
+                                    )}
+                                </span>
+                            )}
+                        </div>
+                        <div className="ml-auto flex items-center gap-1">
+                            <div className="mr-1 w-[6.5rem]">
+                                <Select disabled={busy} value={String(pageSize)} onValueChange={(value: string) => {
+                                    const size = Number(value);
+                                    const current = data?.run ?? run;
+                                    if (current) setRun({ ...current, query: { ...current.query, page: 1, page_size: size } });
+                                }}>
+                                    <SelectTrigger aria-label={tr('每页行数', 'Rows per page')} className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent withinDialog>
+                                        {PAGE_SIZES.map(size => <SelectItem key={size} value={String(size)}>{tr(`${size} 行/页`, `${size} / page`)}</SelectItem>)}
+                                    </SelectContent>
+                                </Select>
+                            </div>
+                            <Button type="button" size="icon" variant="ghost" className="!h-8 !w-8" aria-label={tr('上一页', 'Previous page')}
+                                disabled={busy || !data || data.result.page <= 1} onClick={() => data && setRun({ ...data.run, query: { ...data.run.query, page: data.result.page - 1 } })}>
+                                <ChevronLeft aria-hidden="true" className="h-4 w-4" />
+                            </Button>
+                            <span className="whitespace-nowrap tabular-nums">{tr(`第 ${result?.page ?? 1} 页`, `Page ${result?.page ?? 1}`)}</span>
+                            <Button type="button" size="icon" variant="ghost" className="!h-8 !w-8" aria-label={tr('下一页', 'Next page')}
+                                disabled={busy || !data?.result.has_more} onClick={() => data && setRun({ ...data.run, query: { ...data.run.query, page: data.result.page + 1 } })}>
+                                <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                            </Button>
+                        </div>
+                    </div>
+                </>
+            )}
+        </>
+    );
+}
+
+export default function DatabaseCapability({ apiPath, operations }: { apiPath: string; operations: string[] }) {
+    const { i18n } = useTranslation();
+    const zh = (i18n.resolvedLanguage || i18n.language || 'en').startsWith('zh');
+    const tr: Translate = (chinese, english) => zh ? chinese : english;
+    const canList = operations.includes('list_tables');
+    const canPreview = operations.includes('read_rows');
+    const canQuery = operations.includes('query');
+    const catalogId = useId();
+    const [relation, setRelation] = useState<Relation | null>(null);
+    const [tables, setTables] = useState<Relation[]>([]);
+    const [catalogTruncated, setCatalogTruncated] = useState(false);
+    const [catalogError, setCatalogError] = useState('');
+    const [loadingTables, setLoadingTables] = useState(canList);
+    const [catalogVersion, setCatalogVersion] = useState(0);
+    const [search, setSearch] = useState('');
+    const [closedSchemas, setClosedSchemas] = useState<Set<string>>(() => new Set());
+    const [showCatalog, setShowCatalog] = useState(true);
+
+    useEffect(() => {
+        if (!canList) return;
+        const controller = new AbortController();
+        setLoadingTables(true);
+        setCatalogError('');
+        request.get<{ items: Relation[]; truncated: boolean }>(apiPath + '/tables', {
+            signal: controller.signal, suppressErrorToast: true,
+        }).then(({ data }) => {
+            if (controller.signal.aborted) return;
+            setTables(data.items);
+            setCatalogTruncated(data.truncated);
+        }).catch((cause: unknown) => {
+            if (!controller.signal.aborted) setCatalogError(getErrorMessage(cause, zh ? '无法读取表目录。' : 'Could not load tables.'));
+        }).finally(() => {
+            if (!controller.signal.aborted) setLoadingTables(false);
+        });
+        return () => controller.abort();
+    }, [apiPath, canList, catalogVersion, zh]);
+
+    const needle = search.trim().toLowerCase();
+    const catalog = useMemo(() => {
+        const groups = new Map<string, Relation[]>();
+        for (const item of tables) {
+            if (!`${item.schema}.${item.table}`.toLowerCase().includes(needle)) continue;
+            const group = groups.get(item.schema);
+            if (group) group.push(item);
+            else groups.set(item.schema, [item]);
+        }
+        return [...groups];
+    }, [tables, needle]);
+
+    function selectRelation(next: Relation) {
+        setRelation(next);
+        setShowCatalog(false);
+    }
+
+    function searchCatalog(value: string) {
+        setSearch(value);
+        setClosedSchemas(new Set());
+    }
+
+    const searchLabel = tr('搜索 Schema 或表名', 'Search schemas or tables');
+    const catalogLabel = tr('表目录', 'Table catalog');
+
+    return (
+        <div className={`grid min-h-0 min-w-0 flex-1 grid-cols-1 bg-background ${canList ? 'md:grid-cols-[15rem_minmax(0,1fr)] xl:grid-cols-[17rem_minmax(0,1fr)]' : ''}`}>
+            {canList && (
+                <aside id={catalogId} aria-label={catalogLabel}
+                    className={`${showCatalog ? 'flex' : 'hidden'} min-h-0 min-w-0 flex-col bg-muted/25 md:flex md:border-r`}>
+                    <div className="shrink-0 space-y-1.5 border-b px-3 pb-2.5 pt-1.5">
+                        <div className="flex h-8 items-center gap-1.5">
+                            <h3 className="min-w-0 flex-1 truncate text-xs font-semibold">{catalogLabel}</h3>
+                            <Button type="button" variant="ghost" size="icon" className="!h-7 !w-7" disabled={loadingTables}
+                                aria-label={tr('刷新表目录', 'Refresh catalog')} title={tr('刷新表目录', 'Refresh catalog')}
+                                onClick={() => setCatalogVersion(current => current + 1)}>
+                                <RefreshCw aria-hidden="true" className={`h-3.5 w-3.5 ${loadingTables ? 'animate-spin' : ''}`} />
+                            </Button>
+                            {relation && (
+                                <Button type="button" variant="ghost" size="icon" className="!h-7 !w-7 md:!hidden" aria-label={tr('返回当前表', 'Return to current table')} onClick={() => setShowCatalog(false)}>
+                                    <ChevronRight aria-hidden="true" className="h-4 w-4" />
+                                </Button>
+                            )}
+                            <div className="md:hidden"><RelationPicker relation={relation} onSelect={selectRelation} tr={tr} /></div>
+                        </div>
+                        <div className="relative">
+                            <Search aria-hidden="true" className="pointer-events-none absolute left-2.5 top-2.5 z-[1] h-3.5 w-3.5 text-muted-foreground" />
+                            <Input value={search} onChange={event => searchCatalog(event.target.value)} aria-label={searchLabel}
+                                placeholder={searchLabel} className={`!h-8 !pl-8 !text-xs ${search ? '!pr-8' : ''}`} />
+                            {search && (
+                                <Button type="button" size="icon" variant="ghost" className="!absolute right-1 top-1 !h-6 !w-6"
+                                    aria-label={tr('清除搜索', 'Clear search')} onClick={() => searchCatalog('')}>
+                                    <X aria-hidden="true" className="h-3.5 w-3.5" />
+                                </Button>
+                            )}
+                        </div>
+                    </div>
+                    <nav className="min-h-0 flex-1 overflow-auto px-2 py-2" aria-label={tr('Schema 和表', 'Schemas and tables')} aria-busy={loadingTables}>
+                        {catalogError && <p role="alert" className="px-2 py-2 text-xs text-destructive">{catalogError}</p>}
+                        {catalog.length > 0 ? (
+                            <ul className="space-y-1">
+                                {catalog.map(([schema, items]) => {
+                                    const expanded = !closedSchemas.has(schema);
+                                    return (
+                                        <li key={schema}>
+                                            <Button type="button" size="sm" variant="ghost" className={`${groupButton} font-medium`} aria-expanded={expanded}
+                                                title={schema} onClick={() => setClosedSchemas(current => {
+                                                    const next = new Set(current);
+                                                    if (next.has(schema)) next.delete(schema);
+                                                    else next.add(schema);
+                                                    return next;
+                                                })}>
+                                                {expanded ? <ChevronDown aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground" /> : <ChevronRight aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground" />}
+                                                {expanded ? <FolderOpen aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" /> : <Folder aria-hidden="true" className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                                                <span className="min-w-0 flex-1 truncate text-left font-mono">{schema}</span>
+                                                <span className="ml-auto text-[11px] tabular-nums text-muted-foreground">{items.length}</span>
+                                            </Button>
+                                            {expanded && (
+                                                <ul className="ml-3.5 space-y-0.5 border-l pl-1.5">
+                                                    {items.map(item => {
+                                                        const selected = relation?.schema === schema && relation.table === item.table;
+                                                        return (
+                                                            <li key={item.table}>
+                                                                <Button type="button" size="sm" variant="ghost" className={`${groupButton} ${selected ? '!bg-primary/10 !text-primary' : 'text-muted-foreground'}`}
+                                                                    aria-current={selected ? 'true' : undefined} title={`${item.schema}.${item.table}`} onClick={() => selectRelation(item)}>
+                                                                    <Table2 aria-hidden="true" className="h-3.5 w-3.5 shrink-0" />
+                                                                    <span className="min-w-0 truncate text-left font-mono">{item.table}</span>
+                                                                </Button>
+                                                            </li>
+                                                        );
+                                                    })}
+                                                </ul>
+                                            )}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        ) : !catalogError && <p className="px-2 py-3 text-xs text-muted-foreground" role="status">
+                            {loadingTables ? tr('正在读取表目录…', 'Loading tables…') : needle ? tr('没有匹配的表', 'No matching tables') : tr('没有可浏览的表', 'No tables available')}
+                        </p>}
+                    </nav>
+                    <div className="shrink-0 border-t px-3 py-2 text-xs text-muted-foreground">
+                        {catalogTruncated
+                            ? tr('目录已截断，可按名称打开其他表。', 'Catalog truncated. Open other tables by name.')
+                            : tr(`${tables.length} 张表`, `${tables.length} ${tables.length === 1 ? 'table' : 'tables'}`)}
+                    </div>
+                </aside>
+            )}
+
+            <div className={`${canList && showCatalog ? 'hidden md:flex' : 'flex'} min-h-0 min-w-0 flex-col`}>
+                <div className="flex min-h-12 shrink-0 items-center gap-2 border-b bg-card px-3">
+                    {canList && (
+                        <Button type="button" size="icon" variant="ghost" className="!h-8 !w-8 md:!hidden"
+                            aria-label={catalogLabel} aria-controls={catalogId} onClick={() => setShowCatalog(true)}>
+                            <PanelLeft aria-hidden="true" className="h-4 w-4" />
+                        </Button>
+                    )}
+                    {relation && (
+                        <div className="flex min-w-0 flex-1 items-center gap-1.5 font-mono text-xs" title={`${relation.schema}.${relation.table}`}>
+                            <Table2 aria-hidden="true" className="h-4 w-4 shrink-0 text-primary" />
+                            <span className="max-w-[35%] truncate text-muted-foreground">{relation.schema}</span>
+                            <ChevronRight aria-hidden="true" className="h-3 w-3 shrink-0 text-muted-foreground" />
+                            <h3 className="truncate font-semibold">{relation.table}</h3>
+                        </div>
+                    )}
+                    <div className="ml-auto shrink-0"><RelationPicker relation={relation} onSelect={selectRelation} tr={tr} /></div>
+                </div>
+                {relation ? (
+                    <TableWorkspace key={JSON.stringify([apiPath, relation.schema, relation.table, canList, canPreview, canQuery])}
+                        apiPath={apiPath} relation={relation} canList={canList} canPreview={canPreview} canQuery={canQuery} tr={tr} zh={zh} />
+                ) : (
+                    <div className="min-h-0 flex-1">
+                        <Notice>{canList ? tr('从左侧目录选择一张表', 'Select a table from the catalog') : tr('输入 Schema 和表名以打开表', 'Open a table by schema and name')}</Notice>
+                    </div>
+                )}
+            </div>
+        </div>
+    );
+}
+{% endraw %}

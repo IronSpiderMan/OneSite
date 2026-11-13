@@ -1,0 +1,252 @@
+{% raw %}
+import { useEffect, useId, useRef, useState, type FormEvent } from 'react';
+import { useTranslation } from 'react-i18next';
+import { Button } from '../ui/button';
+import { Input } from '../ui/input';
+import { formatDateTime } from '../../lib/datetime';
+import { getBaseURL } from '../../utils/request';
+
+type Message = {
+    id: number;
+    topic: string;
+    payload: string;
+    encoding: 'utf-8' | 'base64';
+    qos: number;
+    retained: boolean;
+    size: number;
+    truncated: boolean;
+    received_at: string;
+};
+
+const labels = {
+    en: {
+        title: 'MQTT messages',
+        filter: 'Topic filter',
+        subscribe: 'Subscribe',
+        stop: 'Stop',
+        idle: 'Enter a topic filter to start receiving messages.',
+        connecting: 'Connecting to the broker…',
+        active: 'Subscribed',
+        ended: 'The subscription reached its time or message limit. Subscribe again to continue.',
+        allTopics: 'All observed topics',
+        topics: 'Observed topics',
+        noMessages: 'Waiting for messages matching this filter.',
+        empty: 'No messages received.',
+        lost: 'Messages skipped because the stream was busy:',
+        retained: 'Retained',
+        truncated: 'Preview truncated',
+        errors: {
+            busy: 'The server has too many active MQTT subscriptions. Try again shortly.',
+            subscription_denied: 'The broker declined this topic filter.',
+            disconnected: 'The broker disconnected. Subscribe again to continue.',
+            connection_failed: 'Unable to connect or subscribe. Check the saved broker settings and topic filter.',
+            forbidden: 'You do not have access to this MQTT subscription.',
+            invalid: 'Check the topic filter and saved broker configuration.',
+            unavailable: 'Unable to open the MQTT message stream.',
+        },
+    },
+    zh: {
+        title: 'MQTT 消息',
+        filter: '主题过滤器',
+        subscribe: '订阅',
+        stop: '停止',
+        idle: '输入主题过滤器后开始接收消息。',
+        connecting: '正在连接 Broker…',
+        active: '订阅中',
+        ended: '订阅已达到时长或消息数量上限，可重新订阅。',
+        allTopics: '所有已观察主题',
+        topics: '已观察主题',
+        noMessages: '等待符合过滤条件的消息。',
+        empty: '暂无消息。',
+        lost: '因消息流繁忙而跳过的消息数：',
+        retained: '保留消息',
+        truncated: '预览已截断',
+        errors: {
+            busy: '当前订阅数量已达上限，请稍后重试。',
+            subscription_denied: 'Broker 拒绝了此主题过滤器。',
+            disconnected: 'Broker 已断开连接，可重新订阅。',
+            connection_failed: '连接或订阅失败，请检查保存的 Broker 设置和主题过滤器。',
+            forbidden: '你没有订阅此 Broker 的权限。',
+            invalid: '请检查主题过滤器和保存的 Broker 配置。',
+            unavailable: '无法打开 MQTT 消息流。',
+        },
+    },
+};
+
+type ErrorCode = keyof typeof labels.en.errors;
+type Status = 'idle' | 'connecting' | 'active' | 'ended' | 'stopped';
+const MAX_VISIBLE_MESSAGES = 100;
+const MAX_OBSERVED_TOPICS = 200;
+
+export default function MqttCapability({ apiPath }: { apiPath: string }) {
+    const { i18n } = useTranslation();
+    const copy = (i18n.resolvedLanguage ?? i18n.language ?? 'en').startsWith('zh') ? labels.zh : labels.en;
+    const filterId = useId();
+    const topicsId = useId();
+    const [filter, setFilter] = useState('');
+    const [messages, setMessages] = useState<Message[]>([]);
+    const [topics, setTopics] = useState<string[]>([]);
+    const [selectedTopic, setSelectedTopic] = useState('');
+    const [status, setStatus] = useState<Status>('idle');
+    const [error, setError] = useState<ErrorCode | null>(null);
+    const [lost, setLost] = useState(0);
+    const active = useRef<AbortController>();
+    const running = status === 'connecting' || status === 'active';
+
+    useEffect(() => {
+        setMessages([]);
+        setTopics([]);
+        setSelectedTopic('');
+        setStatus('idle');
+        setError(null);
+        setLost(0);
+        return () => {
+            active.current?.abort();
+            active.current = undefined;
+        };
+    }, [apiPath]);
+
+    const stop = () => {
+        active.current?.abort();
+        active.current = undefined;
+        setStatus('stopped');
+    };
+
+    const subscribe = async (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+        if (!filter || active.current) return;
+        const connection = new AbortController();
+        active.current = connection;
+        setMessages([]);
+        setTopics([]);
+        setSelectedTopic('');
+        setStatus('connecting');
+        setError(null);
+        setLost(0);
+
+        try {
+            const token = localStorage.getItem('token');
+            const query = new URLSearchParams({ topic_filter: filter });
+            const response = await fetch(`${getBaseURL().replace(/\/$/, '')}${apiPath}/messages?${query}`, {
+                headers: token ? { Authorization: `Bearer ${token}`, Accept: 'text/event-stream' } : { Accept: 'text/event-stream' },
+                signal: connection.signal,
+            });
+            if (connection.signal.aborted) return;
+            if (!response.ok || !response.body) {
+                if ([401, 403, 404].includes(response.status)) setError('forbidden');
+                else setError(response.status === 422 ? 'invalid' : 'unavailable');
+                setStatus('stopped');
+                return;
+            }
+
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let pending = '';
+            try {
+                while (!connection.signal.aborted) {
+                    const { value, done } = await reader.read();
+                    if (done || connection.signal.aborted) break;
+                    pending += decoder.decode(value, { stream: true });
+                    let boundary = pending.indexOf('\n\n');
+                    const received: Message[] = [];
+                    let terminal = false;
+                    while (boundary >= 0) {
+                        const frame = pending.slice(0, boundary).split('\n');
+                        pending = pending.slice(boundary + 2);
+                        boundary = pending.indexOf('\n\n');
+                        const eventName = frame.find(line => line.startsWith('event: '))?.slice(7);
+                        const data = frame.find(line => line.startsWith('data: '))?.slice(6);
+                        if (!data) continue;
+                        if (eventName === 'ready') setStatus('active');
+                        if (eventName === 'message') received.push(JSON.parse(data) as Message);
+                        if (eventName === 'overflow') setLost(count => count + (JSON.parse(data).count as number));
+                        if (eventName === 'end') {
+                            setStatus('ended');
+                            terminal = true;
+                            break;
+                        }
+                        if (eventName === 'error') {
+                            const code = JSON.parse(data).code as ErrorCode;
+                            setError(Object.prototype.hasOwnProperty.call(labels.en.errors, code) ? code : 'unavailable');
+                            setStatus('stopped');
+                            terminal = true;
+                            break;
+                        }
+                    }
+                    if (received.length) {
+                        setMessages(current => current.concat(received).slice(-MAX_VISIBLE_MESSAGES));
+                        setTopics(current => Array.from(new Set([...current, ...received.map(message => message.topic)])).slice(0, MAX_OBSERVED_TOPICS));
+                    }
+                    if (terminal) return;
+                    if (pending.length > 64 * 1024) throw new Error('MQTT stream frame is too large');
+                }
+                if (!connection.signal.aborted) {
+                    setError('disconnected');
+                    setStatus('stopped');
+                }
+            } finally {
+                await reader.cancel().catch(() => undefined);
+                reader.releaseLock();
+            }
+        } catch {
+            if (!connection.signal.aborted) {
+                setError('unavailable');
+                setStatus('stopped');
+            }
+        } finally {
+            if (active.current === connection) active.current = undefined;
+        }
+    };
+
+    const visible = (selectedTopic ? messages.filter(message => message.topic === selectedTopic) : messages).slice().reverse();
+    const statusText = status === 'stopped' ? '' : copy[status];
+
+    return (
+        <section className="space-y-4" aria-label={copy.title}>
+            <form onSubmit={subscribe} className="flex flex-wrap items-end gap-2">
+                <div className="min-w-[14rem] flex-1">
+                    <label htmlFor={filterId} className="mb-1 block text-sm font-medium">{copy.filter}</label>
+                    <Input id={filterId} value={filter} onChange={event => setFilter(event.target.value)}
+                        placeholder="sensors/+/temperature" maxLength={1024} disabled={running} required spellCheck={false} />
+                </div>
+                {running
+                    ? <Button type="button" variant="outline" onClick={stop}>{copy.stop}</Button>
+                    : <Button type="submit" disabled={!filter}>{copy.subscribe}</Button>}
+            </form>
+            {statusText && <p role="status" className="text-sm text-muted-foreground">{statusText}</p>}
+            {error && <p role="alert" className="text-sm text-destructive">{copy.errors[error]}</p>}
+            {lost > 0 && <p role="status" className="text-sm text-muted-foreground">{copy.lost} {lost}</p>}
+            {topics.length > 0 && (
+                <div className="flex flex-wrap items-center gap-2">
+                    <label htmlFor={topicsId} className="text-sm font-medium">{copy.topics}</label>
+                    <select id={topicsId} value={selectedTopic} onChange={event => setSelectedTopic(event.target.value)}
+                        className="max-w-full rounded-md border border-input bg-background px-3 py-2 text-sm">
+                        <option value="">{copy.allTopics}</option>
+                        {topics.map(topic => <option key={topic} value={topic}>{topic}</option>)}
+                    </select>
+                </div>
+            )}
+            {visible.length > 0 ? (
+                <ul className="max-h-[65vh] divide-y overflow-auto rounded-lg border">
+                    {visible.map(message => (
+                        <li key={message.id} className="min-w-0 space-y-2 p-3">
+                            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1 text-xs text-muted-foreground">
+                                <strong className="break-all text-sm text-foreground">{message.topic}</strong>
+                                <time dateTime={message.received_at}>{formatDateTime(message.received_at)}</time>
+                                <span>QoS {message.qos}</span>
+                                <span>{message.size} B</span>
+                                {message.retained && <span>{copy.retained}</span>}
+                                {message.encoding === 'base64' && <span>Base64</span>}
+                                {message.truncated && <span>{copy.truncated}</span>}
+                            </div>
+                            <pre className="whitespace-pre-wrap break-all rounded-md bg-muted/50 p-2 text-xs">{message.payload}</pre>
+                        </li>
+                    ))}
+                </ul>
+            ) : status !== 'idle' && status !== 'connecting' && !error && (
+                <p className="rounded-lg border p-4 text-sm text-muted-foreground">{status === 'active' ? copy.noMessages : copy.empty}</p>
+            )}
+        </section>
+    );
+}
+{% endraw %}

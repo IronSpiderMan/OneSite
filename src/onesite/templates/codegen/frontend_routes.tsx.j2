@@ -35,6 +35,9 @@ import ExternalResourcesPage from './pages/ExternalResources';
 {% if import_export_enabled %}
 import TaskCenterPage from './pages/TaskCenter';
 {% endif %}
+{% if mqtt_capability_enabled %}
+import MqttCapabilityPage from './components/capabilities/MqttCapabilityPage';
+{% endif %}
 {% for model in models %}
 {% if not model.is_singleton %}
 import {{ model.name }}Page from './pages/{{ model.module_name }}';
@@ -110,6 +113,13 @@ const GeneratedBaseRoutes: GeneratedRouteDefinition[] = [
     path: '/{{ model.module_name }}s/:id',
     element: <{{ model.name }}DetailPage />,
   },
+{% for capability in model.capabilities | default([]) if capability.kind == 'mqtt_broker' %}
+  {
+    id: 'model.{{ model.module_name }}.mqtt',
+    path: '/{{ model.module_name }}s/:id/mqtt',
+    element: <MqttCapabilityPage model={{ '{' }}{{ model.module_name | tojson }}{{ '}' }} allowedRoles={{ '{' }}{{ capability.permissions.subscribe | tojson }}{{ '}' }} modelPermissions={{ '{' }}{{ model.role_permissions | tojson }}{{ '}' }} />,
+  },
+{% endfor %}
 {% elif model.module_name != 'system_config' and model.module_name != 'custom_config' %}
   {
     id: 'model.{{ model.module_name }}.detail',

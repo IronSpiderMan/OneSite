@@ -17,6 +17,7 @@ from ...project_paths import get_project_paths
 from ..filter_defaults import validate_filter_default
 from ..file_utils import copy_file_with_status
 from ..custom_backend import sync_custom_backend
+from ..capabilities import generate_capabilities
 from ..i18n import generate_locale_files
 from ..render import generate_file, generate_file_if_missing, generate_theme_file
 from ..theme import resolve_theme
@@ -1191,6 +1192,7 @@ def phase_generate_aggregated(
     generate_agents(site_config, api_models, cwd, backend_path)
 
     generate_file("access_policies.py.j2", {"models": models}, backend_path / "app/core/access_policies.py")
+    capabilities_enabled = generate_capabilities(api_models, backend_path, frontend_path)
 
     # ── API router ──
     update_api_router(
@@ -1205,6 +1207,7 @@ def phase_generate_aggregated(
         reports_enabled=model_reports_enabled,
         schedule_enabled=bool(site_config.get("schedule", {}).get("enabled")),
         opcua_enabled="opcua" in site_config.get("plugins", []),
+        capabilities_enabled=capabilities_enabled,
     )
 
     if site_config.get("schedule", {}).get("enabled"):
@@ -1597,6 +1600,7 @@ def phase_generate_aggregated(
         {
             "models": frontend_models,
             "schedule_enabled": bool(site_config.get("schedule", {}).get("enabled")),
+            "mqtt_capability_enabled": "mqtt_broker" in site_config.get("_capability_kinds", []),
             "external_resources_enabled": external_resources_enabled,
             "reports_enabled": bool(report_models),
             "import_export_enabled": background_tasks_enabled,

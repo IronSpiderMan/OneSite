@@ -287,7 +287,7 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
         <JsonInput value={value} onChange={onChange} jsonKind="{{ 'array' if override.read_type.startswith('List[') or override.read_type == 'list' else 'object' }}" />
     )} />
     {% else %}
-    <Input id="edit-{{ field.name }}" type="{% if model.opcua_browse and field.name == 'password' %}password{% else %}text{% endif %}" {% if model.opcua_browse and field.name == 'password' %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })} />
+    <Input id="edit-{{ field.name }}" type="{% if field.capability_secret or (model.opcua_browse and field.name == 'password') %}password{% else %}text{% endif %}" {% if field.capability_secret or (model.opcua_browse and field.name == 'password') %}autoComplete="new-password" {% endif %}{...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }} })} />
     {% endif %}
     {% elif field.dict_key_reference %}
     <Controller control={editControl} name="{{ field.name }}" render={({ field: { onChange, value } }) => (
@@ -457,14 +457,26 @@ hasFieldPerm('{{ field.name }}', 'u'){% if field.name == model.owner_field %} &&
         {% endif %}
     )} />
     {% else %}
-    <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% if field.minimum is not none %} min={ {{ field.minimum }} }{% endif %}{% if field.maximum is not none %} max={ {{ field.maximum }} }{% endif %}{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% elif model.opcua_browse and field.name == 'password' %} type="password" autoComplete="new-password"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }},{% if field.minimum is not none %} min: {{ field.minimum }},{% endif %}{% if field.maximum is not none %} max: {{ field.maximum }},{% endif %} })} />
+    <Input id="edit-{{ field.name }}"{% if field.ui_type == 'int' or field.ui_type == 'float' %} type="number"{% if field.minimum is not none %} min={ {{ field.minimum }} }{% endif %}{% if field.maximum is not none %} max={ {{ field.maximum }} }{% endif %}{% elif field.ui_type == 'datetime' %} type="datetime-local"{% elif field.ui_type == 'date' %} type="date"{% elif field.capability_secret or (model.opcua_browse and field.name == 'password') %} type="password" autoComplete="new-password"{% else %} type="text"{% endif %} {...register('{{ field.name }}', { required: {{ 'true' if field.required and not field.update_optional else 'false' }},{% if field.minimum is not none %} min: {{ field.minimum }},{% endif %}{% if field.maximum is not none %} max: {{ field.maximum }},{% endif %} })} />
+    {% endif %}
+    {% if field.capability_secret_clearable %}
+    <label className="flex items-center gap-2 text-sm">
+        <input type="checkbox" {...register('__clear_{{ field.name }}')} /> {t('capabilities.clear_password')}
+    </label>
     {% endif %}
 </div>
 )
 {%- endmacro %}
 import React, { useEffect, useState, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
-import { ArrowLeft, Eye, Loader2{% if model.reverse_timeseries %}, Clock, Search{% endif %}{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
+{% set has_database_capability = model.capabilities | default([]) | selectattr('kind', 'equalto', 'database') | list %}
+{% for capability in model.capabilities | default([]) if capability.kind != 'mqtt_broker' %}
+import {{ capability.component }} from '../../components/capabilities/{{ capability.component }}';
+{% endfor %}
+import { ArrowLeft, Eye, Loader2{% if has_database_capability %}, Database{% endif %}{% if model.reverse_timeseries %}, Clock, Search{% endif %}{% if model.page_edit or model.reverse_foreign_keys %}, Pencil{% endif %}{% if model.page_edit %}, Save, X{% endif %}{% if model.reverse_foreign_keys %}, Trash2{% endif %} } from 'lucide-react';
+{% if has_database_capability %}
+import { Dialog, DialogContent, DialogTitle, DialogTrigger } from '../../components/ui/dialog';
+{% endif %}
 {% if model.opcua_browse %}
 import OpcuaBrowsePanel from '../../components/opcua/BrowsePanel';
 {% endif %}
@@ -604,6 +616,17 @@ const {{ model.name }}DetailPage: React.FC = () => {
     const rolePermissions: Record<string, string> = {{ model.role_permissions | tojson }};
     const userPerms = rolePermissions[userRole] || '';
     const hasPermission = (perm: 'r' | 'c' | 'u' | 'd') => userPerms.includes(perm);
+    {% if model.capabilities %}
+    const capabilityPermissions: Record<string, Record<string, string[]>> = {
+        {% for capability in model.capabilities %}
+        {{ capability.kind | tojson }}: {{ capability.permissions | tojson }},
+        {% endfor %}
+    };
+    const capabilityOperations = (kind: string) => hasPermission('r')
+        ? Object.entries(capabilityPermissions[kind]).filter(([, roles]) => roles.includes(userRole)).map(([operation]) => operation)
+        : [];
+    const capabilityBase = `/model-capabilities/{{ model.module_name }}/${encodeURIComponent(id ?? '')}`;
+    {% endif %}
     {% set inline_edit_tabs = model.reverse_foreign_keys | default([]) | selectattr('display') | selectattr('editor', 'equalto', 'inline') | list %}
     const [activeTab, setActiveTab] = useState('detail');
     {% if model.opcua_browse %}
@@ -771,7 +794,7 @@ const {{ model.name }}DetailPage: React.FC = () => {
         {% endfor %}
       } catch (error) {
         toast.error(getErrorMessage(error, t('toast.save_failed', 'Save failed')));
-        console.error(error);
+        {% if not model.capabilities %}console.error(error);{% endif %}
       } finally {
         setIsSaving(false);
       }
@@ -781,6 +804,10 @@ const {{ model.name }}DetailPage: React.FC = () => {
       if (!currentItem) return;
       const item = currentItem;
       {% for field in model.fields %}
+      {% if field.capability_secret %}
+      setEditValue('{{ field.name }}', '');
+      {% endif %}
+      {% if field.capability_secret_clearable %}setEditValue('__clear_{{ field.name }}', false);{% endif %}
       {% if 'r' in field.permissions %}
       {% set override = (model.override_fields | default([]) | selectattr('field', 'equalto', field.name) | list | first) %}
       setEditValue('{{ field.name }}', item.{{ override.raw_field if override and override.raw_field is defined else field.name }});
@@ -1431,6 +1458,46 @@ const {{ model.name }}DetailPage: React.FC = () => {
                 {% endif %}
 
               <div className="flex min-w-0 flex-wrap items-center justify-end gap-2" data-page-region="page-actions">
+                {% for capability in model.capabilities | default([]) %}
+                {id && String(currentItem.id) === id && capabilityOperations({{ capability.kind | tojson }}).length > 0
+                    {% if model.page_edit %} && !isEditing{% endif %} && (
+                    {% if capability.kind == 'mqtt_broker' %}
+                    <Button size="sm" variant="outline" onClick={() => navigate(`/{{ model.module_name }}s/${encodeURIComponent(id)}/mqtt`)}>
+                        {t('capabilities.mqtt_subscribe')}
+                    </Button>
+                    {% elif capability.kind == 'database' %}
+                    <Dialog key={id}>
+                        <DialogTrigger asChild>
+                            <Button size="sm" variant="outline" className="gap-1.5">
+                                <Database className="h-4 w-4" aria-hidden="true" />
+                                {t('capabilities.database_browse')}
+                            </Button>
+                        </DialogTrigger>
+                        <DialogContent
+                            className="flex h-[min(800px,92dvh)] w-[calc(100vw-1rem)] max-w-[1440px] flex-col gap-0 overflow-hidden rounded-xl p-0 sm:w-[96vw] [&>button:last-child]:top-5"
+                            aria-describedby={undefined}
+                            onEscapeKeyDown={event => {
+                                // Let Ant Design close an open dropdown before closing the dialog.
+                                if (event.target instanceof Element && event.target.closest('[role="combobox"][aria-expanded="true"]')) {
+                                    event.preventDefault();
+                                }
+                            }}
+                            onInteractOutside={event => event.preventDefault()}
+                        >
+                            <header className="flex min-h-14 shrink-0 items-center gap-2.5 border-b bg-card px-4 py-2 pr-12">
+                                <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
+                                    <Database className="h-4 w-4" aria-hidden="true" />
+                                </span>
+                                <DialogTitle className="text-sm">{t('capabilities.database_browse')}</DialogTitle>
+                            </header>
+                            <DatabaseCapability apiPath={`${capabilityBase}/database`} operations={capabilityOperations('database')} />
+                        </DialogContent>
+                    </Dialog>
+                    {% else %}
+                    <{{ capability.component }} key={id} apiPath={`${capabilityBase}/{{ capability.kind }}`} />
+                    {% endif %}
+                )}
+                {% endfor %}
                 {% if model.opcua_browse %}
                 {hasPermission('r') && <Button ref={browseButtonRef} size="sm" variant="outline" {% if model.page_edit %}disabled={isEditing}{% endif %} onClick={() => setBrowseOpen(true)}>{t('opcua.browse', '浏览节点')}</Button>}
                 {% endif %}

@@ -1,0 +1,155 @@
+"""Validate saved connection profiles and protect their write-only credentials."""
+
+import base64
+import hashlib
+import json
+from ipaddress import ip_address
+from urllib.parse import urlsplit
+
+from cryptography.fernet import Fernet, InvalidToken
+from fastapi import HTTPException
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from fastapi.routing import APIRoute
+from sqlalchemy import inspect
+
+from app.core.config import settings
+
+_ENCRYPTED = "onesite:v1:"
+
+
+class CapabilityModelRoute(APIRoute):
+    def get_route_handler(self):
+        handler = super().get_route_handler()
+
+        async def handle(request):
+            try:
+                return await handler(request)
+            except RequestValidationError as exc:
+                # Invalid bodies can contain credentials even outside the field's own error.
+                errors = [{key: error[key] for key in ("loc", "msg", "type") if key in error}
+                          for error in exc.errors()]
+                return JSONResponse(status_code=422, content={"detail": errors})
+
+        return handle
+
+
+def _cipher() -> Fernet:
+    key = settings.CAPABILITY_SECRET_KEY or settings.SECRET_KEY
+    if len(key) < 32:
+        raise HTTPException(503, "Configure a stable CAPABILITY_SECRET_KEY of at least 32 characters")
+    digest = hashlib.sha256(b"onesite-capability-password\x00" + key.encode()).digest()
+    return Fernet(base64.urlsafe_b64encode(digest))
+
+
+def _value(value):
+    return getattr(value, "value", value)
+
+
+def _binding(kind: str, profile: dict) -> str:
+    settings = {key: value for key, value in profile.items() if key != "password"}
+    data = json.dumps([kind, settings], sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(data.encode()).hexdigest()
+
+
+def _host_is_valid(host) -> bool:
+    if not isinstance(host, str) or not host or len(host) > 253:
+        return False
+    try:
+        ip_address(host)
+        return "%" not in host
+    except ValueError:
+        return all(
+            label and label[0] != "-" and label[-1] != "-" and len(label) <= 63
+            and all(char.isascii() and (char.isalnum() or char == "-") for char in label)
+            for label in host.rstrip(".").split(".")
+        )
+
+
+def _check_profile(kind: str, profile: dict) -> None:
+    if kind == "database":
+        port = profile["port"]
+        if not _host_is_valid(profile["host"]) or type(port) is not int or not 1 <= port <= 65535:
+            raise HTTPException(422, "Invalid database host or port")
+        if profile["driver"] != "postgresql" or not all(
+            isinstance(profile[key], str) and profile[key].strip() and "\x00" not in profile[key]
+            for key in ("username", "database", "password")
+        ):
+            raise HTTPException(422, "PostgreSQL requires a database, username and password")
+        return
+
+    endpoint = profile["endpoint"]
+    if (not isinstance(endpoint, str) or len(endpoint) > 2048
+            or any(char.isspace() or ord(char) < 32 for char in endpoint)):
+        raise HTTPException(422, "Invalid connection endpoint")
+    schemes = {"opc.tcp"} if kind == "opcua_server" else {"mqtt", "mqtts"}
+    try:
+        parsed = urlsplit(endpoint)
+        valid = (parsed.scheme in schemes and _host_is_valid(parsed.hostname)
+                 and parsed.port != 0 and parsed.username is None and parsed.password is None
+                 and not parsed.netloc.endswith(":")
+                 and not any(char in endpoint for char in "?#\\")
+                 and (kind == "opcua_server" or parsed.path in {"", "/"}))
+    except ValueError:
+        valid = False
+    if not valid:
+        raise HTTPException(422, "Invalid connection endpoint")
+
+    username = profile["username"]
+    password = profile["password"]
+    auth_type = profile.get("auth_type")
+    if (auth_type not in {None, "", "anonymous", "username"}
+            or any(value is not None and (not isinstance(value, str) or "\x00" in value)
+                   for value in (username, password))
+            or auth_type == "anonymous" and (username or password)
+            or (auth_type == "username" or password) and not username):
+        raise HTTPException(422, "Invalid connection authentication fields")
+
+
+def prepare_profiles(record, changes: dict, capabilities: list, *, creating: bool = False) -> None:
+    """Prepare writes through the generated CRUD entry points."""
+    bindings = {}
+    for capability in capabilities:
+        fields = capability["fields"]
+        credential = capability["credential"]
+        secret = fields[credential]
+        if not creating and not changes.keys() & fields.values():
+            continue
+        before = {key: _value(getattr(record, name, None)) for key, name in fields.items()}
+        after = {key: _value(changes.get(name, before[key])) for key, name in fields.items()}
+        if (not creating and before[credential] and secret not in changes
+                and any(before[key] != after[key] for key in fields if key != credential)):
+            raise HTTPException(422, "Re-enter the password when changing the connection configuration")
+        _check_profile(capability["kind"], after)
+        if creating or secret in changes:
+            bindings.setdefault(secret, []).append(_binding(capability["kind"], after))
+
+    for name, destinations in bindings.items():
+        password = changes.get(name, getattr(record, name, None))
+        if password:
+            payload = json.dumps([password, destinations], separators=(",", ":"))
+            ciphertext = _ENCRYPTED + _cipher().encrypt(payload.encode()).decode("ascii")
+            column = inspect(type(record)).column_attrs[name].columns[0]
+            length = getattr(column.type, "length", None)
+            if length is not None and len(ciphertext) > length:
+                raise HTTPException(422, "The encrypted password exceeds the model column length")
+            changes[name] = ciphertext
+
+
+def read_profile(record, capability: dict) -> dict:
+    profile = {key: _value(getattr(record, name)) for key, name in capability["fields"].items()}
+    credential = capability["credential"]
+    if credential is None:
+        return profile
+    password = profile[credential]
+    if isinstance(password, str) and password.startswith(_ENCRYPTED):
+        try:
+            payload = _cipher().decrypt(password[len(_ENCRYPTED):].encode())
+            plaintext, destinations = json.loads(payload)
+        except (InvalidToken, UnicodeError, ValueError, TypeError):
+            raise HTTPException(503, "The stored connection password could not be decrypted") from None
+        if _binding(capability["kind"], profile) not in destinations:
+            raise HTTPException(422, "Re-enter the password for the current connection configuration")
+        profile[credential] = plaintext
+    _check_profile(capability["kind"], profile)
+    return profile

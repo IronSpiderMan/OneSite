@@ -1,0 +1,255 @@
+"""Read-only PostgreSQL inspection for saved connection records."""
+
+import asyncio
+from contextlib import asynccontextmanager
+from typing import Annotated, Literal
+
+from asyncpg import PostgresError
+from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel, ConfigDict, Field
+from sqlalchemy import (
+    BigInteger, Boolean, Date, DateTime, Integer, Numeric, SmallInteger, Text, Time, Uuid, cast, column, func,
+    literal, select, table, text,
+)
+from sqlalchemy.dialects.postgresql import DOUBLE_PRECISION, REAL
+from sqlalchemy.engine import URL
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
+from sqlalchemy.ext.asyncio import create_async_engine
+from sqlalchemy.pool import NullPool
+from sqlalchemy.sql import quoted_name
+
+
+_MAX_TABLES = 500
+_MAX_COLUMNS = 64
+_MAX_CELL_CHARS = 1024
+_MAX_RESULT_BYTES = 512 * 1024
+_MAX_PAGE = 200
+_MAX_PAGE_SIZE = 100
+_CONNECTIONS = asyncio.Semaphore(8)
+_Identifier = Annotated[str, Field(min_length=1, max_length=63)]
+
+_ALLOWED_TABLES = """
+    FROM pg_catalog.pg_class AS c
+    JOIN pg_catalog.pg_namespace AS n ON n.oid = c.relnamespace
+    WHERE c.relkind IN ('r', 'p')
+      AND left(n.nspname, 3) <> 'pg_'
+      AND n.nspname <> 'information_schema'
+      AND pg_catalog.has_schema_privilege(n.oid, 'USAGE')
+      AND pg_catalog.has_table_privilege(c.oid, 'SELECT')
+"""
+
+_TABLES = text("""
+    SELECT n.nspname AS "schema", c.relname AS "table"
+""" + _ALLOWED_TABLES + """
+    ORDER BY n.nspname, c.relname
+    LIMIT :limit
+""")
+
+_TABLE = text("""
+    SELECT c.oid
+""" + _ALLOWED_TABLES + """
+    AND n.nspname = :schema AND c.relname = :table
+""")
+
+_COLUMNS = text("""
+    SELECT a.attname AS name, pg_catalog.format_type(a.atttypid, a.atttypmod) AS type,
+           NOT a.attnotnull AS nullable,
+           CASE WHEN t.typnamespace = 'pg_catalog'::regnamespace THEN t.typname END AS builtin_type
+    FROM pg_catalog.pg_attribute AS a
+    JOIN pg_catalog.pg_type AS t ON t.oid = a.atttypid
+    WHERE a.attrelid = :oid AND a.attnum > 0 AND NOT a.attisdropped
+    ORDER BY a.attnum
+""")
+
+_COMPARISON_TYPES = {
+    "int2": SmallInteger, "int4": Integer, "int8": BigInteger, "numeric": Numeric,
+    "float4": REAL, "float8": DOUBLE_PRECISION, "bool": Boolean, "date": Date,
+    "timestamp": DateTime, "timestamptz": DateTime(timezone=True), "time": Time,
+    "timetz": Time(timezone=True), "uuid": Uuid,
+}
+
+
+class _Filter(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column: _Identifier
+    operator: Literal["eq", "ne", "lt", "lte", "gt", "gte", "contains", "is_null", "is_not_null"]
+    value: str | None = Field(default=None, max_length=1024)
+
+
+class _Sort(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    column: _Identifier
+    direction: Literal["asc", "desc"]
+
+
+class _Query(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    schema_name: _Identifier = Field(alias="schema")
+    table: _Identifier
+    page: int = Field(default=1, ge=1, le=_MAX_PAGE)
+    page_size: int = Field(default=25, ge=1, le=_MAX_PAGE_SIZE)
+    columns: list[_Identifier] | None = Field(default=None, min_length=1, max_length=_MAX_COLUMNS)
+    filters: list[_Filter] = Field(default_factory=list, max_length=12)
+    sort: _Sort | None = None
+
+
+@asynccontextmanager
+async def _database(profile):
+    if _CONNECTIONS.locked():
+        raise HTTPException(429, "Too many concurrent database requests")
+    async with _CONNECTIONS:
+        url = URL.create(
+            "postgresql+asyncpg",
+            username=profile["username"], password=profile["password"],
+            host=profile["host"], port=profile["port"], database=profile["database"],
+        )
+        engine = create_async_engine(
+            url, poolclass=NullPool, hide_parameters=True,
+            connect_args={
+                "timeout": 5, "command_timeout": 7,
+                "server_settings": {
+                    "statement_timeout": "5000", "lock_timeout": "2000",
+                    "search_path": "pg_catalog",
+                },
+            },
+        )
+        try:
+            async with engine.begin() as connection:
+                await connection.execute(text("SET TRANSACTION READ ONLY"))
+                yield connection
+        except asyncio.TimeoutError:
+            raise HTTPException(504, "The database operation timed out") from None
+        except (DBAPIError, PostgresError) as exc:
+            state = getattr(getattr(exc, "orig", exc), "sqlstate", "") or ""
+            if state.startswith("22"):
+                raise HTTPException(422, "A query value is invalid for its column type") from None
+            if state in {"57014", "55P03"}:
+                raise HTTPException(504, "The database operation timed out") from None
+            raise HTTPException(502, "The database operation could not be completed") from None
+        except (SQLAlchemyError, OSError):
+            raise HTTPException(502, "The database operation could not be completed") from None
+        finally:
+            await engine.dispose()
+
+
+async def _columns(connection, schema, table_name):
+    if "\x00" in schema or "\x00" in table_name:
+        raise HTTPException(422, "Invalid schema or table name")
+    oid = (await connection.execute(_TABLE, {"schema": schema, "table": table_name})).scalar_one_or_none()
+    if oid is None:
+        raise HTTPException(404, "Table not found")
+    result = await connection.execute(_COLUMNS, {"oid": oid})
+    return result.mappings().all()
+
+
+def _filter_expression(field, definition, criteria):
+    operation = criteria.operator
+    if operation == "is_null":
+        return field.is_(None)
+    if operation == "is_not_null":
+        return field.is_not(None)
+    if criteria.value is None or "\x00" in criteria.value:
+        raise HTTPException(422, "A filter requires a valid value")
+    if operation == "contains":
+        return cast(field, Text).contains(criteria.value, autoescape=True)
+
+    target_type = _COMPARISON_TYPES.get(definition["builtin_type"])
+    value = literal(criteria.value, type_=Text())
+    if target_type is None:
+        field = cast(field, Text)
+    else:
+        value = cast(value, target_type)
+
+    comparisons = {
+        "eq": field.__eq__, "ne": field.__ne__,
+        "lt": field.__lt__, "lte": field.__le__,
+        "gt": field.__gt__, "gte": field.__ge__,
+    }
+    return comparisons[operation](value)
+
+
+async def _read_rows(connection, query):
+    definitions = await _columns(connection, query.schema_name, query.table)
+    metadata = {item["name"]: item for item in definitions}
+    selected = query.columns or list(metadata)[:_MAX_COLUMNS]
+    requested = set(selected) | {item.column for item in query.filters}
+    if query.sort:
+        requested.add(query.sort.column)
+    if requested - metadata.keys() or len(selected) != len(set(selected)):
+        raise HTTPException(422, "Unknown or duplicate column")
+    if not selected:
+        return {"columns": [], "rows": [], "page": query.page, "page_size": query.page_size,
+                "has_more": False, "truncated": False}
+
+    source = table(
+        quoted_name(query.table, True),
+        *(column(quoted_name(name, True)) for name in metadata),
+        schema=quoted_name(query.schema_name, True),
+    )
+    # Budget for JSON escaping at up to six bytes per character, plus cell delimiters.
+    # Shrink previews for wider pages so pagination can still advance by whole rows.
+    cell_chars = min(_MAX_CELL_CHARS, (_MAX_RESULT_BYTES // (query.page_size * len(selected)) - 6) // 6)
+    cells = [func.left(cast(source.c[name], Text), cell_chars + 1) for name in selected]
+    statement = select(*cells).select_from(source)
+    for criteria in query.filters:
+        statement = statement.where(_filter_expression(source.c[criteria.column], metadata[criteria.column], criteria))
+    if query.sort:
+        field = source.c[query.sort.column]
+        if metadata[query.sort.column]["builtin_type"] not in _COMPARISON_TYPES:
+            field = cast(field, Text)
+        statement = statement.order_by((field.desc() if query.sort.direction == "desc" else field.asc()).nulls_last())
+    # PostgreSQL physical row identifiers provide a tie-breaker for ordinary and partitioned tables.
+    statement = statement.order_by(
+        column("tableoid", _selectable=source), column("ctid", _selectable=source),
+    ).offset((query.page - 1) * query.page_size).limit(query.page_size + 1)
+    result = (await connection.execute(statement)).all()
+
+    rows = []
+    truncated = query.columns is None and len(metadata) > len(selected)
+    has_more = len(result) > query.page_size
+    for row in result[:query.page_size]:
+        rows.append([value[:cell_chars] if value is not None else None for value in row])
+        truncated = truncated or any(value is not None and len(value) > cell_chars for value in row)
+    return {"columns": selected, "rows": rows, "page": query.page, "page_size": query.page_size,
+            "has_more": has_more and query.page < _MAX_PAGE, "truncated": truncated}
+
+
+def create_router(resolve):
+    router = APIRouter()
+
+    @router.get("/tables")
+    async def list_tables(connection: dict = Depends(resolve("list_tables"))):
+        async with _database(connection) as db:
+            result = (await db.execute(_TABLES, {"limit": _MAX_TABLES + 1})).mappings().all()
+            return {"items": [dict(row) for row in result[:_MAX_TABLES]], "truncated": len(result) > _MAX_TABLES}
+
+    @router.get("/columns")
+    async def describe_table(
+        schema: str = Query(min_length=1, max_length=63),
+        table: str = Query(min_length=1, max_length=63),
+        connection: dict = Depends(resolve("list_tables")),
+    ):
+        async with _database(connection) as db:
+            columns = await _columns(db, schema, table)
+            return {"columns": [{key: item[key] for key in ("name", "type", "nullable")} for item in columns]}
+
+    @router.get("/rows")
+    async def preview_rows(
+        schema: str = Query(min_length=1, max_length=63),
+        table: str = Query(min_length=1, max_length=63),
+        page: int = Query(default=1, ge=1, le=_MAX_PAGE),
+        page_size: int = Query(default=25, ge=1, le=_MAX_PAGE_SIZE),
+        connection: dict = Depends(resolve("read_rows")),
+    ):
+        async with _database(connection) as db:
+            return await _read_rows(db, _Query(schema=schema, table=table, page=page, page_size=page_size))
+
+    @router.post("/query")
+    async def query_rows(query: _Query, connection: dict = Depends(resolve("query"))):
+        async with _database(connection) as db:
+            return await _read_rows(db, query)
+
+    return router
